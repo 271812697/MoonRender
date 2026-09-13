@@ -2,6 +2,7 @@
 #include "GizmoBehaviour.h"
 #include "AViewControllable.h"
 #include "PickingRenderPass.h"
+#include "Rendering/Geometry/BoundingSphere.h"
 
 #include <QElapsedTimer>
 
@@ -22,6 +23,18 @@ namespace Editor::Panels
 		void LookAt(const Maths::FVector3& pivot,const Maths::FVector3& dir,float radius);
 		Maths::FVector2 worldToScreen(const Maths::FVector3& worldPos);
 		void FitToScene(const Maths::FVector3& dir);
+		/** Fits the view to the focus sphere - the selection when there is one,
+		 * every active model otherwise - and then applies p_rotation on top of it:
+		 * the camera ends up looking at the center of that sphere along the
+		 * forward of p_rotation, at the fitted distance, with exactly the rotation
+		 * it was given.
+		 *
+		 * The direction based fits above do the opposite: they derive the
+		 * orientation from the direction and the world up. This overload keeps the
+		 * orientation, which is what a rotate button needs so its click composes
+		 * with the pose the camera is already on.
+		 */
+		void FitToFocusWithRotation(const Maths::FQuaternion& p_rotation);
 		void BuildBvh();
 		void SetGizmoOperation(Core::EGizmoOperation p_operation);
 		Core::EGizmoOperation GetGizmoOperation() const;
@@ -43,6 +56,19 @@ namespace Editor::Panels
 		void ApplyPickResult(const Rendering::PickingRenderPass::PickingResult& p_result);
 		/** Synchronous click pick against the picking target drawn this frame. */
 		void ResolvePendingClick();
+		/** Bounding sphere of the selected model; false when nothing selected has
+		 * a model to fit. */
+		bool GetSelectionSphere(::Rendering::Geometry::BoundingSphere& p_outSphere);
+		/** Bounding sphere of every active model, merged into one. */
+		bool GetSceneSphere(::Rendering::Geometry::BoundingSphere& p_outSphere);
+		/** The selection when there is one, the scene otherwise. */
+		bool GetFocusSphere(::Rendering::Geometry::BoundingSphere& p_outSphere);
+		/** Shared fit pose: adjust the projection first, then place the camera
+		 * along p_forward at a distance that contains the sphere. */
+		void ApplyFitPose(
+			::Rendering::Geometry::BoundingSphere& p_sphere,
+			const Maths::FVector3& p_forward,
+			const Maths::FQuaternion& p_rotation);
 	private:
 		int64_t mTargetActorId = -1;
 		::Core::SceneSystem::SceneManager& m_sceneManager;

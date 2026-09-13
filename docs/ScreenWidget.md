@@ -354,6 +354,15 @@ float strokeWidth, strokePickSlack;          // Stroke 模式的线宽与额外�
 2. **描边用"到折线的距离"**：开放路径（折线、勾、曲线）没有内外之分，只能靠距离判定，阈值 = `strokeWidth / 2 + strokePickSlack + pad`，而且**必须在变换到像素空间之后算**，否则缩放后就不是"像素阈值"了。
 3. **`pad` 对填充路径的含义**：任意轮廓没法像矩形那样"向外扩一圈"，所以填充模式的 `pad` 定义为"在内部，或者离轮廓不超过 pad"。
 
+轮廓从哪里来有两种，走的是**同一条下游**（连面 → 离散 → even-odd）：
+
+| 来源 | 接口 | 适用 |
+| --- | --- | --- |
+| 代码里用 OCCT 曲线画 | `ShapeBuilder`（见 12.8） | 固定形状：按钮、图标、装饰轮廓。改形状 = 改代码里的几个数 |
+| 草图烘焙 | `BakeSketchFaces()`（见 12.6） | 需要交互式设计、或形状本来就来自建模草图 |
+
+两者都汇合到 `BakeShapeFaces()`：入参是 `TopoDS_Shape`，出来是 `std::vector<ScreenPath>`。
+
 ### 7.5 性能
 
 - 命中是 O(形状数) 的解析式测试，无分配、无 GPU 往返；
@@ -717,15 +726,17 @@ wire（1 条，或若干条组成 compound）
    │  makeElementFace(nullptr, "Part::FaceMakerBullseye") 封闭 wire 连成面
    ▼
 face（可能多个）          每个面：loops[0] = 外环，后面是它的洞
-   │  BakeSketchFaces()：BRepTools_WireExplorer 沿 wire 取边
-   │                     + GCPnts_QuasiUniformDeflection 按弦高容差离散
-   │                     + 按边的 orientation 决定采样方向（见下）
+   │  BakeShapeFaces()：BRepTools_WireExplorer 沿 wire 取边
+   │                    + GCPnts_QuasiUniformDeflection 按弦高容差离散
+   │                    + 按边的 orientation 决定采样方向（见下）
    ▼
 ScreenPath（草图坐标，y 向上）
    │  FitWiresInto(控件矩形, flipY = true)：整个烘焙共用一个变换 + y 翻转
    ▼
 每个面一个 HitShape::Path（action = 面的序号）
 ```
+
+`BakeSketchFaces()` 只是 `BakeShapeFaces(p_sketch.toShape())` 的一层包装，所以"代码里用 OCCT 造的形状"（12.8）和草图走的是**完全同一套**连面、离散、闭合校验代码。
 
 现状与边界：
 
@@ -779,6 +790,127 @@ const float gap = Distance(points.front(), points.back());  // 几何是否真�
 
 ---
 
+### 12.8 用 OCC 曲线在代码里造形状（ShapeBuilder）
+
+固定形状（按钮、图标、装饰轮廓）不该走"画草图 → 烘焙 → 导出文件"那一圈：形状本来就不会变，用草图反而引入一串额外状态（草图在哪、单位是多少、画多大、要不要翻转）。`ShapeBuilder` 把曲线直接写在 C++ 里，并复用同一条连面/离散链路：
+
+```cpp
+ShapeBuilder builder;                 // 在控件自己的空间里画
+builder.MoveTo(42.5f, 6.5f);          // 起点
+builder.ArcByCenter(cx, cy, r, startDeg, sweepDeg);
+builder.LineTo(...);                  // 接住上一条曲线的终点
+builder.ArcByCenter(...);
+builder.Close();                      // 回到 MoveTo 点
+
+std::vector<ScreenPath> paths = builder.BuildPaths({ 0.05 });   // 容差 = 0.05 px
+```
+
+| 方法 | 说明 |
+| --- | --- |
+| `MoveTo(x, y)` | 开始一条子路径（一个子路径 = 一条 wire） |
+| `LineTo(x, y)` | 从当前点连直线 |
+| `ArcByCenter(cx, cy, r, startDeg, sweepDeg)` | 圆上的一段圆弧，**起点由 startDeg 决定**（不是"接上一点"），逆时针为正 |
+| `ArcThrough(tx, ty, ex, ey)` | 三点圆弧（当前点 → 经过点 → 终点），手写时不方便算圆心就用它 |
+| `Circle(cx, cy, r)` | 整圆，自带闭合，单起一条子路径 |
+| `ArcSlot(cx, cy, r, halfWidth, startDeg, sweepDeg)` | 弧形槽：等宽圆环带 + 两端圆头，一条子路径一个 shape |
+| `Close()` | 从当前点补一条线回到 `MoveTo` 点 |
+| `BuildWires()` / `BuildFaces()` / `BuildPaths()` | 串 wire / 连面 / 离散成 `ScreenPath` |
+
+连面仍然是 `makeElementFace(..., Bullseye)`：**一个子路径套在另一个里面就是洞**，互不相交就是多个 shape。
+
+#### 坐标空间：这里没有"转换"
+
+`ShapeBuilder` 不做任何缩放、拟合、翻转——**你写什么数就是屏幕上的什么像素**。对控件来说最自然的是直接按控件局部坐标画：x 向右、y 向下（屏幕空间），原点就是控件矩形的左上角。
+
+这一点和草图路线刚好相反，别搞混：
+
+| 路线 | 作者空间 | 到屏幕空间要做什么 |
+| --- | --- | --- |
+| `ShapeBuilder` | 直接是控件局部像素 | 什么都不用做 |
+| `BakeSketchFaces()` | 草图坐标（y 向上，单位是草图单位） | `FitWiresInto(rect, flipY = true)`：统一缩放/平移 + y 翻转 |
+
+#### 样板：ViewCube 的四个箭头
+
+`ViewCubeWidget` 的四个旋转按钮就是这条路的例子（`BuildArrowShapes()`），形状是**弧形槽**（Arc slot）：等宽的一条圆环带，两端用半圆封口。
+
+```
+        ╭────────╮        外沿：半径 R + halfWidth 的圆弧
+       ╱    ↑     ╲       中心线：半径 R（按钮轴线）
+      ╰─────┴─────╯       内沿：半径 R − halfWidth 的圆弧
+        ↑            ↑
+      圆头（半圆）    圆头（半圆）
+```
+
+一个槽的轮廓就是绕一圈走：
+
+1. **外沿**：半径 `R + halfWidth` 的圆弧，从 `startDeg` 扫 `sweepDeg`；
+2. **末端圆头**：以中心线末端为圆心、`halfWidth` 为半径的**半圆**，转向与扫描方向一致（正扫角就用 +180°）；
+3. **内沿**：半径 `R − halfWidth` 的圆弧，从末端反着走回起点；
+4. **起点圆头**：同样一个半圆，正好落在第一条弧的起点上，于是 `Close()` 无缝。
+
+六个按钮 = 六个槽，各自以所在方位为中心（角度按屏幕空间、y 向下）：
+
+| 方位 | 角度 | 动作 | 绕的轴 |
+| --- | --- | --- | --- |
+| 上 | `-90°` | `OrbitUp` | 相机 right（俯仰） |
+| 右 | `0°` | `OrbitRight` | 相机 up（偏航） |
+| 东南 | `45°` | `RollClockwise` | **相机 forward（滚转）** |
+| 下 | `90°` | `OrbitDown` | 相机 right（俯仰） |
+| 西南 | `135°` | `RollCounterClockwise` | **相机 forward（滚转）** |
+| 左 | `180°` | `OrbitLeft` | 相机 up（偏航） |
+
+槽的张角**按按钮配置**（`ButtonDefinition::halfSweepDeg`）：四个侧面按钮各扫 ±16°（32° 弧长），两个滚转按钮夹在它们中间、只扫 ±12°（24°），这样相邻 45° 的槽之间都留 **17°** 缺口，两个 90° 区间（左→上、上→右）留 58°。
+
+当前参数与校验值（`kSlot*` 常量，都在 [ViewCubeWidget.cpp](../Moon/Interactive/Widgets/ViewCubeWidget.cpp)）：
+
+| 项 | 值 |
+| --- | --- |
+| 环半径 / 半宽 | 70 / 7 px |
+| 侧面按钮的槽 | 弧长 32°，外形约 52.6 × 16.7 px，面积 701.3 px² |
+| 滚转按钮的槽 | 弧长 24°，外形约 43.1 × 15.5 px，面积约 564 px²（都是 `2·h·L + π·h²`） |
+| 内沿 / 外沿 | 距立方体中心 63 / 77 px（立方体轮廓最坏 51 px，所以内沿留了 12px 空隙） |
+
+> **环会超出控件矩形**：最外沿 77px，而立方体视口半宽只有 62.5px。控件矩形只用于锚点与坐标换算（命中是形状级的，绘制也不裁剪），所以超出去没问题，但**要给视口角落留出空间**——`kViewCubeMargin` 因此是 24 而不是 5（上面那个槽最外点离视口边缘还有 9.5px）。半径继续加大时，这个 margin 要跟着加。
+
+想调按钮外观就改这几个常量：`kSlotRadius`（环半径）、`kSlotHalfWidth`（槽宽的一半）、`kSlotHalfSweepDeg`（每个槽张开的半角）。想做带箭头的槽，就在末端再加一段三角/燕尾曲线。
+
+#### 按钮的行为：相机在**自己的坐标系**里转 45°，再回到包围球中心
+
+两种控件对"方向"的处理不一样，这也是它们必须分开的原因：
+
+```
+点击立方体的面：dir = 被点中格子的内法线 ─→ Fit(dir)
+                 └ 用 dir + 世界 up 重新推出姿态（所以点完总是水平的）
+
+点击环形按钮：  rotation = delta ⊗ 当前旋转   （delta 绕的是相机自己的轴）
+                 └→ SceneView::FitToFocusWithRotation(rotation)
+                    └ 姿态原样保留，只把相机放回"看向包围球中心"的位置
+```
+
+关键是**"叠加一次旋转"而不是"用方向反推姿态"**：按钮的效果等价于"相机不动、把物体在相机空间里绕对应轴转 45°"，所以相机的姿态必须是**在它自己当前姿态上再转一次**（把旧的 roll/俯仰带进去），而不是从旋转后的方向 + 世界 up 重新算（那样会把倾斜抹平）。两条路径最后都会落到 `SceneView::ApplyFitPose()`：先按包围球修投影/远裁剪面，再把相机放到 `球心 − forward × 距离`，于是**相机永远看向包围球中心**，距离也按包围球重新算。
+
+细节：
+
+- 轴与符号：偏航/俯仰沿用 `CameraController::HandleCameraOrbit()`（左右绕相机 up、上下绕相机 right），所以按钮和同方向的拖拽手感一致；东南/西南两个按钮绕**相机视线轴**转，所以视角原地滚转（相机位置不变，因为 forward 没变），用来补上第三个自由度；
+- 有选中对象时用它的包围球，没有就用整个场景的（`GetFocusSphere()`）；
+- 连续点击用的是**相机正在飞向的目标姿态**（`TryGetPendingPose()`），否则第二次点击会从一个飞到一半的姿态上再转，角度会偏小；
+- 相机动画的"到达"判定必须**同时看位置和旋转**（`CameraController::HandleInputs()`）：滚转按钮的位置和终点重合，只比位置的话会在第一帧就判定到位，旋转变成瞬间跳变而不是动画；
+- 想改步进角度用 `ViewCubeWidget::SetStepDegrees()`，默认 45°。
+
+#### 失败时的行为
+
+曲线描述不出面时（没闭合、方向接不上），`ShapeBuilder` 会**记日志并跳过**，`BuildArrowShapes()` 拿不到 4 个形状就回退到内置三角形箭头（`BuildFallbackShapes()`），不会让控件整体消失。日志前缀是 `[ShapeBuilder]` / `[ShapeBake]` / `[ViewCube]`。
+
+#### 三个容易踩的点
+
+| 坑 | 症状 | 原因 / 做法 |
+| --- | --- | --- |
+| **"看起来接上了"不等于接上了** | 日志 `a sub path with N curves does not connect (error 2)`，子路径被丢弃 | OCCT 连 wire 用的是顶点坐标 + `Precision::Confusion()`（1e-7）。我们自己算的点是 float，坐标 60~130 时误差 ~1e-5，而 OCCT 按圆心+角度算出来的弧端点是 double —— 差 1e-5 就"差得很远"。所以：子路径的端点用 double 保存，每段曲线加进去后**回读 OCCT 的 `LastVertex`** 作为真实终点，并且圆弧在"起点 ≈ 当前点（<1e-3）"时直接用当前点当起点 |
+| 忘了 `MoveTo` | 日志提示自动起了一条子路径 | 第一条曲线前必须先 `MoveTo` |
+| 容差按"草图单位"给 | 圆弧要么棱角明显要么点多 | `flattenDeflection` 用的是**作者空间**的单位；按像素画就给 0.05px 量级 |
+
+---
+
 ## 13. 约定与坑
 
 **必须遵守**
@@ -812,10 +944,11 @@ const float gap = Distance(points.front(), points.back());  // 几何是否真�
 | `Moon/Interactive/Screen/ScreenLayout.h/.cpp` | `ScreenRect` / `EScreenAnchor` / `ScreenLayout::Resolve()` |
 | `Moon/Interactive/Screen/HitShape.h/.cpp` | 形状 + 命中 + 绘制 |
 | `Moon/Interactive/Screen/ScreenPath.h/.cpp` | 任意轮廓：包围盒 / 拟合 / even-odd 填充判定 / 描边距离 |
-| `Moon/Interactive/Screen/SketchPathBake.h/.cpp` | 草图 → 轮廓烘焙 |
+| `Moon/Interactive/Screen/ShapeBuilder.h/.cpp` | 曲线 → wire → 面 → 轮廓：`ShapeBuilder`（代码造曲线）、`ConnectEdgesToWires()`、`BakeShapeFaces()` |
+| `Moon/Interactive/Screen/SketchPathBake.h/.cpp` | 草图 → 轮廓烘焙（转调 `BakeShapeFaces()`）+ `FitWiresInto()` 拟合 |
 | `Moon/Interactive/Screen/ScreenWidget.h/.cpp` | 基类：状态机、捕获、光标、绘制入口 |
 | `Moon/Interactive/Screen/ScreenOverlayRegistry.h/.cpp` | 光标归属仲裁 |
-| `Moon/Interactive/Widgets/ViewCubeWidget.h/.cpp` | 按下即触发的例子 |
+| `Moon/Interactive/Widgets/ViewCubeWidget.h/.cpp` | 按下即触发的例子；形状用 `ShapeBuilder` 画的四个箭头 |
 | `Moon/Interactive/Widgets/SplitScreen.h/.cpp` | 捕获拖拽的例子（`PathTraceRenderPass` 读它的线方程） |
 | `Moon/Interactive/Widgets/PathShapeWidget.h/.cpp` | 路径形状（自定义形状）的验证控件 |
 | `Moon/Interactive/Interactive/RenderWindowInteractor.h/.cpp` | 光标 / 尺寸 / Enter-Leave（2D 层的输入来源） |

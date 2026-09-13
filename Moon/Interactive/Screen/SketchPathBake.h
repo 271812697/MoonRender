@@ -1,30 +1,21 @@
 #pragma once
-#include "Interactive/Screen/ScreenPath.h"
+#include "Interactive/Screen/ShapeBuilder.h"
 
 namespace MOON
 {
 	class SketcherObj;
 
-	/** Options for turning a sketch into a widget shape. */
-	struct SketchBakeOptions
-	{
-		/** Chordal tolerance used when flattening the wires, in sketch units.
-		 * The sampling is deflection based, so a large arc and a small one both
-		 * end up with as many points as they need. */
-		double flattenDeflection = 0.02;
-	};
+	/** Options for turning a sketch into a widget shape. The flattening tolerance
+	 * is the one every shape source shares, see ShapeBakeOptions. */
+	using SketchBakeOptions = ShapeBakeOptions;
 
 	/** Bakes the faces of a sketch into widget shapes.
 	 *
 	 * The topology comes from the sketch itself: SketcherObj::toShape() chains
-	 * the edges into wires with OCCT, and makeElementFace(..., Bullseye) turns
-	 * the closed wires into faces - exactly what makeDone() caches as
-	 * doneWireShape / doneFaceShape. One face becomes one widget shape, so a
-	 * sketch with two separate closed wires gives two shapes, and a wire drawn
-	 * inside another one becomes a hole of that face.
-	 *
-	 * A returned path holds the face's outer loop followed by its hole loops, so
-	 * the even-odd rule already used by the hit test describes the face exactly.
+	 * the edges into wires with OCCT - exactly what makeDone() caches as
+	 * doneWireShape / doneFaceShape - and BakeShapeFaces() turns the wires into
+	 * faces and then into outlines. A shape built by ShapeBuilder() instead of a
+	 * sketch goes through the very same code.
 	 *
 	 * Output is in sketch coordinates (y up, z ignored). Finish with
 	 * FitWiresInto() to map the faces into a widget rectangle, which also flips

@@ -6,6 +6,8 @@
 #include "GizmoRenderPass.h"
 #include "Interactive/Screen/ScreenOverlayRegistry.h"
 #include <iostream>
+#include <algorithm>
+#include <cmath>
 
 
 Editor::Core::MirrorPlane ComputeMirrorPlane(const Maths::FVector3& CameraPos, const Maths::FVector3& CameraForward, const Maths::FVector3& BBoxMin, const Maths::FVector3& BBoxMax)
@@ -145,7 +147,21 @@ void ::Editor::Core::CameraController::HandleInputs(float p_deltaTime)
 
 		float t = m_focusLerpCoefficient * p_deltaTime;
 
-		if (Maths::FVector3::Distance(m_camera.GetPosition(), destPos) <= 0.03f)
+		// The pose is only reached when both halves of it are: a fit that keeps
+		// the position and only turns the view (the roll buttons of the view cube
+		// turn about the view axis) would otherwise arrive on its first frame and
+		// the turn would pop instead of animating.
+		const float positionGap = Maths::FVector3::Distance(m_camera.GetPosition(), destPos);
+		// Quaternions cover every rotation twice, so the sign of the dot product
+		// carries no meaning here: |dot| = cos(half the angle between them).
+		const float rotationDot = std::abs(std::clamp(
+			Maths::FQuaternion::DotProduct(m_camera.GetRotation(), destRotation),
+			0.0f,
+			1.0f));
+		const float rotationGapDegrees =
+			2.0f * std::acos(rotationDot) * 180.0f / 3.14159265359f;
+
+		if (positionGap <= 0.03f && rotationGapDegrees <= 0.25f)
 		{
 			m_camera.SetPosition(destPos);
 			m_camera.SetRotation(destRotation);

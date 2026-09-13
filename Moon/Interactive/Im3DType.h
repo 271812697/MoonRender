@@ -275,8 +275,10 @@ namespace MOON
 	PolygonMesh& TransformAxis();
 	PolygonMesh& GizmoSketchPlane();
 
-	/** Margin between the navigation cube and the viewport corner. */
-	constexpr int kViewCubeMargin = 5;
+	/** Margin between the navigation cube and the viewport corner. It leaves room
+	 * for the rotate buttons of ViewCubeWidget, which are a ring of arc slots
+	 * around the cube and stick out past the cube rectangle. */
+	constexpr int kViewCubeMargin = 24;
 	/** Side length of the square viewport the navigation cube renders into. */
 	constexpr int kViewCubeSize = 125;
 

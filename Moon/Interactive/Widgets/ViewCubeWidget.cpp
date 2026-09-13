@@ -1,27 +1,82 @@
 #include "Interactive/Widgets/ViewCubeWidget.h"
 #include "Interactive/Im3DType.h"
 #include "Interactive/Im3DRenderer.h"
+#include "Interactive/Screen/ScreenPath.h"
+#include "Interactive/Screen/ShapeBuilder.h"
 #include "renderer/SceneView.h"
 #include "renderer/CameraController.h"
+#include "core/log.h"
 #include <algorithm>
+#include <cmath>
+#include <iterator>
 
 namespace MOON
 {
 	namespace
 	{
-		/** Distance between the cube center and a button center. The cube
-		 * silhouette stays inside a 51px radius in the worst case, so the ring
-		 * sits in the empty band around it. */
-		constexpr float kButtonRadius = 52.0f;
-		/** Half extent of the arrow head triangle. */
-		constexpr float kButtonHalfSize = 9.0f;
-		/** Extra pick area around each arrow, in pixels. */
-		constexpr float kButtonHitPadding = 4.0f;
+		/** Ring the buttons sit on: distance from the cube center to the center
+		 * line of a slot, and half the width of a slot. The cube silhouette stays
+		 * inside a 51px radius in the worst case, so the ring is clear of it. */
+		constexpr float kSlotRadius = 70.0f;
+		constexpr float kSlotHalfWidth = 7.0f;
+		/** How far a slot reaches on either side of the axis it belongs to. The
+		 * four side buttons sit 90 degrees apart, so they can afford a wide slot;
+		 * the two roll buttons are squeezed between them at 45 degrees and are cut
+		 * shorter, which keeps the gaps in the ring even. */
+		constexpr float kOrbitSlotHalfSweepDeg = 16.0f;
+		constexpr float kRollSlotHalfSweepDeg = 12.0f;
+		/** Flattening tolerance of the curves, in pixels: a slot is about 80px
+		 * long, so this is already smooth and keeps the loops short. */
+		constexpr double kSlotDeflection = 0.05;
+		/** Extra pick area around each slot, in pixels. */
+		constexpr float kSlotHitPadding = 4.0f;
+		/** Stroke width and pick slack of the outline, see HitShape::Path. */
+		constexpr float kSlotStrokeWidth = 2.0f;
+		constexpr float kSlotStrokePickSlack = 5.0f;
 
 		constexpr float kDegToRad = 3.14159265358979f / 180.0f;
 
+		/** Axis a button turns the view around, in the camera's own frame. */
+		enum class EStepAxis
+		{
+			/** About the camera up: a yaw, the view turns left / right. */
+			Yaw,
+			/** About the camera right: a pitch, the view looks up / down. */
+			Pitch,
+			/** About the camera forward: a roll, the view spins in place. */
+			Roll
+		};
+
+		/** One button of the ring. */
+		struct ButtonDefinition
+		{
+			ViewCubeWidget::EAction action;
+			/** Where the slot sits on the ring, in degrees, screen space with y
+			 * down: -90 up, 0 right, 90 down, 180 left, 45 south east, 135 south
+			 * west. */
+			float placementDeg;
+			EStepAxis axis;
+			/** Sign of the step, so a click turns the view the way the button
+			 * points. */
+			float stepSign;
+			/** Half of the angle the slot spans. */
+			float halfSweepDeg;
+		};
+
+		const ButtonDefinition kButtonDefinitions[] = {
+			{ ViewCubeWidget::EAction::OrbitUp,              -90.0f, EStepAxis::Pitch, -1.0f, kOrbitSlotHalfSweepDeg },
+			{ ViewCubeWidget::EAction::OrbitRight,             0.0f, EStepAxis::Yaw,   -1.0f, kOrbitSlotHalfSweepDeg },
+			{ ViewCubeWidget::EAction::OrbitDown,             90.0f, EStepAxis::Pitch,  1.0f, kOrbitSlotHalfSweepDeg },
+			{ ViewCubeWidget::EAction::OrbitLeft,            180.0f, EStepAxis::Yaw,    1.0f, kOrbitSlotHalfSweepDeg },
+			/** The two roll buttons: they spin the view about the axis it looks
+			 * along, at the south east and the south west of the ring. */
+			{ ViewCubeWidget::EAction::RollClockwise,         45.0f, EStepAxis::Roll,  -1.0f, kRollSlotHalfSweepDeg },
+			{ ViewCubeWidget::EAction::RollCounterClockwise, 135.0f, EStepAxis::Roll,   1.0f, kRollSlotHalfSweepDeg }
+		};
+
 		/** Arrow head pointing along a unit direction: tip, base left, base
-		 * right, centered on p_centerX / p_centerY. */
+		 * right, centered on p_centerX / p_centerY. Only used when the slot
+		 * curves cannot be built. */
 		std::vector<ImVec2> BuildArrowTriangle(
 			float p_centerX,
 			float p_centerY,
@@ -49,6 +104,7 @@ namespace MOON
 		// key events of the interactor.
 		setActive(true);
 		SetHoverCursor(ImGuiMouseCursor_Hand);
+		BuildArrowShapes();
 	}
 
 	ViewCubeWidget::~ViewCubeWidget()
@@ -58,6 +114,83 @@ namespace MOON
 	void ViewCubeWidget::SetStepDegrees(float p_degrees)
 	{
 		mStepDegrees = std::clamp(p_degrees, 1.0f, 180.0f);
+	}
+
+	void ViewCubeWidget::BuildArrowShapes()
+	{
+		const float center = static_cast<float>(kViewCubeSize) * 0.5f;
+
+		mArrows.clear();
+		mArrows.reserve(std::size(kButtonDefinitions));
+		for (const ButtonDefinition& definition : kButtonDefinitions)
+		{
+			// One arc slot per button, centered on the axis of that button, so the
+			// six of them read as one ring of curved buttons around the cube.
+			ShapeBuilder builder;
+			builder.ArcSlot(
+				center,
+				center,
+				kSlotRadius,
+				kSlotHalfWidth,
+				definition.placementDeg - definition.halfSweepDeg,
+				2.0f * definition.halfSweepDeg);
+
+			std::vector<ScreenPath> paths = builder.BuildPaths({ kSlotDeflection });
+			if (paths.empty())
+			{
+				CORE_WARN(
+					"[ViewCube] the arc slot of the {0} button does not enclose a face",
+					static_cast<int>(definition.action));
+				continue;
+			}
+			if (paths.size() > 1)
+			{
+				CORE_WARN(
+					"[ViewCube] the {0} button describes {1} faces instead of 1; the "
+					"first one is used",
+					static_cast<int>(definition.action),
+					paths.size());
+			}
+
+			ArrowShape arrow;
+			arrow.action = definition.action;
+			arrow.path = std::make_shared<const ScreenPath>(std::move(paths.front()));
+			mArrows.push_back(std::move(arrow));
+		}
+
+		if (mArrows.size() != std::size(kButtonDefinitions))
+		{
+			CORE_WARN(
+				"[ViewCube] only {0} of {1} button slots could be built; the plain "
+				"arrow heads are used instead",
+				mArrows.size(),
+				std::size(kButtonDefinitions));
+			mArrows.clear();
+			return;
+		}
+
+		size_t points = 0;
+		for (const ArrowShape& arrow : mArrows)
+		{
+			for (const std::vector<ImVec2>& loop : arrow.path->loops)
+			{
+				points += loop.size();
+			}
+			// Ask for the fill once: an outline that cannot be triangulated would
+			// otherwise only show up as a button drawn without its fill, and the
+			// reason is logged by ScreenPath.
+			if (arrow.path->GetFillTriangles().empty())
+			{
+				CORE_WARN(
+					"[ViewCube] a button outline cannot be filled; it is drawn as an "
+					"outline only");
+			}
+		}
+		CORE_INFO(
+			"[ViewCube] built {0} button arc slots from OCCT curves ({1} points in "
+			"total)",
+			mArrows.size(),
+			points);
 	}
 
 	ScreenLayout ViewCubeWidget::BuildLayout() const
@@ -73,34 +206,54 @@ namespace MOON
 
 	void ViewCubeWidget::BuildShapes(std::vector<HitShape>& p_outShapes) const
 	{
+		if (mArrows.empty())
+		{
+			BuildFallbackShapes(p_outShapes);
+			return;
+		}
+
+		for (const ArrowShape& arrow : mArrows)
+		{
+			if (!arrow.path || arrow.path->IsEmpty())
+			{
+				continue;
+			}
+			HitShape shape;
+			shape.type = HitShape::EType::Path;
+			shape.action = static_cast<int>(arrow.action);
+			shape.path = arrow.path;
+			// The outline is part of the shape as well: a slot is only 14px wide,
+			// so the fill alone would leave a small click target.
+			shape.pickMode = HitShape::EPickMode::FillOrStroke;
+			shape.pad = kSlotHitPadding;
+			shape.strokeWidth = kSlotStrokeWidth;
+			shape.strokePickSlack = kSlotStrokePickSlack;
+			p_outShapes.push_back(std::move(shape));
+		}
+	}
+
+	void ViewCubeWidget::BuildFallbackShapes(std::vector<HitShape>& p_outShapes) const
+	{
 		const float center = static_cast<float>(kViewCubeSize) * 0.5f;
+		constexpr float kFallbackRadius = 52.0f;
+		constexpr float kFallbackHalfSize = 9.0f;
 
-		// Screen space directions, y grows downwards, one button per side.
-		struct ButtonDefinition
+		for (const ButtonDefinition& definition : kButtonDefinitions)
 		{
-			EAction action;
-			float dirX;
-			float dirY;
-		};
-		static const ButtonDefinition definitions[] = {
-			{ EAction::OrbitUp,    0.0f, -1.0f },
-			{ EAction::OrbitRight, 1.0f,  0.0f },
-			{ EAction::OrbitDown,  0.0f,  1.0f },
-			{ EAction::OrbitLeft, -1.0f,  0.0f }
-		};
+			const float axis = definition.placementDeg * kDegToRad;
+			const float dirX = std::cos(axis);
+			const float dirY = std::sin(axis);
 
-		for (const ButtonDefinition& definition : definitions)
-		{
 			HitShape shape;
 			shape.type = HitShape::EType::Triangle;
 			shape.action = static_cast<int>(definition.action);
-			shape.pad = kButtonHitPadding;
+			shape.pad = kSlotHitPadding;
 			shape.points = BuildArrowTriangle(
-				center + definition.dirX * kButtonRadius,
-				center + definition.dirY * kButtonRadius,
-				definition.dirX,
-				definition.dirY,
-				kButtonHalfSize);
+				center + dirX * kFallbackRadius,
+				center + dirY * kFallbackRadius,
+				dirX,
+				dirY,
+				kFallbackHalfSize);
 			p_outShapes.push_back(shape);
 		}
 	}
@@ -138,46 +291,56 @@ namespace MOON
 			return;
 		}
 
-		Editor::Core::CameraController& controller = m_sceneView->GetCameraController();
-
-		// Keep the distance, the orbit center and the roll untouched: the click
-		// only re-orients the camera around the orbit center. When an animation is
-		// still running the pose it is heading to is used, so several clicks in a
-		// row add up instead of compounding from a half way pose.
-		Maths::FVector3 pivotPosition = camera->GetPosition();
-		Maths::FQuaternion pivotRotation = camera->GetRotation();
-		controller.TryGetPendingPose(pivotPosition, pivotRotation);
-
-		// Same axes and signs as CameraController::HandleCameraOrbit(), so a
-		// click matches a drag of the same length in that direction.
-		const Maths::FVector3 worldUp = camera->GetTransform().GetWorldUp();
-		const Maths::FVector3 worldRight = camera->GetTransform().GetWorldRight();
-
-		Maths::FVector3 axis = worldUp;
-		float angle = mStepDegrees * kDegToRad;
-		switch (p_action)
+		const ButtonDefinition* definition = nullptr;
+		for (const ButtonDefinition& candidate : kButtonDefinitions)
 		{
-		case EAction::OrbitLeft:
-			axis = worldUp;
-			break;
-		case EAction::OrbitRight:
-			axis = worldUp;
-			angle = -angle;
-			break;
-		case EAction::OrbitUp:
-			axis = worldRight;
-			angle = -angle;
-			break;
-		case EAction::OrbitDown:
-			axis = worldRight;
-			break;
-		default:
+			if (candidate.action == p_action)
+			{
+				definition = &candidate;
+				break;
+			}
+		}
+		if (definition == nullptr)
+		{
 			return;
 		}
 
+		// Work from the pose the camera is heading for: while a previous click is
+		// still animating, a second one has to add to it instead of turning from a
+		// half way pose.
+		Maths::FVector3 posePosition = camera->GetPosition();
+		Maths::FQuaternion poseRotation = camera->GetRotation();
+		m_sceneView->GetCameraController().TryGetPendingPose(posePosition, poseRotation);
+
+		// The step turns the camera about one of its own axes, the same axes and
+		// signs CameraController::HandleCameraOrbit() uses for a drag: a yaw about
+		// the camera up, a pitch about its right, and the two south buttons roll
+		// the view about the direction it looks along.
+		Maths::FVector3 axis = poseRotation * Maths::FVector3::Up;
+		switch (definition->axis)
+		{
+		case EStepAxis::Yaw:
+			axis = poseRotation * Maths::FVector3::Up;
+			break;
+		case EStepAxis::Pitch:
+			axis = poseRotation * Maths::FVector3::Right;
+			break;
+		case EStepAxis::Roll:
+			axis = poseRotation * Maths::FVector3::Forward;
+			break;
+		}
+
+		const float angle = definition->stepSign * mStepDegrees * kDegToRad;
 		const Maths::FQuaternion delta(axis, angle);
-		const Maths::FVector3 center = m_sceneView->GetRoaterCenter();
-		const Maths::FVector3 offset = pivotPosition - center;
-		controller.MoveToPose(center + delta * offset, delta * pivotRotation);
+		// Compose the step with the pose the camera is on (or is heading for), so
+		// the click turns that pose inside its own frame - the same thing as
+		// turning the model around the camera's axes while the camera watches. A
+		// pose that is not level keeps its tilt, which deriving the orientation
+		// from a direction and the world up would have flattened.
+		//
+		// The fit then puts the camera back on the center of the focus sphere (the
+		// selection when there is one, the scene otherwise) at the fitted distance,
+		// so the model turns about that center and stays framed.
+		m_sceneView->FitToFocusWithRotation(delta * poseRotation);
 	}
 }
