@@ -10,6 +10,7 @@
 #include "Interactive/Widgets/ClipPlane.h"
 #include "core/component/CTopoShape.h"
 #include "Interactive/Im3DRenderer.h"
+#include "Interactive/Screen/ScreenOverlayRegistry.h"
 #include <iostream>
 #include <algorithm>
 #include <cmath>
@@ -447,14 +448,12 @@ void Editor::Panels::SceneView::HandleActorPicking()
 
 	const auto mousePos = input.GetMousePosition();
 
-	// The navigation cube owns the cursor while it is hovered: skip scene
-	// picking so clicking a cube face does not also select the actor behind it,
-	// and hovering the cube does not highlight the scene.
-	if (MOON::ImRenderer::instance().IsCursorOverViewCube(
+	// Screen widgets (navigation cube, HUD buttons, ...) own the cursor while it
+	// is over them: skip scene picking so a click there does not also select the
+	// actor behind the widget, and hovering it does not highlight the scene.
+	if (MOON::ScreenOverlayRegistry::Instance().BlocksSceneCursor(
 		static_cast<float>(mousePos.first),
-		static_cast<float>(mousePos.second),
-		static_cast<int>(viewWidth),
-		static_cast<int>(viewHeight)))
+		static_cast<float>(mousePos.second)))
 	{
 		m_highlightedActor = {};
 		m_highlightedGizmoDirection = {};

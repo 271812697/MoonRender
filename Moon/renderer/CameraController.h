@@ -30,6 +30,15 @@ namespace Editor::Core
 		void LockTargetActor(::Core::ECS::Actor& p_actor);
 		void UnlockTargetActor();
 		void EnableRotate(bool flag);
+		/** False while the view is locked, e.g. while sketching. */
+		bool IsRotateEnabled() const { return m_enableRotate; }
+		/** Pose the camera is currently animating towards.
+		 *
+		 * Returns false when no MoveToPose() target is queued, in which case the
+		 * outputs are left untouched. */
+		bool TryGetPendingPose(
+			Maths::FVector3& p_outPosition,
+			Maths::FQuaternion& p_outRotation) const;
 		MirrorPlane GetMirrorPlane() {return  mirrorPlane;
 		}
 	private:

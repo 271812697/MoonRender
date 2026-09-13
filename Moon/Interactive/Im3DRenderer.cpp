@@ -10,6 +10,7 @@
 #include "renderer/SceneView.h"
 #include "Core/Global/ServiceLocator.h"
 #include "EventWidget.h"
+#include "Interactive/Screen/ScreenOverlayRegistry.h"
 #include "Sketcher/SketcherObj.h"
 
 #include "editor/View/sceneview/viewerwidget.h"
@@ -3987,34 +3988,6 @@ namespace MOON
 		}
 	}
 
-	bool ImRenderer::IsCursorOverViewCube(
-		float p_cursorX,
-		float p_cursorY,
-		int p_viewportWidth,
-		int p_viewportHeight
-	) const
-	{
-		const auto& viewCube = NavigateCube();
-
-		// Mirrors the placement in drawSort(): the cube viewport is anchored to
-		// the top right corner, using GL (bottom-left) viewport coordinates.
-		const int viewportX =
-			p_viewportWidth - viewCube.screenPos.viewportSizeX - kViewCubeMargin;
-		const int viewportY =
-			p_viewportHeight - viewCube.screenPos.viewportSizeY - kViewCubeMargin;
-
-		// The cursor uses top-left based coordinates, hence the flip.
-		const float cubeTop = static_cast<float>(
-			p_viewportHeight - (viewportY + viewCube.screenPos.viewportSizeY)
-		);
-		const float cubeBottom = static_cast<float>(p_viewportHeight - viewportY);
-
-		return p_cursorX >= static_cast<float>(viewportX)
-			&& p_cursorX < static_cast<float>(viewportX + viewCube.screenPos.viewportSizeX)
-			&& p_cursorY >= cubeTop
-			&& p_cursorY < cubeBottom;
-	}
-
 	void ImRenderer::drawSort()
 	{
 		drawLists.clear();
@@ -4104,8 +4077,12 @@ namespace MOON
 			Eigen::Vector3f boxECenter = (viewCube.maxConner + viewCube.minConner) / 2.0;
 			Maths::FVector3 boxCenter = { boxECenter.x(),boxECenter.y(),boxECenter.z()};
 
-			viewCube.screenPos.startX = cameraParam.viewportWidth - viewCube.screenPos.viewportSizeX - kViewCubeMargin;
-			viewCube.screenPos.startY = cameraParam.viewportHeight- viewCube.screenPos.viewportSizeY - kViewCubeMargin;
+			const ViewCubeLayout cubeLayout = ComputeViewCubeLayout(
+				cameraParam.viewportWidth,
+				cameraParam.viewportHeight
+			);
+			viewCube.screenPos.startX = cubeLayout.glViewportX;
+			viewCube.screenPos.startY = cubeLayout.glViewportY;
 		    int viewPortX = viewCube.screenPos.startX;
 			int viewPortY =  viewCube.screenPos.startY;
 			float u = 2*(cameraParam.cursor.x() - viewPortX) / (float)viewCube.screenPos.viewportSizeX -1;
@@ -4123,6 +4100,16 @@ namespace MOON
 		
 			auto proj=Maths::FMatrix4::CreateOrthographic(boxExtent/2.0, 1, 0.1, boxExtent);
 			int faceIndex=viewCube.hit(ToEigenMatrix4f(proj * view),u,v);
+			// The rotate buttons are drawn on top of the cube: while the cursor
+			// sits on one of them the click belongs to the widget, so the cube
+			// neither highlights a cell nor fits the view. Asking the overlay
+			// registry keeps this working for any future screen widget.
+			if (ScreenOverlayRegistry::Instance().HitsShape(
+				cameraParam.cursor.x(),
+				cameraParam.cursor.y()))
+			{
+				faceIndex = -1;
+			}
 			if (faceIndex != mViewCubeHoveredCell) {
 				// -1 resets every cell, so leaving the cube clears the highlight.
 				viewCube.setCellColor(faceIndex,{255,255,0,255});

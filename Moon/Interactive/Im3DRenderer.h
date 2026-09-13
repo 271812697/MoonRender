@@ -237,19 +237,6 @@ namespace MOON
 			return !keyDownCurr[key] && keyDownPrev[key];
 		}
 
-		/** True when the cursor is inside the navigation cube viewport.
-		 *
-		 * Cursor coordinates follow the camera params convention (origin at the
-		 * top-left). The rect is recomputed from the cube layout, so the answer is
-		 * exact for the current frame instead of lagging one frame behind the
-		 * drawn cube.
-		 */
-		bool IsCursorOverViewCube(
-			float p_cursorX,
-			float p_cursorY,
-			int p_viewportWidth,
-			int p_viewportHeight
-		) const;
 		void pushAlpha(float value);
 		void popAlpha();
 		void pushColor(const Eigen::Vector4<uint8_t>& color);
@@ -260,8 +247,6 @@ namespace MOON
 		void popMatrix();
 	private:
 		Editor::Panels::SceneView* renderView = nullptr;
-		/** Margin between the navigation cube and the viewport corner. */
-		static constexpr int kViewCubeMargin = 5;
 		/** Cell currently highlighted by the navigation cube (-1 = none). */
 		int mViewCubeHoveredCell = -1;
 

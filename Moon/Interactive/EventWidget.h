@@ -17,6 +17,7 @@ namespace MOON
 		unsigned int getWidgetId() const { return mWidgetId; }
 		const std::string& getName() const { return mName; }
 		bool isActived() const { return mActive; }
+		bool isVisible() const { return mVisible; }
 		void setActive(bool flag);
 		void setVisible(bool flag);
 		void setImmediateInvoke(bool flag);

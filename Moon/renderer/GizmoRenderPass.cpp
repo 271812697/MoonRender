@@ -33,6 +33,7 @@
 #include "Interactive/Widgets/PrimitiveSphere.h"
 #include "Interactive/Widgets/PrimitiveCylinder.h"
 #include "Interactive/Widgets/PrimitiveCone.h"
+#include "Interactive/Widgets/ViewCubeWidget.h"
 #include "Qtimgui/imgui/imgui.h"
 
 struct GizmoRenderSettings
@@ -66,6 +67,7 @@ class Editor::Rendering::GizmoRenderPass::GizmoRenderPassInternal {
 			mWidgets["PrimitiveSphere"] = new MOON::PrimitiveSphere("PrimitiveSphere");
 			mWidgets["PrimitiveCylinder"] = new MOON::PrimitiveCylinder("PrimitiveCylinder");
 			mWidgets["PrimitiveCone"] = new MOON::PrimitiveCone("PrimitiveCone");
+			mWidgets["ViewCube"] = new MOON::ViewCubeWidget("ViewCube");
 			
 			mWidgets["DrawSketchHandlerRotate"] = new MOON::DrawSketchHandlerRotate("DrawSketchHandlerRotate");
 			mWidgets["DrawSketchHandlerTrimming"] = new MOON::DrawSketchHandlerTrimming("DrawSketchHandlerTrimming");

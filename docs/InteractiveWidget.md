@@ -421,12 +421,203 @@ pos = eye + ray * t;
 
 ---
 
-## 9. 如何扩展一个新 Widget
+## 9. 2D 覆盖层控件层：ScreenWidget
+
+前面几节的控件都在 3D 空间里：要么走拾取 Pass 的颜色编码，要么用 CPU 射线求交。另有一类控件是**纯 2D 覆盖层**：图案画在 ImGui 的 draw list 上，点击用**屏幕空间相交测试**判定，完全不碰 3D 拾取——ViewCube 四周的旋转箭头、视口内的 HUD 按钮和滑条都属于这一类。
+
+`ScreenWidget : public EventWidget` 是这类控件的基类。它把最容易写错、也最容易在每个控件里重复写错的部分收拢到一处：
+
+| 层 | 文件 | 职责 |
+| --- | --- | --- |
+| 布局 | `Moon/Interactive/Screen/ScreenLayout.h` | 锚点 + 偏移 + 尺寸 + `uiScale` → `ScreenRect` |
+| 形状与命中 | `Moon/Interactive/Screen/HitShape.h` | 绘制与命中共用同一份几何 |
+| 状态机 / 基类 | `Moon/Interactive/Screen/ScreenWidget.h` | 光标、hover / press / drag、捕获、绘制入口 |
+| 归属仲裁 | `Moon/Interactive/Screen/ScreenOverlayRegistry.h` | 让场景拾取、导航立方体、相机知道光标已被占用 |
+
+事件订阅、`setActive` 开关、`InvokeEvent` 通知业务层这些能力直接继承自 `EventWidget`，所以 2D 控件和 3D 控件的生命周期、工具栏开关方式完全一致。
+
+### 9.1 坐标与布局
+
+```cpp
+struct ScreenRect { float x, y, w, h; /* 左上原点，场景视口逻辑像素 */ };
+
+struct ScreenLayout
+{
+    EScreenAnchor anchor;   // 9 宫格锚点
+    ImVec2 offset;          // 距锚定边的距离
+    ImVec2 size;            // 控件尺寸
+    float  scale = 1.0f;    // 全局 uiScale
+    ScreenRect Resolve(int viewportWidth, int viewportHeight) const;
+};
+```
+
+**整套 2D 层只有一套坐标空间**：左上原点、y 向下、场景视口逻辑像素。它同时是交互器光标、`FrameParam::cursor`、`ImGui::GetForegroundDrawList()` 和 `ScreenLayout` 的空间，所以布局 → 命中 → 绘制之间不需要任何翻转；需要左下原点的只有 `glViewport()`，由 `ComputeViewCubeLayout()` 在边界处换算。
+
+锚点算术只有 `ScreenLayout::Resolve()` 一份实现。`Im3DType.cpp` 里的 `ComputeViewCubeLayout()` 也是用它描述的——"立方体渲染到哪"和"按钮锚到哪"因此不可能漂移。
+
+### 9.2 光标：从 `Interactor` 取
+
+`Interactor` 是 `EventWidget` 的基类成员（`InteractorObserver::Interactor`），光标就在这里，不必绕到 `SceneView::getInutState()` 或 `FrameParam`：
+
+```cpp
+Interactor->GetEventPositionFlipY();   // 本次事件的光标，左上原点
+Interactor->GetLastEventPosition();    // 上一个事件的光标，拖拽 delta
+Interactor->GetSize(size);             // 视口尺寸（与翻转同源）
+Interactor->IsCursorInsideViewport();  // Enter / Leave 维护
+Interactor->GetControlKey() / GetShiftKey() / GetAltKey();
+```
+
+`GetEventPosition()` 保留 VTK 的左下原点约定，`GetEventPositionFlipY()` 是补上的左上原点版本。这样做的三个好处：
+
+1. **按下位置是精确的**：Qt 事件进入 `ReceiveEvent()` 时先 `SetEventInformationFlipY()` 再 `InvokeEvent()`，所以 `onLeftMousePressed()` 里读到的是按下那一刻的光标，不存在"用上一帧光标"的问题；
+2. **hover、press、drag 共用一份数据**，不会出现两个来源不一致；
+3. **翻转和布局用同一个 `Size`**（`ViewerWidget::resizeEvent` 同时更新 `SceneView` 和交互器），不会出现"光标按交互器尺寸翻、布局按 SceneView 尺寸算"的错配。
+
+`Enter` / `Leave` 事件用来维护 `CursorInsideViewport`：鼠标移出视口后控件必须退出 hover，否则光标停在最后位置、按钮一直亮着。
+
+### 9.3 形状与命中测试
+
+`HitShape` 把"画"和"测"绑在同一个描述上：
+
+```cpp
+struct HitShape
+{
+    enum class EType { Rect, Circle, RingArc, Triangle, Polygon };
+    EType type;   int action;        // action 交给 OnAction 解释
+    ImVec2 center, halfExtent;       // Rect
+    float radius, bandHalfWidth;     // Circle / RingArc
+    float startAngleDeg, sweepAngleDeg;
+    std::vector<ImVec2> points;      // Triangle / Polygon（凸、局部坐标）
+    float pad;                       // 命中外扩，像素
+
+    bool Contains(const ImVec2& local) const;
+    void Draw(ImDrawList*, const ImVec2& offset, ImU32 fill, ImU32 outline, float width) const;
+};
+```
+
+一旦绘制和命中是两份几何描述，改按钮形状就会漏改命中区，点击范围会悄悄和看到的图案错开，所以这里强制共用。`pad` 是统一的"命中区比图案大一点"：
+
+- 矩形 / 圆：直接放大尺寸或半径；
+- 三角形 / 多边形：围绕**质心**等比放大（`1 + pad / maxRadius`），不依赖绕序或顶点顺序；
+- 环带：径向加 `pad`，角向把 `pad` 用 `atan2(pad, r)` 换算成角度，保证弧上任意位置的外扩都是同样的像素宽度。
+
+点与凸多边形的关系用"三个叉积同号"判断，同样不依赖绕序：
+
+```cpp
+bool PointInConvexOutline(p, outline) {
+    bool hasNeg = false, hasPos = false;
+    for (每条边 a→b) {
+        float side = Cross2D(a, b, p);
+        hasNeg |= side < 0; hasPos |= side > 0;
+    }
+    return !(hasNeg && hasPos);
+}
+```
+
+### 9.4 状态机
+
+```cpp
+enum class EScreenState { Stop, Hot, Pressed, Dragging };
+```
+
+| 当前 | 条件 | 动作 | 下一状态 |
+| --- | --- | --- | --- |
+| Stop | 光标落到某个形状 | 记录 `mHotShape` | Hot |
+| Hot | 光标离开全部形状 | 清空 `mHotShape` | Stop |
+| Hot | 左键按下，`WantsCapture()==false` | **立即** `OnAction(action)` | Pressed |
+| Hot | 左键按下，`WantsCapture()==true` | 捕获光标，`OnDrag()` | Dragging |
+| Pressed | 左键松开 | 重新按当前光标判定 | Hot / Stop |
+| Dragging | 每次鼠标移动 | `OnDrag()`（光标出界也继续） | Dragging |
+| Dragging | 左键松开 | 释放捕获，重新判定 | Hot / Stop |
+| 任意 | 光标离开视口 / 控件被禁用 | 清空状态 | Stop |
+
+三个约定：
+
+1. **按下即触发**（`Pressed` 只是锁存）。2D 按钮是离散命令，不需要"按下-拖动-松开"的过程，所以语义在 `onLeftMousePressed()` 里就跑掉；锁存的作用是防止同一次按住重复触发，并让渲染端在这段时间里持续认为"光标属于控件"。
+2. **只有需要连续值的控件才捕获**（`WantsCapture()` 返回 true 的滑条、手柄）。捕获后 `OnDrag()` 每帧都收到光标，即使拖出控件矩形甚至拖出视口。
+3. **`EventWidget` 的三个回调被 `final` 封口**。子类改成实现 `BuildLayout()` / `BuildShapes()` / `DrawContent()` / `OnAction()` / `OnDrag()` / `OnStateChanged()` / `IsInteractionEnabled()`，就不会有人漏掉三处状态刷新（每帧兜底、移动即刷新、按下前用实时光标）。
+
+### 9.5 光标归属：ScreenOverlayRegistry
+
+这一层解决"2D 控件和 3D 交互抢同一个点击"的问题。注意**不能靠拦截事件来做**：相机（`CameraController::HandleInputs`）和拾取（`SceneView::HandleActorPicking`）都是直接读 `InputState` 的，根本不经过 widget 的事件分发。所以归属必须是**可查询的状态**：
+
+```cpp
+ScreenOverlayRegistry::Instance().BlocksSceneCursor(x, y); // 场景让位（拾取、悬停高亮）
+ScreenOverlayRegistry::Instance().HitsShape(x, y);         // HUD 让位（导航立方体的面点击）
+ScreenOverlayRegistry::Instance().IsCapturing();           // 相机让位（拖拽中不许 orbit/pan）
+```
+
+两个设计决定：
+
+- **按需查询，不做每帧快照**。`CameraController` 跑在 `SceneView::Update()` 里，比控件的 `onUpdate()`（在 `Render()` 里）更早，快照方案会让相机拿到上一帧的归属状态。`BuildLayout()` 是视口尺寸的纯函数、命中是解析式测试，任何时刻现算都是对的。
+- **重叠用显式 `zOrder` 仲裁**。`drawWidgets()` 遍历的是 `unordered_map`，顺序不确定，谁在上层不能靠遍历顺序决定。
+
+`BlocksSceneCursor` 和 `HitsShape` 的区别是有意保留的：ViewCube 的整块 125×125 矩形都要挡住场景拾取（否则会选中立方体背后的模型），但只有 4 个箭头"算命中"（否则立方体自己的面点击会让位，功能就没了）。
+
+### 9.6 ViewCubeWidget：一个完整例子
+
+`ViewCubeWidget` 现在只剩三件事，其余全在基类：
+
+```cpp
+ScreenLayout BuildLayout() const override       // TopRight，尺寸 = kViewCubeSize
+void BuildShapes(std::vector<HitShape>&) const  // 4 个三角形，往 4 个方向
+void DrawContent(ImDrawList&, const ScreenRect&) // DrawShapes()，样式由基类给
+void OnAction(int action)                        // 触发 90° 旋转
+```
+
+按钮表把"形状"和"语义"分开，加按钮只改数据：
+
+```cpp
+static const ButtonDefinition definitions[] = {
+    { EAction::OrbitUp,    0.0f, -1.0f },   // 屏幕 y 向下
+    { EAction::OrbitRight, 1.0f,  0.0f },
+    { EAction::OrbitDown,  0.0f,  1.0f },
+    { EAction::OrbitLeft, -1.0f,  0.0f }
+};
+```
+
+细节约定：
+
+- **旋转语义**：绕 `SceneView::GetRoaterCenter()` 做 90° 转台旋转，保持距离 / 中心 / 缩放不变；轴与符号完全对齐 `CameraController::HandleCameraOrbit()`（左右绕世界 up、上下绕相机 right），所以"点箭头"和"把鼠标朝同方向拖 90°"等价。若已有 `MoveToPose` 动画在跑，用 `TryGetPendingPose()` 取动画目标位姿继续累加，连点 3 次正好 270°。
+- **草图模式**：`IsInteractionEnabled()` 跟随 `CameraController::IsRotateEnabled()`（进入草图时被置 false），此时不绘制、不刷新状态、不抢光标。
+- **与立方体的分工**：立方体本体（6 面 / 8 角 / 12 棱）仍然由 `ImRenderer::drawSort()` 绘制和 3D 命中，点击后 `FitToSelectedActor/FitToScene`；箭头只是叠在上面的 2D 覆盖层。`drawSort()` 通过 `HitsShape()` 让位给箭头，这一条对任何未来的 2D 控件都成立。
+
+### 9.7 SplitScreen：捕获与拖拽的例子
+
+`ViewCubeWidget` 只用到"按下即触发"；`SplitScreen`（路径追踪的分屏分割线）是**捕获拖拽**路径的例子：两个端点手柄 + 一个中点手柄，拖中点整体平移。
+
+```cpp
+ScreenLayout BuildLayout() const override {          // 铺满视口
+    layout.anchor = EScreenAnchor::TopLeft;
+    layout.size = GetViewportSize();                 // 于是局部坐标 == 屏幕坐标
+    return layout;
+}
+void BuildShapes(std::vector<HitShape>& out) const override {
+    // 3 个 Circle，action = Start / End / Middle
+}
+bool WantsCapture() const override { return true; }  // 按下即捕获
+void OnDragBegin(const ImVec2& cursor) override;     // GetActiveShape() 拿到抓住的是哪个手柄
+void OnDrag(const ImVec2& cursor) override;          // 移动手柄 + MarkGeometryDirty()
+```
+
+四个要点：
+
+1. **`SetRectBlocksCursor(false)`**：矩形铺满整个视口，但只有手柄算命中，否则整块视口都会挡住场景拾取。这也说明 `BlocksSceneCursor`（矩形 + 形状都算）和 `HitsShape`（只算形状）为什么要分开。
+2. **抓取偏移**：`OnDragBegin()` 记下"手柄位置 - 按下时光标"，之后 `handle = cursor + offset`，手柄不会在按下瞬间跳到光标中心；中点手柄另外记下抓取时的半向量，拖动时整体平移而不是重新缩放。
+3. **`GetActiveShape()`**：拖拽期间保持在被抓的形状上（光标离开手柄也一样），这是"一个控件多个手柄"知道自己在拖哪个的办法。
+4. **几何脏标记**：位置变了要 `MarkGeometryDirty()`。绘制和命中用的是同一份形状，所以两者会一起更新，不会一边动一边没动。
+
+另外，拖拽中若控件被停用（`setActive(false)`、切工具、相机被锁定），基类会主动调用 `OnDragEnd()` 释放捕获——否则 `IsCapturing()` 会一直是 true，**相机会被永久挡住**。
+
+---
+
+## 10. 如何扩展一个新 Widget
 
 1. **继承 `EventWidget`**，构造时传入名字（自动注册到 `ImRenderer` 与 `RenderWindowInteractor`）；
 2. **选择控件风格**：
    - ClipPlane 风格：在 `Im3DType` 构建 `PolygonMesh`（`switchNextBlock` 分块命名），`onUpdate` 用 `drawOneMesh`，`onMouseMove` 用 `isSelectPolygon` 拾取；
    - WidgetViewData 风格：用 `viewData.setTriangleFace(...)` 承载三角形，`onUpdate` 用 `pushMatrix + drawTriangleList`，`onMouseMove` 用 `viewData.hitFace(ray, scale)` 拾取（需要固定屏幕尺寸时按 4.5 计算 scale）；
+   - 2D 覆盖层风格：**继承 `ScreenWidget` 而不是 `EventWidget`**，只实现 `BuildLayout()` / `BuildShapes()` / `DrawContent()` / `OnAction()`（需要连续值时再加 `WantsCapture()` + `OnDrag()`），光标、状态机、命中测试和光标归属都由基类处理（见第 9 节）。适合"永远正对相机、固定屏幕尺寸、不参与 3D 拾取"的按钮、滑条、HUD 类控件；
 3. **重写 `onUpdate()`**：绘制控件，读取 `getFrameParam()` 做逻辑；
 4. **重写 `onMouseMove()`**：做悬停检测，切换状态机；
 5. **重写 `onLeftMousePressed()` / `onLeftMouseReleased()`**：进入/退出拖拽，初始化 `GizmoBehaviour`；
@@ -435,7 +626,7 @@ pos = eye + ray * t;
 
 ---
 
-## 10. 关键文件
+## 11. 关键文件
 
 | 文件 | 职责 |
 | --- | --- |
@@ -448,6 +639,12 @@ pos = eye + ray * t;
 | `Moon/Interactive/ViewData.*` | WidgetViewData 风格控件的几何容器与 CPU 拾取（`hitFace` / `hitEdge` / `hitPoint`） |
 | `Moon/Interactive/Widgets/AxisTranslationWidget.*` | 沿轴拖拽控件：固定屏幕尺寸、CPU 拾取、`LengthChange` 事件 |
 | `Moon/Interactive/Widgets/ArrowRotateWidget.*` | 旋转控件：箭头绕轴旋转、`AngleChange` 事件 |
+| `Moon/Interactive/Screen/ScreenLayout.*` | 2D 布局：锚点 + 偏移 + 尺寸 + `uiScale` → `ScreenRect` |
+| `Moon/Interactive/Screen/HitShape.*` | 2D 形状：`Rect/Circle/RingArc/Triangle/Polygon` 的绘制 + 相交测试（共用几何） |
+| `Moon/Interactive/Screen/ScreenWidget.*` | 2D 控件基类：光标、`Stop/Hot/Pressed/Dragging` 状态机、捕获、绘制入口 |
+| `Moon/Interactive/Screen/ScreenOverlayRegistry.*` | 光标归属仲裁：场景拾取 / 导航立方体 / 相机按需查询 |
+| `Moon/Interactive/Widgets/ViewCubeWidget.*` | ViewCube 旋转箭头：`ScreenWidget` 的完整例子 |
+| `Moon/Interactive/Widgets/SplitScreen.*` | 分屏分割线：`ScreenWidget` 的捕获 / 拖拽例子（`PathTraceRenderPass` 用它的线方程） |
 | `Moon/Interactive/Widgets/PadTaskWidget.*` | 平板控件：箭头平移 + 圆环点旋转，`LengthChange` / `AngleChange` |
 | `Moon/editor/UI/TaskPanel/FilletTask.cpp` | 倒圆角 UI：用两个 `AxisTranslationWidget` 拖动控制半径 |
 | `Moon/renderer/PickingRenderPass.cpp` | 拾取 framebuffer、像素读回与 `selectPolygon` |

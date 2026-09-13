@@ -6,6 +6,7 @@
 #include "Rendering/Resources/Mesh.h"
 #include "Rendering/Resources/Model.h"
 #include "renderer/Context.h"
+#include "Interactive/Screen/ScreenLayout.h"
 #include <glad/glad.h>
 #include <Tools/Utils/PathParser.h>
 namespace MOON {
@@ -265,12 +266,39 @@ namespace MOON {
 			mergeBox(face.vertex[i]);
 		}
 	}
+	ViewCubeLayout ComputeViewCubeLayout(float p_viewportWidth, float p_viewportHeight)
+	{
+		// Anchor through ScreenLayout so the cube and the screen widgets that
+		// decorate it share one implementation of the corner arithmetic.
+		ScreenLayout cubeLayout;
+		cubeLayout.anchor = EScreenAnchor::TopRight;
+		cubeLayout.offset = ImVec2(
+			static_cast<float>(kViewCubeMargin),
+			static_cast<float>(kViewCubeMargin));
+		cubeLayout.size = ImVec2(
+			static_cast<float>(kViewCubeSize),
+			static_cast<float>(kViewCubeSize));
+
+		const ScreenRect rect = cubeLayout.Resolve(
+			static_cast<int>(p_viewportWidth),
+			static_cast<int>(p_viewportHeight));
+
+		ViewCubeLayout layout;
+		layout.centerX = rect.x + rect.w * 0.5f;
+		layout.centerY = rect.y + rect.h * 0.5f;
+		layout.halfSize = rect.w * 0.5f;
+		layout.glViewportX = static_cast<int>(rect.x);
+		// GL uses a bottom-left origin, the layout a top-left one.
+		layout.glViewportY = static_cast<int>(p_viewportHeight - rect.y - rect.h);
+		return layout;
+	}
+
 	GuiWidgetPolyMesh& NavigateCube()
 	{
 		static GuiWidgetPolyMesh viewCube;
 		if (viewCube.cellArray.size() == 0) {
-			viewCube.screenPos.viewportSizeX = 125;
-			viewCube.screenPos.viewportSizeY = 125;
+			viewCube.screenPos.viewportSizeX = kViewCubeSize;
+			viewCube.screenPos.viewportSizeY = kViewCubeSize;
 			viewCube.screenPos.startX = 20;
 			viewCube.screenPos.startY = 20;
 			float halflen = 3.0f;

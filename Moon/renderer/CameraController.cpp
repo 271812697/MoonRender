@@ -4,6 +4,7 @@
 
 #include "CameraController.h"
 #include "GizmoRenderPass.h"
+#include "Interactive/Screen/ScreenOverlayRegistry.h"
 #include <iostream>
 
 
@@ -158,6 +159,15 @@ void ::Editor::Core::CameraController::HandleInputs(float p_deltaTime)
 	}
 	else
 	{   
+		// A screen widget that captured the cursor (a dragged slider or handle)
+		// owns the mouse until it is released, so the camera stays out of it.
+		if (MOON::ScreenOverlayRegistry::Instance().IsCapturing())
+		{
+			HandleCameraZoom();
+			HandleCameraFPSKeyboard(p_deltaTime);
+			return;
+		}
+
 		auto [xPos, yPos] = input.GetMousePosition();
 		if (m_rightMousePressed || m_middleMousePressed || m_leftMousePressed)
 		{
@@ -292,6 +302,22 @@ void Editor::Core::CameraController::UnlockTargetActor()
 void Editor::Core::CameraController::EnableRotate(bool flag)
 {
 	m_enableRotate = flag;
+}
+
+bool Editor::Core::CameraController::TryGetPendingPose(
+	Maths::FVector3& p_outPosition,
+	Maths::FQuaternion& p_outRotation) const
+{
+	if (m_cameraDestinations.empty())
+	{
+		return false;
+	}
+	// HandleInputs() keeps a single element in the queue, so the newest target
+	// is the one the camera will end up on.
+	const auto& destination = m_cameraDestinations.back();
+	p_outPosition = std::get<0>(destination);
+	p_outRotation = std::get<1>(destination);
+	return true;
 }
 
 std::optional<std::reference_wrapper<Core::ECS::Actor>> Editor::Core::CameraController::GetTargetActor() const
