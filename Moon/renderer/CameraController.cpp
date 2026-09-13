@@ -5,6 +5,7 @@
 #include "CameraController.h"
 #include "GizmoRenderPass.h"
 #include "Interactive/Screen/ScreenOverlayRegistry.h"
+#include "core/log.h"
 #include <iostream>
 #include <algorithm>
 #include <cmath>
@@ -136,6 +137,17 @@ void ::Editor::Core::CameraController::HandleInputs(float p_deltaTime)
 		if (input.IsKeyPressed(Editor::Panels::PageDown))	focusObjectFromAngle(-Maths::FVector3::Forward);
 	}
 
+	// A press of a camera button takes the camera back: whatever move is still in
+	// flight is dropped. While a move is being played the mouse is ignored, so
+	// without this a move that cannot converge would leave the view stuck.
+	if (m_rightMousePressed || m_middleMousePressed)
+	{
+		while (!m_cameraDestinations.empty())
+		{
+			m_cameraDestinations.pop();
+		}
+	}
+
 	if (!m_cameraDestinations.empty())
 	{
 		m_currentMovementSpeed = 0.0f;
@@ -161,7 +173,15 @@ void ::Editor::Core::CameraController::HandleInputs(float p_deltaTime)
 		const float rotationGapDegrees =
 			2.0f * std::acos(rotationDot) * 180.0f / 3.14159265359f;
 
-		if (positionGap <= 0.03f && rotationGapDegrees <= 0.25f)
+		if (!std::isfinite(positionGap) || !std::isfinite(rotationGapDegrees))
+		{
+			// A degenerate target must never hold the camera: it is dropped and the
+			// pose the camera already has is kept.
+			CORE_WARN(
+				"[Camera] dropped a camera move whose target is not finite");
+			m_cameraDestinations.pop();
+		}
+		else if (positionGap <= 0.03f && rotationGapDegrees <= 0.25f)
 		{
 			m_camera.SetPosition(destPos);
 			m_camera.SetRotation(destRotation);
@@ -169,8 +189,32 @@ void ::Editor::Core::CameraController::HandleInputs(float p_deltaTime)
 		}
 		else
 		{
-			m_camera.SetPosition(Maths::FVector3::Lerp(m_camera.GetPosition(), destPos, t));
-			m_camera.SetRotation(Maths::FQuaternion::Lerp(m_camera.GetRotation(), destRotation, t));
+			const Maths::FVector3 previousPosition = m_camera.GetPosition();
+			const Maths::FQuaternion previousRotation = m_camera.GetRotation();
+
+			m_camera.SetPosition(Maths::FVector3::Lerp(previousPosition, destPos, t));
+			// Slerp turns at a constant rate, which is what keeps a pure roll (the
+			// view cube roll buttons) smooth.
+			m_camera.SetRotation(
+				Maths::FQuaternion::Slerp(previousRotation, destRotation, t));
+
+			// A step that changed nothing means float precision cannot bring the
+			// camera any closer: snap instead of spinning forever, because while a
+			// move is in flight the mouse is ignored.
+			const bool stalled =
+				Maths::FVector3::Distance(previousPosition, m_camera.GetPosition()) <= 0.0f
+				&& std::abs(Maths::FQuaternion::DotProduct(
+					previousRotation,
+					m_camera.GetRotation())) >= 1.0f;
+			if (stalled)
+			{
+				CORE_WARN(
+					"[Camera] a camera move stopped making progress; it was snapped "
+					"to its target");
+				m_camera.SetPosition(destPos);
+				m_camera.SetRotation(destRotation);
+				m_cameraDestinations.pop();
+			}
 		}
 	}
 	else
@@ -459,6 +503,14 @@ void Editor::Core::CameraController::HandleMousePressed()
 	if (input.IsMouseButtonPressed(Editor::Panels::MouseButton::MOUSE_BUTTON_RIGHT))
 	{
 		m_rightMousePressed = true;
+		if (!m_enableRotate)
+		{
+			// Say it once per press instead of silently ignoring the drag: the
+			// usual reason is a sketch that never handed rotation back.
+			CORE_WARN(
+				"[Camera] the right button was pressed while rotation is disabled "
+				"(a sketch that is still being edited?); the drag is ignored");
+		}
 	}
 }
 
