@@ -204,7 +204,9 @@ namespace MOON {
         int& geometryIndex2,
         Base::Vector3d& intersect2, double& u1, double& u2)
     {
-        if (geometryIndex >= mGeoList.size()) {
+        if (geometryIndex < 0
+            || static_cast<size_t>(geometryIndex) >= mGeoList.size()
+            || mGeoList[geometryIndex] == nullptr) {
             return false;
         }
         gp_Pln plane(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1));
@@ -220,6 +222,11 @@ namespace MOON {
         }
         else {
             primaryCurve = GeomAPI::To2d(curve3d, plane);
+            // To2d() hands back a null handle for a curve that cannot be written
+            // in that plane; everything below would walk into it.
+            if (primaryCurve.IsNull()) {
+                return false;
+            }
             periodic = primaryCurve->IsPeriodic();
             if (periodic) {
                 period = primaryCurve->Period();
@@ -232,6 +239,13 @@ namespace MOON {
 
         // find the parameter of the picked point on the primary curve
         Projector.Init(gp_Pnt2d(point.x, point.y), primaryCurve);
+        // A projection that found nothing - a degenerate curve, a curve whose
+        // parameter range is empty, a pick that is not a number - has no parameter
+        // to give back. Asking for one anyway reads into an extrema that was never
+        // computed, which is what crashed the trim tool while the mouse moved.
+        if (Projector.NbPoints() < 1) {
+            return false;
+        }
         double pickedParam = Projector.LowerDistanceParameter();
 
         // find intersection points
