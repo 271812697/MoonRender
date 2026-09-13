@@ -1,9 +1,12 @@
 #pragma once
 #include "Qtimgui/imgui/imgui.h"
+#include <memory>
 #include <vector>
 
 namespace MOON
 {
+	struct ScreenPath;
+
 	/** A 2D shape that is both drawn and hit tested.
 	 *
 	 * Drawing and hit testing share one description on purpose: a button drawn
@@ -22,7 +25,20 @@ namespace MOON
 			/** Convex, filled. */
 			Triangle,
 			/** Convex, filled. */
-			Polygon
+			Polygon,
+			/** An arbitrary outline, e.g. baked from a sketch. See ScreenPath. */
+			Path
+		};
+
+		/** How a shape decides that the cursor is on it. */
+		enum class EPickMode
+		{
+			/** Inside the outline. */
+			Fill,
+			/** Within strokePickSlack of the outline (open or closed). */
+			Stroke,
+			/** Either of the two. */
+			FillOrStroke
 		};
 
 		EType type = EType::Rect;
@@ -42,6 +58,14 @@ namespace MOON
 		float sweepAngleDeg = 0.0f;
 		/** Triangle / Polygon: convex outline in local space. */
 		std::vector<ImVec2> points;
+
+		/** Path: the outline. Shared between widgets that use the same shape. */
+		std::shared_ptr<const ScreenPath> path;
+		EPickMode pickMode = EPickMode::Fill;
+		/** Path: drawn stroke thickness (Stroke mode). */
+		float strokeWidth = 2.0f;
+		/** Path: extra pick area around the stroke, in pixels. */
+		float strokePickSlack = 4.0f;
 
 		/** Extra pick area in pixels, applied uniformly to every shape type. */
 		float pad = 0.0f;

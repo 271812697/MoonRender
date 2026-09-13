@@ -1,4 +1,4 @@
-#include "Interactive/Widgets/DrawSketchHandlerLineSet.h"
+﻿#include "Interactive/Widgets/DrawSketchHandlerLineSet.h"
 #include "Sketcher/SketcherObjManager.h"
 #include "Sketcher/SketcherObj.h"
 #include "Maths/FMatrix4.h"
@@ -672,7 +672,7 @@ namespace MOON {
     void DrawSketchHandlerLineSet::quit()
     {
         // We must see if we need to create a B-spline before cancelling everything
-// and now just like any other Handler,
+        // and now just like any other Handler,
 
       
         bool continuousMode = true;

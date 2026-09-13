@@ -1,4 +1,5 @@
 #include "Interactive/Screen/HitShape.h"
+#include "Interactive/Screen/ScreenPath.h"
 #include <algorithm>
 #include <cmath>
 
@@ -101,6 +102,8 @@ namespace MOON
 		case EType::Circle:
 		case EType::RingArc:
 			return center;
+		case EType::Path:
+			return path ? path->Center() : ImVec2(0.0f, 0.0f);
 		default:
 			return points.empty() ? ImVec2(0.0f, 0.0f) : Centroid(points);
 		}
@@ -154,6 +157,20 @@ namespace MOON
 			const std::vector<ImVec2> outline = PaddedOutline(points, LocalCenter(), pad);
 			return PointInConvexOutline(p_local, outline);
 		}
+
+		case EType::Path:
+		{
+			if (!path || path->IsEmpty())
+			{
+				return false;
+			}
+			const bool hitFill =
+				(pickMode != EPickMode::Stroke) && path->ContainsPointWithPad(p_local, pad);
+			const bool hitStroke =
+				(pickMode != EPickMode::Fill)
+				&& path->NearOutline(p_local, strokeWidth * 0.5f + strokePickSlack + pad);
+			return hitFill || hitStroke;
+		}
 		}
 		return false;
 	}
@@ -182,7 +199,10 @@ namespace MOON
 			}
 			if (p_outlineWidth > 0.0f)
 			{
-				p_drawList->AddRect(min, max, p_outline, 0.0f, 0, p_outlineWidth);
+				// Argument order is explicit: rounding, thickness, flags. The two
+				// ImDrawList implementations in the tree differ here, and the
+				// swapped-meaning legacy overloads are easy to bind to by accident.
+				p_drawList->AddRect(min, max, p_outline, 0.0f, p_outlineWidth, 0);
 			}
 			break;
 		}
@@ -225,8 +245,8 @@ namespace MOON
 				arcPoints.data(),
 				static_cast<int>(arcPoints.size()),
 				p_fill != 0 ? p_fill : p_outline,
-				0,
-				bandHalfWidth * 2.0f);
+				bandHalfWidth * 2.0f,
+				0);
 			break;
 		}
 
@@ -253,8 +273,70 @@ namespace MOON
 					outline.data(),
 					static_cast<int>(outline.size()),
 					p_outline,
-					ImDrawFlags_Closed,
-					p_outlineWidth);
+					p_outlineWidth,
+					ImDrawFlags_Closed);
+			}
+			break;
+		}
+
+		case EType::Path:
+		{
+			if (!path || path->IsEmpty())
+			{
+				break;
+			}
+
+			// The fill comes from ScreenPath's even-odd triangulation, which
+			// handles concave outlines and holes; the draw list's own concave fill
+			// is not used (see ScreenPath::GetFillTriangles).
+			const bool wantFill = pickMode != EPickMode::Stroke && p_fill != 0;
+			// In Stroke mode the outline *is* the shape, so it takes the main
+			// color (the one that changes on hover / press).
+			const bool strokeIsMainColor = pickMode == EPickMode::Stroke;
+			const ImU32 strokeColor = strokeIsMainColor ? p_fill : p_outline;
+			const float strokeThickness = strokeIsMainColor
+				? std::max(strokeWidth, 1.0f)
+				: p_outlineWidth;
+
+			if (wantFill)
+			{
+				const std::vector<ImVec2>& triangles = path->GetFillTriangles();
+				for (size_t t = 0; t + 2 < triangles.size(); t += 3)
+				{
+					p_drawList->AddTriangleFilled(
+						ImVec2(p_offset.x + triangles[t].x, p_offset.y + triangles[t].y),
+						ImVec2(p_offset.x + triangles[t + 1].x, p_offset.y + triangles[t + 1].y),
+						ImVec2(p_offset.x + triangles[t + 2].x, p_offset.y + triangles[t + 2].y),
+						p_fill);
+				}
+			}
+
+			std::vector<ImVec2> scratch;
+			for (size_t loopIndex = 0; loopIndex < path->loops.size(); ++loopIndex)
+			{
+				const std::vector<ImVec2>& loop = path->loops[loopIndex];
+				if (loop.size() < 2)
+				{
+					continue;
+				}
+				scratch.clear();
+				scratch.reserve(loop.size());
+				for (const ImVec2& point : loop)
+				{
+					scratch.push_back(ImVec2(p_offset.x + point.x, p_offset.y + point.y));
+				}
+
+				if (strokeColor != 0 && strokeThickness > 0.0f)
+				{
+					const bool loopClosed =
+						loopIndex < path->closed.size() && path->closed[loopIndex];
+					p_drawList->AddPolyline(
+						scratch.data(),
+						static_cast<int>(scratch.size()),
+						strokeColor,
+						strokeThickness,
+						loopClosed ? ImDrawFlags_Closed : 0);
+				}
 			}
 			break;
 		}
