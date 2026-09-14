@@ -23,19 +23,22 @@ out VS_OUT
 
 void main()
 { 
-    float projectY=2/ubo_Projection[1][1];
-    float pixels=5;
-    float ratio= (pixels / ubo_ScreenHeight);
-    
-    if(ubo_CameraType==0){
-       vs_out.FragPos = vec3(ubo_Model * vec4(normalize(geo_Pos)*projectY *ratio+aInstanceOffset, 1.0));
-    }
-    else{
-       float d = length(geo_Pos - ubo_ViewPos);
-        vs_out.FragPos = vec3(ubo_Model * vec4(normalize(geo_Pos)*projectY *d*ratio+aInstanceOffset, 1.0));
+    // What the viewport covers at distance d is 2*d/ubo_Projection[1][1] of world
+    // space, so a sprite of 'pixels' pixels has a world radius of
+    // pixels * 2 * d / (ubo_Projection[1][1] * ubo_ScreenHeight).
+    const float pixels = 5.0;
+    const float projectY = 2.0 / ubo_Projection[1][1];
+    const float ratio = pixels / ubo_ScreenHeight;
 
-    }
+    // The instance offset is a vertex of the selected mesh, so it is in the
+    // model's own space: the point it places is only in the world after the model
+    // matrix. The sprite is built around that world position.
+    const vec3 worldPoint = (ubo_Model * vec4(aInstanceOffset, 1.0)).xyz;
+    float radius = projectY * ratio;                 // orthographic: constant pixels
+    if (ubo_CameraType != 0)                         // perspective: constant pixels too,
+        radius *= length(worldPoint - ubo_ViewPos);  // so the world radius grows with d
 
+    vs_out.FragPos = worldPoint + normalize(geo_Pos) * radius;
     vs_out.TexCoords = geo_TexCoords;
     vs_out.Color = aInstanceColor;
     vs_out.Normal = normalize(mat3(transpose(inverse(ubo_Model))) * geo_Normal);

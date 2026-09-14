@@ -301,6 +301,7 @@ void Rendering::Resources::Mesh::Upload(const std::vector<Geometry::Vertex>& p_v
 {
 	if (m_vertexBuffer.Allocate(p_vertices.size()*sizeof(Geometry::Vertex)))
 	{
+		m_vertexStride = sizeof(Geometry::Vertex);
 		m_vertexBuffer.Upload(p_vertices.data());
 
 		UploadIndices(p_indices);
@@ -321,6 +322,7 @@ void Rendering::Resources::Mesh::Upload(const std::vector<Geometry::VertexPositi
 {
 	if (m_vertexBuffer.Allocate(p_vertices.size() * sizeof(Geometry::VertexPositionNormal)))
 	{
+		m_vertexStride = sizeof(Geometry::VertexPositionNormal);
 		m_vertexBuffer.Upload(p_vertices.data());
 
 		UploadIndices(p_indices);
@@ -338,6 +340,7 @@ void Rendering::Resources::Mesh::Upload(const std::vector<Geometry::VertexBVH>& 
 {
 	if (m_vertexBuffer.Allocate(p_vertices.size() * sizeof(Geometry::VertexBVH)))
 	{
+		m_vertexStride = sizeof(Geometry::VertexBVH);
 		m_vertexBuffer.Upload(p_vertices.data());
 
 		UploadIndices(p_indices);

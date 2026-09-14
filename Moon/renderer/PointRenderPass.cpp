@@ -39,9 +39,14 @@ void Editor::Rendering::PointRenderPass::Draw(::Rendering::Data::PipelineState p
 			
 			sphereVao.Bind();
 			instanceVBO.Bind();
-			// 设置实例化属性指针（3D偏移量）
+			// Instance attribute 5 = the position of each vertex of the selected
+			// mesh. The stride has to come from the mesh: a model loaded from a file
+			// uses the 14 float Vertex layout, while a STEP/topology batch uses the
+			// 10 float VertexBVH one, and reading either with the other's stride
+			// lands the points between vertices.
 			glEnableVertexAttribArray(5);
-			glVertexAttribPointer(5, 3, GL_FLOAT, GL_FALSE, 14 * sizeof(float), (void*)0);
+			glVertexAttribPointer(
+				5, 3, GL_FLOAT, GL_FALSE, selectMesh->GetVertexStride(), (void*)0);
 			glVertexAttribDivisor(5, 1);  // 每个实例更新一次
 			sphereVao.Unbind();
 			instanceVBO.Unbind();

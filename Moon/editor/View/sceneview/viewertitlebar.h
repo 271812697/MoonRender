@@ -1,14 +1,19 @@
 ﻿#pragma once
-#include <QToolBar>
-
-class QGraphicsOpacityEffect;
-class QPropertyAnimation;
-class QTimer;
+#include <QWidget>
 
 namespace MOON {
 
 
-	class ViewerWindowTitleBar : public QToolBar
+	/** The view overlay: a small floating card in the top left corner of the
+	 * viewport, the categories side by side like a menu bar. Clicking one drops
+	 * that category's buttons below it, the way a menu bar drops a menu.
+	 *
+	 * Grouping exists because a flat strip runs out of room as soon as there are a
+	 * few buttons. Adding a button is one line in ViewerWindowTitleBarInternal (add
+	 * it to the category it belongs to); adding a category is one more AddCategory()
+	 * call, see viewertitlebar.cpp.
+	 */
+	class ViewerWindowTitleBar : public QWidget
 	{
 	public:
 		explicit ViewerWindowTitleBar(QWidget* parent = nullptr);
@@ -21,21 +26,12 @@ namespace MOON {
 		 * and it changes with the icon size: recenter whenever it does. */
 		void resizeEvent(QResizeEvent* p_event) override;
 		void showEvent(QShowEvent* p_event) override;
-		/** Fades the bar in while the cursor is on it, and back to its idle
-		 * opacity a moment after the cursor has left it. */
-		void enterEvent(QEvent* p_event) override;
-		void leaveEvent(QEvent* p_event) override;
 	private:
-		/** Vertical, centered on the left edge of the parent, above its content. */
+		/** Pinned to the top left corner of the parent, above its content. */
 		void PlaceOverlay();
-		/** Animates the bar between its idle and its hover opacity. */
-		void FadeTo(float p_opacity, int p_durationMs);
 
 	private:
 		class ViewerWindowTitleBarInternal;
 		ViewerWindowTitleBarInternal* mInternal = nullptr;
-		QGraphicsOpacityEffect* mOpacity = nullptr;
-		QPropertyAnimation* mFade = nullptr;
-		QTimer* mIdleTimer = nullptr;
 	};
 }
