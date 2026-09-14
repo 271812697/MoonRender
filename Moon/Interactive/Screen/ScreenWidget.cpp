@@ -1,4 +1,4 @@
-#include "Interactive/Screen/ScreenWidget.h"
+﻿#include "Interactive/Screen/ScreenWidget.h"
 #include "Interactive/Interactive/RenderWindowInteractor.h"
 #include "Interactive/Screen/ScreenOverlayRegistry.h"
 #include "Qtimgui/imgui/imgui.h"
@@ -274,8 +274,6 @@ namespace MOON
 
 	void ScreenWidget::onUpdate()
 	{
-		RefreshState();
-
 		if (!IsInteractive())
 		{
 			return;

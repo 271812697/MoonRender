@@ -34,7 +34,6 @@
 #include "Interactive/Widgets/PrimitiveCylinder.h"
 #include "Interactive/Widgets/PrimitiveCone.h"
 #include "Interactive/Widgets/ViewCubeWidget.h"
-#include "Interactive/Widgets/PathShapeWidget.h"
 #include "Qtimgui/imgui/imgui.h"
 
 struct GizmoRenderSettings
@@ -69,7 +68,6 @@ class Editor::Rendering::GizmoRenderPass::GizmoRenderPassInternal {
 			mWidgets["PrimitiveCylinder"] = new MOON::PrimitiveCylinder("PrimitiveCylinder");
 			mWidgets["PrimitiveCone"] = new MOON::PrimitiveCone("PrimitiveCone");
 			mWidgets["ViewCube"] = new MOON::ViewCubeWidget("ViewCube");
-			mWidgets["PathShape"] = new MOON::PathShapeWidget("PathShape");
 			
 			mWidgets["DrawSketchHandlerRotate"] = new MOON::DrawSketchHandlerRotate("DrawSketchHandlerRotate");
 			mWidgets["DrawSketchHandlerTrimming"] = new MOON::DrawSketchHandlerTrimming("DrawSketchHandlerTrimming");
@@ -77,7 +75,7 @@ class Editor::Rendering::GizmoRenderPass::GizmoRenderPassInternal {
 			
 			mWidgets["ClipPlane"]->setActive(false);
 			mWidgets["SplitScreen"]->setActive(false);
-			mWidgets["PathShape"]->setActive(false);
+			
 		}
 		~GizmoRenderPassInternal()
 		{

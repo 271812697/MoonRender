@@ -1,6 +1,5 @@
-#include "Interactive/Widgets/ViewCubeWidget.h"
+﻿#include "Interactive/Widgets/ViewCubeWidget.h"
 #include "Interactive/Im3DType.h"
-#include "Interactive/Im3DRenderer.h"
 #include "Interactive/Screen/ScreenPath.h"
 #include "Interactive/Screen/ShapeBuilder.h"
 #include "renderer/SceneView.h"
@@ -8,7 +7,6 @@
 #include "core/log.h"
 #include <algorithm>
 #include <cmath>
-#include <iterator>
 
 namespace MOON
 {
@@ -23,8 +21,8 @@ namespace MOON
 		 * four side buttons sit 90 degrees apart, so they can afford a wide slot;
 		 * the two roll buttons are squeezed between them at 45 degrees and are cut
 		 * shorter, which keeps the gaps in the ring even. */
-		constexpr float kOrbitSlotHalfSweepDeg = 16.0f;
-		constexpr float kRollSlotHalfSweepDeg = 12.0f;
+		constexpr float kOrbitSlotHalfSweepDeg = 14.0f;
+		constexpr float kRollSlotHalfSweepDeg = 8.0f;
 		/** Flattening tolerance of the curves, in pixels: a slot is about 80px
 		 * long, so this is already smooth and keeps the loops short. */
 		constexpr double kSlotDeflection = 0.05;
