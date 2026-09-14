@@ -10,8 +10,17 @@
 #include <QHBoxLayout>
 #include <QToolBar>
 #include <QPointer>
+#include <QEvent>
+#include <QTimer>
+#include <algorithm>
 
 namespace MOON {
+
+	namespace
+	{
+		/** Free space between the floating bar and the edge of the viewport. */
+		constexpr int kOverlayMargin = 10;
+	}
 
 	class  WireCommand : public Command
 	{
@@ -173,11 +182,88 @@ namespace MOON {
 	};
 	ViewerWindowTitleBar::ViewerWindowTitleBar(QWidget* parent) :QToolBar(parent), mInternal(new ViewerWindowTitleBarInternal(this))
 	{
+		// The bar floats inside the viewport it is given instead of sitting in the
+		// window's toolbar area: vertical along the left edge, translucent so the
+		// scene stays readable behind it, and it never docks or floats away.
+		setOrientation(Qt::Vertical);
+		setMovable(false);
+		setFloatable(false);
+		setAttribute(Qt::WA_TranslucentBackground);
+		setStyleSheet(
+			"QToolBar{background:rgba(32,35,42,170);"
+			"border:none;border-radius:8px;padding:3px;}"
+			"QToolButton{background:transparent;border:none;border-radius:5px;padding:3px;}"
+			"QToolButton:hover{background:rgba(255,255,255,45);}"
+			"QToolButton:checked{background:rgba(90,150,255,130);}");
+		if (layout() != nullptr)
+		{
+			layout()->setSpacing(2);
+			layout()->setContentsMargins(3, 3, 3, 3);
+		}
 
+		if (parent != nullptr)
+		{
+			// Follow the viewport: it is the one that changes size, not the bar.
+			parent->installEventFilter(this);
+		}
 
+		// The buttons only reach their final size once the layout and the style
+		// have run, so the first placement is left to the event loop; showEvent()
+		// and resizeEvent() keep it centered from then on.
+		QTimer::singleShot(0, this, [this]()
+			{
+				adjustSize();
+				PlaceOverlay();
+			});
 	}
 	ViewerWindowTitleBar::~ViewerWindowTitleBar()
 	{
 		delete mInternal;
+	}
+
+	void ViewerWindowTitleBar::PlaceOverlay()
+	{
+		QWidget* host = parentWidget();
+		if (host == nullptr)
+		{
+			return;
+		}
+		// Left edge, centered vertically. When the bar is taller than the viewport
+		// it stays pinned to the top so its first buttons remain reachable.
+		const int y = std::max(kOverlayMargin, (host->height() - height()) / 2);
+		move(kOverlayMargin, y);
+		raise();
+	}
+
+	void ViewerWindowTitleBar::resizeEvent(QResizeEvent* p_event)
+	{
+		QToolBar::resizeEvent(p_event);
+		// Keep the center: only moving here, so this cannot recurse.
+		PlaceOverlay();
+	}
+
+	void ViewerWindowTitleBar::showEvent(QShowEvent* p_event)
+	{
+		QToolBar::showEvent(p_event);
+		adjustSize();
+		PlaceOverlay();
+	}
+
+	bool ViewerWindowTitleBar::eventFilter(QObject* p_watched, QEvent* p_event)
+	{
+		if (p_watched == parentWidget() && p_event != nullptr)
+		{
+			switch (p_event->type())
+			{
+			case QEvent::Resize:
+			case QEvent::Show:
+				adjustSize();
+				PlaceOverlay();
+				break;
+			default:
+				break;
+			}
+		}
+		return QToolBar::eventFilter(p_watched, p_event);
 	}
 }
