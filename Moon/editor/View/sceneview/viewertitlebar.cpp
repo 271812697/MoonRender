@@ -12,6 +12,9 @@
 #include <QPointer>
 #include <QEvent>
 #include <QTimer>
+#include <QCursor>
+#include <QGraphicsOpacityEffect>
+#include <QPropertyAnimation>
 #include <algorithm>
 
 namespace MOON {
@@ -20,6 +23,11 @@ namespace MOON {
 	{
 		/** Free space between the floating bar and the edge of the viewport. */
 		constexpr int kOverlayMargin = 10;
+		/** How visible the bar is while the cursor is elsewhere, and after how long
+		 * of not being touched it fades back to that. */
+		constexpr qreal kIdleOpacity = 0.28;
+		constexpr int kIdleDelayMs = 900;
+		constexpr int kFadeMs = 220;
 	}
 
 	class  WireCommand : public Command
@@ -207,6 +215,22 @@ namespace MOON {
 			parent->installEventFilter(this);
 		}
 
+		// The bar stays out of the way while the cursor is elsewhere: it fades to a
+		// translucent hint and comes back to full opacity when the cursor is on it.
+		mOpacity = new QGraphicsOpacityEffect(this);
+		mOpacity->setOpacity(kIdleOpacity);
+		setGraphicsEffect(mOpacity);
+
+		mFade = new QPropertyAnimation(mOpacity, "opacity", this);
+		mFade->setEasingCurve(QEasingCurve::InOutQuad);
+
+		mIdleTimer = new QTimer(this);
+		mIdleTimer->setSingleShot(true);
+		connect(mIdleTimer, &QTimer::timeout, this, [this]()
+			{
+				FadeTo(kIdleOpacity, kFadeMs);
+			});
+
 		// The buttons only reach their final size once the layout and the style
 		// have run, so the first placement is left to the event loop; showEvent()
 		// and resizeEvent() keep it centered from then on.
@@ -247,6 +271,44 @@ namespace MOON {
 		QToolBar::showEvent(p_event);
 		adjustSize();
 		PlaceOverlay();
+	}
+
+	void ViewerWindowTitleBar::enterEvent(QEvent* p_event)
+	{
+		QToolBar::enterEvent(p_event);
+		if (mIdleTimer != nullptr)
+		{
+			mIdleTimer->stop();
+		}
+		FadeTo(1.0, kFadeMs);
+	}
+
+	void ViewerWindowTitleBar::leaveEvent(QEvent* p_event)
+	{
+		QToolBar::leaveEvent(p_event);
+		// Moving onto one of the buttons leaves the bar itself, but not the bar as
+		// far as the user is concerned: only a real exit starts the idle timer.
+		if (rect().contains(mapFromGlobal(QCursor::pos())))
+		{
+			return;
+		}
+		if (mIdleTimer != nullptr)
+		{
+			mIdleTimer->start(kIdleDelayMs);
+		}
+	}
+
+	void ViewerWindowTitleBar::FadeTo(float p_opacity, int p_durationMs)
+	{
+		if (mOpacity == nullptr || mFade == nullptr)
+		{
+			return;
+		}
+		mFade->stop();
+		mFade->setDuration(std::max(0, p_durationMs));
+		mFade->setStartValue(mOpacity->opacity());
+		mFade->setEndValue(static_cast<qreal>(p_opacity));
+		mFade->start();
 	}
 
 	bool ViewerWindowTitleBar::eventFilter(QObject* p_watched, QEvent* p_event)
