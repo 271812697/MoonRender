@@ -396,8 +396,8 @@ namespace MOON {
 				Maths::FMatrix4::Scaling({ 6,6,6 });
 			viewAxis.drawEdge = false;
 			
-			auto arrow = GetService(Editor::Core::Context).editorResources->GetModel("Arrow_Translate");
-			auto sphere= GetService(Core::ResourceManagement::ModelManager).LoadResource(":Models/Sphere.fbx");
+			auto arrow = GetModelService[":Models/Arrow_Translate.fbx"];
+			auto sphere= GetModelService[":Models/Sphere.fbx"];
 			viewAxis.addModel(arrow, model, { 0,0,255,255 });
 			viewAxis.switchNextBlock({0,0,1,1});
 			viewAxis.addModel(arrow, model.RotateOnAxisY(-90), { 255,0,0,255 });
@@ -426,9 +426,9 @@ namespace MOON {
 				Maths::FMatrix4::Scaling({ 6,6,6 });
 			poly.drawEdge = false;
 
-			auto arrow = GetService(Editor::Core::Context).editorResources->GetModel("Arrow_Translate");
-			auto sphere = GetService(Core::ResourceManagement::ModelManager).LoadResource(":Models/Sphere.fbx");
-			auto cil= GetService(Core::ResourceManagement::ModelManager).LoadResource(":Models/res.obj");
+			auto arrow = GetModelService[":Models/Arrow_Translate.fbx"];
+			auto sphere = GetModelService[":Models/Sphere.fbx"];
+			auto cil= GetModelService[":Models/res.obj"];
 			poly.addModel(cil, Maths::FMatrix4::Identity, { 255,255,255,255 });
 			poly.switchNextBlock({ 1,0,0,1 },"XAxis");
 			poly.addModel(cil, Maths::FMatrix4::Identity.RotateOnAxisZ(90.0f).RotateOnAxisX(90), {255,255,255,255});
@@ -491,8 +491,8 @@ namespace MOON {
 			float halflen = 3.0f;
 			Maths::FMatrix4 model =Maths::FMatrix4::Translation({ 0,0,0 }) * Maths::FMatrix4::Scaling({ 6,6,6 });
 			poly.drawEdge = false;
-			auto arrow = GetService(Editor::Core::Context).editorResources->GetModel("Arrow_Translate");
-			auto sphere = GetService(Core::ResourceManagement::ModelManager).LoadResource(":Models/Sphere.fbx");
+			auto arrow = GetModelService[":Models/Arrow_Translate.fbx"];
+			auto sphere = GetModelService[":Models/Sphere.fbx"];
 			poly.addModel(arrow, model, { 255,255,255,255 });
 			poly.switchNextBlock({ 0,0,1,1 }, "ZArrow");
 			poly.addModel(arrow, model.RotateOnAxisY(-90), { 255,255,255,255 });

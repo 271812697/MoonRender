@@ -5,7 +5,10 @@
 #include "Rendering/Geometry/BoundingSphere.h"
 
 #include <QElapsedTimer>
-
+namespace Core::SceneSystem
+{
+	class SceneManager;
+}
 namespace Editor::Panels
 {
 

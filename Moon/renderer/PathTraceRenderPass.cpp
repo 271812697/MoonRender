@@ -7,9 +7,12 @@
 #include <Core/Rendering/SceneRenderer.h>
 #include <Core/ResourceManagement/ShaderManager.h>
 #include <Core/SceneSystem/BvhService.h>
+#include "core/Global/ServiceLocator.h"
+
 #include "core/log.h"
 #include "Rendering/Resources/Texture.h"
 #include "renderer/SceneView.h"
+#include "renderer/Context.h"
 #include <Rendering/Core/CompositeRenderer.h>
 #include <Rendering/HAL/Profiling.h>
 #include <Rendering/Settings/EPixelDataFormat.h>

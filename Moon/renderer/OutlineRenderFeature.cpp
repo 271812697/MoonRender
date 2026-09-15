@@ -19,10 +19,10 @@ Editor::Rendering::OutlineRenderFeature::OutlineRenderFeature(
 	::Rendering::Features::ARenderFeature(p_renderer, p_executionPolicy)
 {
 	/* Stencil Fill Material */
-	m_stencilFillMaterial.SetShader(::Core::Global::ServiceLocator::Get<Editor::Core::Context>().editorResources->GetShader("OutlineFallback"));
+	m_stencilFillMaterial.SetShader(GetShaderService[":Shaders/OutlineFallback.ovfx"]);
 
 	/* Outline Material */
-	m_outlineMaterial.SetShader(::Core::Global::ServiceLocator::Get<Editor::Core::Context>().editorResources->GetShader("OutlineFallback"));
+	m_outlineMaterial.SetShader(GetShaderService[":Shaders/OutlineFallback.ovfx"]);
 }
 
 void Editor::Rendering::OutlineRenderFeature::DrawOutline(
@@ -92,7 +92,7 @@ void Editor::Rendering::OutlineRenderFeature::DrawActorToStencil(::Rendering::Da
 			auto translation = Maths::FMatrix4::Translation(p_actor.transform.GetWorldPosition());
 			auto rotation = Maths::FQuaternion::ToMatrix4(p_actor.transform.GetWorldRotation());
 			auto model = translation * rotation;
-			DrawModelToStencil(p_pso, model, *::Core::Global::ServiceLocator::Get<Editor::Core::Context>().editorResources->GetModel("Camera"));
+			DrawModelToStencil(p_pso, model, *GetModelService[":Models/Camera.fbx"]);
 		}
 
 		if (auto reflectionProbeComponent = p_actor.GetComponent<::Core::ECS::Components::CReflectionProbe>(); reflectionProbeComponent)
@@ -104,7 +104,7 @@ void Editor::Rendering::OutlineRenderFeature::DrawActorToStencil(::Rendering::Da
 			const auto rotation = Maths::FQuaternion::ToMatrix4(p_actor.transform.GetWorldRotation());
 			const auto scale = Maths::FMatrix4::Scaling({ 0.5f, 0.5f, 0.5f });
 			const auto model = translation * rotation * scale;
-			DrawModelToStencil(p_pso, model, *::Core::Global::ServiceLocator::Get<Editor::Core::Context>().editorResources->GetModel("Sphere"));
+			DrawModelToStencil(p_pso, model, *GetModelService[":Models/Sphere.fbx"]);
 		}
 
 		for (auto& child : p_actor.GetChildren())
@@ -141,7 +141,7 @@ void Editor::Rendering::OutlineRenderFeature::DrawActorOutline(
 			auto translation = Maths::FMatrix4::Translation(p_actor.transform.GetWorldPosition());
 			auto rotation = Maths::FQuaternion::ToMatrix4(p_actor.transform.GetWorldRotation());
 			auto model = translation * rotation;
-			DrawModelOutline(p_pso, model, *::Core::Global::ServiceLocator::Get<Editor::Core::Context>().editorResources->GetModel("Camera"), p_color);
+			DrawModelOutline(p_pso, model, *GetModelService[":Models/Camera.fbx"], p_color);
 		}
 
 		if (auto reflectionProbeComponent = p_actor.GetComponent<::Core::ECS::Components::CReflectionProbe>(); reflectionProbeComponent)
@@ -153,7 +153,7 @@ void Editor::Rendering::OutlineRenderFeature::DrawActorOutline(
 			const auto rotation = Maths::FQuaternion::ToMatrix4(p_actor.transform.GetWorldRotation());
 			const auto scale = Maths::FMatrix4::Scaling({ 0.5f, 0.5f, 0.5f });
 			const auto model = translation * rotation * scale;
-			DrawModelOutline(p_pso, model, *::Core::Global::ServiceLocator::Get<Editor::Core::Context>().editorResources->GetModel("Sphere"), p_color);
+			DrawModelOutline(p_pso, model, *GetModelService[":Models/Sphere.fbx"], p_color);
 		}
 
 		for (auto& child : p_actor.GetChildren())

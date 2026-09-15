@@ -16,7 +16,7 @@ Editor::Rendering::GridRenderPass::GridRenderPass(::Rendering::Core::CompositeRe
 	::Rendering::Core::ARenderPass(p_renderer)
 {
 	/* Grid Material */
-	m_gridMaterial.SetShader(::Core::Global::ServiceLocator::Get<Editor::Core::Context>().editorResources->GetShader("Grid"));
+	m_gridMaterial.SetShader(GetShaderService[":Shaders/Grid.ovfx"]);
 	m_gridMaterial.SetBlendable(true);
 	m_gridMaterial.SetBackfaceCulling(true);
 	m_gridMaterial.SetDepthWriting(false);
@@ -193,7 +193,7 @@ void Editor::Rendering::GridRenderPass::Draw(::Rendering::Data::PipelineState p_
 	m_gridMaterial.SetProperty("u_MirrorTex", &color.value());
 	m_gridMaterial.SetProperty("u_MirrorShadowTex", &shadow.value());
 	m_renderer.GetFeature<DebugModelRenderFeature>()
-		.DrawModelWithSingleMaterial(pso, *::Core::Global::ServiceLocator::Get<Editor::Core::Context>().editorResources->GetModel("Plane"), m_gridMaterial, model);
+		.DrawModelWithSingleMaterial(pso, *GetModelService[":Models/Plane.fbx"], m_gridMaterial, model);
 
 	//debug
 	//if (false) {

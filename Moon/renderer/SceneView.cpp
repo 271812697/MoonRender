@@ -4,6 +4,7 @@
 #include "DebugSceneRenderer.h"
 #include "PickingRenderPass.h"
 #include "Core/Global/ServiceLocator.h"
+#include <Core/SceneSystem/SceneManager.h>
 #include "SceneView.h"
 #include "Settings/DebugSetting.h"
 #include "renderer/GizmoRenderPass.h"

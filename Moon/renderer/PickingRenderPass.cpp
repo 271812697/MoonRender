@@ -44,23 +44,8 @@ Editor::Rendering::PickingRenderPass::PickingRenderPass(::Rendering::Core::Compo
 	);
 
 	SetupPickReadbacks();
-
-	/* Light Material */
-	m_lightMaterial.SetShader(::Core::Global::ServiceLocator::Get<Editor::Core::Context>().editorResources->GetShader("Billboard"));
-	m_lightMaterial.SetDepthTest(false);
-
-	/* ImRenderer Pickable Material */
-	m_gizmoPickingMaterial.SetShader(::Core::Global::ServiceLocator::Get<Editor::Core::Context>().editorResources->GetShader("ImRenderer"));
-	m_gizmoPickingMaterial.SetGPUInstances(3);
-	m_gizmoPickingMaterial.SetProperty("u_IsBall", false);
-	m_gizmoPickingMaterial.SetProperty("u_IsPickable", true);
-	m_gizmoPickingMaterial.SetDepthTest(true);
-
-	m_reflectionProbeMaterial.SetShader(::Core::Global::ServiceLocator::Get<Editor::Core::Context>().editorResources->GetShader("PickingFallback"));
-	m_reflectionProbeMaterial.SetDepthTest(false);
-
 	/* Picking Material */
-	m_actorPickingFallbackMaterial.SetShader(::Core::Global::ServiceLocator::Get<Editor::Core::Context>().editorResources->GetShader("PickingFallback"));
+	m_actorPickingFallbackMaterial.SetShader(GetShaderService[":Shaders/PickingFallback.ovfx"]);
 	m_TopoShapePickingFallbackMaterial.SetShader(GetShaderService[":Shaders\\GeomertySurfacePick.ovfx"]);
 	m_TopoShapePickingFallbackMaterial.SetBackfaceCulling(false);
 	// Lines and faces are coplanar in the picking buffer too: push the faces
@@ -503,99 +488,6 @@ bool Editor::Rendering::PickingRenderPass::MayTouchPickRegion(
 		|| ndcY - radiusY > m_pickRegionNdcMaxY
 		);
 }
-
-void Editor::Rendering::PickingRenderPass::DrawPickableCameras(
-	::Rendering::Data::PipelineState p_pso,
-	::Core::SceneSystem::Scene& p_scene
-)
-{
-	for (auto camera : p_scene.GetFastAccessComponents().cameras)
-	{
-		auto& actor = camera->owner;
-
-		if (actor.IsActive())
-		{
-			PreparePickingMaterial(actor, m_actorPickingFallbackMaterial);
-			auto& cameraModel = *::Core::Global::ServiceLocator::Get<Editor::Core::Context>().editorResources->GetModel("Camera");
-			auto translation = Maths::FMatrix4::Translation(actor.transform.GetWorldPosition());
-			auto rotation = Maths::FQuaternion::ToMatrix4(actor.transform.GetWorldRotation());
-			auto modelMatrix = translation * rotation;
-
-			m_renderer.GetFeature<DebugModelRenderFeature>()
-				.DrawModelWithSingleMaterial(p_pso, cameraModel, m_actorPickingFallbackMaterial, modelMatrix);
-		}
-	}
-}
-
-void Editor::Rendering::PickingRenderPass::DrawPickableReflectionProbes(::Rendering::Data::PipelineState p_pso, ::Core::SceneSystem::Scene& p_scene)
-{
-	for (auto reflectionProbe : p_scene.GetFastAccessComponents().reflectionProbes)
-	{
-		auto& actor = reflectionProbe->owner;
-
-		if (actor.IsActive())
-		{
-			PreparePickingMaterial(actor, m_reflectionProbeMaterial);
-			auto& reflectionProbeModel = *::Core::Global::ServiceLocator::Get<Editor::Core::Context>().editorResources->GetModel("Sphere");
-			const auto translation = Maths::FMatrix4::Translation(
-				actor.transform.GetWorldPosition() +
-				reflectionProbe->GetCapturePosition()
-			);
-			const auto rotation = Maths::FQuaternion::ToMatrix4(actor.transform.GetWorldRotation());
-			const auto scaling = Maths::FMatrix4::Scaling({ 0.5f, 0.5f, 0.5f });
-			auto modelMatrix = translation * rotation * scaling;
-
-			m_renderer.GetFeature<DebugModelRenderFeature>()
-				.DrawModelWithSingleMaterial(p_pso, reflectionProbeModel, m_reflectionProbeMaterial, modelMatrix);
-		}
-	}
-}
-
-void Editor::Rendering::PickingRenderPass::DrawPickableLights(
-	::Rendering::Data::PipelineState p_pso,
-	::Core::SceneSystem::Scene& p_scene
-)
-{
-	if (true)
-	{
-		m_renderer.Clear(false, true, false);
-
-		m_lightMaterial.SetProperty("u_Scale", 0.35f);
-
-		for (auto light : p_scene.GetFastAccessComponents().lights)
-		{
-			auto& actor = light->owner;
-
-			if (actor.IsActive())
-			{
-				PreparePickingMaterial(actor, m_lightMaterial, "u_Diffuse");
-				auto& lightModel = *::Core::Global::ServiceLocator::Get<Editor::Core::Context>().editorResources->GetModel("Vertical_Plane");
-				auto modelMatrix = Maths::FMatrix4::Translation(actor.transform.GetWorldPosition());
-
-				m_renderer.GetFeature<DebugModelRenderFeature>()
-					.DrawModelWithSingleMaterial(p_pso, lightModel, m_lightMaterial, modelMatrix);
-			}
-		}
-	}
-}
-
-void Editor::Rendering::PickingRenderPass::DrawPickableGizmo(
-	::Rendering::Data::PipelineState p_pso,
-	const Maths::FVector3& p_position,
-	const Maths::FQuaternion& p_rotation,
-	Editor::Core::EGizmoOperation p_operation
-)
-{
-	auto modelMatrix =
-		Maths::FMatrix4::Translation(p_position) *
-		Maths::FQuaternion::ToMatrix4(Maths::FQuaternion::Normalize(p_rotation));
-
-	auto arrowModel = ::Core::Global::ServiceLocator::Get<Editor::Core::Context>().editorResources->GetModel("Arrow_Picking");
-
-	m_renderer.GetFeature<DebugModelRenderFeature>()
-		.DrawModelWithSingleMaterial(p_pso, *arrowModel, m_gizmoPickingMaterial, modelMatrix);
-}
-
 Editor::Rendering::PickPassOption& Editor::Rendering::PickingRenderPass::GetPickPassOption()
 {
 	return mPickOption;

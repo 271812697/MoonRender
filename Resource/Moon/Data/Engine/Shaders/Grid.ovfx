@@ -1,0 +1,133 @@
+#shader vertex
+#version 450 core
+
+layout (location = 0) in vec3 geo_Pos;
+layout (location = 1) in vec2 geo_TexCoords;
+layout (location = 2) in vec3 geo_Normal;
+
+layout (std140) uniform EngineUBO
+{
+    mat4 ubo_Model;
+    mat4 ubo_View;
+    mat4 ubo_Projection;
+    vec3 ubo_ViewPos;
+    float ubo_Time;
+};
+
+uniform mat4 u_PlaneTransform;
+
+out VS_OUT
+{
+    vec3 FragPos;
+    vec2 TexCoords;
+    vec3 Normal;
+
+} vs_out;
+
+void main()
+{
+    vec4 worldPos = ubo_Model * vec4(geo_Pos, 1.0);
+    vs_out.FragPos = worldPos.xyz;
+    
+    mat4 worldToPlane = inverse(u_PlaneTransform);
+    vec4 localPos = worldToPlane * worldPos;
+    
+    vs_out.TexCoords = localPos.xz;
+    
+    vs_out.Normal = normalize(mat3(transpose(inverse(ubo_Model))) * geo_Normal);
+    
+
+    gl_Position = ubo_Projection * ubo_View * worldPos;
+}
+
+#shader fragment
+#version 450 core
+
+out vec4 FRAGMENT_COLOR;
+
+layout (std140) uniform EngineUBO
+{
+    mat4 ubo_Model;
+    mat4 ubo_View;
+    mat4 ubo_Projection;
+    vec3 ubo_ViewPos;
+    float ubo_Time;
+};
+
+uniform mat4 u_PlaneTransform;
+uniform vec3 u_Color;
+uniform sampler2D u_MirrorTex;
+uniform sampler2D u_MirrorShadowTex;
+
+
+uniform float u_GridSize = 0.01f;      
+uniform float u_GridOpacity = 0.7f;   
+uniform float u_FadeDistance = 50.0f; 
+
+in VS_OUT
+{
+    vec3 FragPos;
+    vec2 TexCoords;
+    vec3 Normal;
+
+} fs_in;
+
+float MAG(float lineWidth, float spacing, vec2 texCoords)
+{
+    const vec2 coord = texCoords / spacing;
+    const vec2 grid = abs(fract(coord - 0.5) - 0.5) / fwidth(coord);
+    const float line = min(grid.x, grid.y);
+    const float lineResult = lineWidth - min(line, lineWidth);
+    return max(lineResult,0.2);
+}
+
+void main()
+{
+    mat4 worldToPlane = inverse(u_PlaneTransform);
+    vec4 localCameraPos = worldToPlane * vec4(ubo_ViewPos, 1.0);
+    vec4 localFragPos = worldToPlane * vec4(fs_in.FragPos, 1.0);
+    
+    float height = abs(localCameraPos.y - localFragPos.y);
+    
+    vec2 texCoords = fs_in.TexCoords;
+    
+    float spacing1 = u_GridSize;           // 0.5m
+    float spacing2 = u_GridSize * 4.0f;    // 2m
+    float spacing3 = u_GridSize * 16.0f;   // 8m
+    
+
+    float grid1 = MAG(1.4f, spacing1, texCoords);
+    float grid2 = MAG(1.5f, spacing2, texCoords);
+    float grid3 = MAG(1.6f, spacing3, texCoords);
+    
+
+    float fadeFactor = 1.0f ;//- clamp(height / u_FadeDistance, 0.0f, 1.0f);
+    
+  
+    float grid = 0.0f;
+    if (height < 20.0f)
+        grid = grid1 * 0.8f + grid2 * 0.2f;
+    else if (height < 50.0f)
+        grid = grid2 * 0.7f + grid3 * 0.3f;
+    else
+        grid = grid3 * fadeFactor;
+    vec3 viewDir = normalize(fs_in.FragPos - ubo_ViewPos);
+    vec3 planeNormal = normalize(mat3(u_PlaneTransform)[1]);
+    float angleFactor = abs(dot(viewDir, planeNormal));
+    float horizonFade = 0.1f + 0.9f * smoothstep(0.0f, 0.3f, angleFactor);
+
+
+
+
+
+    vec2 reflectUV = gl_FragCoord.xy / textureSize(u_MirrorTex, 0);
+    vec3 reflectColor = texture(u_MirrorTex, reflectUV).rgb;
+    float shadow=texture(u_MirrorShadowTex,reflectUV).r;
+    reflectColor *= mix(0.2, 1.0, angleFactor) ;
+    float alpha = grid * u_GridOpacity * horizonFade * fadeFactor;
+    vec3 finalColor = reflectColor;
+    finalColor = mix(reflectColor, u_Color, 0.3);
+    finalColor = mix(finalColor,vec3(0.10,0.10,0.10),(shadow*0.8));
+    FRAGMENT_COLOR = vec4(finalColor, 1.0);
+
+}

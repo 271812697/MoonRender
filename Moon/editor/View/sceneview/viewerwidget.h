@@ -8,7 +8,6 @@ namespace Editor::Panels {
 	class AView;
 }
 namespace MOON {
-	
 	class ViewerWidget : public QOpenGLWidget, QOpenGLFunctions_4_5_Core
 	{
 		Q_OBJECT
@@ -37,7 +36,6 @@ namespace MOON {
 		void onActorHoverLeaved(Core::ECS::Actor* actor);
 		void onReadFile(const QString& path);
 		void refreshTreeView();
-
 	private:
 		class ViewerWindowInternal;
 		ViewerWindowInternal* mInternal = nullptr;
