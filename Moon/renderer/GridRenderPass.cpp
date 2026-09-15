@@ -99,12 +99,10 @@ void Editor::Rendering::GridRenderPass::Draw(::Rendering::Data::PipelineState p_
 	TracyGpuZone("GridRenderPass");
 	
 	assert(m_renderer.HasDescriptor<GridDescriptor>()&&"Cannot find GridDescriptor attached to this renderer");
-	assert(m_renderer.HasFeature<::Rendering::Features::DebugShapeRenderFeature>()&& "Cannot find DebugShapeRenderFeature attached to this renderer");
 	assert(m_renderer.HasFeature<Editor::Rendering::DebugModelRenderFeature>()&&"Cannot find DebugModelRenderFeature attached to this renderer");
 	
 	auto& frameDesc = m_renderer.GetFrameDescriptor();
 	auto& gridDescriptor = m_renderer.GetDescriptor<GridDescriptor>();
-	auto& debugShapeRenderer = m_renderer.GetFeature<::Rendering::Features::DebugShapeRenderFeature>();
 	auto plane=Maths::FVector4(gridDescriptor.mirrorPlaneNormal,-gridDescriptor.mirrorPlaneNormal.Dot(gridDescriptor.mirrorPlaneCenter));
 	auto& engineBufferRenderFeature =m_renderer.GetFeature<::Core::Rendering::EngineBufferRenderFeature>();
 	Maths::FMatrix4 mirrorMat=Maths::FMatrix4::MirrorPlane(plane.x, plane.y, plane.z, plane.w);
