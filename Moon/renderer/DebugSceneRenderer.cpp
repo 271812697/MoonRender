@@ -107,9 +107,9 @@ Editor::Rendering::DebugSceneRenderer::DebugSceneRenderer(::Rendering::Context::
 	::Core::Rendering::SceneRenderer(p_driver, true /* enable stencil write, required by the grid */)
 {
 	AddFeature<::Rendering::Features::FrameInfoRenderFeature, ::Rendering::Features::EFeatureExecutionPolicy::ALWAYS>();
-	AddFeature<::Rendering::Features::DebugShapeRenderFeature, ::Rendering::Features::EFeatureExecutionPolicy::FRAME_EVENTS_ONLY>();
+	//AddFeature<::Rendering::Features::DebugShapeRenderFeature, ::Rendering::Features::EFeatureExecutionPolicy::FRAME_EVENTS_ONLY>();
 	AddFeature<Editor::Rendering::DebugModelRenderFeature, ::Rendering::Features::EFeatureExecutionPolicy::NEVER>();
-	AddFeature<OutlineRenderFeature, ::Rendering::Features::EFeatureExecutionPolicy::NEVER>();
+	//AddFeature<OutlineRenderFeature, ::Rendering::Features::EFeatureExecutionPolicy::NEVER>();
 
 	AddPass<PointRenderPass>("PointDraw", ::Rendering::Settings::ERenderPassOrder::Opaque).SetEnabled(false);	
 	AddPass<GridRenderPass>("Grid", ::Rendering::Settings::ERenderPassOrder::Opaque);
