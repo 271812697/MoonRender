@@ -1,19 +1,12 @@
-#include "core/TopoNameDebug.h"
+﻿#include "core/TopoNameDebug.h"
 #include "TopoShape.h"
 #include "MappedElement.h"
-#include "ElementMap.h"
 #include "core/log.h"
 
 #include <string>
 
 namespace MOON
 {
-	namespace
-	{
-		/** A shape can carry thousands of named elements (a fillet over a whole
-		 * model): log the first ones and the total, not the whole map. */
-		constexpr size_t kMaxLoggedNames = 40;
-	}
 
 	void LogTopoElementNames(Part::TopoShape& p_shape, const char* p_tag)
 	{
@@ -32,27 +25,19 @@ namespace MOON
 				p_tag);
 			return;
 		}
-
-		std::string text;
-		const std::vector<Data::MappedElement>& elements = p_shape.getElementMap();
-		size_t logged = 0;
-		for (const Data::MappedElement& element : elements)
-		{
-			if (logged == kMaxLoggedNames)
-			{
-				break;
+        size_t logged = 0;
+		static const std::array<TopAbs_ShapeEnum, 3> types = { TopAbs_VERTEX, TopAbs_EDGE, TopAbs_FACE };
+		for (int i = 0;i < types.size();i++) {
+			int count=p_shape.countSubShapes(types[i]);
+			std::string shapeName=p_shape.shapeName(types[i]);
+			const char* name = shapeName.c_str();
+			for (int k = 1;k <= count;k++) {
+				Data::IndexedName elementIndex = Data::IndexedName::fromConst(name, k);
+				std::string element=elementIndex.toString();
+				for (const std::pair<Data::MappedName, Data::ElementIDRefs>& candidate : p_shape.getElementMappedNames(elementIndex)) {
+					CORE_INFO("[TopoName] {0}: {1:<9} -> {2}", p_tag, element, candidate.first.toString());
+				}
 			}
-			if (!text.empty())
-			{
-				text += ", ";
-			}
-			text += element.index.toString() + " -> " + element.name.toString();
-			++logged;
 		}
-		if (elements.size() > logged)
-		{
-			text += ", ... (+" + std::to_string(elements.size() - logged) + " more)";
-		}
-		CORE_INFO("[TopoName] {0}: {1} element(s): {2}", p_tag, elements.size(), text);
 	}
 }

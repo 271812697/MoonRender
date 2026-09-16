@@ -102,11 +102,16 @@ namespace MOON {
 			= Data::IndexedName::fromConst(typeName.c_str(), index + 1);
 		std::vector<std::string>& names = m_referenceNames[p_index];
 		names.clear();
-		for (const Data::MappedElement& candidate : baseShape.getElementMap()) {
-			if (candidate.index == element) {
-				names.push_back(candidate.name.toString());
-			}
+		;
+		for (const std::pair<Data::MappedName,Data::ElementIDRefs>& candidate :baseShape.getElementMappedNames(element,false)) {
+		
+			names.push_back(candidate.first.toString());
 		}
+		//for (const Data::MappedElement& candidate : baseShape.getElementMap()) {
+		//	if (candidate.index == element) {
+		//		names.push_back(candidate.name.toString());
+		//	}
+		//}
 		// Longest first: the most specific name is also the one that survives the
 		// most operations downstream.
 		std::sort(names.begin(), names.end(),
