@@ -1,5 +1,7 @@
 ﻿#include "core/component/TopoShapeActor.h"
 #include "renderer/SceneView.h"
+#include "TopoShapeOpCode.h"
+#include "core/TopoNameDebug.h"
 #include "core/component/CTopoShape.h"
 #include "TopoShape.h"
 #include "ChamferFeature.h"
@@ -51,9 +53,11 @@ namespace MOON {
 				static_cast<Part::ChamferType>(chamferType),
 				size,
 				chamferType == 2 ? angle : size2,   // FreeCAD passes angle as the second radius
-				nullptr,
+				// Tags the names of the chamfer faces/edges with the operation.
+				Part::OpCodes::Chamfer,
 				flipDirection ? Part::Flip::flip : Part::Flip::none
 			);
+			LogTopoElementNames(resShape, "chamfer");
 
 			TopTools_ListOfShape aLarg;
 			aLarg.Append(baseShape.getShape());

@@ -6,6 +6,11 @@
 #include "Core/Global/ServiceLocator.h"
 #include "base/Tools.h"
 #include "core/log.h"
+#include "core/TopoNameDebug.h"
+
+#include "ElementMap.h"
+#include "MappedElement.h"
+#include "TopoShapeOpCode.h"
 
 #include <TopoDS.hxx>
 #include <BRepBuilderAPI_MakeWire.hxx>
@@ -14,6 +19,10 @@
 #include <GeomAPI.hxx>
 #include <Geom2dAPI_InterCurveCurve.hxx>
 #include <Geom2dAPI_ProjectPointOnCurve.hxx>
+#include <BRep_Tool.hxx>
+#include <TopExp.hxx>
+#include <TopTools_IndexedMapOfShape.hxx>
+#include <memory>
 namespace MOON {
 
     static bool areParamsWithinApproximation(double param1, double param2)
@@ -27,6 +36,66 @@ namespace MOON {
         // From testing: 500x (or 0.000050) is needed in order to not falsely distinguish points
         // calculated with seekTrimPoints
         return ((point1 - point2).Length() < 500 * Precision::Confusion());
+    }
+
+    /** Name of the edge built from geometry p_geoId of the sketch, and of its end
+     * points.
+     *
+     * Same convention FreeCAD's SketchObject::convertSubName() uses ("g<id>" for
+     * the edge, "g<id>v<pos>" for a vertex), and deliberately built from the
+     * sketch geometry id instead of the index inside the finished shape: the
+     * geometries of a sketch keep their id while it is edited, the enumeration
+     * order of the resulting shape does not. */
+    static std::string sketchElementName(int p_geoId, int p_pointPos = -1)
+    {
+        std::string name = "g" + std::to_string(p_geoId);
+        if (p_pointPos >= 0) {
+            name += "v" + std::to_string(p_pointPos);
+        }
+        return name;
+    }
+
+    /** Gives one geometry's edge (and its end points) the names downstream
+     * operations will extend. */
+    static void nameSketchEdge(Part::TopoShape& p_shape, int p_geoId, const Part::Geometry* p_geo)
+    {
+        if (!p_shape.hasElementMap()) {
+            p_shape.resetElementMap(std::make_shared<Data::ElementMap>());
+        }
+        p_shape.setElementName(
+            Data::IndexedName::fromConst("Edge", 1),
+            Data::MappedName::fromRawData(sketchElementName(p_geoId).c_str()),
+            0L);
+
+        if (p_geo == nullptr || !p_geo->isDerivedFrom<Part::GeomBoundedCurve>()) {
+            return;
+        }
+        // The end points are named as well, so "the start of geometry 3" can be
+        // traced through the chain too.
+        const auto* curve = static_cast<const Part::GeomBoundedCurve*>(p_geo);
+        const Base::Vector3d start = curve->getStartPoint();
+        const Base::Vector3d end = curve->getEndPoint();
+
+        TopTools_IndexedMapOfShape vertexMap;
+        TopExp::MapShapes(p_shape.getShape(), TopAbs_VERTEX, vertexMap);
+        for (int index = 1; index <= vertexMap.Extent(); ++index) {
+            const gp_Pnt gp = BRep_Tool::Pnt(TopoDS::Vertex(vertexMap(index)));
+            const Base::Vector3d point(gp.X(), gp.Y(), gp.Z());
+            int pointPos = -1;
+            if ((point - start).Length() < Precision::Confusion()) {
+                pointPos = static_cast<int>(Sketcher::PointPos::start);
+            }
+            else if ((point - end).Length() < Precision::Confusion()) {
+                pointPos = static_cast<int>(Sketcher::PointPos::end);
+            }
+            if (pointPos < 0) {
+                continue;
+            }
+            p_shape.setElementName(
+                Data::IndexedName::fromConst("Vertex", index),
+                Data::MappedName::fromRawData(sketchElementName(p_geoId, pointPos).c_str()),
+                0L);
+        }
     }
  
 	SketcherObj::SketcherObj() :EventWidget("SketcherObj")
@@ -670,6 +739,43 @@ namespace MOON {
     }
     Part::TopoShape SketcherObj::toShape() const
     {
+        // Every geometry is turned into a *named* edge first, then the wires are
+        // built from those: the names given here are the root of the naming chain
+        // that later operations (prism, boolean, fillet, ...) extend, and they are
+        // what keeps a reference to a sketch curve alive across a recompute.
+        // Without them a reference can only mean "the n-th edge of the shape",
+        // which changes as soon as anything upstream does.
+        std::vector<Part::TopoShape> namedEdges;
+        namedEdges.reserve(mGeoList.size());
+        for (int geoId = 0; geoId < static_cast<int>(mGeoList.size()); ++geoId) {
+            const Part::Geometry* geo = mGeoList[geoId].get();
+            if (geo == nullptr || geo->getConstruction()) {
+                continue;
+            }
+            Part::TopoShape shape(geo->toShape());
+            if (shape.isNull() || shape.getShape().ShapeType() != TopAbs_EDGE) {
+                continue;
+            }
+            nameSketchEdge(shape, geoId, geo);
+            namedEdges.push_back(std::move(shape));
+        }
+
+        if (!namedEdges.empty()) {
+            Part::TopoShape wired;
+            wired.makeElementWires(namedEdges, Part::OpCodes::Sketch);
+            if (!wired.isNull()) {
+                LogTopoElementNames(wired, "sketch");
+                wired.setTransform(planeTransform);
+                return wired;
+            }
+            CORE_WARN(
+                "[SketcherObj] makeElementWires() produced nothing for {0} edge(s); "
+                "falling back to the plain edge chaining, whose names are lost",
+                namedEdges.size());
+        }
+
+        // Fallback: the historical path, kept so a sketch whose edges cannot be
+        // connected by the named builder still produces the shape it used to.
         Part::TopoShape result;
         std::list<TopoDS_Edge> edge_list;
         std::list<TopoDS_Wire> wires;

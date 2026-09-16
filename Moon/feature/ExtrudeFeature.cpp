@@ -1,6 +1,8 @@
 ﻿#include <numbers>
 #include "core/component/TopoShapeActor.h"
 #include "renderer/SceneView.h"
+#include "TopoShapeOpCode.h"
+#include "core/TopoNameDebug.h"
 #include <Core/ResourceManagement/MaterialManager.h>
 #include <Core/ECS/Components/CMaterialRenderer.h>
 #include <Core/ECS/Components/CModelRenderer.h>
@@ -91,7 +93,8 @@ namespace MOON {
                     tempShape,
                     supportShape,
                     upToFace, -params.dir, Part::TopoShape::PrismMode::None,
-                    true);
+                    true,
+                    Part::OpCodes::Extrude);
                 if (prism.isNull()) {
                     CORE_ERROR("Prim is Null");
                     return false;
@@ -110,6 +113,7 @@ namespace MOON {
                     resShape = prism;
                 }
                 topoShape->setShape(resShape);
+                LogTopoElementNames(resShape, "pad(up to face)");
                 getPreviewShape() =resShape;
                 return true;
             }
@@ -130,11 +134,24 @@ namespace MOON {
                 if (drafts.empty()) {
                     return false;
                 }
-                prism.makeElementCompound(
-                    drafts,
-                    nullptr,
-                    Part::TopoShape::SingleShapeCompoundCreationPolicy::returnShape
-                );
+                if (drafts.size() == 1) {
+                    // makeElementCompound() hands a single shape back untouched, so it
+                    // would carry no extrude tag while several drafts would get one.
+                    // The same edge would then be named differently depending on how
+                    // many curves the profile happens to have, and a reference taken
+                    // before the profile grew a curve would stop resolving (it used to
+                    // fall back to the index and fillet the wrong solid). Tagging the
+                    // single draft here keeps one edge, one name.
+                    prism = drafts.front();
+                    prism.mapSubElement(drafts, Part::OpCodes::Extrude);
+                }
+                else {
+                    prism.makeElementCompound(
+                        drafts,
+                        Part::OpCodes::Extrude,
+                        Part::TopoShape::SingleShapeCompoundCreationPolicy::returnShape
+                    );
+                }
                 getPreviewShape() = prism;
                 Part::TopoShape resShape;
                 if (!baseShape.isNull()) {
@@ -150,6 +167,7 @@ namespace MOON {
                     resShape = prism;
                 }
                 topoShape->setShape(resShape);
+                LogTopoElementNames(resShape, "pad");
                 return true;
             }
             catch (Base::ValueError e) {
