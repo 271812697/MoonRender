@@ -19,7 +19,5 @@ namespace MOON {
 		gp_Vec finalDir;
 		Part::TopoShape upToFace;
 		Part::TopoShape supportShape;
-
-
 	};
 }

@@ -113,6 +113,7 @@ namespace MOON {
                     resShape = prism;
                 }
                 topoShape->setShape(resShape);
+             
                 LogTopoElementNames(resShape, "pad(up to face)");
                 getPreviewShape() =resShape;
                 return true;
@@ -143,6 +144,8 @@ namespace MOON {
                     // fall back to the index and fillet the wrong solid). Tagging the
                     // single draft here keeps one edge, one name.
                     prism = drafts.front();
+                    LogTopoElementNames(face, "profile");
+                    LogTopoElementNames(prism, "prism");
                     prism.mapSubElement(drafts, Part::OpCodes::Extrude);
                 }
                 else {
@@ -167,7 +170,8 @@ namespace MOON {
                     resShape = prism;
                 }
                 topoShape->setShape(resShape);
-                LogTopoElementNames(resShape, "pad");
+               
+                //LogTopoElementNames(resShape, "pad");
                 return true;
             }
             catch (Base::ValueError e) {
