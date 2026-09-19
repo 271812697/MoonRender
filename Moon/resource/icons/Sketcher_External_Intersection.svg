@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   width="64"
+   height="64"
+   viewBox="0 0 64 64"
+   version="1.1"
+   xmlns="http://www.w3.org/2000/svg">
+  <!-- The same box as the external geometry icon, but cut by the sketch plane:
+       what is pulled into the sketch is the section curve, not the outline. -->
+  <g
+     fill="none"
+     stroke="#3f3f3f"
+     stroke-width="2.5"
+     stroke-linecap="round"
+     stroke-linejoin="round">
+    <path d="M 12,24 L 32,14 L 52,24 L 32,34 Z" />
+    <path d="M 12,24 L 12,46 L 32,56 L 32,34" />
+    <path d="M 32,56 L 52,46 L 52,24" />
+  </g>
+  <!-- The cutting plane, seen edge on. -->
+  <path
+     d="M 6,38 L 58,38"
+     fill="none"
+     stroke="#7f7f7f"
+     stroke-width="1.5"
+     stroke-dasharray="4 3" />
+  <!-- The section curve the cut leaves behind. -->
+  <ellipse
+     cx="32"
+     cy="38"
+     rx="13"
+     ry="4.5"
+     fill="none"
+     stroke="#ff00ff"
+     stroke-width="4"
+     stroke-linecap="round" />
+</svg>

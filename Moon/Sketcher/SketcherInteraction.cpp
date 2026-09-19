@@ -1,5 +1,7 @@
 ﻿#include "Sketcher/SketcherObj.h"
 #include "renderer/SceneView.h"
+#include "editor/Toolbar/sketchToolbar.h"
+#include "Core/Global/ServiceLocator.h"
 #include <cmath>
 namespace MOON {
     static double pointToSegmentDist(const Base::Vector3d& p, const Base::Vector3d& s, const Base::Vector3d& e, double& u) {
@@ -21,12 +23,21 @@ namespace MOON {
     };
     void SketcherObj::onMouseMove()
     {
+        // Nothing of the sketch is being picked while external geometry is being
+        // chosen; the scene highlight that the picking pass draws is the feedback.
+        if (m_externalGeometryMode && !isHaveActiveHandler) {
+            if (preSelectGeoId.GeoId != NoGeoId) {
+                preSelectGeoId = { NoGeoId, PointPos::none };
+            }
+            selectState = Stop;
+            return;
+        }
         if (!isHaveActiveHandler && isInEdit) {
             updateConstraintLabelInteraction();
             // While the cursor rests on a dimension label (or drags one) the
             // mouse must not select/move the geometry underneath it.
             if (m_labelDrag >= 0 || m_labelHover != -1) {
-                preSelectGeoId = { -1, PointPos::none };
+                preSelectGeoId = { NoGeoId, PointPos::none };
                 return;
             }
         }
@@ -34,7 +45,7 @@ namespace MOON {
         Base::Vector2d preOnSketchPosMove = onSketchPosMove;
         if (!isHaveActiveHandler && isInEdit) {
             pickGeo();
-            if (selectState == Stop && preSelectGeoId.GeoId != -1) {
+            if (selectState == Stop && preSelectGeoId.GeoId != NoGeoId) {
                 selectState = Hot;
             }
             else if (selectState == OperationGeo) {
@@ -80,7 +91,16 @@ namespace MOON {
                 std::vector<Sketcher::GeoElementId> dragIds;
                 dragIds.reserve(selectIds.size());
                 for (const auto& sel : selectIds) {
+                    // An external reference cannot be dragged: the solver is told it is
+                    // fixed, so moving it would only fight with its own definition.
+                    if (sel.GeoId < 0) {
+                        continue;
+                    }
                     dragIds.emplace_back(sel.GeoId, sel.pointPos);
+                }
+                if (dragIds.empty()) {
+                    selectState = Stop;
+                    return;
                 }
                 if (!m_dragSolverInit) {
                     // Rebuild the solver state from the current geometry list
@@ -134,7 +154,7 @@ namespace MOON {
                     solve();
                 }
             }
-            else if (selectState == Hot && preSelectGeoId.GeoId == -1) {
+            else if (selectState == Hot && preSelectGeoId.GeoId == NoGeoId) {
                 selectState = Stop;
             }
         }
@@ -142,6 +162,14 @@ namespace MOON {
 
     void SketcherObj::onLeftMousePressed()
     {
+        // External geometry mode: the click belongs to the scene, not to the sketch.
+        // The pick pass has already resolved the actor under the cursor (the scene
+        // view keeps the last hover pick), so what is under the mouse is what is
+        // referenced - including the highlight the scene draws for it.
+        if (m_externalGeometryMode && !isHaveActiveHandler) {
+            pickExternalGeometry();
+            return;
+        }
         if (!isHaveActiveHandler && isInEdit) {
             auto [mx, my] = m_sceneView->getInutState().GetMousePosition();
             const int labelHit = pickConstraintLabelAt(static_cast<float>(mx), static_cast<float>(my));
@@ -157,7 +185,7 @@ namespace MOON {
                 m_labelDragPressPx = Base::Vector2d(mx, my);
                 clearSelect();
                 selectState = Stop;
-                preSelectGeoId = { -1, PointPos::none };
+                preSelectGeoId = { NoGeoId, PointPos::none };
 
                 const auto now = std::chrono::steady_clock::now();
                 const bool isDoubleClick = m_lastLabelClick == labelHit
@@ -180,13 +208,13 @@ namespace MOON {
         onSketchPosP1 = getMouseHitSketchPlanePoint();
         onSketchPosClicked = onSketchPosP1;
         m_dragSolverInit = false;
-        if (preSelectGeoId.GeoId == -1) {
+        if (preSelectGeoId.GeoId == NoGeoId) {
             pickGeo();
         }
       
         if (!isHaveActiveHandler) {
             if (selectState == Hot) {
-                if (preSelectGeoId.GeoId != -1) {
+                if (preSelectGeoId.GeoId != NoGeoId) {
                     const bool alreadySelected = [this]() {
                         for (const auto& sel : selectIds) {
                             if (sel.GeoId == preSelectGeoId.GeoId
@@ -300,6 +328,11 @@ namespace MOON {
     }
     void SketcherObj::onKeyPress(const std::string& key)
     {
+        if (key == "ESCAPE" && m_externalGeometryMode) {
+            setExternalGeometryMode(false);
+            GetService(SketchToolbar).uncheckExternalGeometry();
+            return;
+        }
         if (key == "DELETE" && !isHaveActiveHandler) {
             std::vector<int>deletList(selectIds.size());
             for (int i = 0; i < selectIds.size(); i++) {
@@ -404,33 +437,55 @@ namespace MOON {
         );
         Base::Matrix4D trans = viewPortMat * getplaneTransform();
         Base::Vector3d p1 = trans * Base::Vector3d{ pos.x,pos.y,0.0 };
-        double deltaTole = 5.0;
-        double minDist = 10000.0;
-        SelectGeoId ret = { -1,PointPos::none };
+       double deltaTole = 5.0;
+       double minDist = 10000.0;
+       SelectGeoId ret = { NoGeoId,PointPos::none };
+       // A hit has to be tracked separately: the first external curve carries the id
+       // -1, so the id cannot double as "nothing was hit".
+       bool hit = false;
 
-        // travel all segments
-        for (int i = 0; i < mGeoList.size(); i++) {
+        // The candidates are the sketch's own curves plus the projected external ones:
+        // an external curve is a reference the user may constrain to, so it has to be
+        // selectable - but only outside a drawing tool, where a reference must not be
+        // mistaken for the geometry the tool is working on.
+        std::vector<std::pair<int, Part::Geometry*>> candidates;
+        candidates.reserve(mGeoList.size() + getExternalCurveCount());
+        for (int i = 0; i < static_cast<int>(mGeoList.size()); ++i) {
             if (mHiddenGeoIds.count(i)) {
                 continue;
             }
-            Part::Geometry* geo = mGeoList[i].get();
-            auto& segment = mGeoSegment[geo];
+            candidates.emplace_back(i, mGeoList[i].get());
+        }
+        if (!isHaveActiveHandler) {
+            for (int i = 0; i < getExternalCurveCount(); ++i) {
+                Part::Geometry* geo = const_cast<Part::Geometry*>(
+                    getExternalCurve(getExternalGeoId(i)));
+                // Only a curve that has been sampled can be hit; a missing cache entry
+                // must not be turned into an empty one here.
+                if (geo != nullptr && findSegment(geo) != nullptr) {
+                    candidates.emplace_back(getExternalGeoId(i), geo);
+                }
+            }
+        }
+
+        // travel all segments
+        for (const auto& [geoId, geo] : candidates) {
+            auto& segment = segmentOf(geo);
             for (int j = 0; j < segment.sepoints.size(); j++) {
                 double dist = (p1 - trans * segment.sepoints[j].coord).Length();
                 if (dist < deltaTole && dist < minDist) {
                     minDist = dist;
-                    ret.GeoId = i;
+                    ret.GeoId = geoId;
                     ret.pointPos = segment.sepoints[j].pointPos;
+                    hit = true;
                 }
             }
         }
-        if (ret.GeoId == -1) {
-            for (int i = 0; i < mGeoList.size(); i++) {
-                if (mHiddenGeoIds.count(i)) {
-                    continue;
-                }
-                Part::Geometry* geo = mGeoList[i].get();
-                auto& segment = mGeoSegment[geo];
+        // Endpoints and centers win over the curves themselves; the curves are only
+        // tested when no point was close enough.
+        if (!hit) {
+            for (const auto& [geoId, geo] : candidates) {
+                auto& segment = segmentOf(geo);
                 if (geo->isDerivedFrom<Part::GeomCurve>()) {
                     for (int j = 0; j < segment.point.size() - 1; j++) {
                         double u = 0.0;
@@ -442,7 +497,7 @@ namespace MOON {
 
                         if (dist < deltaTole && dist < minDist) {
                             minDist = dist;
-                            ret.GeoId = i;
+                            ret.GeoId = geoId;
                         }
                     }
                 }
@@ -452,12 +507,12 @@ namespace MOON {
                     double dist = (p1 - trans * pp).Length();
                     if (dist < deltaTole && dist < minDist) {
                         minDist = dist;
-                        ret.GeoId = i;
+                        ret.GeoId = geoId;
                     }
                 }
             }
         }
-        return ret;
+       return ret;
     }
     bool SketcherObj::findNextCoincidentPoint(
         const Base::Vector2d& pos,
@@ -557,6 +612,34 @@ namespace MOON {
         double deltaTole = 10.0;
         double minDist = 10000.0;
         bool ret = false;
+        // Projected external curves are snap targets as well: they are the references
+        // the sketch is drawn against, and a new point usually wants to land on one of
+        // them. They are tested after the sketch's own geometry at the same stage, so
+        // an internal target within range wins.
+        const auto snapToExternalPoints = [&]() {
+            for (int i = 0; i < getExternalCurveCount(); ++i) {
+                const int geoId = getExternalGeoId(i);
+                if (avoid.count(geoId)) {
+                    continue;
+                }
+                Part::Geometry* geo = const_cast<Part::Geometry*>(getExternalCurve(geoId));
+                if (geo == nullptr) {
+                    continue;
+                }
+                const CurveSegment* segment = findSegment(geo);
+                if (segment == nullptr) {
+                    continue;  // not sampled: nothing to snap to yet
+                }
+                for (const SegPoint& segPoint : segment->sepoints) {
+                    const double dist = (screenpPos - trans * segPoint.coord).Length();
+                    if (dist < deltaTole && dist < minDist) {
+                        minDist = dist;
+                        ret = true;
+                        pos = { segPoint.coord.x, segPoint.coord.y };
+                    }
+                }
+            }
+        };
         // travel all segments
         for (int i = 0; i < mGeoList.size(); i++) {
             if (!avoid.count(i)) {
@@ -579,6 +662,7 @@ namespace MOON {
             }
 
         }
+        snapToExternalPoints();
         if (!ret) {
             //snap to orgin or XAxis or YAxis
             Base::Vector3d screenOrigin = trans * Base::Vector3d(0, 0, 0);
@@ -624,6 +708,38 @@ namespace MOON {
                                 pos = { pp.x, pp.y };
                             }
                         }
+                    }
+                }
+            }
+            // Same for the curves themselves, again after the sketch's own.
+            for (int i = 0; i < getExternalCurveCount(); ++i) {
+                const int geoId = getExternalGeoId(i);
+                if (avoid.count(geoId)) {
+                    continue;
+                }
+                Part::Geometry* geo = const_cast<Part::Geometry*>(getExternalCurve(geoId));
+                if (geo == nullptr || !geo->isDerivedFrom<Part::GeomCurve>()) {
+                    continue;
+                }
+                const CurveSegment* segment = findSegment(geo);
+                if (segment == nullptr) {
+                    continue;
+                }
+                for (int j = 0; j + 1 < static_cast<int>(segment->point.size()); j++) {
+                    double u = 0.0;
+                    const double dist = pointToSegmentDist(
+                        screenpPos,
+                        trans * segment->point[j],
+                        trans * segment->point[j + 1],
+                        u);
+                    if (dist < deltaTole && dist < minDist) {
+                        minDist = dist;
+                        ret = true;
+                        u = segment->params[j]
+                            + u * (segment->params[j + 1] - segment->params[j]);
+                        const Base::Vector3d pp
+                            = static_cast<Part::GeomCurve*>(geo)->value(u);
+                        pos = { pp.x, pp.y };
                     }
                 }
             }
@@ -899,7 +1015,10 @@ namespace MOON {
     }
     void SketcherObj::moveGeo(SelectGeoId Id, float dx, float dy)
     {
-        if (Id.GeoId < mGeoList.size()) {
+        // Only the sketch's own geometry can be moved: an external reference is fixed
+        // by definition (the solver is told so), and its curves are not even part of
+        // mGeoList.
+        if (Id.GeoId >= 0 && Id.GeoId < static_cast<int>(mGeoList.size())) {
             int geoId = Id.GeoId;
             Part::Geometry* geo = mGeoList[geoId].get();
             bool isStart = Id.pointPos == PointPos::start;
@@ -1044,9 +1163,12 @@ namespace MOON {
     }
     void SketcherObj::setConstruction(int geoId, bool construction)
     {
-        if (geoId >= 0 && geoId < static_cast<int>(mGeoList.size())) {
-            mGeoList[geoId]->setConstruction(construction);
+        // Construction is a property of the sketch's own geometry; an external
+        // reference is never part of mGeoList.
+        if (geoId < 0 || geoId >= static_cast<int>(mGeoList.size())) {
+            return;
         }
+        mGeoList[geoId]->setConstruction(construction);
         if (construction) {
             mConstructionGeoIds.insert(geoId);
         }

@@ -8,6 +8,7 @@
 #include "Qtimgui/imgui/imgui.h"
 #include "Qtimgui/implot/implotCustom.h"
 #include "Sketcher/SketcheTool2D.h"
+#include "editor/Toolbar/sketchToolbar.h"
 #include <QInputDialog>
 namespace MOON {
     // Constraint types that get a numeric viewport label.
@@ -120,6 +121,11 @@ namespace MOON {
     void SketcherObj::setPlane(const SketcherPlane2D& plane)
     {
         mPlane = plane;
+        // External geometry is projected into the sketch plane, so it has to be
+        // projected again when the plane moves.
+        for (ExternalGeometry& external : mExternalGeometry) {
+            external.dirty = true;
+        }
         fitCamera();
         //GetService(SketchToolbar).disableAllHandlers();
     }
@@ -141,6 +147,16 @@ namespace MOON {
         isInEdit = true;
         setActive(true);
         fitCamera();
+    }
+    void SketcherObj::onSetActive(bool flag)
+    {
+        if (!flag) {
+            // Leaving the sketch leaves its tools: the external geometry button has to
+            // follow, otherwise it would still be pressed the next time the sketch is
+            // opened (and the clicks of the next tool would be taken by it).
+            setExternalGeometryMode(false);
+            GetService(SketchToolbar).uncheckExternalGeometry();
+        }
     }
     SketcherObj::CurveSegment SketcherObj::getCurveSegment(Part::Geometry* geo)
     {
@@ -168,6 +184,14 @@ namespace MOON {
                 Part::GeomCircle* curve = static_cast<Part::GeomCircle*>(geo);
                 seg.sepoints.push_back({ curve->getCenter() ,PointPos::mid });
             }
+            else if (geo->isDerivedFrom<Part::GeomConic>()) {
+                // A full conic (ellipse, hyperbola, parabola) has no ends, so its centre
+                // is the only anchor it can offer. Without this an ellipse - which is
+                // what a circle tilted against the sketch plane projects to - had no
+                // marker at all: nothing to draw, to pick or to snap to.
+                const auto* conic = static_cast<const Part::GeomConic*>(geo);
+                seg.sepoints.push_back({ conic->getCenter() ,PointPos::mid });
+            }
             else if (geo->is<Part::GeomBSplineCurve>()) {
                 Part::GeomBSplineCurve* curve = static_cast<Part::GeomBSplineCurve*>(geo);
                 std::vector<Base::Vector3d>poles = curve->getPoles();
@@ -181,6 +205,25 @@ namespace MOON {
             seg.sepoints.push_back({ pos, PointPos::start });
         }
         return seg;
+    }
+    SketcherObj::CurveSegment& SketcherObj::segmentOf(Part::Geometry* geo)
+    {
+        // An entry existing means "this geometry is sampled": a point samples to no
+        // polyline at all, so the content cannot be used to tell.
+        const auto found = mGeoSegment.find(geo);
+        if (found != mGeoSegment.end()) {
+            return found->second;
+        }
+        return mGeoSegment.emplace(geo, getCurveSegment(geo)).first->second;
+    }
+    const SketcherObj::CurveSegment* SketcherObj::findSegment(
+        const Part::Geometry* geo) const
+    {
+        const auto found = mGeoSegment.find(const_cast<Part::Geometry*>(geo));
+        if (found == mGeoSegment.end()) {
+            return nullptr;
+        }
+        return &found->second;
     }
     SketcherPlane2D SketcherObj::getPlane()
     {
@@ -201,6 +244,13 @@ namespace MOON {
             // hover/drag so it cannot fight with the active handler.
             m_labelHover = -1;
             m_labelDrag = -1;
+            // The preselect is not refreshed while a handler runs, and the handlers
+            // only ever work on the sketch's own geometry: an external id left over
+            // from before the tool was started would be read as a curve of this
+            // sketch by them.
+            if (preSelectGeoId.GeoId < 0) {
+                preSelectGeoId = { NoGeoId, PointPos::none };
+            }
         }
         draw();
     }
@@ -482,6 +532,71 @@ namespace MOON {
             }
             renderer->popColor();
         }
+        // Geometry projected in from another feature: drawn in its own colour and
+        // always solid, because it is a reference - the sketch may constrain to it but
+        // never edits it, and it must not be mistaken for something drawn here.
+        // External geometry is selectable like the sketch's own curves (it is what a
+        // constraint is applied to), so it is highlighted like them - only its idle
+        // colour sets it apart as a reference.
+        for (int externalIndex = 0; externalIndex < getExternalCurveCount(); ++externalIndex) {
+            const int geoId = getExternalGeoId(externalIndex);
+            const Part::Geometry* externalGeo = getExternalCurve(geoId);
+            if (externalGeo == nullptr) {
+                continue;
+            }
+            const bool isSelected = [this, geoId]() {
+                for (const SelectGeoId& sel : selectIds) {
+                    if (sel.GeoId == geoId) {
+                        return true;
+                    }
+                }
+                return false;
+                }();
+            const bool isPreSelected = preSelectGeoId.GeoId == geoId
+                && selectState != OperationGeo;
+
+            auto& segment = segmentOf(const_cast<Part::Geometry*>(externalGeo));
+
+            // The curve first, its markers on top: the same order the sketch's own
+            // geometry is drawn in, because a marker under its own curve is invisible.
+            renderer->pushColor(isSelected ? selectColor
+                                           : (isPreSelected ? preselectColor
+                                                            : m_drawOption.externalColor));
+            if (externalGeo->isDerivedFrom<Part::GeomCurve>()) {
+                // Sampled on demand: the external curves are rebuilt whenever their
+                // source changes, and being few they can share the segment cache the
+                // sketch geometry already uses.
+                for (int k = 0; k + 1 < static_cast<int>(segment.point.size()); k++) {
+                    renderer->drawLine(
+                        mPlane.valueEigen(segment.point[k].x, segment.point[k].y),
+                        mPlane.valueEigen(segment.point[k + 1].x, segment.point[k + 1].y)
+                    );
+                }
+            }
+            renderer->popColor();
+
+            // The markers are what the user snaps to and constrains against, so they
+            // are drawn as points - endpoints and centres, like the sketch's own.
+            for (int k = 0; k < static_cast<int>(segment.sepoints.size()); ++k) {
+                const PointPos pos = segment.sepoints[k].pointPos;
+                bool pointSelected = false;
+                for (const SelectGeoId& sel : selectIds) {
+                    if (sel.GeoId == geoId
+                        && (sel.pointPos == PointPos::none || sel.pointPos == pos)) {
+                        pointSelected = true;
+                        break;
+                    }
+                }
+                const bool pointPreSelected
+                    = isPreSelected && preSelectGeoId.pointPos == pos;
+                renderer->drawPoint(
+                    mPlane.valueEigen(segment.sepoints[k].coord.x, segment.sepoints[k].coord.y),
+                    pointSize + 1,
+                    pointSelected ? selectColor
+                                  : (pointPreSelected ? preselectColor
+                                                      : m_drawOption.externalColor));
+            }
+        }
         // Point markers are drawn after the curves so they stay on top.
         for (int geoIndex = 0; geoIndex < static_cast<int>(mGeoList.size()); ++geoIndex) {
             if (mHiddenGeoIds.count(geoIndex)) {
@@ -667,13 +782,17 @@ namespace MOON {
     }
     bool SketcherObj::getGeometryPointSketch(int geoId, PointPos pos, Base::Vector2d& out) const
     {
-        if (geoId == Sketcher::GeoEnum::RtPnt
+        // External references are drawn and labelled like the sketch's own curves, so
+        // the lookup has to cover both halves of the solver list.
+        const Part::Geometry* geo = resolveGeometry(geoId);
+        // The origin is the fallback for the root-point id, but only when that id is
+        // not one of the external curves (the ids of the block run up to -1).
+        if (geo == nullptr && geoId == Sketcher::GeoEnum::RtPnt
             && (pos == PointPos::start || pos == PointPos::mid)) {
             out.x = 0.0;
             out.y = 0.0;
             return true;
         }
-        const Part::Geometry* geo = getGeometry(geoId);
         if (!geo) {
             return false;
         }
@@ -698,15 +817,17 @@ namespace MOON {
     }
     bool SketcherObj::getGeometryCenterSketch(int geoId, Base::Vector2d& out) const
     {
-        if (geoId == Sketcher::GeoEnum::RtPnt) {
+        if (geoId == NoGeoId) {
+            return false;
+        }
+        const Part::Geometry* geo = resolveGeometry(geoId);
+        // The origin stands in for the root-point id, but only when that id does not
+        // name one of the external curves.
+        if (geo == nullptr && geoId == Sketcher::GeoEnum::RtPnt) {
             out.x = 0.0;
             out.y = 0.0;
             return true;
         }
-        if (geoId < 0) {
-            return false;  // axes / external references are not drawn here
-        }
-        const Part::Geometry* geo = getGeometry(geoId);
         if (!geo) {
             return false;
         }
@@ -1035,7 +1156,7 @@ namespace MOON {
         case Sketcher::ConstraintType::Distance: {
             if (c->Second == Sketcher::GeoEnum::GeoUndef) {
                 // length of a single edge: anchor on the middle of its curve
-                const Part::Geometry* geo = getGeometry(c->First);
+                const Part::Geometry* geo = resolveGeometry(c->First);
                 if (geo) {
                     const auto it = mGeoSegment.find(const_cast<Part::Geometry*>(geo));
                     if (it != mGeoSegment.end() && !it->second.point.empty()) {
@@ -1191,7 +1312,7 @@ namespace MOON {
             // dragged label (or the default up-right corner), distance is the
             // screen radius plus a small gap.
             Base::Vector2d centerSk;
-            const Part::Geometry* geo = getGeometry(c->First);
+            const Part::Geometry* geo = resolveGeometry(c->First);
             double radius = -1.0;
             Base::Vector2d rimDirSk;
             if (getGeometryCenterSketch(c->First, centerSk) && geo
@@ -1398,7 +1519,7 @@ namespace MOON {
                 if (getGeometryCenterSketch(c->First, centerSk)) {
                     double radius = 0.0;
                     Base::Vector2d dirSk;
-                    const Part::Geometry* geo = getGeometry(c->First);
+                    const Part::Geometry* geo = resolveGeometry(c->First);
                     if (geo && (geo->is<Part::GeomCircle>() || geo->is<Part::GeomArcOfCircle>())) {
                         radius = geo->is<Part::GeomCircle>()
                             ? static_cast<const Part::GeomCircle*>(geo)->getRadius()
@@ -1534,7 +1655,7 @@ namespace MOON {
         };
         // Tangent direction of a geometry at a sketch point.
         auto tangentDirAt = [this, &normalize2d](int geoId, const Base::Vector2d& pt, Base::Vector2d& dir) {
-            const Part::Geometry* geo = getGeometry(geoId);
+            const Part::Geometry* geo = resolveGeometry(geoId);
             if (!geo) {
                 return false;
             }
@@ -1564,8 +1685,8 @@ namespace MOON {
                 && tangentDirAt(constraint->First, anchorSketch, dirSketch)) {
                 Base::Vector2d center;
                 double radius = 0.0;
-                if (getCircleArcInfo(getGeometry(constraint->First), center, radius)
-                    || getCircleArcInfo(getGeometry(constraint->Second), center, radius)) {
+                if (getCircleArcInfo(resolveGeometry(constraint->First), center, radius)
+                    || getCircleArcInfo(resolveGeometry(constraint->Second), center, radius)) {
                     normalSketch = Base::Vector2d(
                         anchorSketch.x - center.x,
                         anchorSketch.y - center.y
@@ -1583,8 +1704,8 @@ namespace MOON {
                 && tangentDirAt(constraint->Second, anchorSketch, dirSketch)) {
                 Base::Vector2d center;
                 double radius = 0.0;
-                if (getCircleArcInfo(getGeometry(constraint->First), center, radius)
-                    || getCircleArcInfo(getGeometry(constraint->Second), center, radius)) {
+                if (getCircleArcInfo(resolveGeometry(constraint->First), center, radius)
+                    || getCircleArcInfo(resolveGeometry(constraint->Second), center, radius)) {
                     normalSketch = Base::Vector2d(
                         anchorSketch.x - center.x,
                         anchorSketch.y - center.y
@@ -1598,8 +1719,8 @@ namespace MOON {
             }
         }
 
-        const Part::Geometry* g1 = getGeometry(constraint->First);
-        const Part::Geometry* g2 = getGeometry(constraint->Second);
+        const Part::Geometry* g1 = resolveGeometry(constraint->First);
+        const Part::Geometry* g2 = resolveGeometry(constraint->Second);
         if (!g1 || !g2) {
             return false;
         }

@@ -3,6 +3,9 @@
 #include "Core/Global/ServiceLocator.h"
 #include "renderer/SceneView.h"
 #include "renderer/GizmoRenderPass.h"
+#include "Sketcher/SketcherObjManager.h"
+#include "Sketcher/SketcherObj.h"
+#include "core/log.h"
 #include <QCoreApplication>
 namespace MOON {
 
@@ -58,6 +61,70 @@ namespace MOON {
 		"DrawSketchHandlerOffset"
 	};
 	std::unordered_map<std::string, CreateCurveCommand*> CreateCurveCommand::commandMap;
+
+	/** Turns the add-external-geometry mode of the active sketch on and off.
+	 *
+	 * This is not a draw handler: the mode lives on the sketch, which resolves the
+	 * clicked sub-shape of another feature into a curve projected into its plane
+	 * (see SketcherObj::addExternalGeometry). It is still exclusive with the
+	 * handlers, because both of them want the same clicks.
+	 *
+	 * The command comes in two flavours that share the one mode: the reference is
+	 * either the projection of the picked shape or the section of it with the sketch
+	 * plane. They therefore switch each other off. */
+	class AddExternalGeometryCommand : public Command
+	{
+	public:
+		AddExternalGeometryCommand(QObject* parent, bool intersection)
+			:Command(parent), m_intersection(intersection) {
+			auto action = new QAction(this);
+			action->setCheckable(true);
+			setAction(action);
+			s_commands.push_back(this);
+		}
+	private:
+		bool m_intersection = false;
+		static std::vector<AddExternalGeometryCommand*> s_commands;
+	public:
+		static const std::vector<AddExternalGeometryCommand*>& commands() {
+			return s_commands;
+		}
+	protected:
+		virtual void execute()override {
+			const bool value = action()->isChecked();
+			SketcherObj* sketch
+				= SketcherObjManager::instance().GetCurrentActiveSketcherObj();
+			if (sketch == nullptr) {
+				CORE_WARN("[ExternalGeo] no sketch is being edited");
+				action()->setChecked(false);
+				return;
+			}
+			if (value) {
+				// The two flavours are one mode, so the other button has to come up.
+				for (AddExternalGeometryCommand* other : s_commands) {
+					if (other != this && other->action()->isChecked()) {
+						other->action()->setChecked(false);
+					}
+				}
+				// One tool at a time: leave whatever draw handler was running.
+				auto& view = GetService(Editor::Panels::SceneView);
+				auto& gizmoPass
+					= view.GetRenderer().GetPass<Editor::Rendering::GizmoRenderPass>("ImRenderer");
+				for (int i = 0; i < static_cast<int>(CreateCurveCommand::blackList.size()); i++) {
+					gizmoPass.enableGizmoWidget(CreateCurveCommand::blackList[i], false);
+					if (CreateCurveCommand::commandMap.find(CreateCurveCommand::blackList[i])
+						!= CreateCurveCommand::commandMap.end()) {
+						CreateCurveCommand::commandMap[CreateCurveCommand::blackList[i]]
+							->action()->setChecked(false);
+					}
+				}
+			}
+			sketch->setExternalGeometryIntersection(m_intersection);
+			sketch->setExternalGeometryMode(value);
+		}
+	};
+	std::vector<AddExternalGeometryCommand*> AddExternalGeometryCommand::s_commands;
+
 	class SketchToolbar::SketchToolbarInternal {
 	public:
 
@@ -82,6 +149,8 @@ namespace MOON {
 			symmetry=new CreateCurveCommand(self, "DrawSketchHandlerSymmetry");
 			fillet = new CreateCurveCommand(self, "DrawSketchHandlerFillet");
 			offset = new CreateCurveCommand(self, "DrawSketchHandlerOffset");
+			external = new AddExternalGeometryCommand(self, /*intersection*/ false);
+			externalIntersection = new AddExternalGeometryCommand(self, /*intersection*/ true);
 			point->setIcon(":/widgets/icons/Sketcher_CreatePoint.svg");
 		    line->setIcon(":/widgets/icons/Sketcher_CreateLine.svg");
 			lineSet->setIcon(":/widgets/icons/Sketcher_CreatePolyline.svg");
@@ -98,6 +167,8 @@ namespace MOON {
 			symmetry->setIcon(":/widgets/icons/Sketcher_Symmetry.svg");
 			fillet->setIcon(":/widgets/icons/Sketcher_CreateFillet.svg");
 			offset->setIcon(":/widgets/icons/Sketcher_Offset.svg");
+			external->setIcon(":/widgets/icons/Sketcher_External.svg");
+			externalIntersection->setIcon(":/widgets/icons/Sketcher_External_Intersection.svg");
 			self->addAction(point->action());
 			self->addAction(line->action());
 			self->addAction(lineSet->action());
@@ -114,6 +185,31 @@ namespace MOON {
 			self->addAction(symmetry->action());
 			self->addAction(fillet->action());
 			self->addAction(offset->action());
+			self->addAction(external->action());
+			self->addAction(externalIntersection->action());
+			// A draw handler takes the clicks back, so it ends the external geometry
+			// mode (the two would otherwise fight over the same button presses).
+			const auto leaveExternalMode = [this]() {
+				// Both flavours of the mode go down together with the handler that
+				// takes the clicks over.
+				for (AddExternalGeometryCommand* command
+					: AddExternalGeometryCommand::commands()) {
+					if (command->action()->isChecked()) {
+						command->action()->setChecked(false);
+						if (SketcherObj* sketch
+							= SketcherObjManager::instance().GetCurrentActiveSketcherObj()) {
+							sketch->setExternalGeometryMode(false);
+						}
+					}
+				}
+			};
+			for (CreateCurveCommand* command : {
+				point, line, lineSet, arc, arcSlot, ellipse, bspline, circle,
+				rectangle, polygon, slot, trimming, rotate, symmetry, fillet, offset
+				}) {
+				self->connect(
+					command->action(), &QAction::triggered, self, leaveExternalMode);
+			}
 			retranslateUi();
 		}
 		void retranslateUi() {
@@ -133,6 +229,8 @@ namespace MOON {
 			symmetry->action()->setText(QCoreApplication::translate("SketchToolbar", "Symmetry", nullptr));
 			fillet->action()->setText(QCoreApplication::translate("SketchToolbar", "Fillet", nullptr));
 			offset->action()->setText(QCoreApplication::translate("SketchToolbar", "Offset", nullptr));
+			external->action()->setText(QCoreApplication::translate("SketchToolbar", "External Geometry", nullptr));
+			externalIntersection->action()->setText(QCoreApplication::translate("SketchToolbar", "External Intersection", nullptr));
 		}
 	private:
 		friend class SketchToolbar;
@@ -153,6 +251,8 @@ namespace MOON {
 		CreateCurveCommand* symmetry;
 		CreateCurveCommand* fillet;
 		CreateCurveCommand* offset;
+		AddExternalGeometryCommand* external = nullptr;
+		AddExternalGeometryCommand* externalIntersection = nullptr;
 		
 	};
 
@@ -187,7 +287,22 @@ namespace MOON {
 				CreateCurveCommand::commandMap[CreateCurveCommand::blackList[i]]->action()->setChecked(false);
 			}
 		}
-		
+		uncheckExternalGeometry();
+	}
+	void SketchToolbar::uncheckExternalGeometry()
+	{
+		for (AddExternalGeometryCommand* command : AddExternalGeometryCommand::commands()) {
+			if (!command->action()->isChecked()) {
+				continue;
+			}
+			// Keep the sketch in sync with the buttons: this is also the way the mode is
+			// left when the sketch stops being edited.
+			command->action()->setChecked(false);
+			if (SketcherObj* sketch
+				= SketcherObjManager::instance().GetCurrentActiveSketcherObj()) {
+				sketch->setExternalGeometryMode(false);
+			}
+		}
 	}
 	void SketchToolbar::setUncheckedAction(const std::string& name)
 	{

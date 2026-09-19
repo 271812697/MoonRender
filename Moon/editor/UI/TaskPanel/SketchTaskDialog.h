@@ -23,6 +23,9 @@ namespace MOON {
 	private:
 		QListWidget* mConstraintList = nullptr;
 		QListWidget* mCurveList = nullptr;
+		/** Geometry pulled in from other features: one row per reference, with the
+		 * sub-shape it comes from and a button to drop it again. */
+		QListWidget* mExternalList = nullptr;
 		QTimer* mRefreshTimer = nullptr;
 		QString mListCache;
 		QWidget* mCurveHoverRow = nullptr;

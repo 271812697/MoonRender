@@ -46,7 +46,7 @@ namespace MOON {
 			BRepPrimAPI_MakeCone mkCone(radiusBottom, radiusTop, height);
 			ResultShape = mkCone.Shape();
 		}
-		auto topoActor = new Feature("ConeFeature", "Cone");
+		auto topoActor = new Feature3D("ConeFeature", "Cone");
 		const auto& topoComp = topoActor->GetComponent<Core::ECS::Components::CTopoShape>();
 		Part::TopoShape& topo = topoComp->GetTopoShape();
 

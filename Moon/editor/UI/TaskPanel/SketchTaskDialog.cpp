@@ -187,6 +187,7 @@ namespace MOON {
         addParam(new ColorPickerProperty("Select Color", sketchGroup));
         addParam(new ColorPickerProperty("Curve Color", sketchGroup));
         addParam(new ColorPickerProperty("Construction Color", sketchGroup));
+        addParam(new ColorPickerProperty("External Color", sketchGroup));
         addParam(new ColorPickerProperty("Constraint Color", sketchGroup));
         auto* curveWidth = new SliderFloatProperty("Curve Line Width", sketchGroup, 0.5f, 10.0f);
         curveWidth->setStep(0.1f);
@@ -196,12 +197,15 @@ namespace MOON {
         addParam(pointSize);
         addGroupParam("Constraints");
         addGroupParam("Curves");
+        addGroupParam("External Geometry");
         buildUi();
 
         mConstraintList = new QListWidget(this);
         mCurveList = new QListWidget(this);
+        mExternalList = new QListWidget(this);
         mConstraintList->setMinimumHeight(110);
         mCurveList->setMinimumHeight(110);
+        mExternalList->setMinimumHeight(80);
         auto attachList = [this](const QString& groupName, QListWidget* list) {
             const auto it = groupToIndex.find(groupName);
             if (it != groupToIndex.end()) {
@@ -212,6 +216,7 @@ namespace MOON {
         };
         attachList("Constraints", mConstraintList);
         attachList("Curves", mCurveList);
+        attachList("External Geometry", mExternalList);
 
         mRefreshTimer = new QTimer(this);
         mRefreshTimer->setInterval(300);
@@ -224,6 +229,10 @@ namespace MOON {
             "QListWidget::item { height: 20px; padding-left: 2px; }"
             "QListWidget::item:hover { background-color: #cfe2f5; color: #202020; }"
             "QListWidget::item:selected { background-color: #7ab2e8; color: white; }"
+        );
+        mExternalList->setStyleSheet(
+            "QListWidget { background: transparent; border: none; outline: 0; }"
+            "QListWidget::item { height: 20px; padding-left: 2px; }"
         );
         connect(mCurveList, &QListWidget::itemClicked, this, [this](QListWidgetItem* item) {
             if (mInternal && mInternal->feature) {
@@ -270,6 +279,9 @@ namespace MOON {
             if (propertyName == "Sketch:Construction Color") {
                 return QVariant::fromValue(abgrToQColor(opt.constructionColor));
             }
+            if (propertyName == "Sketch:External Color") {
+                return QVariant::fromValue(abgrToQColor(opt.externalColor));
+            }
             if (propertyName == "Sketch:Constraint Color") {
                 return QVariant::fromValue(abgrToQColor(opt.constraintColor));
             }
@@ -308,6 +320,9 @@ namespace MOON {
             else if (propertyName == "Sketch:Construction Color") {
                 opt.constructionColor = qColorToAbgr(value.value<QColor>());
             }
+            else if (propertyName == "Sketch:External Color") {
+                opt.externalColor = qColorToAbgr(value.value<QColor>());
+            }
             else if (propertyName == "Sketch:Constraint Color") {
                 opt.constraintColor = qColorToAbgr(value.value<QColor>());
             }
@@ -341,7 +356,8 @@ namespace MOON {
     }
     void SketchTaskDialog::refreshLists()
     {
-        if (!mInternal || !mInternal->feature || !mConstraintList || !mCurveList) {
+        if (!mInternal || !mInternal->feature || !mConstraintList || !mCurveList
+            || !mExternalList) {
             return;
         }
         SketcherObj* obj = mInternal->feature->getSketcherObj();
@@ -412,8 +428,35 @@ namespace MOON {
             curveLines << QString("%1  %2").arg(i).arg(typeName);
         }
 
+        // External geometry: what is referenced, where it comes from and whether the
+        // reference still resolves. It is listed by entry (not by projected curve),
+        // because that is the thing the user can drop again.
+        QStringList externalLines;
+        std::vector<bool> externalMissing;
+        for (int i = 0; i < obj->getExternalGeometryCount(); ++i) {
+            const SketcherObj::ExternalGeometry* external = obj->getExternalGeometry(i);
+            if (external == nullptr) {
+                continue;
+            }
+            externalMissing.push_back(external->missing);
+            QString line = external->source
+                ? QString("%1.%2").arg(external->source->GetName().c_str())
+                    .arg(external->reference.c_str())
+                : QString("?.%1").arg(external->reference.c_str());
+            // A section and a projection of the same sub-shape are different
+            // references, so the list has to say which one a row is.
+            if (external->intersection) {
+                line += "  [section]";
+            }
+            if (external->geos.size() != 1) {
+                line += QString("  (%1 curves)").arg(external->geos.size());
+            }
+            externalLines << line;
+        }
+
         const QString cache = constraintLines.join(QStringLiteral("\n")) + QStringLiteral("|")
-            + curveLines.join(QStringLiteral("\n"));
+            + curveLines.join(QStringLiteral("\n")) + QStringLiteral("|")
+            + externalLines.join(QStringLiteral("\n"));
         if (cache == mListCache && mCurveList->count() == curveLines.size()) {
             syncCurveListSelection();
             return;
@@ -503,6 +546,44 @@ namespace MOON {
                 i,
                 [obj, i](bool on) { obj->setGeometryVisible(i, on); }
             );
+        }
+        // External geometry: the row shows the sub-shape the reference points at and
+        // a button that drops it again (there is no per-entry visibility to toggle -
+        // the entry either exists or it does not).
+        mExternalList->clear();
+        for (int i = 0; i < externalLines.size(); ++i) {
+            auto* item = new QListWidgetItem();
+            item->setData(Qt::UserRole, i);
+            auto* row = new QWidget(mExternalList);
+            auto* rowLayout = new QHBoxLayout(row);
+            rowLayout->setContentsMargins(2, 2, 2, 2);
+            rowLayout->setSpacing(6);
+            auto* remove = new QToolButton(row);
+            remove->setAutoRaise(true);
+            remove->setText(QString::fromUtf8("\u00d7"));
+            remove->setToolTip("Remove the reference");
+            remove->setStyleSheet(
+                "QToolButton { border: none; background: transparent; padding: 0px 4px; "
+                "font-size: 16px; }"
+            );
+            auto* label = new QLabel(externalLines[i], row);
+            label->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+            if (externalMissing[i]) {
+                label->setStyleSheet("color: #ff6b6b;");
+                label->setToolTip(
+                    "The source sub-shape cannot be resolved any more; the reference "
+                    "draws nothing");
+            }
+            rowLayout->addWidget(remove);
+            rowLayout->addWidget(label, 1);
+            connect(remove, &QToolButton::clicked, this, [this, obj, i]() {
+                obj->removeExternalGeometry(i);
+                mListCache.clear();
+                refreshLists();
+            });
+            item->setSizeHint(row->sizeHint());
+            mExternalList->addItem(item);
+            mExternalList->setItemWidget(item, row);
         }
         syncCurveListSelection();
     }

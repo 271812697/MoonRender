@@ -37,7 +37,7 @@ namespace MOON {
 		BRepPrimAPI_MakeCylinder mkCylinder(radiusTop, height);
 		TopoDS_Shape ResultShape = mkCylinder.Shape();
 	
-		auto topoActor = new Feature("CylinderFearture", "Cylinder");
+		auto topoActor = new Feature3D("CylinderFearture", "Cylinder");
 		const auto& topoComp = topoActor->GetComponent<Core::ECS::Components::CTopoShape>();
 		Part::TopoShape& topo = topoComp->GetTopoShape();
 
