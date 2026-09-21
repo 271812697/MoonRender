@@ -172,9 +172,31 @@ namespace MOON {
         }
         if (!isHaveActiveHandler && isInEdit) {
             auto [mx, my] = m_sceneView->getInutState().GetMousePosition();
-            const int labelHit = pickConstraintLabelAt(static_cast<float>(mx), static_cast<float>(my));
+            // The annotation itself is a handle as well: a length dimension's line -
+            // arrows included - moves the dimension, an angle's arc pulls the annotation
+            // in and out. The caption stays its own handle and only slides along them.
+            int annotationHit = -1;
+            LabelHandle annotationHandle = LabelHandle::Caption;
+            pickLabelTarget(
+                static_cast<float>(mx),
+                static_cast<float>(my),
+                annotationHit,
+                annotationHandle
+            );
+            if (annotationHit >= 0 && annotationHandle != LabelHandle::Caption) {
+                m_labelDrag = annotationHit;
+                m_labelDragHandle = annotationHandle;
+                m_labelDragPressPx = Base::Vector2d(mx, my);
+                m_lastLabelClick = -1;
+                clearSelect();
+                selectState = Stop;
+                preSelectGeoId = { NoGeoId, PointPos::none };
+                return;
+            }
+            const int labelHit = annotationHit;
             if (labelHit >= 0) {
                 const Sketcher::Constraint* c = getConstraint(labelHit);
+                m_labelDragHandle = LabelHandle::Caption;
                 float defDx = 0.0f, defDy = 0.0f;
                 defaultLabelOffsetPx(c, defDx, defDy);
                 const auto it = c ? m_labelManualOffsetPx.find(c) : m_labelManualOffsetPx.end();
@@ -871,8 +893,11 @@ namespace MOON {
         // is keyed by constraint pointer.
         m_labelManualOffsetPx.clear();
         m_labelManualParam.clear();
+        m_straightDimOffsetPx.clear();
         m_labelHover = -1;
         m_labelDrag = -1;
+        m_labelHoverHandle = LabelHandle::Caption;
+        m_labelDragHandle = LabelHandle::Caption;
     }
     void SketcherObj::replaceGeometry(int oldGeoId, std::unique_ptr<Part::Geometry>& newGeo)
     {

@@ -328,6 +328,78 @@ namespace MOON {
 			Base::Vector2d& a,
 			Base::Vector2d& b
 		) const;
+		/** Which part of a dimension an interaction is on. The caption only slides
+		 * along the dimension line; the line itself - arrows included - is one handle
+		 * that moves the dimension as a whole along the direction its extension lines
+		 * run in. */
+		enum class LabelHandle
+		{
+			Caption,
+			/** A length dimension: the line - arrows included - is one handle that
+			 * moves the dimension as a whole along its extension direction. */
+			DimensionLine,
+			/** An angle dimension: the arc is the handle, and dragging it changes the
+			 * radius it is drawn at while its centre stays on the vertex. */
+			AngleArc
+		};
+
+		/** Everything a linear dimension is laid out from: the measured points (in
+		 * sketch and screen space), where each end of the dimension line starts from
+		 * and the direction the line may be dragged in, the offset it sits at until it
+		 * is moved, and the pixel gap that keeps the caption clear of the line. */
+		struct StraightDimFrame
+		{
+			Base::Vector2d measuredA;
+			Base::Vector2d measuredB;
+			Eigen::Vector2f screenA;
+			Eigen::Vector2f screenB;
+			/** The two ends of the line the dimension is drawn from (each one is tied to
+			 * the point it measures by an extension line) and the unit direction the
+			 * whole line is dragged in. Both ends share the offset, so the line always
+			 * stays parallel to what it measures - axis aligned for DistanceX/Y. */
+			Eigen::Vector2f baseA;
+			Eigen::Vector2f baseB;
+			Eigen::Vector2f direction;
+			float defaultOffset = 0.0f;
+			float gapX = 0.0f;
+			float gapY = 0.0f;
+		};
+		bool straightDimFrame(
+			const Sketcher::Constraint* constraint,
+			StraightDimFrame& out
+		) const;
+		/** The offset of the dimension line along its direction: where the user dragged
+		 * it to, or the automatic offset while it was never moved. */
+		float straightDimOffset(
+			const Sketcher::Constraint* constraint,
+			float p_defaultOffset
+		) const;
+		/** The dimension line's two ends in screen space, with the dragged offsets
+		 * applied. @return false when the dimension cannot be laid out. */
+		bool straightDimShaft(
+			const Sketcher::Constraint* constraint,
+			Eigen::Vector2f& p_a,
+			Eigen::Vector2f& p_b
+		) const;
+		/** Which dimension line the cursor is on, if any. The whole line is the handle,
+		 * not only its arrow heads. */
+		int pickConstraintDimLineAt(float p_mouseX, float p_mouseY) const;
+		/** Which angle annotation arc the cursor is on, if any. */
+		int pickConstraintAngleArcAt(float p_mouseX, float p_mouseY) const;
+		/** What the cursor is on: the constraint and which of its handles, or -1.
+		 * The arrows are tested before the caption - they sit at the ends of the
+		 * dimension line, the caption in its middle. */
+		void pickLabelTarget(
+			float p_mouseX,
+			float p_mouseY,
+			int& p_constrId,
+			LabelHandle& p_handle
+		) const;
+		/** Drops the placement the user gave a dimension (caption offset, caption
+		 * parameter, arrow offsets). The maps are keyed by the constraint's address,
+		 * so a constraint that goes away has to take its entries with it - otherwise a
+		 * later constraint allocated at the same address would inherit them. */
+		void forgetConstraintLayout(const Sketcher::Constraint* p_constraint);
 		// Computes the straight dimension shaft (trackA..trackB) in screen
 		// space plus the fixed pixel gap that separates the caption from the
 		// shaft. Used both for drawing and for constraining label dragging.
@@ -403,6 +475,17 @@ namespace MOON {
 		std::unordered_map<const Sketcher::Constraint*, double> m_labelManualParam;
 		int m_labelHover = -1;
 		int m_labelDrag = -1;
+		/** Which handle of the dimension m_labelHover / m_labelDrag is on. The arrows
+		 * move the dimension line itself, the caption only slides along it. */
+		LabelHandle m_labelHoverHandle = LabelHandle::Caption;
+		LabelHandle m_labelDragHandle = LabelHandle::Caption;
+		/** How far (pixels along its direction) the user dragged a dimension line;
+		 * missing means it still sits at its automatic offset. */
+		std::unordered_map<const Sketcher::Constraint*, float> m_straightDimOffsetPx;
+		/** The radius (pixels) the user dragged an angle annotation arc to. The centre
+		 * stays where the geometry puts it, so this is all that moves - and with it the
+		 * amount of arc that is drawn. */
+		std::unordered_map<const Sketcher::Constraint*, float> m_angleLabelRadiusPx;
 		Base::Vector2d m_labelDragOffsetPx;
 		Base::Vector2d m_labelDragPressPx;
 		int m_lastLabelClick = -1;

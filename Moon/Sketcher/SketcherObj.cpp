@@ -1860,6 +1860,7 @@ namespace MOON {
 				*geoId = found->second - newCount;
 			}
 			if (dead) {
+				forgetConstraintLayout(constraint);
 				delete constraint;
 				++dropped;
 				continue;

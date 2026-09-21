@@ -21,6 +21,14 @@ namespace MOON {
             || type == Sketcher::ConstraintType::Diameter
             || type == Sketcher::ConstraintType::Angle;
     }
+    /** The dimensions drawn as a line between two arrows, i.e. the ones whose ends can
+     * be dragged (a radius or an angle has no second end to drag). */
+    static bool isStraightDimension(Sketcher::ConstraintType type)
+    {
+        return type == Sketcher::ConstraintType::Distance
+            || type == Sketcher::ConstraintType::DistanceX
+            || type == Sketcher::ConstraintType::DistanceY;
+    }
     static ImU32 abgrToImU32(const Eigen::Vector4<uint8_t>& c)
     {
         return IM_COL32(c[3], c[2], c[1], c[0]);
@@ -713,9 +721,47 @@ namespace MOON {
                 m_labelDrag = -1;
                 return;
             }
-            const bool straightDim = c->Type == Sketcher::ConstraintType::Distance
-                || c->Type == Sketcher::ConstraintType::DistanceX
-                || c->Type == Sketcher::ConstraintType::DistanceY;
+            const bool straightDim = isStraightDimension(c->Type);
+            if (straightDim && m_labelDragHandle != LabelHandle::Caption) {
+                // The dimension line is being dragged: it moves as a whole, and
+                // all it does is move along the direction its extension lines run in -
+                // the cursor's projection onto that direction is the new offset. The
+                // line keeps its orientation, so it can never come out tilted.
+                StraightDimFrame frame;
+                if (straightDimFrame(c, frame)) {
+                    // Projecting from either base gives the same value: the two bases
+                    // differ along the line, which the projection onto the direction
+                    // ignores.
+                    const float wanted
+                        = (static_cast<float>(mx) - frame.baseA.x()) * frame.direction.x()
+                        + (static_cast<float>(my) - frame.baseA.y()) * frame.direction.y();
+                    // Keep the line on its side of the geometry: a dimension that
+                    // crosses what it measures is never what the user meant.
+                    constexpr float kMinOffset = 8.0f;
+                    m_straightDimOffsetPx[c] = std::max(wanted, kMinOffset);
+                }
+                m_labelHover = m_labelDrag;
+                m_labelHoverHandle = m_labelDragHandle;
+                return;
+            }
+            if (c->Type == Sketcher::ConstraintType::Angle
+                && m_labelDragHandle == LabelHandle::AngleArc) {
+                // The arc is being dragged: its centre is the vertex of the angle and
+                // does not move, so what changes is the radius - the arc is drawn at the
+                // distance the cursor is at, and therefore covers more or less length.
+                float centerX = 0.0f, centerY = 0.0f;
+                float radius = 0.0f, startDeg = 0.0f, sweepDeg = 0.0f;
+                if (computeAngleLabelTrack(c, centerX, centerY, radius, startDeg, sweepDeg)) {
+                    const float dx = static_cast<float>(mx) - centerX;
+                    const float dy = static_cast<float>(my) - centerY;
+                    constexpr float kMinRadius = 8.0f;
+                    m_angleLabelRadiusPx[c]
+                        = std::max(std::sqrt(dx * dx + dy * dy), kMinRadius);
+                }
+                m_labelHover = m_labelDrag;
+                m_labelHoverHandle = m_labelDragHandle;
+                return;
+            }
             if (straightDim) {
                 // Project the mouse onto the dimension shaft: the caption may
                 // only slide along the segment, it never leaves the line.
@@ -776,9 +822,11 @@ namespace MOON {
                 m_labelManualOffsetPx[c] = offset;
             }
             m_labelHover = m_labelDrag;
+            m_labelHoverHandle = m_labelDragHandle;
             return;
         }
-        m_labelHover = pickConstraintLabelAt(static_cast<float>(mx), static_cast<float>(my));
+        pickLabelTarget(
+            static_cast<float>(mx), static_cast<float>(my), m_labelHover, m_labelHoverHandle);
     }
     bool SketcherObj::getGeometryPointSketch(int geoId, PointPos pos, Base::Vector2d& out) const
     {
@@ -935,6 +983,29 @@ namespace MOON {
         float& gapY
     ) const
     {
+        StraightDimFrame frame;
+        if (!straightDimFrame(constraint, frame)) {
+            return false;
+        }
+        // One offset for the whole line: the dimension is dragged as a unit and keeps
+        // its direction, so it can never come out tilted.
+        const float offset = straightDimOffset(constraint, frame.defaultOffset);
+        trackAx = frame.baseA.x() + frame.direction.x() * offset;
+        trackAy = frame.baseA.y() + frame.direction.y() * offset;
+        trackBx = frame.baseB.x() + frame.direction.x() * offset;
+        trackBy = frame.baseB.y() + frame.direction.y() * offset;
+        gapX = frame.gapX;
+        gapY = frame.gapY;
+        return true;
+    }
+    bool SketcherObj::straightDimFrame(
+        const Sketcher::Constraint* constraint,
+        StraightDimFrame& out
+    ) const
+    {
+        if (constraint == nullptr) {
+            return false;
+        }
         Base::Vector2d aSk, bSk;
         if (!getConstraintMeasureEndpoints(constraint, aSk, bSk)) {
             return false;
@@ -968,30 +1039,37 @@ namespace MOON {
         const bool isVertDist = constraint->Type == Sketcher::ConstraintType::DistanceY;
         const float shaftMargin = 16.0f;
         const float captionGap = 14.0f;
+
+        out.measuredA = aSk;
+        out.measuredB = bSk;
+        out.screenA = aS;
+        out.screenB = bS;
         if (isHorizDist || isVertDist) {
             // Horizontal/vertical distances always draw an axis-aligned
             // dimension shaft instead of a line parallel to the measured
             // segment: DistanceX stays horizontal above the points, DistanceY
             // stays vertical to the right of them.
             if (isHorizDist) {
-                const float lineY = std::min(aS.y(), bS.y()) - shaftMargin;
-                trackAx = aS.x();
-                trackAy = lineY;
-                trackBx = bS.x();
-                trackBy = lineY;
-                gapX = 0.0f;
-                gapY = -captionGap;
+                // The line runs above both points and stays horizontal until an end is
+                // dragged; each end only moves straight up (its extension line).
+                const float lineY = std::min(aS.y(), bS.y());
+                out.baseA = Eigen::Vector2f(aS.x(), lineY);
+                out.baseB = Eigen::Vector2f(bS.x(), lineY);
+                out.direction = Eigen::Vector2f(0.0f, -1.0f);
+                out.defaultOffset = shaftMargin;
+                out.gapX = 0.0f;
+                out.gapY = -captionGap;
             }
             else {
-                // Vertical distance: shaft to the right of the rightmost point,
-                // caption between the measured points and the shaft.
-                const float lineX = std::max(aS.x(), bS.x()) + 26.0f;
-                trackAx = lineX;
-                trackAy = aS.y();
-                trackBx = lineX;
-                trackBy = bS.y();
-                gapX = -captionGap;
-                gapY = 0.0f;
+                // Vertical distance: shaft to the right of both points (vertical until
+                // dragged), caption between the measured points and the shaft.
+                const float lineX = std::max(aS.x(), bS.x());
+                out.baseA = Eigen::Vector2f(lineX, aS.y());
+                out.baseB = Eigen::Vector2f(lineX, bS.y());
+                out.direction = Eigen::Vector2f(1.0f, 0.0f);
+                out.defaultOffset = 26.0f;
+                out.gapX = -captionGap;
+                out.gapY = 0.0f;
             }
             return true;
         }
@@ -1021,13 +1099,164 @@ namespace MOON {
         if (shaftDist < minShaftDist) {
             shaftDist = minShaftDist;
         }
-        trackAx = aS.x() + nx * shaftDist;
-        trackAy = aS.y() + ny * shaftDist;
-        trackBx = bS.x() + nx * shaftDist;
-        trackBy = bS.y() + ny * shaftDist;
-        gapX = nx * captionGap;
-        gapY = ny * captionGap;
+        // A plain length dimension sits parallel to the segment it measures; both ends
+        // start on the points themselves and may be pulled along that normal.
+        out.baseA = aS;
+        out.baseB = bS;
+        out.direction = Eigen::Vector2f(nx, ny);
+        out.defaultOffset = shaftDist;
+        out.gapX = nx * captionGap;
+        out.gapY = ny * captionGap;
         return true;
+    }
+    float SketcherObj::straightDimOffset(
+        const Sketcher::Constraint* constraint,
+        float p_defaultOffset
+    ) const
+    {
+        const auto found = m_straightDimOffsetPx.find(constraint);
+        return found == m_straightDimOffsetPx.end() ? p_defaultOffset : found->second;
+    }
+    bool SketcherObj::straightDimShaft(
+        const Sketcher::Constraint* constraint,
+        Eigen::Vector2f& p_a,
+        Eigen::Vector2f& p_b
+    ) const
+    {
+        float trackAx = 0.0f, trackAy = 0.0f, trackBx = 0.0f, trackBy = 0.0f;
+        float gapX = 0.0f, gapY = 0.0f;
+        if (!computeStraightLabelTrack(constraint, trackAx, trackAy, trackBx, trackBy, gapX, gapY)) {
+            return false;
+        }
+        p_a = Eigen::Vector2f(trackAx, trackAy);
+        p_b = Eigen::Vector2f(trackBx, trackBy);
+        return true;
+    }
+    int SketcherObj::pickConstraintDimLineAt(float p_mouseX, float p_mouseY) const
+    {
+        if (!InEdit()) {
+            return -1;
+        }
+        constexpr float kLineTolerance = 8.0f;
+        const Eigen::Vector2f mouse(p_mouseX, p_mouseY);
+        int best = -1;
+        float bestDistance = kLineTolerance;
+        // Last constraint first, like the caption hit test: what was added later sits
+        // on top.
+        for (int i = static_cast<int>(mConstraintList.size()) - 1; i >= 0; --i) {
+            const Sketcher::Constraint* c = mConstraintList[i];
+            if (!c || !c->isVisible || !isStraightDimension(c->Type)) {
+                continue;
+            }
+            Eigen::Vector2f a;
+            Eigen::Vector2f b;
+            if (!straightDimShaft(c, a, b)) {
+                continue;
+            }
+            // Distance to the segment, so the arrows and everything between them are
+            // the same handle.
+            const Eigen::Vector2f direction = b - a;
+            const float length = direction.norm();
+            float distance = (mouse - a).norm();
+            if (length > 1.0f) {
+                const float t = std::clamp(
+                    (mouse - a).dot(direction) / (length * length), 0.0f, 1.0f);
+                distance = (mouse - (a + direction * t)).norm();
+            }
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                best = i;
+            }
+        }
+        return best;
+    }
+    int SketcherObj::pickConstraintAngleArcAt(float p_mouseX, float p_mouseY) const
+    {
+        if (!InEdit()) {
+            return -1;
+        }
+        constexpr float kArcTolerance = 8.0f;
+        constexpr float kPi = 3.14159265358979f;
+        for (int i = static_cast<int>(mConstraintList.size()) - 1; i >= 0; --i) {
+            const Sketcher::Constraint* c = mConstraintList[i];
+            if (!c || !c->isVisible || c->Type != Sketcher::ConstraintType::Angle) {
+                continue;
+            }
+            float centerX = 0.0f, centerY = 0.0f;
+            float radius = 0.0f, startDeg = 0.0f, sweepDeg = 0.0f;
+            if (!computeAngleLabelTrack(c, centerX, centerY, radius, startDeg, sweepDeg)) {
+                continue;
+            }
+            const float dx = p_mouseX - centerX;
+            const float dy = p_mouseY - centerY;
+            const float distance = std::sqrt(dx * dx + dy * dy);
+            if (std::fabs(distance - radius) > kArcTolerance) {
+                continue;  // not on the arc itself
+            }
+            // ... and within the swept part of it, so the empty side of the circle does
+            // not grab the cursor.
+            const float angleDeg = std::atan2(dy, dx) * 180.0f / kPi;
+            float relative = angleDeg - startDeg;
+            if (sweepDeg >= 0.0f) {
+                while (relative < 0.0f) {
+                    relative += 360.0f;
+                }
+                while (relative > 360.0f) {
+                    relative -= 360.0f;
+                }
+                if (relative > sweepDeg + 1.0f) {
+                    continue;
+                }
+            }
+            else {
+                while (relative > 0.0f) {
+                    relative -= 360.0f;
+                }
+                while (relative < -360.0f) {
+                    relative += 360.0f;
+                }
+                if (relative < sweepDeg - 1.0f) {
+                    continue;
+                }
+            }
+            return i;
+        }
+        return -1;
+    }
+    void SketcherObj::pickLabelTarget(
+        float p_mouseX,
+        float p_mouseY,
+        int& p_constrId,
+        LabelHandle& p_handle
+    ) const
+    {
+        p_constrId = -1;
+        p_handle = LabelHandle::Caption;
+        // The caption is a small box, the line a long thin target, so the caption is
+        // tested first: pointing at the text means "move the text", not the line.
+        p_constrId = pickConstraintLabelAt(p_mouseX, p_mouseY);
+        if (p_constrId >= 0) {
+            return;
+        }
+        p_constrId = pickConstraintDimLineAt(p_mouseX, p_mouseY);
+        if (p_constrId >= 0) {
+            p_handle = LabelHandle::DimensionLine;
+            return;
+        }
+        p_constrId = pickConstraintAngleArcAt(p_mouseX, p_mouseY);
+        if (p_constrId >= 0) {
+            p_handle = LabelHandle::AngleArc;
+        }
+    }
+    void SketcherObj::forgetConstraintLayout(const Sketcher::Constraint* p_constraint)
+    {
+        if (p_constraint == nullptr) {
+            return;
+        }
+        m_labelManualOffsetPx.erase(p_constraint);
+        m_labelManualParam.erase(p_constraint);
+        m_straightDimOffsetPx.erase(p_constraint);
+        m_angleLabelRadiusPx.erase(p_constraint);
     }
     bool SketcherObj::computeAngleLabelTrack(
         const Sketcher::Constraint* constraint,
@@ -1108,17 +1337,27 @@ namespace MOON {
         }
         if (constraint->Second == Sketcher::GeoEnum::GeoUndef) {
             // Half of the segment length, matching the requested annotation.
+            // The floor keeps the arc big enough to be seen and grabbed even when the
+            // line is short on screen.
             const Eigen::Vector2f p1S = screenOf(p1);
             const Eigen::Vector2f p2S = screenOf(p2);
             const float segLen = (p2S - p1S).norm();
-            radiusPx = std::max(6.0f, segLen * 0.5f);
+            radiusPx = std::max(24.0f, segLen * 0.5f);
         }
         else {
-            // Keep the two-line arc compact but inside both rays.
+            // Stay inside both rays, but do not let the arc shrink to a stub: it has to
+            // be something the user can point at and pull.
             const float ray1 = (e1S - vS).norm();
             const float ray2 = (e2S - vS).norm();
             const float minRay = std::min(ray1, ray2);
-            radiusPx = std::max(10.0f, std::min(30.0f, minRay * 0.4f));
+            radiusPx = std::clamp(minRay * 0.35f, 30.0f, 150.0f);
+        }
+        // The arc can be pulled closer or pushed further out; its centre stays on the
+        // vertex, so the radius is the only thing that moves - and the drawn arc grows
+        // and shrinks with it (the sweep never changes).
+        const auto dragged = m_angleLabelRadiusPx.find(constraint);
+        if (dragged != m_angleLabelRadiusPx.end()) {
+            radiusPx = dragged->second;
         }
         centerX = vS.x();
         centerY = vS.y();
@@ -1390,7 +1629,9 @@ namespace MOON {
                 t = std::max(0.0, std::min(1.0, t));
                 const float angleDeg = startDeg + sweepDeg * static_cast<float>(t);
                 const float angleRad = angleDeg * 3.14159265358979f / 180.0f;
-                const float captionRadius = arcRadius + 8.0f;
+                // Keep the caption clear of the arc: the same gap a length dimension
+                // keeps from its line, so the arc stays free to be grabbed and pulled.
+                const float captionRadius = arcRadius + 14.0f;
                 anchorSketch = constraintLabelAnchor(c);
                 screenX = cx + captionRadius * std::cos(angleRad);
                 screenY = cy + captionRadius * std::sin(angleRad);
@@ -1449,10 +1690,16 @@ namespace MOON {
         if (m_labelDrag < 0) {
             if (!isHaveActiveHandler) {
                 auto [mx, my] = m_sceneView->getInutState().GetMousePosition();
-                m_labelHover = pickConstraintLabelAt(static_cast<float>(mx), static_cast<float>(my));
+                pickLabelTarget(
+                    static_cast<float>(mx),
+                    static_cast<float>(my),
+                    m_labelHover,
+                    m_labelHoverHandle
+                );
             }
             else {
                 m_labelHover = -1;
+                m_labelHoverHandle = LabelHandle::Caption;
             }
         }
         ImDrawList* drawList = ImGui::GetForegroundDrawList();
@@ -1496,6 +1743,26 @@ namespace MOON {
                 if (computeStraightLabelTrack(
                     c, trackAx, trackAy, trackBx, trackBy, gapX, gapY
                 )) {
+                    // Extension lines: what the dimension line actually measures is the
+                    // two points of the constraint, so each end of the line is tied back
+                    // to its point. They are what makes a dragged (tilted) dimension
+                    // readable, and FreeCAD draws them as well.
+                    StraightDimFrame frame;
+                    if (straightDimFrame(c, frame)) {
+                        constexpr float kExtensionThickness = 1.0f;
+                        drawList->AddLine(
+                            ImVec2(frame.screenA.x(), frame.screenA.y()),
+                            ImVec2(trackAx, trackAy),
+                            arrowCol,
+                            kExtensionThickness
+                        );
+                        drawList->AddLine(
+                            ImVec2(frame.screenB.x(), frame.screenB.y()),
+                            ImVec2(trackBx, trackBy),
+                            arrowCol,
+                            kExtensionThickness
+                        );
+                    }
                     const float dx = trackBx - trackAx;
                     const float dy = trackBy - trackAy;
                     const float len = std::sqrt(dx * dx + dy * dy);
@@ -1508,6 +1775,19 @@ namespace MOON {
                             thickness,
                             nullptr
                         );
+                    }
+                    // Mark both arrows while the line is under the cursor: the whole
+                    // line is the grip that moves the dimension, and nothing else on
+                    // screen says so.
+                    if (i == m_labelHover || i == m_labelDrag) {
+                        const LabelHandle handle
+                            = i == m_labelDrag ? m_labelDragHandle : m_labelHoverHandle;
+                        if (handle == LabelHandle::DimensionLine) {
+                            drawList->AddCircleFilled(
+                                ImVec2(trackAx, trackAy), 4.5f, IM_COL32(255, 255, 140, 235));
+                            drawList->AddCircleFilled(
+                                ImVec2(trackBx, trackBy), 4.5f, IM_COL32(255, 255, 140, 235));
+                        }
                     }
                 }
             }
@@ -1591,6 +1871,22 @@ namespace MOON {
                         thickness,
                         nullptr
                     );
+                    // Mark the arc while the cursor is on it: it is the grip that pulls
+                    // the annotation in and out, and nothing else says so.
+                    if ((i == m_labelHover || i == m_labelDrag)
+                        && ((i == m_labelDrag ? m_labelDragHandle : m_labelHoverHandle)
+                            == LabelHandle::AngleArc)) {
+                        const float midDeg = startDeg + sweepDeg * 0.5f;
+                        const float midRad = midDeg * pi / 180.0f;
+                        drawList->AddCircleFilled(
+                            ImVec2(
+                                cx + std::cos(midRad) * arcRadius,
+                                cy + std::sin(midRad) * arcRadius
+                            ),
+                            4.5f,
+                            IM_COL32(255, 255, 140, 235)
+                        );
+                    }
                 }
             }
             const ImU32 textCol = isError ? IM_COL32(255, 92, 92, 255)
