@@ -1,5 +1,7 @@
 ﻿#include "core/component/TopoShapeActor.h"
 #include "renderer/SceneView.h"
+#include "TopoShapeOpCode.h"
+#include "core/TopoNameDebug.h"
 #include <Core/ResourceManagement/MaterialManager.h>
 #include <Core/ECS/Components/CMaterialRenderer.h>
 #include <Core/ECS/Components/CModelRenderer.h>
@@ -50,10 +52,13 @@ namespace MOON {
         try
         {
             Part::TopoShape resShape(0);
-            resShape.makeElementFillet(baseShape, edges, radius, radius);
+            // The op code is what tags the names of the new fillet faces/edges, so
+            // a later operation (or a reference) can tell where they came from.
+            resShape.makeElementFillet(baseShape, edges, radius, radius, Part::OpCodes::Fillet);
             if (resShape.isNull()) {
                 return false;
             }
+            LogTopoElementNames(resShape, "fillet");
             TopTools_ListOfShape aLarg;
             aLarg.Append(baseShape.getShape());
             if (!BRepAlgo::IsValid(aLarg, baseShape.getShape(), Standard_False, Standard_False)) {

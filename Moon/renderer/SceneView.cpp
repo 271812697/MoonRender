@@ -4,11 +4,14 @@
 #include "DebugSceneRenderer.h"
 #include "PickingRenderPass.h"
 #include "Core/Global/ServiceLocator.h"
+#include <Core/SceneSystem/SceneManager.h>
 #include "SceneView.h"
 #include "Settings/DebugSetting.h"
 #include "renderer/GizmoRenderPass.h"
 #include "Interactive/Widgets/ClipPlane.h"
 #include "core/component/CTopoShape.h"
+#include "Interactive/Im3DRenderer.h"
+#include "Interactive/Screen/ScreenOverlayRegistry.h"
 #include <iostream>
 #include <algorithm>
 #include <cmath>
@@ -22,6 +25,19 @@ static Maths::FVector3 GetSpherePosition(float a, float b, float radius) {
 }
 namespace
 {
+	/** Orientation that looks along p_dir with the world up, falling back to +X
+	 * when looking straight up or down, where "up" would be degenerate. This is
+	 * how a direction based fit (a click on a view cube face) gets its roll. */
+	Maths::FQuaternion PoseForDirection(const Maths::FVector3& p_dir)
+	{
+		const float pi = 3.14159265359f;
+		const float angle = Maths::FVector3::AngleBetween(p_dir, { 0, 1, 0 });
+		const Maths::FVector3 up =
+			(angle < FLT_EPSILON || std::abs(angle - pi) < FLT_EPSILON) ?
+			Maths::FVector3(1, 0, 0) : Maths::FVector3(0, 1, 0);
+		return Maths::FQuaternion::LookAt(p_dir, up);
+	}
+
 	Tools::Utils::OptRef<Core::ECS::Actor> GetActorFromPickingResult(
 		Editor::Rendering::PickingRenderPass::PickingResult p_result
 	)
@@ -131,38 +147,27 @@ Core::SceneSystem::Scene* Editor::Panels::SceneView::GetScene()
 
 void Editor::Panels::SceneView::FitToSelectedActor(const Maths::FVector3& dir)
 {
-	if (IsSelectActor()) {
-		auto ac = GetSelectedActor();
-		auto modelRenderer = ac->GetComponent<::Core::ECS::Components::CModelRenderer>();
-		if (modelRenderer) {
-			auto model=modelRenderer->GetModel();
-			if (model) {
-				auto transform=ac->GetComponent<::Core::ECS::Components::CTransform>();
-				auto sphere=modelRenderer->GetModel()->GetBoundingSphere();
-				sphere.position=Maths::FMatrix4::MulPoint(transform->GetWorldMatrix(), sphere.position);
-				
-				auto scale = transform->GetWorldScale();
-				sphere.radius*=scale.Max();
-				m_camera.ProjectionFitToSphere(sphere,dir);
-
-				float pi = 3.14159265359f;
-				Maths::FVector3 forward = dir;
-				float angle = Maths::FVector3::AngleBetween(forward, { 0,1,0 });
-				Maths::FVector3 up = (angle < FLT_EPSILON || abs(angle - pi) < FLT_EPSILON) ? Maths::FVector3(1, 0, 0) : Maths::FVector3(0, 1, 0);
-				Maths::FQuaternion quat=  Maths::FQuaternion::LookAt(forward, up);
-				float eff = pi/ 180.0;
-				
-				if (m_camera.GetProjectionMode() == ::Rendering::Settings::EProjectionMode::ORTHOGRAPHIC) {
-					this->GetCameraController().MoveToPose(sphere.position - dir * sphere.radius,quat);
-				}
-				else
-				{
-					float distance = sphere.radius / std::sin(eff * m_camera.GetFov() / 2.0f);
-				    this->GetCameraController().MoveToPose(sphere.position - dir * distance,quat);
-				}
-			}
-		}
+	::Rendering::Geometry::BoundingSphere sphere;
+	if (!GetSelectionSphere(sphere))
+	{
+		return;
 	}
+
+	// Look from the requested direction with the world up, so a direction based
+	// fit always comes out level (see PoseForDirection below).
+	ApplyFitPose(sphere, dir, PoseForDirection(dir));
+}
+void Editor::Panels::SceneView::FitToFocus(const Maths::FVector3& dir)
+{
+	// The selection when there is one, the whole scene otherwise - and the scene again
+	// when the selection cannot be framed at all. A view command that does nothing is
+	// never what the user meant by clicking it.
+	::Rendering::Geometry::BoundingSphere sphere;
+	if (!GetFocusSphere(sphere))
+	{
+		return;
+	}
+	ApplyFitPose(sphere, dir, PoseForDirection(dir));
 }
 
 void Editor::Panels::SceneView::LookAt(const Maths::FVector3& pivot, const Maths::FVector3& dir, float radius)
@@ -190,17 +195,153 @@ Maths::FVector2 Editor::Panels::SceneView::worldToScreen(const Maths::FVector3& 
 
 void Editor::Panels::SceneView::FitToScene(const Maths::FVector3& dir)
 {
-	//m_camera.ProjectionFitToSphere->the code make no sence
-	auto& models = GetScene()->GetFastAccessComponents().modelRenderers;
-	if (models.size()>0) {
-		::Rendering::Geometry::BoundingSphere sphere=models[0]->GetModel()->GetBoundingSphere();
-		for (size_t i = 1; i < models.size(); i++)
-		{
-			sphere.merge(models[i]->GetModel()->GetBoundingSphere());
-		}	
-		//m_camera.ProjectionFitToSphere(sphere, dir);
+	::Rendering::Geometry::BoundingSphere sphere;
+	if (!GetSceneSphere(sphere))
+	{
+		return;
 	}
 
+	ApplyFitPose(sphere, dir, PoseForDirection(dir));
+}
+
+bool Editor::Panels::SceneView::GetSelectionSphere(
+	::Rendering::Geometry::BoundingSphere& p_outSphere)
+{
+	using namespace ::Core::ECS::Components;
+
+	if (!IsSelectActor())
+	{
+		return false;
+	}
+	auto* actor = GetSelectedActor();
+	if (actor == nullptr)
+	{
+		return false;
+	}
+	// A picked face or edge is only a topology leaf: the mesh it belongs to lives on
+	// the actor that batches it (AllFaces / AllEdges, or the topo actor itself), and
+	// the leaf carries no model renderer of its own. Walk up until one is found, so a
+	// selected face can still be framed - otherwise anything that fits the selection
+	// (the view cube above all) silently does nothing whenever a face is selected.
+	auto* modelRenderer = actor->GetComponent<CModelRenderer>();
+	for (auto* parent = actor; modelRenderer == nullptr && parent != nullptr;
+		parent = parent->HasParent() ? parent->GetParent() : nullptr)
+	{
+		modelRenderer = parent->GetComponent<CModelRenderer>();
+		actor = parent;
+	}
+	if (modelRenderer == nullptr)
+	{
+		return false;
+	}
+	auto model = modelRenderer->GetModel();
+	if (model == nullptr)
+	{
+		return false;
+	}
+	auto* transform = actor->GetComponent<CTransform>();
+	if (transform == nullptr)
+	{
+		return false;
+	}
+
+	p_outSphere = model->GetBoundingSphere();
+	p_outSphere.position = Maths::FMatrix4::MulPoint(
+		transform->GetWorldMatrix(),
+		p_outSphere.position);
+	Maths::FVector3 worldScale = transform->GetWorldScale();
+	p_outSphere.radius *= worldScale.Max();
+	return p_outSphere.radius > 0.0f;
+}
+
+bool Editor::Panels::SceneView::GetSceneSphere(
+	::Rendering::Geometry::BoundingSphere& p_outSphere)
+{
+	using namespace ::Core::ECS::Components;
+
+	// Merge every active model's bounds, transformed to world space, so the fit
+	// covers the whole scene instead of the models' local spheres.
+	bool hasBounds = false;
+	for (auto* modelRenderer : GetScene()->GetFastAccessComponents().modelRenderers)
+	{
+		if (modelRenderer == nullptr) continue;
+
+		auto& owner = modelRenderer->owner;
+		if (!owner.IsActive()) continue;
+
+		auto model = modelRenderer->GetModel();
+		if (model == nullptr) continue;
+
+		auto modelSphere = model->GetBoundingSphere();
+		if (modelSphere.radius <= 0.0f) continue;
+
+		const auto transform = owner.GetComponent<CTransform>();
+		if (transform == nullptr) continue;
+
+		modelSphere.position = Maths::FMatrix4::MulPoint(
+			transform->GetWorldMatrix(),
+			modelSphere.position
+		);
+		Maths::FVector3 worldScale = transform->GetWorldScale();
+		modelSphere.radius *= worldScale.Max();
+
+		if (!hasBounds)
+		{
+			p_outSphere = modelSphere;
+			hasBounds = true;
+		}
+		else
+		{
+			p_outSphere.merge(modelSphere);
+		}
+	}
+	return hasBounds;
+}
+
+bool Editor::Panels::SceneView::GetFocusSphere(
+	::Rendering::Geometry::BoundingSphere& p_outSphere)
+{
+	// The selection when there is one, the whole scene otherwise: the same choice
+	// the view cube faces make.
+	return GetSelectionSphere(p_outSphere) || GetSceneSphere(p_outSphere);
+}
+
+void Editor::Panels::SceneView::ApplyFitPose(
+	::Rendering::Geometry::BoundingSphere& p_sphere,
+	const Maths::FVector3& p_forward,
+	const Maths::FQuaternion& p_rotation)
+{
+	// Adjust the projection first, then place the camera on the fit axis at a
+	// distance that contains the bounding sphere. The orientation is the one the
+	// caller asked for, so its forward is p_forward and the camera looks straight
+	// at the center of the sphere.
+	m_camera.ProjectionFitToSphere(p_sphere, p_forward);
+
+	const float pi = 3.14159265359f;
+	const float eff = pi / 180.0f;
+	if (m_camera.GetProjectionMode() == ::Rendering::Settings::EProjectionMode::ORTHOGRAPHIC)
+	{
+		GetCameraController().MoveToPose(
+			p_sphere.position - p_forward * p_sphere.radius,
+			p_rotation);
+	}
+	else
+	{
+		const float distance = p_sphere.radius / std::sin(eff * m_camera.GetFov() / 2.0f);
+		GetCameraController().MoveToPose(
+			p_sphere.position - p_forward * distance,
+			p_rotation);
+	}
+}
+
+void Editor::Panels::SceneView::FitToFocusWithRotation(const Maths::FQuaternion& p_rotation)
+{
+	::Rendering::Geometry::BoundingSphere sphere;
+	if (!GetFocusSphere(sphere))
+	{
+		return;
+	}
+	ApplyFitPose(sphere, p_rotation * Maths::FVector3::Forward, p_rotation);
 }
 
 void Editor::Panels::SceneView::BuildBvh()
@@ -387,6 +528,18 @@ void Editor::Panels::SceneView::HandleActorPicking()
 	}
 
 	const auto mousePos = input.GetMousePosition();
+
+	// Screen widgets (navigation cube, HUD buttons, ...) own the cursor while it
+	// is over them: skip scene picking so a click there does not also select the
+	// actor behind the widget, and hovering it does not highlight the scene.
+	if (MOON::ScreenOverlayRegistry::Instance().BlocksSceneCursor(
+		static_cast<float>(mousePos.first),
+		static_cast<float>(mousePos.second)))
+	{
+		m_highlightedActor = {};
+		m_highlightedGizmoDirection = {};
+		return;
+	}
 
 	// Clamp to the picking target: a drag can move the cursor outside the
 	// viewport, and reading outside the framebuffer is undefined.

@@ -56,7 +56,31 @@ namespace MOON {
 		if (!actor) {
 			return false;
 		}
+		std::string firstReference;
+		if (!getActorBasedFeature(actor, f, firstReference)) {
+			return false;
+		}
 		std::vector<SelectID> selectIds = SelectionManager::instance().getSelect();
+		subValues.clear();
+		subValues.reserve(selectIds.size());
+		auto& view = GetService(Editor::Panels::SceneView);
+		auto scene = view.GetScene();
+		for (int i = 0;i < selectIds.size();i++) {
+			auto tempActor = scene->FindActorByID(selectIds[i]);
+			if (tempActor) {
+				subValues.emplace_back(tempActor->GetName());
+			}
+		}
+		return true;
+	}
+	bool ViewTool::getActorBasedFeature(
+		Core::ECS::Actor* actor,
+		Feature*& f,
+		std::string& subValue)
+	{
+		if (!actor) {
+			return false;
+		}
 		// The topology leaves (Face_*/Edge_*) can live at arbitrary depth below
 		// the Feature (Solid/Shell groups), so walk up the whole chain instead
 		// of assuming the Feature is the grandparent.
@@ -65,16 +89,7 @@ namespace MOON {
 			Feature* feature = dynamic_cast<Feature*>(cur);
 			if (feature) {
 				f = feature;
-				subValues.clear();
-				subValues.reserve(selectIds.size());
-				auto& view = GetService(Editor::Panels::SceneView);
-				auto scene = view.GetScene();
-				for (int i = 0;i < selectIds.size();i++) {
-					auto tempActor = scene->FindActorByID(selectIds[i]);
-					if (tempActor) {
-						subValues.emplace_back(tempActor->GetName());
-					}
-				}
+				subValue = actor->GetName();
 				return true;
 			}
 		}

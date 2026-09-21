@@ -16,7 +16,6 @@
 #include "editor/Toolbar/ContraintToolbar.h"
 #include "editor/Toolbar/primitiveToolbar.h"
 #include "editor/Toolbar/DesignModelingToolbar.h"
-#include "editor/View/sceneview/viewertitlebar.h"
 #include "Command/menubar/openFile.h"
 #include "Command/menubar/exportFile.h"
 #include "Command/menubar/cameraMode.h"
@@ -137,9 +136,6 @@ namespace MOON {
 			QToolBar* primitiveToolBar = new PrimitiveToolbar(self);
 			primitiveToolBar->layout()->setSpacing(0);
 			self->addToolBar(Qt::TopToolBarArea, primitiveToolBar);
-			ViewerWindowTitleBar* titleBar = new ViewerWindowTitleBar(self);
-			titleBar->layout()->setSpacing(0);
-			self->addToolBar(Qt::TopToolBarArea, titleBar);
 			DesignModelingToolbar* designModelingToolbar = new DesignModelingToolbar(self);
 			designModelingToolbar->layout()->setSpacing(0);
 			self->addToolBar(Qt::TopToolBarArea, designModelingToolbar);

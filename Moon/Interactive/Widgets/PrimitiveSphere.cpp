@@ -31,7 +31,7 @@ namespace MOON {
 		);
 		TopoDS_Shape ResultShape = mkSphere.Shape();
 	
-		auto topoActor = new Feature("SphereFeature", "Sphere");
+		auto topoActor = new Feature3D("SphereFeature", "Sphere");
 		const auto& topoComp = topoActor->GetComponent<Core::ECS::Components::CTopoShape>();
 		Part::TopoShape& topo = topoComp->GetTopoShape();
 

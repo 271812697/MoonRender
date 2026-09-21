@@ -274,4 +274,31 @@ namespace MOON
 	PolygonMesh& CoordAxis();
 	PolygonMesh& TransformAxis();
 	PolygonMesh& GizmoSketchPlane();
+
+	/** Margin between the navigation cube and the viewport corner. It leaves room
+	 * for the rotate buttons of ViewCubeWidget, which are a ring of arc slots
+	 * around the cube and stick out past the cube rectangle. */
+	constexpr int kViewCubeMargin = 24;
+	/** Side length of the square viewport the navigation cube renders into. */
+	constexpr int kViewCubeSize = 125;
+
+	/** Screen space placement of the navigation cube.
+	 *
+	 * Coordinates are scene-view pixels with the origin at the top-left corner,
+	 * matching ScreenLayout and the mouse position; the GL viewport origin is
+	 * derived from it. The rotate buttons of ViewCubeWidget anchor to the very
+	 * same rectangle through ScreenLayout, so both agree by construction.
+	 */
+	struct ViewCubeLayout
+	{
+		/** Cube center in scene-view pixels. */
+		float centerX = 0.0f;
+		float centerY = 0.0f;
+		/** Half extent of the square viewport the cube renders into. */
+		float halfSize = kViewCubeSize * 0.5f;
+		/** Bottom-left origin of the cube viewport, GL viewport coordinates. */
+		int glViewportX = 0;
+		int glViewportY = 0;
+	};
+	ViewCubeLayout ComputeViewCubeLayout(float p_viewportWidth, float p_viewportHeight);
 }

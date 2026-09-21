@@ -236,6 +236,7 @@ namespace MOON
 		{
 			return !keyDownCurr[key] && keyDownPrev[key];
 		}
+
 		void pushAlpha(float value);
 		void popAlpha();
 		void pushColor(const Eigen::Vector4<uint8_t>& color);
@@ -245,7 +246,9 @@ namespace MOON
 		void pushMatrix(const Eigen::Matrix4f& mat);
 		void popMatrix();
 	private:
-		 Editor::Panels::SceneView* renderView = nullptr;
+		Editor::Panels::SceneView* renderView = nullptr;
+		/** Cell currently highlighted by the navigation cube (-1 = none). */
+		int mViewCubeHoveredCell = -1;
 
 	private:
 		std::vector<std::string> cancelList;

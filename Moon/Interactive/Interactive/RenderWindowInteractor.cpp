@@ -158,6 +158,9 @@ RenderWindowInteractor::RenderWindowInteractor()
 
   this->EventPosition[0] = this->LastEventPosition[0] = 0;
   this->EventPosition[1] = this->LastEventPosition[1] = 0;
+  this->FlipYPosition[0] = 0;
+  this->FlipYPosition[1] = 0;
+  this->CursorInsideViewport = true;
 
 
 
@@ -359,12 +362,14 @@ void RenderWindowInteractor::ReceiveEvent(QEvent*e) {
 
 	if (t == QEvent::Enter)
 	{
+		this->CursorInsideViewport = true;
 		InvokeEvent(ExecuteCommand::EnterEvent, e);
 		return ;
 	}
 
 	if (t == QEvent::Leave)
 	{
+		this->CursorInsideViewport = false;
 		InvokeEvent(ExecuteCommand::LeaveEvent, e);
 		return ;
 	}

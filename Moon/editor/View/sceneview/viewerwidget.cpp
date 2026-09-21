@@ -38,8 +38,6 @@ namespace MOON {
 		}
 		void initializeGL() {
 			auto& tree = GetService(TreeViewPanel);
-			
-			
 			QObject::connect(&tree, &TreeViewPanel::setSelectActor, mSelf, &onActorSelected);
 			QObject::connect(&tree, &TreeViewPanel::itemHovered, mSelf, &onActorHovered);
 
@@ -50,7 +48,6 @@ namespace MOON {
 			mSceneView = new Editor::Panels::SceneView("SceneView");
 			GetService(RenderPassSettingWidget).Refresh();
 			parser->ParseFile(mReadFilePath.toStdString());
-			
 			ImRenderer::instance().init();
 
 		}

@@ -1,54 +1,24 @@
-﻿#include <filesystem>
-#include <Core/Global/ServiceLocator.h>
+﻿#include <Core/Global/ServiceLocator.h>
 #include "Context.h"
-#include <Rendering/Entities/Light.h>
-#include <Tools/Utils/SystemCalls.h>
-#include <assert.h>
 #include <Tools/Utils/PathParser.h>
 using namespace Core::Global;
 using namespace ::Core::ResourceManagement;
 
 
-Editor::Core::Context::Context(const std::string& p_projectPath, const std::string& p_projectName) :
-	projectPath(p_projectPath),
-	projectName(p_projectName),
-	projectFilePath(p_projectPath + p_projectName + ".ovproject"),
-	
-	projectAssetsPath(p_projectPath + "Assets\\"),
-	projectScriptsPath(p_projectPath + "Scripts\\"),
-	
-	sceneManager(projectAssetsPath),
-	projectSettings(projectFilePath)
+Editor::Core::Context::Context(const std::string& p_projectPath, const std::string& p_projectName)
+
 {
 	engineAssetsPath = Tools::Utils::PathParser::GetExeDirectory() + "/Moon/Data/Engine/";
-	editorAssetsPath = Tools::Utils::PathParser::GetExeDirectory() + "/Moon/Data/Editor/";
-	ModelManager::ProvideAssetPaths(projectAssetsPath, engineAssetsPath);
-	TextureManager::ProvideAssetPaths(projectAssetsPath, engineAssetsPath);
-	ShaderManager::ProvideAssetPaths(projectAssetsPath, engineAssetsPath);
-	MaterialManager::ProvideAssetPaths(projectAssetsPath, engineAssetsPath);
-
-
-
-
-	/* Graphics context creation */
+	ModelManager::ProvideAssetPaths("", engineAssetsPath);
+	TextureManager::ProvideAssetPaths("", engineAssetsPath);
+	ShaderManager::ProvideAssetPaths("", engineAssetsPath);
+	MaterialManager::ProvideAssetPaths("", engineAssetsPath);
 	driver = std::make_unique<::Rendering::Context::Driver>(::Rendering::Settings::DriverSettings{ true });
-
-
-
-	/* Editor resources */
-	editorResources = std::make_unique<Editor::Core::EditorResources>(editorAssetsPath);
-
-
-	/* Service Locator providing */
-
 	ServiceLocator::Provide<ModelManager>(modelManager);
 	ServiceLocator::Provide<TextureManager>(textureManager);
 	ServiceLocator::Provide<ShaderManager>(shaderManager);
 	ServiceLocator::Provide<MaterialManager>(materialManager);
-
 	ServiceLocator::Provide<::Core::SceneSystem::SceneManager>(sceneManager);
-
-
 	ServiceLocator::Provide<Editor::Core::Context>(*this);
 }
 
@@ -58,20 +28,5 @@ Editor::Core::Context::~Context()
 	textureManager.UnloadResources();
 	shaderManager.UnloadResources();
 	materialManager.UnloadResources();
-
-}
-
-void Editor::Core::Context::ResetProjectSettings()
-{
-
-}
-
-bool Editor::Core::Context::IsProjectSettingsIntegrityVerified()
-{
-	return false;
-}
-
-void Editor::Core::Context::ApplyProjectSettings()
-{
 
 }

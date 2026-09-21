@@ -40,6 +40,13 @@ namespace Rendering::Resources
 		virtual void Unbind() const override;
 		virtual uint32_t GetVertexCount() const override;
 		virtual uint32_t GetIndexCount(int index=0) const override;
+		/** Bytes between two vertices of the GPU vertex buffer.
+		 *
+		 * The three vertex layouts this class accepts are different sizes (a plain
+		 * Vertex is 14 floats, a VertexPositionNormal 6, a VertexBVH 10), so
+		 * anything that reads the buffer by hand - the point pass instancing a
+		 * sprite per vertex - has to ask for the stride instead of assuming one. */
+		uint32_t GetVertexStride() const { return m_vertexStride; }
 
 		virtual const Rendering::Geometry::BoundingSphere& GetBoundingSphere()  override;
 		virtual const Rendering::Geometry::bbox& GetBoundingBox() override;
@@ -75,6 +82,8 @@ namespace Rendering::Resources
 		::Rendering::Settings::EPrimitiveMode mPrimitiveMode = ::Rendering::Settings::EPrimitiveMode::TRIANGLES;
 		const uint32_t m_vertexCount;
 		const uint32_t m_indicesCount;
+		/** Set by whichever Upload() overload filled the vertex buffer. */
+		uint32_t m_vertexStride = 0;
 		std::vector<uint32_t> uploadIndicesCount;
 
 		//to sure which subRange to which material

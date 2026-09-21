@@ -6,6 +6,7 @@
 #include "Rendering/Resources/Mesh.h"
 #include "Rendering/Resources/Model.h"
 #include "renderer/Context.h"
+#include "Interactive/Screen/ScreenLayout.h"
 #include <glad/glad.h>
 #include <Tools/Utils/PathParser.h>
 namespace MOON {
@@ -265,12 +266,39 @@ namespace MOON {
 			mergeBox(face.vertex[i]);
 		}
 	}
+	ViewCubeLayout ComputeViewCubeLayout(float p_viewportWidth, float p_viewportHeight)
+	{
+		// Anchor through ScreenLayout so the cube and the screen widgets that
+		// decorate it share one implementation of the corner arithmetic.
+		ScreenLayout cubeLayout;
+		cubeLayout.anchor = EScreenAnchor::TopRight;
+		cubeLayout.offset = ImVec2(
+			static_cast<float>(kViewCubeMargin),
+			static_cast<float>(kViewCubeMargin));
+		cubeLayout.size = ImVec2(
+			static_cast<float>(kViewCubeSize),
+			static_cast<float>(kViewCubeSize));
+
+		const ScreenRect rect = cubeLayout.Resolve(
+			static_cast<int>(p_viewportWidth),
+			static_cast<int>(p_viewportHeight));
+
+		ViewCubeLayout layout;
+		layout.centerX = rect.x + rect.w * 0.5f;
+		layout.centerY = rect.y + rect.h * 0.5f;
+		layout.halfSize = rect.w * 0.5f;
+		layout.glViewportX = static_cast<int>(rect.x);
+		// GL uses a bottom-left origin, the layout a top-left one.
+		layout.glViewportY = static_cast<int>(p_viewportHeight - rect.y - rect.h);
+		return layout;
+	}
+
 	GuiWidgetPolyMesh& NavigateCube()
 	{
 		static GuiWidgetPolyMesh viewCube;
 		if (viewCube.cellArray.size() == 0) {
-			viewCube.screenPos.viewportSizeX = 125;
-			viewCube.screenPos.viewportSizeY = 125;
+			viewCube.screenPos.viewportSizeX = kViewCubeSize;
+			viewCube.screenPos.viewportSizeY = kViewCubeSize;
 			viewCube.screenPos.startX = 20;
 			viewCube.screenPos.startY = 20;
 			float halflen = 3.0f;
@@ -368,8 +396,8 @@ namespace MOON {
 				Maths::FMatrix4::Scaling({ 6,6,6 });
 			viewAxis.drawEdge = false;
 			
-			auto arrow = GetService(Editor::Core::Context).editorResources->GetModel("Arrow_Translate");
-			auto sphere= GetService(Core::ResourceManagement::ModelManager).LoadResource(":Models/Sphere.fbx");
+			auto arrow = GetModelService[":Models/Arrow_Translate.fbx"];
+			auto sphere= GetModelService[":Models/Sphere.fbx"];
 			viewAxis.addModel(arrow, model, { 0,0,255,255 });
 			viewAxis.switchNextBlock({0,0,1,1});
 			viewAxis.addModel(arrow, model.RotateOnAxisY(-90), { 255,0,0,255 });
@@ -398,9 +426,9 @@ namespace MOON {
 				Maths::FMatrix4::Scaling({ 6,6,6 });
 			poly.drawEdge = false;
 
-			auto arrow = GetService(Editor::Core::Context).editorResources->GetModel("Arrow_Translate");
-			auto sphere = GetService(Core::ResourceManagement::ModelManager).LoadResource(":Models/Sphere.fbx");
-			auto cil= GetService(Core::ResourceManagement::ModelManager).LoadResource(":Models/res.obj");
+			auto arrow = GetModelService[":Models/Arrow_Translate.fbx"];
+			auto sphere = GetModelService[":Models/Sphere.fbx"];
+			auto cil= GetModelService[":Models/res.obj"];
 			poly.addModel(cil, Maths::FMatrix4::Identity, { 255,255,255,255 });
 			poly.switchNextBlock({ 1,0,0,1 },"XAxis");
 			poly.addModel(cil, Maths::FMatrix4::Identity.RotateOnAxisZ(90.0f).RotateOnAxisX(90), {255,255,255,255});
@@ -463,8 +491,8 @@ namespace MOON {
 			float halflen = 3.0f;
 			Maths::FMatrix4 model =Maths::FMatrix4::Translation({ 0,0,0 }) * Maths::FMatrix4::Scaling({ 6,6,6 });
 			poly.drawEdge = false;
-			auto arrow = GetService(Editor::Core::Context).editorResources->GetModel("Arrow_Translate");
-			auto sphere = GetService(Core::ResourceManagement::ModelManager).LoadResource(":Models/Sphere.fbx");
+			auto arrow = GetModelService[":Models/Arrow_Translate.fbx"];
+			auto sphere = GetModelService[":Models/Sphere.fbx"];
 			poly.addModel(arrow, model, { 255,255,255,255 });
 			poly.switchNextBlock({ 0,0,1,1 }, "ZArrow");
 			poly.addModel(arrow, model.RotateOnAxisY(-90), { 255,255,255,255 });

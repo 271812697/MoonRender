@@ -8,6 +8,8 @@
 #include "Geometry.h"
 #include "Core/ResourceManagement/ModelManager.h"
 #include "renderer/SceneView.h"
+#include "renderer/Context.h"
+#include "Core/Global/ServiceLocator.h"
 #include "base/Tools2D.h"
 #include "Sketcher/SketcheTool2D.h"
 #include "core/callbackManager.h"
@@ -134,6 +136,4 @@ namespace Core::ECS::Components
         lineRener.SetMaterialAtIndex(0, *lineMat);
         lineRener.UpdateMaterialList();
 	}
-
-	
 }

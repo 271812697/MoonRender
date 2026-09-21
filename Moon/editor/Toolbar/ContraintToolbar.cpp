@@ -24,7 +24,7 @@ namespace MOON {
 	}
 	static bool lineEnds2d(SketcherObj* obj, int geoId, Base::Vector2d& s, Base::Vector2d& e)
 	{
-		const Part::Geometry* g = obj->getGeometry(geoId);
+		const Part::Geometry* g = obj->resolveGeometry(geoId);
 		if (!g || !g->is<Part::GeomLineSegment>()) {
 			return false;
 		}
@@ -71,7 +71,7 @@ namespace MOON {
 	static double lengthCurrent(SketcherObj* obj, const std::vector<SketcherObj::SelectGeoId>& sel)
 	{
 		if (sel.size() == 1 && sel[0].pointPos == SketcherObj::PointPos::none) {
-			const Part::Geometry* g = obj->getGeometry(sel[0].GeoId);
+			const Part::Geometry* g = obj->resolveGeometry(sel[0].GeoId);
 			if (!g) {
 				return 0.0;
 			}
@@ -99,7 +99,7 @@ namespace MOON {
 				return dist2d(p1, p2);
 			}
 			if (p1ok && sel[1].pointPos == SketcherObj::PointPos::none) {
-				const Part::Geometry* g2 = obj->getGeometry(sel[1].GeoId);
+				const Part::Geometry* g2 = obj->resolveGeometry(sel[1].GeoId);
 				if (g2 && g2->is<Part::GeomLineSegment>()) {
 					Base::Vector2d s, e;
 					if (lineEnds2d(obj, sel[1].GeoId, s, e)) {
@@ -131,7 +131,7 @@ namespace MOON {
 	}
 	static double radiusCurrent(SketcherObj* obj, const SketcherObj::SelectGeoId& sel)
 	{
-		const Part::Geometry* g = obj->getGeometry(sel.GeoId);
+		const Part::Geometry* g = obj->resolveGeometry(sel.GeoId);
 		if (!g) {
 			return 0.0;
 		}
@@ -414,8 +414,8 @@ namespace MOON {
 			SketcherObj* Obj = SketcherObjManager::instance().GetCurrentActiveSketcherObj();
 			std::vector<SketcherObj::SelectGeoId> listOfGeoIds = Obj->getSelectGeoPosIds();
 			if (listOfGeoIds.size() == 2) {
-				const Part::Geometry* g0 = Obj->getGeometry(listOfGeoIds[0].GeoId);
-				const Part::Geometry* g1 = Obj->getGeometry(listOfGeoIds[1].GeoId);
+				const Part::Geometry* g0 = Obj->resolveGeometry(listOfGeoIds[0].GeoId);
+				const Part::Geometry* g1 = Obj->resolveGeometry(listOfGeoIds[1].GeoId);
 				if (!g0 || !g1 || !g0->is<Part::GeomLineSegment>() || !g1->is<Part::GeomLineSegment>()) {
 					CORE_ERROR("Parallel is only supported on lines");
 					return;
@@ -465,8 +465,8 @@ namespace MOON {
 				const bool hasPoint0 = listOfGeoIds[0].pointPos != SketcherObj::PointPos::none;
 				const bool hasPoint1 = listOfGeoIds[1].pointPos != SketcherObj::PointPos::none;
 				if (!hasPoint0 && !hasPoint1) {
-					const Part::Geometry* g0 = Obj->getGeometry(listOfGeoIds[0].GeoId);
-					const Part::Geometry* g1 = Obj->getGeometry(listOfGeoIds[1].GeoId);
+					const Part::Geometry* g0 = Obj->resolveGeometry(listOfGeoIds[0].GeoId);
+					const Part::Geometry* g1 = Obj->resolveGeometry(listOfGeoIds[1].GeoId);
 					if (!g0 || !g1 || !g0->is<Part::GeomLineSegment>() || !g1->is<Part::GeomLineSegment>()) {
 						CORE_ERROR("Perpendicular is only supported on lines");
 						return;

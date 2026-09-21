@@ -1,0 +1,58 @@
+#shader vertex
+#version 450 core
+layout (std140, binding = 0) uniform EngineUBO
+{
+    mat4    ubo_Model;
+    mat4    ubo_View;
+    mat4    ubo_Projection;
+    vec3    ubo_ViewPos;
+    int     ubo_CameraType; //0 orth,1 pers
+    float   ubo_Time;
+    int     ubo_ScreenWidth;
+    int     ubo_ScreenHeight;
+    int     ubo_enableClip; //1 enable 0 disable
+    vec4    ubo_plane;
+    mat4    ubo_MirroPlaneMatrix;
+    mat4    ubo_UserMatrix;
+};
+
+layout (location = 0) in vec3 geo_Pos;
+out vec3 VSOUT_World;
+void main()
+{
+    vec4 worldPos = ubo_Model * vec4(geo_Pos, 1.0);
+    VSOUT_World=worldPos.xyz;
+    gl_Position = ubo_Projection * ubo_View * worldPos;
+}
+
+#shader fragment
+#version 450 core
+layout (std140, binding = 0) uniform EngineUBO
+{
+    mat4    ubo_Model;
+    mat4    ubo_View;
+    mat4    ubo_Projection;
+    vec3    ubo_ViewPos;
+    int     ubo_CameraType; //0 orth,1 pers
+    float   ubo_Time;
+    int     ubo_ScreenWidth;
+    int     ubo_ScreenHeight;
+    int     ubo_enableClip; //1 enable 0 disable
+    vec4    ubo_plane;
+    mat4    ubo_MirroPlaneMatrix;
+    mat4    ubo_UserMatrix;
+};
+
+in vec3 VSOUT_World;
+uniform vec4 _PickingColor = vec4(1.0);
+out vec4 FRAGMENT_COLOR;
+void main()
+{
+    if(ubo_enableClip==1){
+        float offsetw=dot(ubo_plane.xyz,VSOUT_World)+ubo_plane.w;
+        if(offsetw>0){
+            discard;
+        }
+    }
+    FRAGMENT_COLOR = _PickingColor;
+}

@@ -7,9 +7,12 @@
 #include "Im3DRenderer.h"
 #include "Interactive/MathUtil/MathUtil.h"
 #include "Settings/DebugSetting.h"
+#include "core/Global/ServiceLocator.h"
 #include "renderer/SceneView.h"
+#include "renderer/Context.h"
 #include "Core/Global/ServiceLocator.h"
 #include "EventWidget.h"
+#include "Interactive/Screen/ScreenOverlayRegistry.h"
 #include "Sketcher/SketcherObj.h"
 
 #include "editor/View/sceneview/viewerwidget.h"
@@ -4076,8 +4079,12 @@ namespace MOON
 			Eigen::Vector3f boxECenter = (viewCube.maxConner + viewCube.minConner) / 2.0;
 			Maths::FVector3 boxCenter = { boxECenter.x(),boxECenter.y(),boxECenter.z()};
 
-			viewCube.screenPos.startX = cameraParam.viewportWidth - viewCube.screenPos.viewportSizeX-5;
-			viewCube.screenPos.startY = cameraParam.viewportHeight- viewCube.screenPos.viewportSizeY-5;
+			const ViewCubeLayout cubeLayout = ComputeViewCubeLayout(
+				cameraParam.viewportWidth,
+				cameraParam.viewportHeight
+			);
+			viewCube.screenPos.startX = cubeLayout.glViewportX;
+			viewCube.screenPos.startY = cubeLayout.glViewportY;
 		    int viewPortX = viewCube.screenPos.startX;
 			int viewPortY =  viewCube.screenPos.startY;
 			float u = 2*(cameraParam.cursor.x() - viewPortX) / (float)viewCube.screenPos.viewportSizeX -1;
@@ -4095,12 +4102,29 @@ namespace MOON
 		
 			auto proj=Maths::FMatrix4::CreateOrthographic(boxExtent/2.0, 1, 0.1, boxExtent);
 			int faceIndex=viewCube.hit(ToEigenMatrix4f(proj * view),u,v);
-			if (faceIndex != -1) {
+			// The rotate buttons are drawn on top of the cube: while the cursor
+			// sits on one of them the click belongs to the widget, so the cube
+			// neither highlights a cell nor fits the view. Asking the overlay
+			// registry keeps this working for any future screen widget.
+			if (ScreenOverlayRegistry::Instance().HitsShape(
+				cameraParam.cursor.x(),
+				cameraParam.cursor.y()))
+			{
+				faceIndex = -1;
+			}
+			if (faceIndex != mViewCubeHoveredCell) {
+				// -1 resets every cell, so leaving the cube clears the highlight.
 				viewCube.setCellColor(faceIndex,{255,255,0,255});
-				if (wasKeyReleased(MouseMiddle)) {
-					auto nor=-viewCube.getCellNormal(faceIndex);
-					renderView->FitToSelectedActor({nor.x(),nor.y(),nor.z()});
-				}
+				mViewCubeHoveredCell = faceIndex;
+			}
+			if (faceIndex != -1 && wasKeyPressed(MouseLeft) && renderView != nullptr) {
+				auto nor=-viewCube.getCellNormal(faceIndex);
+				const Maths::FVector3 fitDirection{ nor.x(),nor.y(),nor.z() };
+				// Fit the selection when there is one, the scene otherwise - and the
+				// scene again if the selection has nothing to frame (a picked face is a
+				// topology leaf whose mesh lives on the actor that batches it, for
+				// example). The cube has to answer every click.
+				renderView->FitToFocus(fitDirection);
 			}
 			mCellMaterial->SetFeatures({ "WITH_EDGE","CUSTOM_PROJECT","CUSTOM_VIEWPORT"});
 			mCellMaterial->SetProperty("uModelMatrix", ToFMatrix4(viewCube.model));

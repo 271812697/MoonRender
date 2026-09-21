@@ -3,7 +3,6 @@
 #include <unordered_map>
 #include <chrono>
 #include <set>
-#include <Eigen/Core>
 #include "Interactive/EventWidget.h"
 #include "TopoShape.h"
 #include "Sketcher/SketchePlane2D.h"
@@ -14,6 +13,7 @@ namespace Part {
 	class  Geometry;
 }
 namespace MOON {
+	class Feature;
 	void defaultLabelOffsetPx(const Sketcher::Constraint* c, float& dx, float& dy);
 	class SketcherObj :public EventWidget
 	{
@@ -33,11 +33,39 @@ namespace MOON {
 			Eigen::Vector4<uint8_t> constraintColor { 255, 255, 47, 186 };
 			Eigen::Vector4<uint8_t> curveColor { 255, 255, 134, 120 };
 			Eigen::Vector4<uint8_t> constructionColor { 255, 255, 107, 142 };
-			float curveLineWidth = 4.0f;
-			float pointSize = 12.0f;
+			/** Geometry projected in from another feature: same idea as construction
+			 * geometry (reference only, never part of the shape the sketch produces),
+			 * with its own colour so it cannot be mistaken for something drawn here. */
+			Eigen::Vector4<uint8_t> externalColor { 255, 100, 0, 255 };
+			float curveLineWidth = 3.0f;
+			float pointSize = 10.0f;
 		};
 		DrawOption& drawOption() { return m_drawOption; }
 		const DrawOption& drawOption() const { return m_drawOption; }
+		/** How the solver sees a constraint of this sketch. The diagnosis is the one of
+		 * the last solve (see retrieveSolverDiagnostics). */
+		enum class ConstraintStatus
+		{
+			Ok,
+			/** Contradicts the other constraints: the sketch cannot be solved. */
+			Conflicting,
+			/** Adds nothing: something else already fixes what it asks for. */
+			Redundant,
+			/** Part of it is already enforced by the rest. */
+			PartiallyRedundant,
+			/** The solver cannot make sense of it at all (bad element, bad value). */
+			Malformed
+		};
+		/** The solver's diagnosis of one constraint, so the panels can say what is wrong
+		 * with a sketch instead of only drawing it red in the viewport. */
+		ConstraintStatus getConstraintStatus(int p_constrId) const;
+		/** Degrees of freedom of the last solve: 0 fully constrained, >0 under-,
+		 * <0 over-constrained. */
+		int getDegreesOfFreedom() const { return lastDoF; }
+		bool hasConflictingConstraints() const { return lastHasConflict; }
+		bool hasRedundantConstraints() const { return lastHasRedundancies; }
+		bool hasPartiallyRedundantConstraints() const { return lastHasPartialRedundancies; }
+		bool hasMalformedConstraints() const { return lastHasMalformedConstraints; }
 		struct SelectGeoId
 		{
 			int GeoId;
@@ -52,6 +80,7 @@ namespace MOON {
 		virtual void onLeftMouseReleased()override;
 		virtual void onKeyPress(const std::string& key)override;
 		virtual void onKeyRelease(const std::string& key)override;
+		virtual void onSetActive(bool flag)override;
 		void setPlane(const SketcherPlane2D&plane);
 		void fitCamera();
 		void beginEdit();
@@ -128,6 +157,103 @@ namespace MOON {
 			int refGeoId
 		);
 		Part::TopoShape toShape() const;
+
+		/** One piece of geometry from outside the sketch, projected into it.
+		 *
+		 * The reference is "<Type>_<index>" on p_source - the same form the task
+		 * panels store when the user picks an edge or a face - and it is resolved by
+		 * mapped name first (see ResolveSubShapeRef), so it survives a recompute of
+		 * the feature it points at.
+		 *
+		 * External geometry is *fixed* as far as the solver is concerned: the sketch
+		 * can constrain to it but never change it, which is exactly how FreeCAD feeds
+		 * it to the solver (the trailing entries of the geometry list, see
+		 * Sketch::setUpSketch()).
+		 */
+		struct ExternalGeometry
+		{
+			Feature* source = nullptr;
+			std::string reference;
+			/** Reserved for the section mode (FreeCAD's "intersection" option: take the
+			 * section of the source with the sketch plane instead of projecting it).
+			 * Only the projection is implemented so far. */
+			bool intersection = false;
+			/** Names of the source sub-shape, see ResolveSubShapeRef(). */
+			std::vector<std::string> names;
+			/** The projected curves, in sketch (u, v) coordinates. */
+			std::vector<std::unique_ptr<Part::Geometry>> geos;
+			/** The source shape the projection was made from. A refresh resolves and
+			 * projects again only when this is not the shape the source has now, so a
+			 * drag (which solves on every mouse move) does not re-project each step. */
+			TopoDS_Shape sourceShape;
+			/** Force the next refresh to redo the work even when sourceShape matches. */
+			bool dirty = true;
+			/** The source sub-shape cannot be resolved any more. */
+			bool missing = false;
+		};
+
+		/** Adds geometry of another feature to this sketch, projected into its plane.
+		 * @return the index of the new entry, or -1 when it could not be added. */
+		int addExternalGeometry(
+			Feature* p_source,
+			const std::string& p_reference,
+			bool p_intersection = false);
+		void clearExternalGeometry();
+		int getExternalGeometryCount() const {
+			return static_cast<int>(mExternalGeometry.size());
+		}
+		const ExternalGeometry* getExternalGeometry(int p_index) const;
+		/** Recomputes every projection from its source. Done before solving, so the
+		 * solver always sees the sources as they are now. */
+		void updateExternalGeometry();
+		/** Drops one entry and re-solves.
+		 * @return true when p_index existed. */
+		bool removeExternalGeometry(int p_index);
+		/** Add-external-geometry mode. While it is on, a click in the viewport picks a
+		 * sub-shape of another feature and projects it into this sketch instead of
+		 * selecting sketch geometry - the tool FreeCAD calls "external geometry". The
+		 * mode stays on until it is switched off, so several references can be picked
+		 * one after the other. */
+		void setExternalGeometryMode(bool p_on);
+		/** Whether the picks of the mode are taken as a section of the source with the
+		 * sketch plane instead of an orthographic projection of it (FreeCAD's
+		 * "intersection" flavour of the same tool). */
+		void setExternalGeometryIntersection(bool p_intersection) {
+			m_externalGeometryIntersection = p_intersection;
+		}
+		bool isExternalGeometryIntersection() const {
+			return m_externalGeometryIntersection;
+		}
+		bool isExternalGeometryMode() const { return m_externalGeometryMode; }
+		/** The feature this sketch belongs to. Its own geometry can never be an
+		 * external reference. */
+		void setOwnerFeature(Feature* p_owner) { m_ownerFeature = p_owner; }
+
+		/** "No geometry" for the selection state. The negative solver ids are taken
+		 * by the external geometry (see below), so an unused element is GeoUndef -
+		 * the same value the solver uses for an element that is not set. */
+		static constexpr int NoGeoId = Sketcher::GeoEnum::GeoUndef;
+
+		/** --- the projected curves as selection targets -------------------------
+		 * Constraints name an external curve by its solver geoId, and those ids
+		 * count from the end of the solver list (the external block is its tail):
+		 * the last curve is -1, the first is -count. The selection therefore speaks
+		 * the same numbering, and these helpers are the only place that knows how a
+		 * negative id maps onto the projection lists. */
+		int getExternalCurveCount() const;
+		/** Solver geoId of the curve at p_index of the flattened external list. */
+		int getExternalGeoId(int p_index) const;
+		/** Flattened index a negative geoId refers to, or -1 when it is not one of
+		 * the external curves. */
+		int getExternalCurveIndex(int p_geoId) const;
+		const Part::Geometry* getExternalCurve(int p_geoId) const;
+		/** True for the ids that name one of the projected curves (GeoUndef and the
+		 * other sentinels are not among them). */
+		bool isExternalGeoId(int p_geoId) const;
+		/** Read-only lookup over both halves of the solver list: internal geometry by
+		 * index, external curves by their negative id. Null when p_geoId names
+		 * nothing. */
+		const Part::Geometry* resolveGeometry(int p_geoId) const;
 		Part::TopoShape getDoneFaceShape() {
 			return doneFaceShape;
 		}
@@ -226,6 +352,78 @@ namespace MOON {
 			Base::Vector2d& a,
 			Base::Vector2d& b
 		) const;
+		/** Which part of a dimension an interaction is on. The caption only slides
+		 * along the dimension line; the line itself - arrows included - is one handle
+		 * that moves the dimension as a whole along the direction its extension lines
+		 * run in. */
+		enum class LabelHandle
+		{
+			Caption,
+			/** A length dimension: the line - arrows included - is one handle that
+			 * moves the dimension as a whole along its extension direction. */
+			DimensionLine,
+			/** An angle dimension: the arc is the handle, and dragging it changes the
+			 * radius it is drawn at while its centre stays on the vertex. */
+			AngleArc
+		};
+
+		/** Everything a linear dimension is laid out from: the measured points (in
+		 * sketch and screen space), where each end of the dimension line starts from
+		 * and the direction the line may be dragged in, the offset it sits at until it
+		 * is moved, and the pixel gap that keeps the caption clear of the line. */
+		struct StraightDimFrame
+		{
+			Base::Vector2d measuredA;
+			Base::Vector2d measuredB;
+			Eigen::Vector2f screenA;
+			Eigen::Vector2f screenB;
+			/** The two ends of the line the dimension is drawn from (each one is tied to
+			 * the point it measures by an extension line) and the unit direction the
+			 * whole line is dragged in. Both ends share the offset, so the line always
+			 * stays parallel to what it measures - axis aligned for DistanceX/Y. */
+			Eigen::Vector2f baseA;
+			Eigen::Vector2f baseB;
+			Eigen::Vector2f direction;
+			float defaultOffset = 0.0f;
+			float gapX = 0.0f;
+			float gapY = 0.0f;
+		};
+		bool straightDimFrame(
+			const Sketcher::Constraint* constraint,
+			StraightDimFrame& out
+		) const;
+		/** The offset of the dimension line along its direction: where the user dragged
+		 * it to, or the automatic offset while it was never moved. */
+		float straightDimOffset(
+			const Sketcher::Constraint* constraint,
+			float p_defaultOffset
+		) const;
+		/** The dimension line's two ends in screen space, with the dragged offsets
+		 * applied. @return false when the dimension cannot be laid out. */
+		bool straightDimShaft(
+			const Sketcher::Constraint* constraint,
+			Eigen::Vector2f& p_a,
+			Eigen::Vector2f& p_b
+		) const;
+		/** Which dimension line the cursor is on, if any. The whole line is the handle,
+		 * not only its arrow heads. */
+		int pickConstraintDimLineAt(float p_mouseX, float p_mouseY) const;
+		/** Which angle annotation arc the cursor is on, if any. */
+		int pickConstraintAngleArcAt(float p_mouseX, float p_mouseY) const;
+		/** What the cursor is on: the constraint and which of its handles, or -1.
+		 * The arrows are tested before the caption - they sit at the ends of the
+		 * dimension line, the caption in its middle. */
+		void pickLabelTarget(
+			float p_mouseX,
+			float p_mouseY,
+			int& p_constrId,
+			LabelHandle& p_handle
+		) const;
+		/** Drops the placement the user gave a dimension (caption offset, caption
+		 * parameter, arrow offsets). The maps are keyed by the constraint's address,
+		 * so a constraint that goes away has to take its entries with it - otherwise a
+		 * later constraint allocated at the same address would inherit them. */
+		void forgetConstraintLayout(const Sketcher::Constraint* p_constraint);
 		// Computes the straight dimension shaft (trackA..trackB) in screen
 		// space plus the fixed pixel gap that separates the caption from the
 		// shaft. Used both for drawing and for constraining label dragging.
@@ -265,6 +463,16 @@ namespace MOON {
 		Base::Matrix4D updateTransform()const;
 		Base::Vector2d getMouseHitSketchPlanePoint();
 		CurveSegment getCurveSegment( Part::Geometry* geo) ;
+		/** The discretization a geometry is drawn from. The sketch's own curves are
+		 * sampled when they are added, the external ones when their projection is
+		 * computed, so an entry is normally already there; this only samples when one
+		 * is missing, because drawing nothing would be worse than the extra work.
+		 * Having an entry is what marks a geometry as sampled (a point samples to no
+		 * polyline at all, so the content cannot tell). */
+		CurveSegment& segmentOf(Part::Geometry* geo);
+		/** The same without creating an entry: the hit test and the snapping must not
+		 * turn a missing cache into an empty one. */
+		const CurveSegment* findSegment(const Part::Geometry* geo) const;
 		SketcherPlane2D mPlane ;
 		Base::Matrix4D planeTransform;
 		bool isInEdit = true;
@@ -276,7 +484,11 @@ namespace MOON {
 		Sketcher::Sketch solvedSketch;
 		std::vector<Sketcher::Constraint*> mConstraintList;
 		std::vector<std::unique_ptr<Part::Geometry>>mGeoList;
-		SelectGeoId preSelectGeoId = {- 1, PointPos::none};
+		std::vector<ExternalGeometry> mExternalGeometry;
+		Feature* m_ownerFeature = nullptr;
+		bool m_externalGeometryMode = false;
+		bool m_externalGeometryIntersection = false;
+		SelectGeoId preSelectGeoId = { NoGeoId, PointPos::none };
 		std::vector<SelectGeoId> selectIds;
 		bool hasClickSelected = false;
 		bool m_dragSolverInit = false;
@@ -287,6 +499,17 @@ namespace MOON {
 		std::unordered_map<const Sketcher::Constraint*, double> m_labelManualParam;
 		int m_labelHover = -1;
 		int m_labelDrag = -1;
+		/** Which handle of the dimension m_labelHover / m_labelDrag is on. The arrows
+		 * move the dimension line itself, the caption only slides along it. */
+		LabelHandle m_labelHoverHandle = LabelHandle::Caption;
+		LabelHandle m_labelDragHandle = LabelHandle::Caption;
+		/** How far (pixels along its direction) the user dragged a dimension line;
+		 * missing means it still sits at its automatic offset. */
+		std::unordered_map<const Sketcher::Constraint*, float> m_straightDimOffsetPx;
+		/** The radius (pixels) the user dragged an angle annotation arc to. The centre
+		 * stays where the geometry puts it, so this is all that moves - and with it the
+		 * amount of arc that is drawn. */
+		std::unordered_map<const Sketcher::Constraint*, float> m_angleLabelRadiusPx;
 		Base::Vector2d m_labelDragOffsetPx;
 		Base::Vector2d m_labelDragPressPx;
 		int m_lastLabelClick = -1;
@@ -303,6 +526,19 @@ namespace MOON {
 			OverrideSelect,
 			AppendSelect
 		};
+		/** Picks the actor under the cursor and turns it into an external reference.
+		 * @return true when something was added. */
+		bool pickExternalGeometry();
+		/** Identifies every projected curve by (entry, curve in entry). Those keys
+		 * survive the block being renumbered, which the geoIds do not. */
+		std::vector<std::pair<int, int>> externalCurveKeys() const;
+		/** Rebuilds the external geoIds held by the constraints from the keys taken
+		 * before the block changed, and drops the constraints whose curve is gone.
+		 *
+		 * The ids count from the end of the solver list, so adding a curve moves
+		 * every one of them - without this, a constraint would silently end up on
+		 * another curve after the next reference is added. */
+		void remapExternalReferences(const std::vector<std::pair<int, int>>& p_oldKeys);
 		bool isHaveActiveHandler = false;
 		SelectState selectState = Stop;
 		SelectMode selectMode = OverrideSelect;

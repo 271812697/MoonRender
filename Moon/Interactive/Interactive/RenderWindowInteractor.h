@@ -128,6 +128,34 @@ namespace MOON {
 		int* GetEventPosition() {
 			return this->EventPosition;
 		}
+		/** Position of the last event with the origin at the top-left corner.
+		 *
+		 * GetEventPosition() keeps the VTK convention (origin bottom-left),
+		 * while the ImGui overlay and the ScreenWidget layouts work in
+		 * top-left pixels, so 2D widgets read the cursor from here.
+		 */
+		int* GetEventPositionFlipY()
+		{
+			this->FlipYPosition[0] = this->EventPosition[0];
+			this->FlipYPosition[1] = this->Size[1] - 1 - this->EventPosition[1];
+			return this->FlipYPosition;
+		}
+		/** Position of the previous event, same space as GetEventPosition(). */
+		int* GetLastEventPosition() {
+			return this->LastEventPosition;
+		}
+		/** Viewport size the interactor was sized to, logical pixels.
+		 *
+		 * Layout and the flip in GetEventPositionFlipY() must use the same size,
+		 * otherwise the cursor and the widgets end up in different spaces.
+		 */
+		void GetSize(int p_out[2]) const
+		{
+			p_out[0] = this->Size[0];
+			p_out[1] = this->Size[1];
+		}
+		/** True while the cursor is inside the viewport (Enter/Leave events).*/
+		bool IsCursorInsideViewport() const { return this->CursorInsideViewport; }
 		void SetEventInformationFlipY(int x, int y, int ctrl = 0, int shift = 0, char keycode = 0,
 			int repeatcount = 0, const char* keysym = nullptr)
 		{
@@ -250,6 +278,13 @@ namespace MOON {
 		char* KeySym;
 		int EventPosition[2];
 		int LastEventPosition[2];
+		/** Scratch for GetEventPositionFlipY() so the getter stays const-free. */
+		int FlipYPosition[2];
+		/** Maintained from the Enter/Leave events of the viewport widget.
+		 * Starts true so a widget that is already under the cursor can react
+		 * before the first Enter arrives; a false hover is harmless, a
+		 * permanently false one would make the overlays unclickable. */
+		bool CursorInsideViewport = true;
 		int EventSize[2];
 		int Size[2];
 		int AccumulatedDelta=0;

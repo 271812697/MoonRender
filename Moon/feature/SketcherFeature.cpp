@@ -10,6 +10,9 @@ namespace MOON {
 	public:
 		Internal(SketcherFeature* s):self(s) {
 			sketcher = std::make_shared<SketcherObj>();
+			// The sketch has to know its own feature: geometry of the sketch itself can
+			// never be an external reference.
+			sketcher->setOwnerFeature(s);
 		}
 		~Internal() {
 		}

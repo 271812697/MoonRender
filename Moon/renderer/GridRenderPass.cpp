@@ -16,7 +16,7 @@ Editor::Rendering::GridRenderPass::GridRenderPass(::Rendering::Core::CompositeRe
 	::Rendering::Core::ARenderPass(p_renderer)
 {
 	/* Grid Material */
-	m_gridMaterial.SetShader(::Core::Global::ServiceLocator::Get<Editor::Core::Context>().editorResources->GetShader("Grid"));
+	m_gridMaterial.SetShader(GetShaderService[":Shaders/Grid.ovfx"]);
 	m_gridMaterial.SetBlendable(true);
 	m_gridMaterial.SetBackfaceCulling(true);
 	m_gridMaterial.SetDepthWriting(false);
@@ -99,12 +99,10 @@ void Editor::Rendering::GridRenderPass::Draw(::Rendering::Data::PipelineState p_
 	TracyGpuZone("GridRenderPass");
 	
 	assert(m_renderer.HasDescriptor<GridDescriptor>()&&"Cannot find GridDescriptor attached to this renderer");
-	assert(m_renderer.HasFeature<::Rendering::Features::DebugShapeRenderFeature>()&& "Cannot find DebugShapeRenderFeature attached to this renderer");
 	assert(m_renderer.HasFeature<Editor::Rendering::DebugModelRenderFeature>()&&"Cannot find DebugModelRenderFeature attached to this renderer");
 	
 	auto& frameDesc = m_renderer.GetFrameDescriptor();
 	auto& gridDescriptor = m_renderer.GetDescriptor<GridDescriptor>();
-	auto& debugShapeRenderer = m_renderer.GetFeature<::Rendering::Features::DebugShapeRenderFeature>();
 	auto plane=Maths::FVector4(gridDescriptor.mirrorPlaneNormal,-gridDescriptor.mirrorPlaneNormal.Dot(gridDescriptor.mirrorPlaneCenter));
 	auto& engineBufferRenderFeature =m_renderer.GetFeature<::Core::Rendering::EngineBufferRenderFeature>();
 	Maths::FMatrix4 mirrorMat=Maths::FMatrix4::MirrorPlane(plane.x, plane.y, plane.z, plane.w);
@@ -193,7 +191,7 @@ void Editor::Rendering::GridRenderPass::Draw(::Rendering::Data::PipelineState p_
 	m_gridMaterial.SetProperty("u_MirrorTex", &color.value());
 	m_gridMaterial.SetProperty("u_MirrorShadowTex", &shadow.value());
 	m_renderer.GetFeature<DebugModelRenderFeature>()
-		.DrawModelWithSingleMaterial(pso, *::Core::Global::ServiceLocator::Get<Editor::Core::Context>().editorResources->GetModel("Plane"), m_gridMaterial, model);
+		.DrawModelWithSingleMaterial(pso, *GetModelService[":Models/Plane.fbx"], m_gridMaterial, model);
 
 	//debug
 	//if (false) {

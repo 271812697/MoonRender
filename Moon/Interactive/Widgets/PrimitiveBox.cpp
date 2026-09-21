@@ -1,4 +1,4 @@
-#include "Interactive/Widgets/PrimitiveBox.h"
+﻿#include "Interactive/Widgets/PrimitiveBox.h"
 #include "Interactive/Im3DRenderer.h"
 #include "Interactive/MathUtil/MathUtil.h"
 #include "renderer/SceneView.h"
@@ -341,7 +341,7 @@ namespace MOON {
 	{
 		BRepPrimAPI_MakeBox mkBox(2.0 * scale.x(), 2.0 * scale.y(), 2.0 * scale.z());
 		TopoDS_Shape resultShape = mkBox.Shape();
-		auto* topoActor = new Feature("BoxFeature", "Box");
+		auto* topoActor = new Feature3D("BoxFeature", "Box");
 		const auto& topoComp = topoActor->GetComponent<Core::ECS::Components::CTopoShape>();
 		Part::TopoShape& topo = topoComp->GetTopoShape();
 		topo.setShape(resultShape, false);

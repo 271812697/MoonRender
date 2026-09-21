@@ -1,4 +1,4 @@
-#include "Interactive/Widgets/AxisTranslationWidget.h"
+﻿#include "Interactive/Widgets/AxisTranslationWidget.h"
 #include "Interactive/Im3DRenderer.h"
 #include "Interactive/MathUtil/MathUtil.h"
 #include "Core/Global/ServiceLocator.h"
@@ -58,7 +58,7 @@ class AxisTranslationWidget::Internal {
 	{
 		std::vector<Eigen::Vector3f>f;
 		Maths::FMatrix4 matrix =Maths::FMatrix4::Translation({ 0,0,0 }) * Maths::FMatrix4::Scaling({ 10,10,10 });
-		auto model = GetService(Editor::Core::Context).editorResources->GetModel("Arrow_Translate");
+		auto model = GetModelService[":Models/Arrow_Translate.fbx"];
 		for (auto mesh : model->GetMeshes()) {
 			int vcnt = mesh->GetVertexCount();
 			int icnt = mesh->GetIndexCount();

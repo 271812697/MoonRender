@@ -37,7 +37,7 @@ namespace MOON
        }
 
        if (isSnapedSketchPos) {
-           renderer->drawPoint(plane.valueEigen(onSketchPos), 16,Eigen::Vector4<uint8_t>(255, 0, 255, 0));
+           renderer->drawPoint(plane.valueEigen(onSketchPos), 14,Eigen::Vector4<uint8_t>(255, 0, 255, 0));
            //renderer->drawPoint2D({ onSketchPos.x,onSketchPos.y }, Eigen::Vector4<uint8_t>(255,0,255,0), 16,gizmoPlane);
        }
        if (drawSketchPos) {

@@ -1,19 +1,8 @@
 ﻿#pragma once
 #include <Core/ECS/Actor.h>
-#include <Core/ECS/Components/CAmbientBoxLight.h>
-#include <Core/ECS/Components/CAmbientSphereLight.h>
-#include <Core/ECS/Components/CModelRenderer.h>
 #include <Core/Resources/Material.h>
-#include <Core/Rendering/SceneRenderer.h>
-#include <Core/SceneSystem/SceneManager.h>
-
-#include "Context.h"
 #include "GizmoBehaviour.h"
-
-#include <Rendering/Entities/Camera.h>
-#include <Rendering/Features/DebugShapeRenderFeature.h>
 #include <Rendering/HAL/Buffer.h>
-
 #include <cstdint>
 #include <memory>
 #include <vector>
@@ -83,23 +72,10 @@ namespace Editor::Rendering
 
 		virtual void Draw(::Rendering::Data::PipelineState p_pso) override;
 		void DrawPickableModels(::Rendering::Data::PipelineState p_pso, ::Core::SceneSystem::Scene& p_scene);
-		void DrawPickableCameras(::Rendering::Data::PipelineState p_pso, ::Core::SceneSystem::Scene& p_scene);
-		void DrawPickableReflectionProbes(::Rendering::Data::PipelineState p_pso, ::Core::SceneSystem::Scene& p_scene);
-		void DrawPickableLights(::Rendering::Data::PipelineState p_pso, ::Core::SceneSystem::Scene& p_scene);
-		void DrawPickableGizmo(
-			::Rendering::Data::PipelineState p_pso,
-			const Maths::FVector3& p_position,
-			const Maths::FQuaternion& p_rotation,
-			Editor::Core::EGizmoOperation p_operation
-		);
-
 	private:
 		::Rendering::HAL::Framebuffer m_actorPickingFramebuffer;
 		::Core::Resources::Material m_actorPickingFallbackMaterial;
 		::Core::Resources::Material m_TopoShapePickingFallbackMaterial;
-		::Core::Resources::Material m_reflectionProbeMaterial;
-		::Core::Resources::Material m_lightMaterial;
-		::Core::Resources::Material m_gizmoPickingMaterial;
 		PickPassOption mPickOption;
 
 		/** One in flight asynchronous picking readback (RGBA8, 1 pixel). */

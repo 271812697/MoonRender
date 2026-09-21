@@ -1,4 +1,4 @@
-#include "Interactive/Widgets/DrawSketchHandlerLineSet.h"
+﻿#include "Interactive/Widgets/DrawSketchHandlerLineSet.h"
 #include "Sketcher/SketcherObjManager.h"
 #include "Sketcher/SketcherObj.h"
 #include "Maths/FMatrix4.h"
@@ -158,9 +158,14 @@ namespace MOON {
 
             EditCurve[0] = onSketchPos;  // this may be overwritten if previousCurve is found
             SketcherObj::SelectGeoId preSelectId= obj->testSelect(onSketchPos);
-            if (preSelectId.GeoId != -1&&(preSelectId.pointPos== SketcherObj::PointPos::start|| preSelectId.pointPos == SketcherObj::PointPos::end)) {
-                Part::Geometry* geo= obj->getGeometry(preSelectId.GeoId);
-                if (geo->is<Part::GeomLineSegment>() || geo->is<Part::GeomArcOfCircle>()) {
+            // Only the sketch's own geometry can be continued from: the tool works on
+            // this sketch, and an external reference must not become its predecessor.
+            if (preSelectId.GeoId >= 0
+                && (preSelectId.pointPos == SketcherObj::PointPos::start
+                    || preSelectId.pointPos == SketcherObj::PointPos::end)) {
+                Part::Geometry* geo = obj->getGeometry(preSelectId.GeoId);
+                if (geo != nullptr
+                    && (geo->is<Part::GeomLineSegment>() || geo->is<Part::GeomArcOfCircle>())) {
                     previousCurve = preSelectId.GeoId;
                     previousPosId = preSelectId.pointPos;
                     updateTransitionData(previousCurve,
@@ -672,7 +677,7 @@ namespace MOON {
     void DrawSketchHandlerLineSet::quit()
     {
         // We must see if we need to create a B-spline before cancelling everything
-// and now just like any other Handler,
+        // and now just like any other Handler,
 
       
         bool continuousMode = true;

@@ -10,6 +10,9 @@ namespace MOON {
 		~SketchToolbar()override;
 		void disableAllHandlers();
 		void setUncheckedAction(const std::string&name);
+		/** Unchecks the external geometry button (the mode was left from elsewhere,
+		 * e.g. Escape or the end of the sketch). */
+		void uncheckExternalGeometry();
 	private:
 		class SketchToolbarInternal;
 		SketchToolbarInternal* mInternal = nullptr;
