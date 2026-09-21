@@ -203,6 +203,9 @@ namespace MOON {
         mConstraintList = new QListWidget(this);
         mCurveList = new QListWidget(this);
         mExternalList = new QListWidget(this);
+        mSolverStatus = new QLabel(this);
+        mSolverStatus->setWordWrap(true);
+        mSolverStatus->setTextFormat(Qt::RichText);
         mConstraintList->setMinimumHeight(110);
         mCurveList->setMinimumHeight(110);
         mExternalList->setMinimumHeight(80);
@@ -214,6 +217,16 @@ namespace MOON {
                 group->addSubWidget(list);
             }
         };
+        // The solver's verdict is attached before the constraint list, so it reads as
+        // the heading of that list: the degree of freedom count and what is wrong with
+        // the constraints below it.
+        {
+            const auto it = groupToIndex.find("Constraints");
+            if (it != groupToIndex.end()) {
+                auto* group = m_comps[it->second].first;
+                group->addSubWidget(mSolverStatus);
+            }
+        }
         attachList("Constraints", mConstraintList);
         attachList("Curves", mCurveList);
         attachList("External Geometry", mExternalList);
@@ -364,10 +377,12 @@ namespace MOON {
         if (!obj) {
             return;
         }
+        updateSolverStatus(obj);
 
-        QStringList constraintLines;
+     	QStringList constraintLines;
         QStringList constraintIconPaths;
         std::vector<bool> constraintVisible;
+        std::vector<SketcherObj::ConstraintStatus> constraintStatus;
         for (int i = 0; i < obj->getConstraintCount(); ++i) {
             const Sketcher::Constraint* c = obj->getConstraint(i);
             if (!c) {
@@ -375,6 +390,10 @@ namespace MOON {
             }
             constraintIconPaths << constraintIconPath(c->Type);
             constraintVisible.push_back(c->isVisible);
+            // The solver's diagnosis of this row, so a sketch that cannot be solved
+            // says which constraint is to blame instead of only going red in the
+            // viewport.
+            constraintStatus.push_back(obj->getConstraintStatus(i));
             QString line = QString("%1  %2").arg(i).arg(c->typeToString().c_str());
             if (c->First != Sketcher::GeoEnum::GeoUndef) {
                 line += QString("  F%1/%2").arg(c->First).arg(static_cast<int>(c->FirstPos));
@@ -389,6 +408,22 @@ namespace MOON {
                 char buf[48] = { 0 };
                 std::snprintf(buf, sizeof(buf), " = %.2f", c->getValue());
                 line += buf;
+            }
+            switch (constraintStatus.back()) {
+            case SketcherObj::ConstraintStatus::Conflicting:
+                line += "   [conflict]";
+                break;
+            case SketcherObj::ConstraintStatus::Malformed:
+                line += "   [malformed]";
+                break;
+            case SketcherObj::ConstraintStatus::Redundant:
+                line += "   [redundant]";
+                break;
+            case SketcherObj::ConstraintStatus::PartiallyRedundant:
+                line += "   [partly redundant]";
+                break;
+            case SketcherObj::ConstraintStatus::Ok:
+                break;
             }
             constraintLines << line;
         }
@@ -454,7 +489,16 @@ namespace MOON {
             externalLines << line;
         }
 
-        const QString cache = constraintLines.join(QStringLiteral("\n")) + QStringLiteral("|")
+        // The solver's verdict is part of what is shown, so it is part of the cache
+        // key: a solve that turns a constraint from fine into redundant has to rebuild
+        // the rows even though their text did not change.
+        QString statusKey;
+        for (const SketcherObj::ConstraintStatus status : constraintStatus) {
+            statusKey += QString::number(static_cast<int>(status));
+        }
+        const QString cache = constraintLines.join(QStringLiteral("\n"))
+            + QStringLiteral("|") + statusKey
+            + QStringLiteral("|")
             + curveLines.join(QStringLiteral("\n")) + QStringLiteral("|")
             + externalLines.join(QStringLiteral("\n"));
         if (cache == mListCache && mCurveList->count() == curveLines.size()) {
@@ -470,7 +514,9 @@ namespace MOON {
             const QString& text,
             bool visible,
             int userData,
-            const std::function<void(bool)>& onToggled
+            const std::function<void(bool)>& onToggled,
+            const QString& textColor = QString(),
+            const QString& tooltip = QString()
         ) {
             auto* item = new QListWidgetItem();
             item->setData(Qt::UserRole, userData);
@@ -496,6 +542,12 @@ namespace MOON {
             }
             auto* label = new QLabel(text, row);
             label->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+            if (!textColor.isEmpty()) {
+                label->setStyleSheet(QString("color: %1;").arg(textColor));
+            }
+            if (!tooltip.isEmpty()) {
+                label->setToolTip(tooltip);
+            }
             rowLayout->addWidget(eye);
             if (typeLabel) {
                 rowLayout->addWidget(typeLabel);
@@ -527,13 +579,40 @@ namespace MOON {
 
         mConstraintList->clear();
         for (int i = 0; i < constraintLines.size(); ++i) {
+            QString colour;
+            QString tooltip;
+            switch (constraintStatus[i]) {
+            case SketcherObj::ConstraintStatus::Conflicting:
+                colour = "#ff6b6b";
+                tooltip = "The solver cannot satisfy this together with the other "
+                    "constraints of the sketch.";
+                break;
+            case SketcherObj::ConstraintStatus::Malformed:
+                colour = "#ff6b6b";
+                tooltip = "The solver cannot make sense of this constraint "
+                    "(missing element or value).";
+                break;
+            case SketcherObj::ConstraintStatus::Redundant:
+                colour = "#e8c46b";
+                tooltip = "Something else in the sketch already enforces this, so it "
+                    "adds no degree of freedom.";
+                break;
+            case SketcherObj::ConstraintStatus::PartiallyRedundant:
+                colour = "#e8c46b";
+                tooltip = "Part of this is already enforced by the other constraints.";
+                break;
+            case SketcherObj::ConstraintStatus::Ok:
+                break;
+            }
             addEyeRow(
                 mConstraintList,
                 constraintIconPaths[i].isEmpty() ? QIcon() : QIcon(constraintIconPaths[i]),
                 constraintLines[i],
                 constraintVisible[i],
                 i,
-                [obj, i](bool on) { obj->setConstraintVisible(i, on); }
+                [obj, i](bool on) { obj->setConstraintVisible(i, on); },
+                colour,
+                tooltip
             );
         }
         mCurveList->clear();
@@ -586,6 +665,48 @@ namespace MOON {
             mExternalList->setItemWidget(item, row);
         }
         syncCurveListSelection();
+    }
+    void SketchTaskDialog::updateSolverStatus(SketcherObj* p_sketch)
+    {
+        if (mSolverStatus == nullptr || p_sketch == nullptr) {
+            return;
+        }
+        const int dof = p_sketch->getDegreesOfFreedom();
+        QString head;
+        QString colour;
+        if (dof < 0) {
+            head = QString("Over-constrained (%1)").arg(dof);
+            colour = "#ff6b6b";
+        }
+        else if (dof == 0) {
+            head = "Fully constrained";
+            colour = "#8fdc8f";
+        }
+        else {
+            head = QString("Under-constrained: %1 degree%2 of freedom")
+                .arg(dof)
+                .arg(dof == 1 ? "" : "s");
+            colour = "#e8c46b";
+        }
+
+        QStringList problems;
+        if (p_sketch->hasConflictingConstraints()) {
+            problems << "<span style='color:#ff6b6b'>conflicting</span>";
+        }
+        if (p_sketch->hasMalformedConstraints()) {
+            problems << "<span style='color:#ff6b6b'>malformed</span>";
+        }
+        if (p_sketch->hasRedundantConstraints()) {
+            problems << "<span style='color:#e8c46b'>redundant</span>";
+        }
+        if (p_sketch->hasPartiallyRedundantConstraints()) {
+            problems << "<span style='color:#e8c46b'>partly redundant</span>";
+        }
+        QString html = QString("<span style='color:%1'>%2</span>").arg(colour, head);
+        if (!problems.isEmpty()) {
+            html += QString(" &mdash; ") + problems.join(QStringLiteral(", "));
+        }
+        mSolverStatus->setText(html);
     }
     void SketchTaskDialog::syncCurveListSelection()
     {

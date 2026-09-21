@@ -4120,14 +4120,11 @@ namespace MOON
 			if (faceIndex != -1 && wasKeyPressed(MouseLeft) && renderView != nullptr) {
 				auto nor=-viewCube.getCellNormal(faceIndex);
 				const Maths::FVector3 fitDirection{ nor.x(),nor.y(),nor.z() };
-				// Fit the selection when there is one; otherwise fit the scene so
-				// the cube stays useful with nothing selected.
-				if (renderView->IsSelectActor()) {
-					renderView->FitToSelectedActor(fitDirection);
-				}
-				else {
-					renderView->FitToScene(fitDirection);
-				}
+				// Fit the selection when there is one, the scene otherwise - and the
+				// scene again if the selection has nothing to frame (a picked face is a
+				// topology leaf whose mesh lives on the actor that batches it, for
+				// example). The cube has to answer every click.
+				renderView->FitToFocus(fitDirection);
 			}
 			mCellMaterial->SetFeatures({ "WITH_EDGE","CUSTOM_PROJECT","CUSTOM_VIEWPORT"});
 			mCellMaterial->SetProperty("uModelMatrix", ToFMatrix4(viewCube.model));

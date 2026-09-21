@@ -42,6 +42,30 @@ namespace MOON {
 		};
 		DrawOption& drawOption() { return m_drawOption; }
 		const DrawOption& drawOption() const { return m_drawOption; }
+		/** How the solver sees a constraint of this sketch. The diagnosis is the one of
+		 * the last solve (see retrieveSolverDiagnostics). */
+		enum class ConstraintStatus
+		{
+			Ok,
+			/** Contradicts the other constraints: the sketch cannot be solved. */
+			Conflicting,
+			/** Adds nothing: something else already fixes what it asks for. */
+			Redundant,
+			/** Part of it is already enforced by the rest. */
+			PartiallyRedundant,
+			/** The solver cannot make sense of it at all (bad element, bad value). */
+			Malformed
+		};
+		/** The solver's diagnosis of one constraint, so the panels can say what is wrong
+		 * with a sketch instead of only drawing it red in the viewport. */
+		ConstraintStatus getConstraintStatus(int p_constrId) const;
+		/** Degrees of freedom of the last solve: 0 fully constrained, >0 under-,
+		 * <0 over-constrained. */
+		int getDegreesOfFreedom() const { return lastDoF; }
+		bool hasConflictingConstraints() const { return lastHasConflict; }
+		bool hasRedundantConstraints() const { return lastHasRedundancies; }
+		bool hasPartiallyRedundantConstraints() const { return lastHasPartialRedundancies; }
+		bool hasMalformedConstraints() const { return lastHasMalformedConstraints; }
 		struct SelectGeoId
 		{
 			int GeoId;

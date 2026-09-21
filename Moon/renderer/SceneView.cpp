@@ -157,6 +157,18 @@ void Editor::Panels::SceneView::FitToSelectedActor(const Maths::FVector3& dir)
 	// fit always comes out level (see PoseForDirection below).
 	ApplyFitPose(sphere, dir, PoseForDirection(dir));
 }
+void Editor::Panels::SceneView::FitToFocus(const Maths::FVector3& dir)
+{
+	// The selection when there is one, the whole scene otherwise - and the scene again
+	// when the selection cannot be framed at all. A view command that does nothing is
+	// never what the user meant by clicking it.
+	::Rendering::Geometry::BoundingSphere sphere;
+	if (!GetFocusSphere(sphere))
+	{
+		return;
+	}
+	ApplyFitPose(sphere, dir, PoseForDirection(dir));
+}
 
 void Editor::Panels::SceneView::LookAt(const Maths::FVector3& pivot, const Maths::FVector3& dir, float radius)
 {
@@ -206,7 +218,18 @@ bool Editor::Panels::SceneView::GetSelectionSphere(
 	{
 		return false;
 	}
+	// A picked face or edge is only a topology leaf: the mesh it belongs to lives on
+	// the actor that batches it (AllFaces / AllEdges, or the topo actor itself), and
+	// the leaf carries no model renderer of its own. Walk up until one is found, so a
+	// selected face can still be framed - otherwise anything that fits the selection
+	// (the view cube above all) silently does nothing whenever a face is selected.
 	auto* modelRenderer = actor->GetComponent<CModelRenderer>();
+	for (auto* parent = actor; modelRenderer == nullptr && parent != nullptr;
+		parent = parent->HasParent() ? parent->GetParent() : nullptr)
+	{
+		modelRenderer = parent->GetComponent<CModelRenderer>();
+		actor = parent;
+	}
 	if (modelRenderer == nullptr)
 	{
 		return false;

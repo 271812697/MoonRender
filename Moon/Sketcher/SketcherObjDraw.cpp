@@ -1509,6 +1509,27 @@ namespace MOON {
         return contains(lastConflicting) || contains(lastRedundant)
             || contains(lastPartiallyRedundant) || contains(lastMalformedConstraints);
     }
+    SketcherObj::ConstraintStatus SketcherObj::getConstraintStatus(int p_constrId) const
+    {
+        const auto contains = [p_constrId](const std::vector<int>& list) {
+            return std::find(list.begin(), list.end(), p_constrId) != list.end();
+            };
+        // A constraint can show up in more than one list; the most severe one is the
+        // one worth showing.
+        if (contains(lastConflicting)) {
+            return ConstraintStatus::Conflicting;
+        }
+        if (contains(lastMalformedConstraints)) {
+            return ConstraintStatus::Malformed;
+        }
+        if (contains(lastRedundant)) {
+            return ConstraintStatus::Redundant;
+        }
+        if (contains(lastPartiallyRedundant)) {
+            return ConstraintStatus::PartiallyRedundant;
+        }
+        return ConstraintStatus::Ok;
+    }
     bool SketcherObj::computeConstraintLabel(
         int constrId,
         Base::Vector2d& anchorSketch,
