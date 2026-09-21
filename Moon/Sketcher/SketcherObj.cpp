@@ -919,7 +919,18 @@ namespace MOON {
         view.GetCameraController().EnableRotate(true);
         doneWireShape = toShape();
         if (!doneWireShape.isEmpty()) {
-            doneFaceShape = doneWireShape.makeElementFace(nullptr, "Part::FaceMakerBullseye");
+            try
+            {
+                 doneFaceShape = doneWireShape.makeElementFace(nullptr, "Part::FaceMakerBullseye");
+            }
+            catch (Part::NullShapeException&e)
+            {
+                CORE_ERROR("the shape is null ,can't make a face");
+            }
+            catch (Base::ValueError&e) {
+                CORE_ERROR(e.what());
+            }
+
         }
         GetService(SketchToolbar).disableAllHandlers();
     }

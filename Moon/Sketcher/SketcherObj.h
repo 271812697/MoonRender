@@ -3,7 +3,6 @@
 #include <unordered_map>
 #include <chrono>
 #include <set>
-#include <Eigen/Core>
 #include "Interactive/EventWidget.h"
 #include "TopoShape.h"
 #include "Sketcher/SketchePlane2D.h"
@@ -37,9 +36,9 @@ namespace MOON {
 			/** Geometry projected in from another feature: same idea as construction
 			 * geometry (reference only, never part of the shape the sketch produces),
 			 * with its own colour so it cannot be mistaken for something drawn here. */
-			Eigen::Vector4<uint8_t> externalColor { 255, 255, 0, 255 };
-			float curveLineWidth = 4.0f;
-			float pointSize = 12.0f;
+			Eigen::Vector4<uint8_t> externalColor { 255, 100, 0, 255 };
+			float curveLineWidth = 3.0f;
+			float pointSize = 10.0f;
 		};
 		DrawOption& drawOption() { return m_drawOption; }
 		const DrawOption& drawOption() const { return m_drawOption; }

@@ -132,7 +132,7 @@ namespace MOON {
     void SketcherObj::fitCamera()
     {
         auto& view = GetService(Editor::Panels::SceneView);
-        view.GetCameraController().EnableRotate(false);
+        //view.GetCameraController().EnableRotate(false);
         view.GetCamera()->SetSize(100);
         view.GetCamera()->SetProjectionMode(Rendering::Settings::EProjectionMode::ORTHOGRAPHIC);
         float pos = view.GetCamera()->GetFar() / 2.0;

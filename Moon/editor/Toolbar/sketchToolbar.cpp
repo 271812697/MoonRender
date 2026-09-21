@@ -167,8 +167,8 @@ namespace MOON {
 			symmetry->setIcon(":/widgets/icons/Sketcher_Symmetry.svg");
 			fillet->setIcon(":/widgets/icons/Sketcher_CreateFillet.svg");
 			offset->setIcon(":/widgets/icons/Sketcher_Offset.svg");
-			external->setIcon(":/widgets/icons/Sketcher_External.svg");
-			externalIntersection->setIcon(":/widgets/icons/Sketcher_External_Intersection.svg");
+			external->setIcon(":/widgets/icons/Sketcher_Projection.svg");
+			externalIntersection->setIcon(":/widgets/icons/Sketcher_Intersection.svg");
 			self->addAction(point->action());
 			self->addAction(line->action());
 			self->addAction(lineSet->action());

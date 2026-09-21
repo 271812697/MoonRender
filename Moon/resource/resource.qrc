@@ -81,8 +81,8 @@
 		    <file>icons/Sketcher_Symmetry.svg</file>
 		    <file>icons/Sketcher_CreateFillet.svg</file>
 		    <file>icons/Sketcher_Offset.svg</file>
-		    <file>icons/Sketcher_External.svg</file>
-		    <file>icons/Sketcher_External_Intersection.svg</file>
+		    <file>icons/Sketcher_Projection.svg</file>
+		    <file>icons/Sketcher_Intersection.svg</file>
 		    <file>icons/constraint/Constraint_Coincident.svg</file>
         <file>icons/constraint/Constraint_Horizontal.svg</file>
         <file>icons/constraint/Constraint_Vertical.svg</file>
