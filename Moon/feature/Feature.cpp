@@ -38,9 +38,55 @@ namespace MOON {
 	{
 		return true;
 	}
+	Part::TopoShape Feature::getWorldTopoShape()
+	{
+		Part::TopoShape shape = GetTopoShape();
+		if (shape.isNull()) {
+			return shape;
+		}
+		applyWorldTransform(*this, shape);
+		return shape;
+	}
+	void Feature::applyWorldTransform(Feature& p_feature, Part::TopoShape& p_shape)
+	{
+		if (p_shape.isNull()) {
+			return;
+		}
+		// Nothing to do while the feature sits where it was built, which is the common
+		// case: only a pose the user gave it changes what a consumer has to see.
+		const Maths::FMatrix4& world = p_feature.transform.GetWorldMatrix();
+		bool identity = true;
+		for (int i = 0; i < 16 && identity; ++i) {
+			const float expected = (i % 5 == 0) ? 1.0f : 0.0f;
+			identity = std::abs(world.data[i] - expected) < 1.0e-6f;
+		}
+		if (identity) {
+			return;
+		}
+
+		const Base::Matrix4D matrix(
+			world.data[0], world.data[1], world.data[2], world.data[3],
+			world.data[4], world.data[5], world.data[6], world.data[7],
+			world.data[8], world.data[9], world.data[10], world.data[11],
+			world.data[12], world.data[13], world.data[14], world.data[15]
+		);
+		// A rigid motion only adds a location, which keeps the mapped names of the shape
+		// alive - the references downstream (and the sketch that projects them) rely on
+		// them. A scaled transform needs the topology rebuilt, which checkScale handles.
+		CORE_INFO(
+			"[Feature] {0}: handing its shape out with the transform of the actor",
+			p_feature.GetName());
+		p_shape.transformShape(matrix, /*copy*/false, /*checkScale*/true);
+	}
 	Part::TopoShape Feature::getBaseTopoShape()
 	{
-		return m_baseFeature->GetTopoShape();
+		if (m_baseFeature == nullptr) {
+			CORE_WARN(
+				"[Feature] {0}: has no base feature to take a shape from",
+				GetName());
+			return Part::TopoShape();
+		}
+		return m_baseFeature->getWorldTopoShape();
 	}
 	Part::TopoShape Feature::resolveBaseSubShape(int p_index)
 	{
@@ -48,11 +94,14 @@ namespace MOON {
 			|| p_index >= static_cast<int>(subValues.size())) {
 			return Part::TopoShape();
 		}
-		auto comp = m_baseFeature->GetComponent<Core::ECS::Components::CTopoShape>();
-		if (comp == nullptr) {
+		// Resolve against the base as a consumer sees it - its own transform included -
+		// exactly like getBaseTopoShape() does. Otherwise a face or an edge picked for a
+		// profile would be the one at the position the base was built at, not the
+		// position it is shown at.
+		Part::TopoShape baseShape = m_baseFeature->getWorldTopoShape();
+		if (baseShape.isNull()) {
 			return Part::TopoShape();
 		}
-		Part::TopoShape& baseShape = comp->GetTopoShape();
 
 		if (m_referenceNames.size() < subValues.size()) {
 			m_referenceNames.resize(subValues.size());

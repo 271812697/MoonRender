@@ -61,7 +61,9 @@ namespace MOON {
                         //2.设置基于最后一个feature
                         FeatureBody::instance().setBaseFeatureFor(extrudeFeature);
                         extrudeFeature->setProfile(sketchFeature);
-                        faceShape = sketchFeature->getSketcherObj()->getDoneFaceShape();
+                        // Through the feature, so the pose of the sketch is taken into
+                        // account here exactly like it is where the pad is built.
+                        faceShape = extrudeFeature->getProfileFace();
                     }
                 } 
             }

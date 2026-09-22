@@ -13,6 +13,26 @@ namespace MOON {
 			subValues = values;
 		}
 		Feature* getBaseFeature() { return m_baseFeature; }
+		/** The shape another feature should model with: this feature's stored topology
+		 * with its own transform applied.
+		 *
+		 * The stored shape already carries the placement of the operation - a sketch
+		 * carries the placement of its plane, for instance - while the transform of the
+		 * actor is the pose the feature was given from the outside (the property panel,
+		 * the primitive dragger, ...). Drawing applies that pose through the actor
+		 * matrices, so modeling has to apply it here too: otherwise moving a feature
+		 * would move only what is drawn, and everything built on top of it would stay
+		 * where it was.
+		 *
+		 * Every consumer of a feature goes through this - getBaseTopoShape(),
+		 * resolveBaseSubShape() and ResolveSubShapeRef() - so a reference always lands on
+		 * the shape as it is seen, whatever kind of feature it points at. */
+		Part::TopoShape getWorldTopoShape();
+		/** The same, for the consumers that hold a shape of their own rather than the
+		 * actor's: a sketch keeps the face it produced on the sketch object, not on the
+		 * feature, and the profile of a pad is taken from there. Does nothing while the
+		 * feature sits at the origin with no scale. */
+		static void applyWorldTransform(Feature& p_feature, Part::TopoShape& p_shape);
 		Part::TopoShape getBaseTopoShape();
 		Part::TopoShape getBaseTopoFaceShape();
 		std::vector<Part::TopoShape> getBaseTopoFaceShapes();

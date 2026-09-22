@@ -17,11 +17,13 @@ namespace MOON
 		const std::string& p_reference,
 		std::vector<std::string>& p_names)
 	{
-		auto comp = p_source.GetComponent<Core::ECS::Components::CTopoShape>();
-		if (comp == nullptr) {
+		// The source is taken as it is seen: a feature that was moved (its actor
+		// transform) has moved for whoever references it as well. Keeping the two in step
+		// here is what makes the sketch's external geometry follow a moved feature.
+		Part::TopoShape baseShape = p_source.getWorldTopoShape();
+		if (baseShape.isNull()) {
 			return Part::TopoShape();
 		}
-		Part::TopoShape& baseShape = comp->GetTopoShape();
 
 		// 1) By the names recorded when the reference was last resolved: this is the
 		// path that survives a recompute of the source.
