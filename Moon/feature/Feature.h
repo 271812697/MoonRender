@@ -39,6 +39,16 @@ namespace MOON {
 		Part::TopoShape getBaseTopoEdgeShape();
 		std::vector<Part::TopoShape> getBaseTopoEdgeShapes();
 	    Part::TopoShape& getPreviewShape();
+		/** Hands the shape this feature produced to the actor.
+		 *
+		 * The mapped names of that shape are what a feature above resolves its
+		 * references against. A shape that arrives without them - the raw shape
+		 * overload of setShape() resets the element map - turns every reference to
+		 * this feature into a position in its enumeration, which the next recompute
+		 * is free to move. The warning logged here is what makes that visible instead
+		 * of leaving it to be discovered as a reference that points at the wrong
+		 * element months later. */
+		void setResultShape(Part::TopoShape p_shape);
 		void makeDone();
 	protected:
 		/** Resolves one entry of subValues against the *current* shape of the base

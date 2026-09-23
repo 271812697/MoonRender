@@ -76,42 +76,64 @@ namespace MOON {
                     feature->setSubValues(subValues);
                     self->setFeature(feature);
 
-                    Part::TopoShape baseShape=feature->getBaseTopoShape();
-                    std::vector<Part::TopoShape> shapes = feature->getBaseTopoEdgeShapes();
-                    feature->len = baseShape.getBoundBoxOptimal().CalcDiagonalLength() * 0.01;;
-                    feature->radius = safeInitialFilletRadius(
-                        shapes,
-                        baseShape.getBoundBoxOptimal().CalcDiagonalLength()
-                    );
+                    Part::TopoShape baseShape;
+                    std::vector<Part::TopoShape> shapes;
+                    // Opening this panel reads the shape the fillet sits on. A
+                    // reference that the recomputed shape cannot answer any more, or
+                    // a kernel failure while looking for a radius, must not take the
+                    // panel (or the application) down with it: the panel opens and
+                    // the log says what went wrong.
+                    try {
+                        baseShape = feature->getBaseTopoShape();
+                        shapes = feature->getBaseTopoEdgeShapes();
+                        feature->len
+                            = baseShape.getBoundBoxOptimal().CalcDiagonalLength() * 0.01;
+                        feature->radius = safeInitialFilletRadius(
+                            shapes,
+                            baseShape.getBoundBoxOptimal().CalcDiagonalLength()
+                        );
 
-                    // Keep shrinking until the radius really produces a fillet.
-                    // execute() only touches the shape once it succeeds, so a
-                    // failed attempt leaves the previous (smaller) result.
-                    int shrinkGuards = 0;
-                    while (feature->radius > 0.001f && !feature->execute()) {
-                        feature->radius *= 0.5f;
-                        if (++shrinkGuards > 24) {
-                            break;
+                        // Keep shrinking until the radius really produces a fillet.
+                        // execute() only touches the shape once it succeeds, so a
+                        // failed attempt leaves the previous (smaller) result.
+                        int shrinkGuards = 0;
+                        while (feature->radius > 0.001f && !feature->execute()) {
+                            feature->radius *= 0.5f;
+                            if (++shrinkGuards > 24) {
+                                break;
+                            }
                         }
                     }
+                    catch (Base::Exception& e) {
+                        CORE_ERROR("[Fillet] {0}: {1}", feature->GetName(), e.what());
+                    }
+                    catch (Standard_Failure& e) {
+                        CORE_ERROR(
+                            "[Fillet] {0}: {1}",
+                            feature->GetName(),
+                            e.GetMessageString());
+                    }
 
-                    // Attach the arrow to the first edge
-                    Part::TopoShape edge = shapes[0];
-                    auto [face1, face2] = getAdjacentFacesFromEdge(edge, baseShape);
-                    DraggerPlacementProps props1 = getDraggerPlacementFromEdgeAndFace(edge, face1);
-                    DraggerPlacementProps props2 = getDraggerPlacementFromEdgeAndFace(edge, face2);
-                    feature->origin1[0] = props1.position.x;
-                    feature->origin1[1] = props1.position.y;
-                    feature->origin1[2] = props1.position.z;
-                    feature->dir1[0] = props1.dir.x;
-                    feature->dir1[1] = props1.dir.y;
-                    feature->dir1[2] = props1.dir.z;
-                    feature->origin2[0] = props2.position.x;
-                    feature->origin2[1] = props2.position.y;
-                    feature->origin2[2] = props2.position.z;
-                    feature->dir2[0] = props2.dir.x;
-                    feature->dir2[1] = props2.dir.y;
-                    feature->dir2[2] = props2.dir.z;
+                    // Attach the arrow to the first edge, when the shape has one
+                    // that resolved.
+                    if (!shapes.empty() && !shapes[0].isNull()) {
+                        Part::TopoShape edge = shapes[0];
+                        auto [face1, face2] = getAdjacentFacesFromEdge(edge, baseShape);
+                        DraggerPlacementProps props1 = getDraggerPlacementFromEdgeAndFace(edge, face1);
+                        DraggerPlacementProps props2 = getDraggerPlacementFromEdgeAndFace(edge, face2);
+                        feature->origin1[0] = props1.position.x;
+                        feature->origin1[1] = props1.position.y;
+                        feature->origin1[2] = props1.position.z;
+                        feature->dir1[0] = props1.dir.x;
+                        feature->dir1[1] = props1.dir.y;
+                        feature->dir1[2] = props1.dir.z;
+                        feature->origin2[0] = props2.position.x;
+                        feature->origin2[1] = props2.position.y;
+                        feature->origin2[2] = props2.position.z;
+                        feature->dir2[0] = props2.dir.x;
+                        feature->dir2[1] = props2.dir.y;
+                        feature->dir2[2] = props2.dir.z;
+                    }
 
 
                 }

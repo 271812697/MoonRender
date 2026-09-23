@@ -5,6 +5,7 @@
 #include <Core/Global/ServiceLocator.h>
 #include "Feature.h"
 #include "feature/FeatureBody.h"
+#include "feature/SubShapeRef.h"
 #include "SketcherFeature.h"
 #include "Sketcher/SketcherObj.h"
 #include "TopoShape.h"
@@ -88,6 +89,17 @@ namespace MOON {
 		}
 		return m_baseFeature->getWorldTopoShape();
 	}
+	void Feature::setResultShape(Part::TopoShape p_shape)
+	{
+		if (!p_shape.isNull() && !p_shape.hasElementMap()) {
+			CORE_WARN(
+				"[Feature] {0}: it hands on a shape without mapped names; a feature "
+				"built on it can only reference its elements by index, which a "
+				"recompute is free to move",
+				GetName());
+		}
+		topoShape->setShape(p_shape);
+	}
 	Part::TopoShape Feature::resolveBaseSubShape(int p_index)
 	{
 		if (m_baseFeature == nullptr || p_index < 0
@@ -107,84 +119,14 @@ namespace MOON {
 			m_referenceNames.resize(subValues.size());
 		}
 
-		// 1) By the name recorded the first time this reference was used: this is
-		// the path that survives a recompute of the base feature.
-		const std::string& reference = subValues[p_index];
-		for (const std::string& name : m_referenceNames[p_index]) {
-			TopoDS_Shape byName = baseShape.getSubShape(name.c_str(), true);
-			if (!byName.IsNull()) {
-				CORE_INFO(
-					"[TopoRef] {0}: '{1}' resolved by name '{2}'",
-					GetName(), reference, name);
-				return Part::TopoShape(byName);
-			}
-		}
-		if (!m_referenceNames[p_index].empty()) {
-			CORE_WARN(
-				"[TopoRef] {0}: none of the {1} name(s) of reference '{2}' is in the "
-				"base shape any more; falling back to its index",
-				GetName(), m_referenceNames[p_index].size(), reference);
-		}
-
-		// 2) By index, the historical path. The reference is "<Type>_<index>" and
-		// the index inside the shape is 1 based.
-		const bool isFace = reference.rfind("Face", 0) == 0;
-		const std::string typeName = isFace ? "Face" : "Edge";
-		const TopAbs_ShapeEnum type = isFace ? TopAbs_FACE : TopAbs_EDGE;
-		int index = 0;
-		try {
-			index = std::stoi(reference.substr(5));
-		}
-		catch (const std::exception&) {
-			CORE_ERROR(
-				"[TopoRef] {0}: cannot read an index out of the reference '{1}'",
-				GetName(), reference);
-			return Part::TopoShape();
-		}
-		Part::TopoShape result = baseShape.getSubTopoShape(type, index + 1);
-
-		// Remember every name this index currently has, so the next resolve can use
-		// them even if a recompute moves the sub-shape elsewhere. All of them are
-		// kept because which one survives depends on how much history the shape
-		// carries at that later time.
-		const Data::IndexedName element
-			= Data::IndexedName::fromConst(typeName.c_str(), index + 1);
-		std::vector<std::string>& names = m_referenceNames[p_index];
-		names.clear();
-		;
-		for (const std::pair<Data::MappedName,Data::ElementIDRefs>& candidate :baseShape.getElementMappedNames(element,false)) {
-		
-			names.push_back(candidate.first.toString());
-		}
-		//for (const Data::MappedElement& candidate : baseShape.getElementMap()) {
-		//	if (candidate.index == element) {
-		//		names.push_back(candidate.name.toString());
-		//	}
-		//}
-		// Longest first: the most specific name is also the one that survives the
-		// most operations downstream.
-		std::sort(names.begin(), names.end(),
-			[](const std::string& p_left, const std::string& p_right)
-			{
-				return p_left.size() > p_right.size();
-			});
-
-		if (!names.empty()) {
-			std::string joined;
-			for (const std::string& name : names) {
-				joined += joined.empty() ? name : (" | " + name);
-			}
-			CORE_INFO(
-				"[TopoRef] {0}: '{1}' resolved by index {2}, captured name(s) '{3}'",
-				GetName(), reference, index, joined);
-		}
-		else {
-			CORE_WARN(
-				"[TopoRef] {0}: the base shape carries no mapped name for {1}_{2}; the "
-				"reference stays index based and may break on recompute",
-				GetName(), typeName, index);
-		}
-		return result;
+		// The lookup itself lives in one place, shared with the sketch's external
+		// geometry: names first, then the names without their encoding levels, and
+		// only then the index. It resolves against the *base* feature, because that
+		// is the shape the reference was taken from - this feature's own shape is
+		// what the reference produces, so looking there would hand an element of the
+		// previous result back as if it came from the base.
+		return ResolveSubShapeRef(
+			*m_baseFeature, subValues[p_index], m_referenceNames[p_index], GetName());
 	}
 	Part::TopoShape Feature::getBaseTopoFaceShape()
 	{

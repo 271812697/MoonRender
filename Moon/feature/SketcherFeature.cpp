@@ -35,7 +35,7 @@ namespace MOON {
 	bool SketcherFeature::execute()
 	{
 		if (mInternal->sketcher.get()) {
-			topoShape->setShape(mInternal->sketcher->getDoneWireShape());
+        setResultShape(mInternal->sketcher->getDoneWireShape());
 			CORE_INFO("Make a SketcherFeature");
 			return true;
 	    }

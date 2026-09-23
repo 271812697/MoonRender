@@ -83,7 +83,7 @@ namespace MOON {
                 resShape = revolve;
             }
 
-            topoShape->setShape(resShape);
+            setResultShape(resShape);
             return true;
         }
         catch (const Standard_Failure& e) {
