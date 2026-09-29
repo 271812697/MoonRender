@@ -57,6 +57,10 @@ namespace MOON
 			}
 
 			const TopoDS_Shape edge = mkEdge.Edge();
+			// Unlike the other features this one hands on a bare shape, so it carries
+			// no mapped names: a datum has nothing it was derived from and nothing
+			// above it references by name yet. Going through setResultShape() would
+			// only warn about that on every recompute.
 			topoShape->setShape(edge);
 			getPreviewShape().setShape(edge);
 			return true;

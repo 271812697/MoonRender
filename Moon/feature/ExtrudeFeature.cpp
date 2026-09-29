@@ -3,6 +3,7 @@
 #include "renderer/SceneView.h"
 #include "TopoShapeOpCode.h"
 #include "core/TopoNameDebug.h"
+#include <cmath>
 #include <Core/ResourceManagement/MaterialManager.h>
 #include <Core/ECS/Components/CMaterialRenderer.h>
 #include <Core/ECS/Components/CModelRenderer.h>
@@ -24,6 +25,7 @@
 #include <BRepAdaptor_Surface.hxx>
 #include <gp_Vec.hxx>
 #include <gp_Dir.hxx>
+#include <gp_Trsf.hxx>
 #include <GeomAbs_Shape.hxx>
 #include <ShapeFix_ShapeTolerance.hxx>
 #include <BRepAlgo.hxx>
@@ -109,11 +111,20 @@ namespace MOON {
                     }
                 }
                 else {
-                    if(addSubType == 0)
-                    resShape = prism;
+                    if (addSubType == 0) {
+                        resShape = prism;
+                    }
+                    else {
+                        // A pocket has nothing to cut from until it is given a base
+                        // shape. Reporting that beats handing an empty shape to the
+                        // features below, which would read as a shape that was lost.
+                        CORE_ERROR(
+                            "{0}: the pocket has no base shape to cut from", GetName());
+                        return false;
+                    }
                 }
-                topoShape->setShape(resShape);
-             
+                setResultShape(resShape);
+            
                 LogTopoElementNames(resShape, "pad(up to face)");
                 getPreviewShape() =resShape;
                 return true;
@@ -126,35 +137,68 @@ namespace MOON {
         else
         {
             try {
-                std::vector<Part::TopoShape> drafts;
-                Part::ExtrusionHelper::makeElementDraft(
-                    params,
-                    face,
-                    drafts, App::StringHasherRef()
-                );
-                if (drafts.empty()) {
-                    return false;
-                }
-                if (drafts.size() == 1) {
-                    // makeElementCompound() hands a single shape back untouched, so it
-                    // would carry no extrude tag while several drafts would get one.
-                    // The same edge would then be named differently depending on how
-                    // many curves the profile happens to have, and a reference taken
-                    // before the profile grew a curve would stop resolving (it used to
-                    // fall back to the index and fillet the wrong solid). Tagging the
-                    // single draft here keeps one edge, one name.
-                    prism = drafts.front();
-                    LogTopoElementNames(face, "profile");
-                    LogTopoElementNames(prism, "prism");
-                    prism.mapSubElement(drafts, Part::OpCodes::Extrude);
+                // Without a taper angle the whole profile is one prism, the way
+                // FreeCAD's pad does it: the sides come out as analytic surfaces
+                // (planes and cylinders) instead of the B-splines a loft leaves
+                // behind, and the holes of the profile are carried by the face
+                // itself instead of being lofted one by one and cut away. Only a
+                // taper angle needs the draft path, where every wire - the outer
+                // one and the inner ones that become the holes - is lofted on its
+                // own.
+                const bool hasTaper
+                    = std::fabs(params.taperAngleFwd) > Precision::Angular()
+                    || std::fabs(params.taperAngleRev) > Precision::Angular();
+                if (!hasTaper) {
+                    Part::TopoShape profile = face;
+                    if (params.solid && !profile.hasSubShape(TopAbs_FACE)) {
+                        profile = profile.makeElementFace(
+                            nullptr, params.faceMakerClass.c_str());
+                    }
+                    // A length behind the sketch is applied by moving the profile
+                    // back and extruding the total length, which is what keeps a
+                    // symmetric or a two sided pad centred on the sketch plane.
+                    if (std::fabs(params.lengthRev) > Precision::Confusion()) {
+                        gp_Trsf back;
+                        back.SetTranslation(gp_Vec(params.dir) * (-params.lengthRev));
+                        profile = profile.makeElementTransform(back);
+                    }
+                    prism = prism.makeElementPrism(
+                        profile,
+                        gp_Vec(params.dir) * (params.lengthFwd + params.lengthRev)
+                    );
                 }
                 else {
+                    std::vector<Part::TopoShape> drafts;
+                    Part::ExtrusionHelper::makeElementDraft(
+                        params,
+                        face,
+                        drafts, App::StringHasherRef()
+                    );
+                    if (drafts.empty()) {
+                        return false;
+                    }
+                    // One draft is the prism itself (makeElementCompound hands a
+                    // single shape back untouched), several drafts become one
+                    // compound whose child maps repeat the names of the drafts.
+                    // Either way the result is named after the drafts and gets no
+                    // level of its own.
+                    //
+                    // That is the point of going through this one call: while the
+                    // single wire case was tagged with mapSubElement(..., Extrude)
+                    // and the several wire case passed the extrude code as the
+                    // compound's postfix, the very same edge of the pad was named
+                    // "g0;...;:U;MAK;XTR;:H:4,E;:H,E" for one wire and
+                    // "g0;...;:U;MAK;XTR" for two, so a fillet that had recorded
+                    // the first spelling stopped finding it, fell back to its index
+                    // and filleted the solid the second wire produced.
                     prism.makeElementCompound(
                         drafts,
-                        Part::OpCodes::Extrude,
+                        nullptr,
                         Part::TopoShape::SingleShapeCompoundCreationPolicy::returnShape
                     );
                 }
+                LogTopoElementNames(face, "profile");
+                LogTopoElementNames(prism, "prism");
                 getPreviewShape() = prism;
                 Part::TopoShape resShape;
                 if (!baseShape.isNull()) {
@@ -166,10 +210,19 @@ namespace MOON {
                     }
                 }
                 else {
-                    if (addSubType == 0)
-                    resShape = prism;
+                    if (addSubType == 0) {
+                        resShape = prism;
+                    }
+                    else {
+                        // A pocket has nothing to cut from until it is given a base
+                        // shape. Reporting that beats handing an empty shape to the
+                        // features below, which would read as a shape that was lost.
+                        CORE_ERROR(
+                            "{0}: the pocket has no base shape to cut from", GetName());
+                        return false;
+                    }
                 }
-                topoShape->setShape(resShape);
+                setResultShape(resShape);
                
                 //LogTopoElementNames(resShape, "pad");
                 return true;

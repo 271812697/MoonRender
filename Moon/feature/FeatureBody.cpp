@@ -2,6 +2,7 @@
 #include "feature/FeatureBody.h"
 #include "SketcherFeature.h"
 #include "feature/FeatureBaseProfile.h"
+#include "core/log.h"
 
 namespace MOON {
 	class FeatureBody::Internal {
@@ -12,6 +13,8 @@ namespace MOON {
 		friend FeatureBody;
 		FeatureBody* self = nullptr;
 		std::vector<Feature*>featureList;
+		/** How deep the recompute propagation currently is. */
+		int populateDepth = 0;
 	};
 	FeatureBody::FeatureBody(const std::string& p_name) :mInternal(new Internal(this))
 	{
@@ -56,28 +59,46 @@ namespace MOON {
 
 	void FeatureBody::populateFeature(Feature* feature)
 	{
-		if (feature) {
-			std::vector<Feature*>stack;
-			stack.push_back(feature);
-			while (!stack.empty()) {
-				Feature* curFeature = stack.back(); stack.pop_back();
-				for (int i = 0; i < mInternal->featureList.size(); i++) {
-					if (mInternal->featureList[i]->getBaseFeature()== curFeature) {
-						mInternal->featureList[i]->execute();
-						mInternal->featureList[i]->makeDone();
-					}
-					else {
-						FeatureBaseProfile*  profile=dynamic_cast<FeatureBaseProfile*>(mInternal->featureList[i]);
-						if (profile) {
-							if (profile->getProfile() == curFeature) {
-								mInternal->featureList[i]->execute();
-								mInternal->featureList[i]->makeDone();
-							}
+		if (feature == nullptr) {
+			return;
+		}
+		// makeDone() of a recomputed feature calls back into here, so the propagation is
+		// recursive. A feature that ends up depending on something built from itself -
+		// a sketch that projects an edge of the very pad it is the profile of, for
+		// instance - makes that recursion cyclic, and the depth is what turns it into a
+		// warning instead of a stack overflow.
+		constexpr int kMaxPopulateDepth = 32;
+		if (mInternal->populateDepth >= kMaxPopulateDepth) {
+			CORE_WARN(
+				"[FeatureBody] the feature graph looks cyclic around {0}; the recompute "
+				"was stopped",
+				feature->GetName());
+			return;
+		}
+		++mInternal->populateDepth;
+
+		std::vector<Feature*>stack;
+		stack.push_back(feature);
+		while (!stack.empty()) {
+			Feature* curFeature = stack.back(); stack.pop_back();
+			for (int i = 0; i < mInternal->featureList.size(); i++) {
+				if (mInternal->featureList[i]->getBaseFeature()== curFeature) {
+					mInternal->featureList[i]->execute();
+					mInternal->featureList[i]->makeDone();
+				}
+				else {
+					FeatureBaseProfile*  profile=dynamic_cast<FeatureBaseProfile*>(mInternal->featureList[i]);
+					if (profile) {
+						if (profile->getProfile() == curFeature) {
+							mInternal->featureList[i]->execute();
+							mInternal->featureList[i]->makeDone();
 						}
 					}
 				}
 			}
 		}
+
+		--mInternal->populateDepth;
 	}
 
 	Feature* FeatureBody::getLastBaseFeature(Feature* target)

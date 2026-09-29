@@ -25,9 +25,23 @@ namespace MOON {
 	}
 
 	bool ChamferFeature::execute() {
-		Part::TopoShape baseShape = getBaseTopoShape();
-
-		std::vector<Part::TopoShape> baseEdge = getBaseTopoEdgeShapes();
+		// Same guard as the fillet: resolving a reference can throw Base::Exception
+		// when the shape below this feature no longer has the element the reference
+		// names, and an exception that leaves execute() terminates the application.
+		Part::TopoShape baseShape;
+		std::vector<Part::TopoShape> baseEdge;
+		try {
+			baseShape = getBaseTopoShape();
+			baseEdge = getBaseTopoEdgeShapes();
+		}
+		catch (Base::Exception& e) {
+			CORE_ERROR("[Chamfer] {0}: {1}", GetName(), e.what());
+			return false;
+		}
+		catch (Standard_Failure& e) {
+			CORE_ERROR("[Chamfer] {0}: {1}", GetName(), e.GetMessageString());
+			return false;
+		}
 		std::vector<Part::TopoShape> edges =
 			useAllEdges ? baseShape.getSubTopoShapes(TopAbs_EDGE) : baseEdge;
 
@@ -71,7 +85,9 @@ namespace MOON {
 				);
 			}
 
-			topoShape->setShape(resShape.getShape());
+			// Keep the mapped names: a feature stacked on this chamfer resolves its
+			// own references against them.
+			setResultShape(resShape);
 
 			// Determine the preview cut direction by comparing volumes: a chamfer
 			// on a convex edge removes material (res smaller), on a concave edge it
@@ -101,7 +117,15 @@ namespace MOON {
 			return true;
 		}
 		catch (Standard_Failure& e) {
-			CORE_ERROR(e.GetMessageString());
+			CORE_ERROR("[Chamfer] {0}: {1}", GetName(), e.GetMessageString());
+			return false;
+		}
+		catch (Base::Exception& e) {
+			CORE_ERROR("[Chamfer] {0}: {1}", GetName(), e.what());
+			return false;
+		}
+		catch (const std::exception& e) {
+			CORE_ERROR("[Chamfer] {0}: {1}", GetName(), e.what());
 			return false;
 		}
 	}

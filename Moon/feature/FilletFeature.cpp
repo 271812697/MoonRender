@@ -45,9 +45,29 @@ namespace MOON {
 	}
 	bool FilletFeature::execute()
 	{
-        Part::TopoShape baseShape = getBaseTopoShape();
-        
-        std::vector<Part::TopoShape> baseEdge=getBaseTopoEdgeShapes();
+        // Resolving the references of this feature reads the shape below it, and a
+        // recompute of that shape is free to leave a reference pointing at an
+        // element that is not there any more. Both the lookup and the fillet report
+        // that by throwing - Base::Exception for the references, Standard_Failure
+        // from the kernel - and an exception that leaves execute() terminates the
+        // application, so every path of this function is guarded.
+        Part::TopoShape baseShape;
+        std::vector<Part::TopoShape> baseEdge;
+        try
+        {
+            baseShape = getBaseTopoShape();
+            baseEdge = getBaseTopoEdgeShapes();
+        }
+        catch (Base::Exception& e)
+        {
+            CORE_ERROR("[Fillet] {0}: {1}", GetName(), e.what());
+            return false;
+        }
+        catch (Standard_Failure& e)
+        {
+            CORE_ERROR("[Fillet] {0}: {1}", GetName(), e.GetMessageString());
+            return false;
+        }
         std::vector<Part::TopoShape> edges =useAllEdges ? baseShape.getSubTopoShapes(TopAbs_EDGE) : baseEdge ;
         try
         {
@@ -70,7 +90,10 @@ namespace MOON {
                     TopAbs_SHAPE
                 );
             }
-            topoShape->setShape(resShape.getShape());
+            // Hand the result over through setResultShape so its mapped names stay
+            // with it: those names are what a feature stacked on this fillet has to
+            // resolve its own references against.
+            setResultShape(resShape);
 
             // Determine the cut direction by comparing volumes: filleting a
             // convex edge removes material (res smaller), filleting a concave
@@ -104,7 +127,17 @@ namespace MOON {
         }
         catch (Standard_Failure& e)
         {
-            CORE_ERROR(e.GetMessageString());
+            CORE_ERROR("[Fillet] {0}: {1}", GetName(), e.GetMessageString());
+            return false;
+        }
+        catch (Base::Exception& e)
+        {
+            CORE_ERROR("[Fillet] {0}: {1}", GetName(), e.what());
+            return false;
+        }
+        catch (const std::exception& e)
+        {
+            CORE_ERROR("[Fillet] {0}: {1}", GetName(), e.what());
             return false;
         }
         return true;

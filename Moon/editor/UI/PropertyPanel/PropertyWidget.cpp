@@ -19,6 +19,9 @@
 #include "Widgets/SliderIntProperty.h"
 #include "Widgets/ColorPickerProperty.h"
 #include "Widgets/TextureProperty.h"
+#include "feature/Feature.h"
+#include "feature/FeatureBody.h"
+#include "core/log.h"
 #include <QTreeWidget>
 #include <QStackedWidget>
 #include <QVBoxLayout>
@@ -214,6 +217,15 @@ namespace MOON {
 			else if (propertyName == "rotation") {
 				auto euler=value.value<Maths::FVector3>();
 				comp->SetWorldRotation(Maths::FQuaternion(euler));
+			}
+			// A feature hands its shape to the features built on top of it together with
+			// this transform (see Feature::getWorldTopoShape), so they have to be rebuilt
+			// when it changes - otherwise only what is drawn would move.
+			if (Feature* feature = dynamic_cast<Feature*>(&comp->owner)) {
+				CORE_INFO(
+					"[Feature] {0}: transform changed, rebuilding the features on top of it",
+					feature->GetName());
+				FeatureBody::instance().populateFeature(feature);
 			}
 		}
 	};

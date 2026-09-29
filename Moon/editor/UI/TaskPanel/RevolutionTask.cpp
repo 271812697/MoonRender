@@ -52,7 +52,9 @@ namespace MOON {
                         //2.设置基于最后一个feature
                         FeatureBody::instance().setBaseFeatureFor(feature);
                         feature->setProfile(sketchFeature);
-                        faceShape = sketchFeature->getSketcherObj()->getDoneFaceShape();
+                        // Through the feature, so the pose of the sketch is taken into
+                        // account here exactly like it is where the solid is built.
+                        faceShape = feature->getProfileFace();
                     }
                 }
                 Part::TopoShape tempShape = faceShape.makeElementFace(nullptr, "Part::FaceMakerCheese");

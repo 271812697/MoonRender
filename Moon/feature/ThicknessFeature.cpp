@@ -52,7 +52,9 @@ namespace MOON {
                 Part::TopoShape baseShape= getBaseTopoShape();
                 Part::TopoShape face = getBaseTopoFaceShape();
                 Part::TopoShape shape = baseShape.makeElementThickSolid({face}, thickness, tol, intersection, false, mode, static_cast<Part::JoinType>(join));
-				topoShape->setShape(shape.getShape());
+                // As in the fillet and the chamfer: the element map has to travel with
+                // the shape, or the references of whatever comes next are lost.
+                setResultShape(shape);
                 getPreviewShape() = *topoShape;
                 return true;
             }

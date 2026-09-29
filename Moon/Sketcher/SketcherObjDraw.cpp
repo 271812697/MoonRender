@@ -737,8 +737,8 @@ namespace MOON {
                         + (static_cast<float>(my) - frame.baseA.y()) * frame.direction.y();
                     // Keep the line on its side of the geometry: a dimension that
                     // crosses what it measures is never what the user meant.
-                    constexpr float kMinOffset = 8.0f;
-                    m_straightDimOffsetPx[c] = std::max(wanted, kMinOffset);
+                    //constexpr float kMinOffset = 8.0f;
+                    m_straightDimOffsetPx[c] = wanted;// std::max(wanted, kMinOffset);
                 }
                 m_labelHover = m_labelDrag;
                 m_labelHoverHandle = m_labelDragHandle;
@@ -1914,8 +1914,8 @@ namespace MOON {
                 : abgrToImU32(m_drawOption.constraintColor);
             const ImU32 borderCol = isError ? IM_COL32(255, 120, 120, 220)
                 : hovered ? IM_COL32(255, 255, 140, 255) : IM_COL32(255, 255, 255, 42);
-            drawList->AddRectFilled(boxMin, boxMax, IM_COL32(24, 24, 30, 178), 4.0f);
-            drawList->AddRect(boxMin, boxMax, borderCol, 4.0f);
+            //drawList->AddRectFilled(boxMin, boxMax, IM_COL32(24, 24, 30, 178), 4.0f);
+            //drawList->AddRect(boxMin, boxMax, borderCol, 4.0f);
             drawList->AddText(ImVec2(sx - ts.x * 0.5f, sy - ts.y * 0.5f), textCol, text.c_str());
         }
     }

@@ -21,16 +21,33 @@ namespace MOON
 	 * p_names holds the mapped names the element was seen to have. An element can
 	 * carry several (the one its creator gave it plus the ones later operations
 	 * added), and which of them survives depends on how much history the shape has
-	 * when the reference is resolved, so every one of them is tried first. When none
-	 * of them is in the shape any more the index is used as the fallback, and the
-	 * names that index has now are written back into p_names, so the next resolve
-	 * can be name based again.
+	 * when the reference is resolved, so every one of them is tried first.
+	 *
+	 * When none of them is in the shape any more the names are compared once more
+	 * with their encoding levels left out. Those levels are the ":H..." markers,
+	 * one per shape the element travelled through, and how many of them a name
+	 * carries is a property of the rebuild history rather than of the element: a pad
+	 * that extrudes several wires names its edges through a compound instead of
+	 * mapping the draft directly, so an edge that existed before the pad grew a
+	 * second wire comes back with a different number of levels. Such a match is
+	 * accepted only when a single element fits, because moving a reference to
+	 * another edge is worse than reporting that the name was lost.
+	 *
+	 * Only when that fails too is the index used, and the names that index has now
+	 * are written back into p_names, so the next resolve can be name based again.
 	 *
 	 * Shared by Feature (a feature referencing the feature below it) and by the
 	 * sketch (external geometry referencing another feature).
+	 *
+	 * p_owner names the feature the reference belongs to and is used for the log
+	 * only: the shape that is searched is always the one of p_source. A feature
+	 * resolves its references against the feature below it, so the two are not the
+	 * same thing there, while the sketch resolves against the very feature it
+	 * references.
 	 */
 	Part::TopoShape ResolveSubShapeRef(
 		Feature& p_source,
 		const std::string& p_reference,
-		std::vector<std::string>& p_names);
+		std::vector<std::string>& p_names,
+		const std::string& p_owner = std::string());
 }
