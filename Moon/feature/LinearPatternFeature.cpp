@@ -3,6 +3,7 @@
 #include "core/component/TopoShapeActor.h"
 #include "TopoShape.h"
 #include "ElementNamingUtils.h"
+#include "TransformHelper.h"
 #include "Sketcher/SketcherObj.h"
 #include "core/log.h"
 
@@ -66,14 +67,6 @@ namespace MOON
 	bool LinearPatternFeature::execute()
 	{
 		try {
-			if (mode == static_cast<int>(TransformMode::Feature)) {
-				CORE_ERROR(
-					"[LinearPattern] {0}: the feature mode is not implemented yet, use "
-					"the whole shape mode",
-					GetName());
-				return false;
-			}
-
 			Part::TopoShape baseShape = getBaseTopoShape();
 			if (baseShape.isNull()) {
 				CORE_ERROR(
@@ -134,32 +127,51 @@ namespace MOON
 			}
 
 			ZoneScopedN("LinearPattern");
-			// Every combination of the two directions, the original included, which is
-			// why the first one is taken as it is instead of being moved by a null
-			// step.
-			std::vector<Part::TopoShape> instances;
-			instances.reserve(static_cast<size_t>(count1) * static_cast<size_t>(count2));
-			int index = 1;
+			// Every combination of the two directions. The identity comes first: it
+			// is the original, which the base holds already and which every mode
+			// keeps.
+			std::vector<gp_Trsf> transformations;
+			transformations.reserve(
+				static_cast<size_t>(count1) * static_cast<size_t>(count2));
+			transformations.push_back(gp_Trsf());
 			for (int i = 0; i < count1; ++i) {
 				for (int j = 0; j < count2; ++j) {
 					if (i == 0 && j == 0) {
-						instances.push_back(baseShape);
 						continue;
 					}
 					gp_Trsf translation;
 					translation.SetTranslation(step1 * i + step2 * j);
-					// The index keeps the elements of the copies apart: without it
-					// every copy would name its edges exactly like the original.
-					instances.push_back(baseShape.makeElementTransform(
-						translation, Data::indexSuffix(++index).c_str()));
+					transformations.push_back(translation);
 				}
 			}
 
 			Part::TopoShape result;
-			if (instances.size() == 1) {
-				result = instances.front();
+			Part::TopoShape preview;
+			if (mode == static_cast<int>(TransformMode::Feature)) {
+				result = BuildFeatureModeResult(
+					*this, originals, transformations, preview);
+			}
+			else if (transformations.size() == 1) {
+				result = baseShape;
 			}
 			else {
+				std::vector<Part::TopoShape> instances;
+				instances.reserve(transformations.size());
+				instances.push_back(baseShape);
+				for (size_t i = 1; i < transformations.size(); ++i) {
+					// The index keeps the elements of the copies apart: without it
+					// every copy would name its edges exactly like the original.
+					instances.push_back(baseShape.makeElementTransform(
+						transformations[i],
+						Data::indexSuffix(static_cast<int>(i) + 1).c_str()));
+				}
+				// The preview shows the copies the pattern adds, not the finished body
+				// they are fused with: that one is already on screen.
+				std::vector<Part::TopoShape> copies(instances.begin() + 1, instances.end());
+				preview.makeElementCompound(
+					copies,
+					nullptr,
+					Part::TopoShape::SingleShapeCompoundCreationPolicy::returnShape);
 				result.makeElementFuse(instances);
 			}
 			if (result.isNull()) {
@@ -169,7 +181,7 @@ namespace MOON
 				return false;
 			}
 
-			getPreviewShape() = result;
+			getPreviewShape() = preview.isNull() ? result : preview;
 			setResultShape(result);
 			CORE_INFO(
 				"[LinearPattern] {0}: {1} by {2} instance(s)",

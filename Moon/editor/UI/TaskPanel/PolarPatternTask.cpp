@@ -10,6 +10,8 @@
 #include "Widgets/SliderIntProperty.h"
 #include "Widgets/EnumProperty.h"
 #include "Widgets/BoolProperty.h"
+#include "editor/UI/TaskPanel/OriginalsList.h"
+#include "editor/UI/PropertyPanel/Collapsiblegroupboxwidget.h"
 
 #include <BRepAdaptor_Curve.hxx>
 #include <Precision.hxx>
@@ -60,11 +62,30 @@ namespace MOON {
             // A circular pattern normally turns inside the plane of the sketch the
             // body was built from, so start on the normal axis of that sketch.
             feature->applySketchAxis(feature->axisType);
+            AddBaseFeatureAsDefaultOriginal(*feature, feature->mode, feature->originals);
         }
         ~Internal() {
         }
 
     private:
+        /** True when the pattern takes material away rather than adding it: a
+         * pocket, a groove or a fillet that cut into the shape. */
+        bool isSubtractivePattern() const
+        {
+            if (feature == nullptr
+                || feature->mode != static_cast<int>(TransformMode::Feature)) {
+                // The whole shape mode repeats the shape below as it is, which is
+                // never a cut.
+                return false;
+            }
+            for (Feature* original : feature->originals) {
+                if (original != nullptr && original->isToolSubtractive()) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         PolarPatternTask* self;
         TransformMode polarType;
         friend PolarPatternTask;
@@ -81,7 +102,7 @@ namespace MOON {
     {
         setGenerateShapeName("PolarShape");
 
-        mPreviewOption.isTransparent = true;
+        mPreviewOption.isTransparent = false;
         mPreviewOption.isBlend = true;
         mPreviewOption.useDomainColor = false;
         mPreviewOption.g = 0.0f;
@@ -111,7 +132,33 @@ namespace MOON {
         mInternal->reverseProp = new BoolProperty("Reverse", p);
         addParam(mInternal->reverseProp);
 
+        // The features the pattern works on when it runs in its "feature" mode.
+        addGroupParam("Originals");
+
         buildUi();
+        if (pattern) {
+            const auto it = groupToIndex.find("Originals");
+            if (it != groupToIndex.end()) {
+                auto* group = m_comps[it->second].first;
+                group->setCollapsed(false);
+                group->addSubWidget(new OriginalsList(
+                    *pattern,
+                    pattern->originals,
+                    [this]() { refreshPreview(); },
+                    this));
+            }
+        }
+        refreshPreview();
+    }
+    void PolarPatternTask::refreshPreview()
+    {
+        // A pattern that takes material away - a pocket, a hole - happens inside the
+        // shape below it, so its preview is drawn the way the pocket draws: blended,
+        // without a depth test, so the body cannot hide it. A pattern that adds
+        // material keeps the transparent preview the other modeling tools use.
+        const bool subtractive = mInternal->isSubtractivePattern();
+        mPreviewOption.isTransparent = !subtractive;
+        mPreviewOption.isBlend = true;
         previewShape();
     }
     QVariant PolarPatternTask::getParamValue(const QString& propertyName)
@@ -177,7 +224,7 @@ namespace MOON {
         }
 
         if (updatePreView && hasInitUi) {
-            previewShape();
+            refreshPreview();
         }
     }
     PolarPatternTask::~PolarPatternTask()
@@ -239,7 +286,7 @@ namespace MOON {
                 }
             }
             feature->axis = gp_Ax1(base, direction);
-            previewShape();
+            refreshPreview();
         }
         catch (const Standard_Failure& e) {
             CORE_ERROR("[PolarPattern] {0}: {1}", feature->GetName(), e.GetMessageString());

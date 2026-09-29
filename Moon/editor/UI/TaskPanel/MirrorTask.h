@@ -10,7 +10,7 @@ namespace MOON {
 	public:
 		explicit MirrorTask(
 			QWidget* parent = nullptr,
-			TransformMode mode = TransformMode::Whole,
+			TransformMode mode = TransformMode::Feature,
 			Feature* feature = nullptr
 		);
 		virtual ~MirrorTask()override;
@@ -24,6 +24,9 @@ namespace MOON {
 		/** The face picked to use as the mirror plane. */
 		virtual void onSelectFace(const std::vector<Part::TopoShape>& face)override;
 	private:
+		/** Draws the preview again, picking the preview material that fits what the
+		 * mirror does to the shape below it. */
+		void refreshPreview();
 		class Internal;
 		Internal* mInternal = nullptr;
 	};

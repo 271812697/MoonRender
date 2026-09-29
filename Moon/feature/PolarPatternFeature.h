@@ -2,6 +2,7 @@
 #include "feature/Feature.h"
 #include "feature/TransformMode.h"
 
+#include <vector>
 #include <gp_Ax1.hxx>
 #include <gp_Dir.hxx>
 #include <gp_Pnt.hxx>
@@ -15,10 +16,12 @@ namespace MOON
 	 * rotated around the pattern axis, and the copies are fused with the original.
 	 * That is what the FreeCAD feature this follows does in its "whole" mode.
 	 *
-	 * The "feature" mode - pattern the picked features of the body instead of the
-	 * whole of it - is not implemented yet: it needs the additive and the
-	 * subtractive shape of a feature kept apart, which the feature graph does not
-	 * do at the moment. Only the additive result of a feature is kept.
+	 * Its "feature" mode - pattern the material of the picked features instead of
+	 * the whole body - is the default, as it is in FreeCAD: it repeats what those
+	 * features added or took away (a hole, a boss, a fillet) on the same base, which
+	 * keeps the result a single solid. The "whole" mode duplicates the shape below
+	 * the pattern instead, which is what one wants when the pattern is the last
+	 * thing a body is made of.
 	 *
 	 * It is a Feature3D, like the other features that produce a solid: that is what
 	 * FeatureBody::getLastBaseFeature() looks for when a new feature asks for the
@@ -54,7 +57,10 @@ namespace MOON
 		 */
 		bool applySketchAxis(int p_axis);
 
-		int mode = static_cast<int>(TransformMode::Whole);
+		int mode = static_cast<int>(TransformMode::Feature);
+		/** The features whose material is patterned in the "feature" mode. Empty in
+		 * the whole shape mode, which patterns the shape below as a whole. */
+		std::vector<Feature*> originals;
 		/** One of AxisType: which axis the copies turn around. */
 		int axisType = AxisSketchNormal;
 		/** Instances in the pattern, the original included. */

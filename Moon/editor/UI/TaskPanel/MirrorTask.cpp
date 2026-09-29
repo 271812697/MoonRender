@@ -7,6 +7,8 @@
 #include "core/ViewTool.h"
 #include "core/log.h"
 #include "Widgets/EnumProperty.h"
+#include "editor/UI/TaskPanel/OriginalsList.h"
+#include "editor/UI/PropertyPanel/Collapsiblegroupboxwidget.h"
 
 #include <exception>
 
@@ -42,11 +44,28 @@ namespace MOON {
             // Mirroring across the plane of the sketch the body was built from is
             // the common case - it reflects the body to the other side of it.
             feature->applySketchPlane(feature->planeType);
+            AddBaseFeatureAsDefaultOriginal(*feature, feature->mode, feature->originals);
         }
         ~Internal() {
         }
 
     private:
+        /** True when the mirror takes material away rather than adding it: a pocket
+         * or a fillet that cut into the shape. */
+        bool isSubtractivePattern() const
+        {
+            if (feature == nullptr
+                || feature->mode != static_cast<int>(TransformMode::Feature)) {
+                return false;
+            }
+            for (Feature* original : feature->originals) {
+                if (original != nullptr && original->isToolSubtractive()) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         MirrorTask* self;
         TransformMode mirrorType;
         friend MirrorTask;
@@ -60,7 +79,7 @@ namespace MOON {
     {
         setGenerateShapeName("MirrorShape");
 
-        mPreviewOption.isTransparent = true;
+        mPreviewOption.isTransparent = false;
         mPreviewOption.isBlend = true;
         mPreviewOption.useDomainColor = false;
         mPreviewOption.g = 0.0f;
@@ -78,7 +97,33 @@ namespace MOON {
             mirror ? mirror->planeType : MirrorFeature::PlaneSketchNormal);
         addParam(mInternal->planeProp);
 
+        // The features the mirror works on when it runs in its "feature" mode.
+        addGroupParam("Originals");
+
         buildUi();
+        if (mirror) {
+            const auto it = groupToIndex.find("Originals");
+            if (it != groupToIndex.end()) {
+                auto* group = m_comps[it->second].first;
+                group->setCollapsed(false);
+                group->addSubWidget(new OriginalsList(
+                    *mirror,
+                    mirror->originals,
+                    [this]() { refreshPreview(); },
+                    this));
+            }
+        }
+        refreshPreview();
+    }
+    void MirrorTask::refreshPreview()
+    {
+        // What is mirrored can sit inside the body (a hole, a cut), so a subtractive
+        // mirror is previewed the way the pocket previews itself - blended, without a
+        // depth test - and cannot be hidden by the body. An additive mirror keeps the
+        // transparent preview.
+        const bool subtractive = mInternal->isSubtractivePattern();
+        mPreviewOption.isTransparent = !subtractive;
+        mPreviewOption.isBlend = true;
         previewShape();
     }
     QVariant MirrorTask::getParamValue(const QString& propertyName)
@@ -124,7 +169,7 @@ namespace MOON {
         }
 
         if (updatePreView && hasInitUi) {
-            previewShape();
+            refreshPreview();
         }
     }
     MirrorTask::~MirrorTask()
@@ -161,7 +206,7 @@ namespace MOON {
             if (!feature->applyPlaneFromFace(face[1])) {
                 return;
             }
-            previewShape();
+            refreshPreview();
         }
         catch (const Standard_Failure& e) {
             CORE_ERROR("[Mirror] {0}: {1}", feature->GetName(), e.GetMessageString());

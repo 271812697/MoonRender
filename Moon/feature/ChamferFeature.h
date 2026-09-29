@@ -6,6 +6,9 @@ namespace MOON {
 		ChamferFeature(const std::string& p_name);
 		virtual ~ChamferFeature() override;
 		virtual bool execute();
+		/** The material the chamfer removed from, or added to, the shape below. */
+		virtual Part::TopoShape getToolShape() override;
+		virtual bool isToolSubtractive() const override;
 
 		// Part::ChamferType: 0 = equalDistance, 1 = twoDistances, 2 = distanceAngle
 		int chamferType = 0;
@@ -20,5 +23,7 @@ namespace MOON {
 		float dir1[3];
 		float dir2[3];
 		float len = 0;
+		Part::TopoShape toolShape;
+		bool toolSubtractive = true;
 	};
 }

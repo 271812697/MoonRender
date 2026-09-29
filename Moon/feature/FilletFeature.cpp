@@ -43,6 +43,14 @@ namespace MOON {
 	FilletFeature::~FilletFeature()
 	{
 	}
+	Part::TopoShape FilletFeature::getToolShape()
+	{
+		return toolShape;
+	}
+	bool FilletFeature::isToolSubtractive() const
+	{
+		return toolSubtractive;
+	}
 	bool FilletFeature::execute()
 	{
         // Resolving the references of this feature reads the shape below it, and a
@@ -106,23 +114,29 @@ namespace MOON {
             const double baseVol = baseProps.Mass();
             const double resVol = resProps.Mass();
             const double tol = 1e-7 * std::max(baseVol, 1.0);
+            // The sliver of material that went away, or the one that was added on a
+            // concave edge: this is the material of the feature, which is what a
+            // pattern in its "feature" mode repeats.
+            Part::TopoShape removedPart;
+            Part::TopoShape addedPart;
             if (resVol < baseVol - tol) {
-                getPreviewShape() = baseShape.makeElementCut(resShape);  // removed part
+                removedPart = baseShape.makeElementCut(resShape);
             }
             else if (resVol > baseVol + tol) {
-                getPreviewShape() = resShape.makeElementCut(baseShape);  // added part
+                addedPart = resShape.makeElementCut(baseShape);
             }
             else {
                 // Volumes (nearly) equal or shape not measurable: fall back to
                 // the empty-result heuristic.
-                Part::TopoShape preview = baseShape.makeElementCut(resShape);
-                if (preview.isNull() || preview.isEmpty()) {
-                    getPreviewShape() = resShape.makeElementCut(baseShape);
-                }
-                else {
-                    getPreviewShape() = preview;
+                removedPart = baseShape.makeElementCut(resShape);
+                if (removedPart.isNull() || removedPart.isEmpty()) {
+                    removedPart = Part::TopoShape();
+                    addedPart = resShape.makeElementCut(baseShape);
                 }
             }
+            toolSubtractive = !removedPart.isNull();
+            toolShape = toolSubtractive ? removedPart : addedPart;
+            getPreviewShape() = toolShape;
             return true;
         }
         catch (Standard_Failure& e)

@@ -4,6 +4,7 @@
 #include "TopoShape.h"
 #include "TopoShapeOpCode.h"
 #include "ElementNamingUtils.h"
+#include "TransformHelper.h"
 #include "Sketcher/SketcherObj.h"
 #include "core/log.h"
 
@@ -70,14 +71,6 @@ namespace MOON
 	bool PolarPatternFeature::execute()
 	{
 		try {
-			if (mode == static_cast<int>(TransformMode::Feature)) {
-				CORE_ERROR(
-					"[PolarPattern] {0}: the feature mode is not implemented yet, use the "
-					"whole shape mode",
-					GetName());
-				return false;
-			}
-
 			Part::TopoShape baseShape = getBaseTopoShape();
 			if (baseShape.isNull()) {
 				CORE_ERROR(
@@ -123,25 +116,44 @@ namespace MOON
 			}
 
 			ZoneScopedN("PolarPattern");
-			std::vector<Part::TopoShape> instances;
-			instances.reserve(count);
-			// The original is the first instance of the pattern, which is why the
-			// copies start at 1.
-			instances.push_back(baseShape);
+			// The identity comes first: it is the original, which the base already
+			// holds and which every mode keeps.
+			std::vector<gp_Trsf> transformations;
+			transformations.reserve(count);
+			transformations.push_back(gp_Trsf());
 			for (int i = 1; i < count; ++i) {
 				gp_Trsf rotation;
 				rotation.SetRotation(rotationAxis, step * i);
-				// The index keeps the elements of the copies apart: without it every
-				// copy would name its edges exactly like the original.
-				instances.push_back(baseShape.makeElementTransform(
-					rotation, Data::indexSuffix(i + 1).c_str()));
+				transformations.push_back(rotation);
 			}
 
 			Part::TopoShape result;
-			if (instances.size() == 1) {
-				result = instances.front();
+			Part::TopoShape preview;
+			if (mode == static_cast<int>(TransformMode::Feature)) {
+				result = BuildFeatureModeResult(
+					*this, originals, transformations, preview);
+			}
+			else if (transformations.size() == 1) {
+				result = baseShape;
 			}
 			else {
+				std::vector<Part::TopoShape> instances;
+				instances.reserve(transformations.size());
+				instances.push_back(baseShape);
+				for (size_t i = 1; i < transformations.size(); ++i) {
+					// The index keeps the elements of the copies apart: without it
+					// every copy would name its edges exactly like the original.
+					instances.push_back(baseShape.makeElementTransform(
+						transformations[i],
+						Data::indexSuffix(static_cast<int>(i) + 1).c_str()));
+				}
+				// The preview shows the shapes the pattern adds, not the finished
+				// body they are fused with: the body itself is already on screen.
+				std::vector<Part::TopoShape> copies(instances.begin() + 1, instances.end());
+				preview.makeElementCompound(
+					copies,
+					nullptr,
+					Part::TopoShape::SingleShapeCompoundCreationPolicy::returnShape);
 				result.makeElementFuse(instances);
 			}
 			if (result.isNull()) {
@@ -151,7 +163,7 @@ namespace MOON
 				return false;
 			}
 
-			getPreviewShape() = result;
+			getPreviewShape() = preview.isNull() ? result : preview;
 			setResultShape(result);
 			CORE_INFO(
 				"[PolarPattern] {0}: {1} instance(s) over {2} degrees",

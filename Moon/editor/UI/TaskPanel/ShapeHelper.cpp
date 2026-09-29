@@ -131,10 +131,18 @@ namespace MOON {
 				Core::Resources::Material* tempMat = MatRender->GetMaterialAtIndex(0);
 				tempMat->SetProperty("u_Albedo", Maths::FVector4(mPreviewOption.r, mPreviewOption.g, mPreviewOption.b, mPreviewOption.a));
 				if (mPreviewOption.isTransparent) {
+					// Both styles are spelled out completely: a panel can switch
+					// between them (a pattern that takes material away is drawn
+					// differently from one that adds it), and a flag left over from
+					// the other style would keep the preview hidden or on top.
 					tempMat->SetTransparent(true);
+					tempMat->SetBlendable(true);
 					tempMat->SetDepthWriting(true);
+					tempMat->SetDepthTest(true);
+					tempMat->SetDrawOrder(0);
 				}
 				else {
+					tempMat->SetTransparent(false);
 					if (mPreviewOption.isBlend) {
 						tempMat->SetBlendable(true);
 						tempMat->SetDepthTest(false);

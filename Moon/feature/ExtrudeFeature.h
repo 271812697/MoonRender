@@ -8,6 +8,9 @@ namespace MOON {
 		ExtrudeFeature(const std::string& p_name,int addsubType);
 		virtual ~ExtrudeFeature() override;
 		virtual bool execute();
+		/** The prism this pad added or this pocket took away. */
+		virtual Part::TopoShape getToolShape() override;
+		virtual bool isToolSubtractive() const override;
 		SketcherFeature* sketcher = nullptr;
         float lengthForward =10 ;
         double angleForward = 0;
@@ -19,5 +22,6 @@ namespace MOON {
 		gp_Vec finalDir;
 		Part::TopoShape upToFace;
 		Part::TopoShape supportShape;
+		Part::TopoShape toolShape;
 	};
 }

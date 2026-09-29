@@ -24,6 +24,14 @@ namespace MOON {
 	ChamferFeature::~ChamferFeature() {
 	}
 
+	Part::TopoShape ChamferFeature::getToolShape() {
+		return toolShape;
+	}
+
+	bool ChamferFeature::isToolSubtractive() const {
+		return toolSubtractive;
+	}
+
 	bool ChamferFeature::execute() {
 		// Same guard as the fillet: resolving a reference can throw Base::Exception
 		// when the shape below this feature no longer has the element the reference
@@ -99,21 +107,27 @@ namespace MOON {
 			const double baseVol = baseProps.Mass();
 			const double resVol = resProps.Mass();
 			const double tol = 1e-7 * std::max(baseVol, 1.0);
+			// The sliver of material that went away, or the one that was added on a
+			// concave edge: that is the material of this feature, and what a pattern
+			// in its "feature" mode repeats.
+			Part::TopoShape removedPart;
+			Part::TopoShape addedPart;
 			if (resVol < baseVol - tol) {
-				getPreviewShape() = baseShape.makeElementCut(resShape);  // removed part
+				removedPart = baseShape.makeElementCut(resShape);
 			}
 			else if (resVol > baseVol + tol) {
-				getPreviewShape() = resShape.makeElementCut(baseShape);  // added part
+				addedPart = resShape.makeElementCut(baseShape);
 			}
 			else {
-				Part::TopoShape preview = baseShape.makeElementCut(resShape);
-				if (preview.isNull() || preview.isEmpty()) {
-					getPreviewShape() = resShape.makeElementCut(baseShape);
-				}
-				else {
-					getPreviewShape() = preview;
+				removedPart = baseShape.makeElementCut(resShape);
+				if (removedPart.isNull() || removedPart.isEmpty()) {
+					removedPart = Part::TopoShape();
+					addedPart = resShape.makeElementCut(baseShape);
 				}
 			}
+			toolSubtractive = !removedPart.isNull();
+			toolShape = toolSubtractive ? removedPart : addedPart;
+			getPreviewShape() = toolShape;
 			return true;
 		}
 		catch (Standard_Failure& e) {
