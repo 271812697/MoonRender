@@ -1109,6 +1109,63 @@ namespace MOON {
         out.gapY = ny * captionGap;
         return true;
     }
+    void SketcherObj::placeDimensionAnnotation(int constrId, float p_screenX, float p_screenY)
+    {
+        const Sketcher::Constraint* c = getConstraint(constrId);
+        if (c == nullptr) {
+            return;
+        }
+        // A straight dimension: the shaft sits as far from the measured geometry as
+        // the given place does, which is exactly what dragging the shaft there would
+        // have stored. The caption keeps the middle of the shaft.
+        if (c->Type == Sketcher::ConstraintType::Distance
+            || c->Type == Sketcher::ConstraintType::DistanceX
+            || c->Type == Sketcher::ConstraintType::DistanceY) {
+            StraightDimFrame frame;
+            if (straightDimFrame(c, frame)) {
+                m_straightDimOffsetPx[c]
+                    = (p_screenX - frame.baseA.x()) * frame.direction.x()
+                    + (p_screenY - frame.baseA.y()) * frame.direction.y();
+            }
+            m_labelManualParam[c] = 0.5;
+            return;
+        }
+        // An angle: the annotation arc is drawn at the distance of the given place
+        // from the vertex, which is what pulling the arc in and out does.
+        if (c->Type == Sketcher::ConstraintType::Angle) {
+            float centerX = 0.0f, centerY = 0.0f;
+            float radius = 0.0f, startDeg = 0.0f, sweepDeg = 0.0f;
+            if (computeAngleLabelTrack(c, centerX, centerY, radius, startDeg, sweepDeg)) {
+                const float dx = p_screenX - centerX;
+                const float dy = p_screenY - centerY;
+                m_angleLabelRadiusPx[c] = std::max(std::sqrt(dx * dx + dy * dy), 8.0f);
+            }
+            m_labelManualParam[c] = 0.5;
+            return;
+        }
+        // A radius or a diameter: only the direction from the centre matters, so the
+        // radial line and its caption end up on the side the tool pointed at.
+        if (c->Type == Sketcher::ConstraintType::Radius
+            || c->Type == Sketcher::ConstraintType::Diameter) {
+            Base::Vector2d centerSk;
+            if (!getGeometryCenterSketch(c->First, centerSk)) {
+                return;
+            }
+            const Base::Vector3d world
+                = mPlane.origin + centerSk.x * mPlane.xAxis + centerSk.y * mPlane.yAxis;
+            const Eigen::Vector2f centerS = renderer->worldToScreen(
+                Eigen::Vector3f(
+                    static_cast<float>(world.x),
+                    static_cast<float>(world.y),
+                    static_cast<float>(world.z)
+                )
+            );
+            m_labelManualOffsetPx[c] = Base::Vector2d(
+                static_cast<double>(p_screenX - centerS.x()),
+                static_cast<double>(p_screenY - centerS.y())
+            );
+        }
+    }
     float SketcherObj::straightDimOffset(
         const Sketcher::Constraint* constraint,
         float p_defaultOffset
@@ -1335,23 +1392,13 @@ namespace MOON {
         if (std::fabs(sweep) < 0.5f) {
             return false;
         }
-        if (constraint->Second == Sketcher::GeoEnum::GeoUndef) {
-            // Half of the segment length, matching the requested annotation.
-            // The floor keeps the arc big enough to be seen and grabbed even when the
-            // line is short on screen.
-            const Eigen::Vector2f p1S = screenOf(p1);
-            const Eigen::Vector2f p2S = screenOf(p2);
-            const float segLen = (p2S - p1S).norm();
-            radiusPx = std::max(24.0f, segLen * 0.5f);
-        }
-        else {
-            // Stay inside both rays, but do not let the arc shrink to a stub: it has to
-            // be something the user can point at and pull.
-            const float ray1 = (e1S - vS).norm();
-            const float ray2 = (e2S - vS).norm();
-            const float minRay = std::min(ray1, ray2);
-            radiusPx = std::clamp(minRay * 0.35f, 30.0f, 150.0f);
-        }
+        // The arc is a fixed size on screen. Measuring it from the drawing - half the
+        // segment, or a share of the two rays - made the annotation grow and shrink
+        // with the zoom, so the same angle was drawn at a different size at every zoom
+        // level. It stays a note about the angle rather than a length of the sketch,
+        // and it can still be pulled in and out by hand (see below).
+        constexpr float kDefaultAngleRadiusPx = 45.0f;
+        radiusPx = kDefaultAngleRadiusPx;
         // The arc can be pulled closer or pushed further out; its centre stays on the
         // vertex, so the radius is the only thing that moves - and the drawn arc grows
         // and shrinks with it (the sweep never changes).

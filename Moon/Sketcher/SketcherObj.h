@@ -314,6 +314,14 @@ namespace MOON {
 		) const;
 		int pickConstraintLabelAt(float mouseX, float mouseY) const;
 		void editConstraintValue(int constrId);
+		/** Puts the annotation of a dimension where the smart dimension tool dropped
+		 * it.
+		 *
+		 * p_screenX / p_screenY is that place in screen pixels. What is stored are the
+		 * offsets a drag of the dimension to that place would have stored, so the
+		 * annotation the sketch draws afterwards sits exactly where the preview of the
+		 * tool was. */
+		void placeDimensionAnnotation(int constrId, float p_screenX, float p_screenY);
 		// Small geometric marker for tangent constraints: a tangent line
 		// segment through the computed tangency point.
 		void drawTangentIcons();

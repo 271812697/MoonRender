@@ -299,6 +299,9 @@ namespace MOON
 
 		/** Where the cursor is, in sketch space. */
 		Base::Vector2d cursor;
+		/** Where the dimension was dropped, in screen pixels: the annotation is put
+		 * there when it is added, so that it does not jump to its default place. */
+		Base::Vector2d placeScreen;
 	};
 
 	SmartDimensionWidget::SmartDimensionWidget(const std::string& name)
@@ -326,7 +329,7 @@ namespace MOON
 		// mouse with the drawing handlers. When either of those stops being true it
 		// turns itself off, so that its button never stays pressed on its own.
 		if (mInternal->activeSketch() == nullptr) {
-			quit();
+			leaveTool();
 			return;
 		}
 		for (const auto& widget : renderer->getGizmoWidgets()) {
@@ -335,7 +338,7 @@ namespace MOON
 				continue;
 			}
 			if (dynamic_cast<DrawSketchHandler*>(widget.second) != nullptr) {
-				quit();
+				leaveTool();
 				return;
 			}
 		}
@@ -432,7 +435,16 @@ namespace MOON
 			mInternal->reset();
 			return;
 		}
-		quit();
+		leaveTool();
+	}
+
+	void SmartDimensionWidget::leaveTool()
+	{
+		// DrawSketchHandler::quit() also unchecks the button of the sketch toolbar,
+		// which knows nothing about this tool (its name is not among the drawing
+		// handlers). The button of the constraint toolbar follows the widget through
+		// its poll instead, so switching the widget off is enough here.
+		setActive(false);
 	}
 
 	void SmartDimensionWidget::onKeyPress(const std::string& key)
@@ -450,7 +462,7 @@ namespace MOON
 				mInternal->reset();
 			}
 			else {
-				quit();
+				leaveTool();
 			}
 		}
 	}
@@ -696,10 +708,17 @@ namespace MOON
 					kPreviewColor,
 					std::max(length - head, 1.0f),
 					kShaftThickness);
-				const ImVec2 middle(
-					(first.x + second.x) * 0.5f, (first.y + second.y) * 0.5f - 12.0f);
+				// The caption sits just outside the rim, which is where the sketch puts
+				// it once the constraint is there.
+				const float dirX = (second.x - first.x);
+				const float dirY = (second.y - first.y);
+				const float len = std::sqrt(dirX * dirX + dirY * dirY);
+				const float captionDist = length + 18.0f;
+				const ImVec2 caption(
+					len > 1.0f ? first.x + dirX / len * captionDist : first.x,
+					len > 1.0f ? first.y + dirY / len * captionDist : first.y);
 				ImPlotCustom::AddTextTransform(
-					ImPlotCustom::Transform(middle, 0.0f), kPreviewColor, text.c_str());
+					ImPlotCustom::Transform(caption, 0.0f), kPreviewColor, text.c_str());
 			}
 			return;
 		}
@@ -714,7 +733,6 @@ namespace MOON
 				corner = firstLine.first;
 			}
 			const ImVec2 cornerScreen = toImVec(toScreen(corner));
-			const float radius = 40.0f;
 			Base::Vector2d d1 = firstLine.second - firstLine.first;
 			Base::Vector2d d2 = secondLine.second - secondLine.first;
 			if (d1.Length() < Precision::Confusion() || d2.Length() < Precision::Confusion()) {
@@ -738,6 +756,13 @@ namespace MOON
 			while (sweep < -180.0f) {
 				sweep += 360.0f;
 			}
+			// The arc sits at the distance of the cursor from the corner, which is what
+			// pulling the annotation in and out does once it is there.
+			auto [mx, my] = m_sceneView->getInutState().GetMousePosition();
+			const float cursorDx = static_cast<float>(mx) - cornerScreen.x;
+			const float cursorDy = static_cast<float>(my) - cornerScreen.y;
+			const float radius = std::max(
+				std::sqrt(cursorDx * cursorDx + cursorDy * cursorDy), 8.0f);
 			ImPlotCustom::drawDoubleArcArrow(
 				ImPlotCustom::Transform(cornerScreen, start),
 				kPreviewColor,
@@ -844,6 +869,12 @@ namespace MOON
 				break;
 		}
 		const double value = mInternal->measure();
+		{
+			// The annotation is added where the preview stands, not where the sketch
+			// would put it by default.
+			auto [mx, my] = m_sceneView->getInutState().GetMousePosition();
+			mInternal->placeScreen = Base::Vector2d(mx, my);
+		}
 
 		// The dialog is opened from the event loop rather than from inside the mouse
 		// event that caused it: a modal dialog nested in the input handling would let
@@ -920,6 +951,7 @@ namespace MOON
 			// An identical constraint is updated instead of stacked: the tool is also
 			// the way to change a dimension that is already there.
 			const int existing = active->findConstraint(constraint.get());
+			int added = existing;
 			if (existing >= 0) {
 				const int error = active->setDatum(existing, constraint->getValue());
 				if (error != 0) {
@@ -927,12 +959,19 @@ namespace MOON
 				}
 			}
 			else {
-				active->addConstraint(std::move(constraint));
+				added = active->addConstraint(std::move(constraint));
 				const int error = active->solve();
 				if (error != 0) {
 					CORE_WARN("[Dimension] adding the constraint failed, solver error {}", error);
 				}
 			}
+			// Put the annotation where the preview was, or the sketch would draw it at
+			// its default place instead.
+			active->placeDimensionAnnotation(
+				added,
+				static_cast<float>(captured.placeScreen.x),
+				static_cast<float>(captured.placeScreen.y)
+			);
 			mInternal->reset();
 		});
 	}

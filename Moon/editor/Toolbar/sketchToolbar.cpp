@@ -306,7 +306,14 @@ namespace MOON {
 	}
 	void SketchToolbar::setUncheckedAction(const std::string& name)
 	{
-		CreateCurveCommand::commandMap[name]->action()->setChecked(false);
+		// Not every tool that lives in the gizmo pass is a drawing handler of this
+		// toolbar (the smart dimension of the constraint toolbar is one of those), so
+		// a name that is not in the map is simply nothing to uncheck - looking it up
+		// with operator[] would put a null pointer in the map and crash on it.
+		const auto it = CreateCurveCommand::commandMap.find(name);
+		if (it != CreateCurveCommand::commandMap.end() && it->second != nullptr) {
+			it->second->action()->setChecked(false);
+		}
 	}
 	void SketchToolbar::constructor()
 	{

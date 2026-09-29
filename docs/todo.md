@@ -57,3 +57,49 @@
 
 - [ ] 梳理一帧场景渲染的流程，以及可优化的方法
 - [ ] 材质系统的重构
+
+## 建模特征
+
+### 变换特征（环形阵列 / 镜像 / 线性阵列）
+
+三个特征都已落地（`PolarPatternFeature` / `MirrorFeature` / `LinearPatternFeature`），
+默认 **feature 模式**（与 FreeCAD 一致）；原理见
+[FeatureModeling.md](FeatureModeling.md)。
+
+- [x] whole 模式（整份复制后 fuse）与 feature 模式（只重复特征自己的料）
+- [ ] **多实体结果的处理**：feature 模式下副本挂在同一基底上，通常仍是单一实体；
+  whole 模式下副本互不相交时会产生多个实体，目前整份保留
+  （等价 FreeCAD 的 `AllowCompound = true`）。是否改成 FreeCAD 默认的
+  "只取第一个 solid，其余放进 `rejected` 并给出一条警告"待定 ——
+  注意改完只显示一个实例，需要同时给出提示或把 rejected 也画出来
+- [ ] FreeCAD 的 `Spacings` / `SpacingPattern`（逐段间距、重复间距模式）未实现
+- [ ] `ThicknessFeature` 还没有"自己的料"（`getToolShape()` 返回空），
+  因此不能作为阵列/镜像的对象
+
+## 草图
+
+### 圆锥曲线的内部对齐几何
+
+- [ ] 椭圆的内部对齐几何（中心点 + 长/短轴 + `InternalAlignment` 约束）。
+  求解器已经支持 `InternalAlignment`（`Sketch.cpp` 的
+  `buildInternalAlignmentGeometryMap`），但绘制 handler 目前只往草图里放一个
+  `GeomEllipse`，没有任何内部元素。没有它，椭圆的尺寸
+  （FreeCAD 的 `EllipseMajorDiameter` / `EllipseMinorDiameter`）无法标注，
+  智能尺寸点椭圆时只能给出提示；B 样条同理（`Weight` 约束）
+
+### 智能尺寸（SmartDimensionWidget）
+
+- [x] 单元素尺寸（线长/水平/垂直、点到原点、圆直径、弧半径）、
+  多元素尺寸（两点、点到线、圆到圆、两线角度）、连续标注、右键与 ESC 收尾
+- [ ] 圆锥曲线尺寸 —— 依赖上面的"内部对齐几何"
+- [ ] 可选：标完一个尺寸后是否自动释放鼠标。目前保持连续标注（与 FreeCAD 一致）；
+  工具开启期间草图自身交互让路，已添加的标注文字需要关闭工具后才能拖动
+
+## 拓扑命名
+
+- [ ] `[TopoName]` 调试日志每个元素打一行，一次重算几十行；
+  改为只在名字集合变化时输出，或降到 debug 级
+- [ ] `DatumLineFeature` 写回的是裸 `TopoDS_Shape`，没有 element map
+  （基准线目前没有名字）。现在没有按名字引用基准线的地方，
+  如果以后要引用它的边，需要给它一个会建名字的入口
+  （`makeElementCopy` 或带 op 的 maker）

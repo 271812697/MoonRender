@@ -63,6 +63,8 @@ namespace MOON
 		void applyCandidate();
 		/** Draws the markup of the dimension that would be added. */
 		void drawPreview();
+		/** Switches the tool off; the button of the constraint toolbar follows it. */
+		void leaveTool();
 
 		class Internal;
 		Internal* mInternal = nullptr;
