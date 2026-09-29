@@ -14,6 +14,7 @@
 #include "Interactive/Widgets/SketchPlane.h"
 #include "Interactive/Widgets/SplitScreen.h"
 #include "Interactive/Widgets/DrawSketchHandlerPoint.h"
+#include "Interactive/Widgets/SmartDimensionWidget.h"
 #include "Interactive/Widgets/DrawSketchHandlerLine.h"
 #include "Interactive/Widgets/DrawSketchHandlerLineSet.h"
 #include "Interactive/Widgets/DrawSketchHandlerCircle.h"
@@ -68,6 +69,7 @@ class Editor::Rendering::GizmoRenderPass::GizmoRenderPassInternal {
 			mWidgets["PrimitiveCylinder"] = new MOON::PrimitiveCylinder("PrimitiveCylinder");
 			mWidgets["PrimitiveCone"] = new MOON::PrimitiveCone("PrimitiveCone");
 			mWidgets["ViewCube"] = new MOON::ViewCubeWidget("ViewCube");
+			mWidgets["SmartDimension"] = new MOON::SmartDimensionWidget("SmartDimension");
 			
 			mWidgets["DrawSketchHandlerRotate"] = new MOON::DrawSketchHandlerRotate("DrawSketchHandlerRotate");
 			mWidgets["DrawSketchHandlerTrimming"] = new MOON::DrawSketchHandlerTrimming("DrawSketchHandlerTrimming");

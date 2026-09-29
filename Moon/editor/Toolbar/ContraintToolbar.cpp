@@ -4,6 +4,9 @@
 #include "renderer/SceneView.h"
 #include "Sketcher/SketcherObjManager.h"
 #include "Sketcher/SketcherObj.h"
+#include "Interactive/Widgets/DrawSketchHandler.h"
+#include "editor/Toolbar/sketchToolbar.h"
+#include "renderer/GizmoRenderPass.h"
 #include "Geometry.h"
 #include "core/log.h"
 #include <QCoreApplication>
@@ -13,6 +16,7 @@
 #include <QPushButton>
 #include <QHBoxLayout>
 #include <QFormLayout>
+#include <QTimer>
 #include <cmath>
 namespace MOON {
 	// ---- helpers: derive constraint dialog defaults from the current sketch
@@ -281,6 +285,66 @@ namespace MOON {
 			}
 		}
 	}
+	/** The smart dimension tool: a button that turns a widget on and off.
+	 *
+	 * Unlike the other buttons of this toolbar it is not a one-shot command - the
+	 * tool stays on until it is pressed again - so its action is checkable. The
+	 * clicks it works on are the sketch's, which means whatever draw handler was
+	 * running has to let go of them first. */
+	class SmartDimensionCommand : public Command
+	{
+	public:
+		SmartDimensionCommand(QObject* parent) :Command(parent) {
+			auto action = new QAction(this);
+			action->setCheckable(true);
+			setAction(action);
+			// The widget turns itself off when the sketch closes or another drawing
+			// tool starts, so the button follows it instead of the other way around.
+			auto* poll = new QTimer(this);
+			poll->setInterval(250);
+			QObject::connect(poll, &QTimer::timeout, this, [this]() {
+				auto& view = GetService(Editor::Panels::SceneView);
+				auto& gizmoPass = view.GetRenderer()
+					.GetPass<Editor::Rendering::GizmoRenderPass>("ImRenderer");
+				const bool on = gizmoPass.isEnableGizmoWidget("SmartDimension");
+				if (this->action()->isChecked() != on) {
+					this->action()->setChecked(on);
+				}
+			});
+			poll->start();
+		}
+	protected:
+		virtual void execute()override {
+			const bool value = action()->isChecked();
+			auto& view = GetService(Editor::Panels::SceneView);
+			auto& gizmoPass
+				= view.GetRenderer().GetPass<Editor::Rendering::GizmoRenderPass>("ImRenderer");
+
+			if (value) {
+				if (SketcherObjManager::instance().GetCurrentActiveSketcherObj() == nullptr) {
+					CORE_WARN(
+						"[Dimension] the smart dimension works inside a sketch; open one "
+						"first");
+					action()->setChecked(false);
+					return;
+				}
+				// One tool at a time: leave whatever draw handler was running, and
+				// bring its button up with it.
+				for (auto& widget : gizmoPass.getGizmoWidgets()) {
+					if (widget.second == nullptr || widget.first == "SmartDimension"
+						|| !widget.second->isActived()) {
+						continue;
+					}
+					if (dynamic_cast<DrawSketchHandler*>(widget.second) == nullptr) {
+						continue;
+					}
+					gizmoPass.enableGizmoWidget(widget.first, false);
+					GetService(SketchToolbar).setUncheckedAction(widget.first);
+				}
+			}
+			gizmoPass.enableGizmoWidget("SmartDimension", value);
+		}
+	};
 	class  ConstraintCommand : public Command
 	{
 	public:
@@ -1025,6 +1089,8 @@ namespace MOON {
 			block->setIcon(":/widgets/icons/constraint/Constraint_Block.svg");
 			angle= new AngleConstraint(self);
 			angle->setIcon(":/widgets/icons/constraint/Constraint_InternalAngle.svg");
+			smartDimension = new SmartDimensionCommand(self);
+			smartDimension->setIcon(":/widgets/icons/constraint/Constraint_Dimension.svg");
 			self->addAction(coincident->action());
 			self->addAction(horizontal->action());
 			self->addAction(vertical->action());
@@ -1040,6 +1106,7 @@ namespace MOON {
 			self->addAction(diameter->action());
 			self->addAction(block->action());
 			self->addAction(angle->action());
+			self->addAction(smartDimension->action());
 			retranslateUi();
 		}
 		void retranslateUi() {
@@ -1058,6 +1125,7 @@ namespace MOON {
 			diameter->action()->setText(QCoreApplication::translate("ConstraintToolbar", "Diameter", nullptr));
 			block->action()->setText(QCoreApplication::translate("ConstraintToolbar", "Block", nullptr));
 			angle->action()->setText(QCoreApplication::translate("ConstraintToolbar", "Angle", nullptr));
+			smartDimension->action()->setText(QCoreApplication::translate("ConstraintToolbar", "Dimension", nullptr));
 		}
 	private:
 		friend class ConstraintToolbar;
@@ -1077,6 +1145,7 @@ namespace MOON {
 		ConstraintCommand* diameter = nullptr;
 		ConstraintCommand* block = nullptr;
 		ConstraintCommand* angle = nullptr;
+		SmartDimensionCommand* smartDimension = nullptr;
 	};
 
 	ConstraintToolbar::ConstraintToolbar(const QString& title, QWidget* parent)

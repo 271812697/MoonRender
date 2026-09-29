@@ -1701,6 +1701,45 @@ namespace MOON {
         }
         return -1;
     }
+    /** The angle of a screen position as seen from p_center, in degrees.
+     *
+     * The screen y axis points down, so the angle is taken the other way round; every
+     * angle of the radial annotations is measured this way, which is what makes them
+     * comparable with each other. */
+    static float screenAngleDeg(
+        const Eigen::Vector2f& p_center,
+        const Eigen::Vector2f& p_point
+    )
+    {
+        const float pi = 3.14159265358979f;
+        return -std::atan2(p_point.y() - p_center.y(), p_point.x() - p_center.x())
+            * 180.0f / pi;
+    }
+
+    /** True when p_angle lies on the sweep that runs from p_start to p_end the way
+     * that passes through p_through; all four in degrees. */
+    static bool angleOnSweep(float p_angle, float p_start, float p_end, float p_through)
+    {
+        const auto normalise = [](float p_value) {
+            while (p_value < 0.0f) {
+                p_value += 360.0f;
+            }
+            while (p_value >= 360.0f) {
+                p_value -= 360.0f;
+            }
+            return p_value;
+        };
+        const float angle = normalise(p_angle - p_start);
+        const float end = normalise(p_end - p_start);
+        const float through = normalise(p_through - p_start);
+        if (through <= end) {
+            return angle <= end;
+        }
+        // The arc runs the other way round, so it covers everything from its end
+        // back to its start.
+        return angle >= end;
+    }
+
     void SketcherObj::drawConstraintLabels()
     {
         if (!InEdit() || mConstraintList.empty()) {
@@ -1820,15 +1859,29 @@ namespace MOON {
                 if (getGeometryCenterSketch(c->First, centerSk)) {
                     double radius = 0.0;
                     Base::Vector2d dirSk;
+                    // An arc only covers part of its circle, so where the caption
+                    // sits says nothing about where the arc is: its own ends are
+                    // kept to hold the radial line on it.
+                    bool isArc = false;
+                    Base::Vector2d arcStartSk;
+                    Base::Vector2d arcMidSk;
+                    Base::Vector2d arcEndSk;
                     const Part::Geometry* geo = resolveGeometry(c->First);
                     if (geo && (geo->is<Part::GeomCircle>() || geo->is<Part::GeomArcOfCircle>())) {
                         radius = geo->is<Part::GeomCircle>()
                             ? static_cast<const Part::GeomCircle*>(geo)->getRadius()
                             : static_cast<const Part::GeomArcOfCircle*>(geo)->getRadius();
                         if (geo->is<Part::GeomArcOfCircle>()) {
+                            isArc = true;
                             const auto it = mGeoSegment.find(const_cast<Part::Geometry*>(geo));
                             if (it != mGeoSegment.end() && it->second.point.size() > 1) {
-                                const Base::Vector3d mid = it->second.point[it->second.point.size() / 2];
+                                const std::vector<Base::Vector3d>& sampled = it->second.point;
+                                arcStartSk = Base::Vector2d(sampled.front().x, sampled.front().y);
+                                arcMidSk = Base::Vector2d(
+                                    sampled[sampled.size() / 2].x,
+                                    sampled[sampled.size() / 2].y);
+                                arcEndSk = Base::Vector2d(sampled.back().x, sampled.back().y);
+                                const Base::Vector3d mid = sampled[sampled.size() / 2];
                                 const Base::Vector2d midSk(mid.x, mid.y);
                                 const Base::Vector2d d = midSk - centerSk;
                                 const double dLen = std::sqrt(d.x * d.x + d.y * d.y);
@@ -1859,20 +1912,51 @@ namespace MOON {
                                 rx = chipDx / chipDist * rimDist;
                                 ry = chipDy / chipDist * rimDist;
                             }
-                            const float angleDeg = -std::atan2(ry, rx) * 180.0f / pi;
-                            // Radius is drawn like a length dimension: a double
-                            // arrow shaft that passes through the circle centre
-                            // from one rim side to the other. Its direction is
-                            // arbitrary and follows the dragged caption.
-                            ImPlotCustom::drawDoubleArrow(
-                                ImPlotCustom::Transform(
-                                    centerS.x() - rx, centerS.y() - ry, angleDeg
-                                ),
-                                arrowCol,
-                                rimDist * 2.0f,
-                                thickness,
-                                nullptr
-                            );
+                            // The angle is measured the other way round because the
+                            // screen y axis points down.
+                            float angleDeg = -std::atan2(ry, rx) * 180.0f / pi;
+                            if (isArc) {
+                                // A caption dragged past the end of the arc would put
+                                // the radial line where the arc is not. The arc's own
+                                // span decides whether the direction can stay.
+                                const float startDeg = screenAngleDeg(
+                                    centerS, screenOf(arcStartSk));
+                                const float midDeg = screenAngleDeg(centerS, screenOf(arcMidSk));
+                                const float endDeg = screenAngleDeg(centerS, screenOf(arcEndSk));
+                                if (!angleOnSweep(angleDeg, startDeg, endDeg, midDeg)) {
+                                    angleDeg = midDeg;
+                                    const float rad = angleDeg * pi / 180.0f;
+                                    rx = std::cos(rad) * rimDist;
+                                    ry = -std::sin(rad) * rimDist;
+                                }
+                            }
+                            if (c->Type == Sketcher::ConstraintType::Diameter) {
+                                // A diameter runs from one rim through the centre to
+                                // the other, so it carries an arrow at either end.
+                                ImPlotCustom::drawDoubleArrow(
+                                    ImPlotCustom::Transform(
+                                        centerS.x() - rx, centerS.y() - ry, angleDeg
+                                    ),
+                                    arrowCol,
+                                    rimDist * 2.0f,
+                                    thickness,
+                                    nullptr
+                                );
+                            }
+                            else {
+                                // A radius leaves the centre and ends on the rim, so
+                                // only that end carries an arrow. AddArrow puts its tip
+                                // one head length past the end of the line, so the line
+                                // stops that much short of the rim and the tip lands on
+                                // it.
+                                const float head = 2.0f * 2.5f * thickness;
+                                ImPlotCustom::AddArrow(
+                                    ImPlotCustom::Transform(centerS.x(), centerS.y(), angleDeg),
+                                    arrowCol,
+                                    std::max(rimDist - head, 1.0f),
+                                    thickness
+                                );
+                            }
                         }
                     }
                 }
