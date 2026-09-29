@@ -313,6 +313,12 @@ namespace MOON {
 			float& screenY
 		) const;
 		int pickConstraintLabelAt(float mouseX, float mouseY) const;
+		/** How many screen pixels one sketch unit is worth right now.
+		 *
+		 * The dimension annotations are laid out in sketch units and only turned into
+		 * pixels for drawing, so that they keep their place on the drawing when the
+		 * view is zoomed. */
+		float pixelsPerSketchUnit() const;
 		void editConstraintValue(int constrId);
 		/** Puts the annotation of a dimension where the smart dimension tool dropped
 		 * it.
@@ -401,10 +407,12 @@ namespace MOON {
 			StraightDimFrame& out
 		) const;
 		/** The offset of the dimension line along its direction: where the user dragged
-		 * it to, or the automatic offset while it was never moved. */
+		 * it to, or the automatic offset while it was never moved. Both are given in
+		 * sketch units, so the annotation keeps its place on the drawing when the view
+		 * is zoomed; the result is in pixels. */
 		float straightDimOffset(
 			const Sketcher::Constraint* constraint,
-			float p_defaultOffset
+			float p_defaultOffsetSketch
 		) const;
 		/** The dimension line's two ends in screen space, with the dragged offsets
 		 * applied. @return false when the dimension cannot be laid out. */
@@ -501,8 +509,10 @@ namespace MOON {
 		bool hasClickSelected = false;
 		bool m_dragSolverInit = false;
 		bool sketchDrawRect = false;
-		// P0 dimension-label overlay state
-		std::unordered_map<const Sketcher::Constraint*, Base::Vector2d> m_labelManualOffsetPx;
+		// P0 dimension-label overlay state. The offsets are kept in sketch units, so
+		// that an annotation stays where it was put while the view is zoomed; drawing
+		// converts them with pixelsPerSketchUnit().
+		std::unordered_map<const Sketcher::Constraint*, Base::Vector2d> m_labelManualOffsetSketch;
 		// 0..1 parameter of the caption along the straight dimension shaft
 		std::unordered_map<const Sketcher::Constraint*, double> m_labelManualParam;
 		int m_labelHover = -1;
@@ -511,14 +521,16 @@ namespace MOON {
 		 * move the dimension line itself, the caption only slides along it. */
 		LabelHandle m_labelHoverHandle = LabelHandle::Caption;
 		LabelHandle m_labelDragHandle = LabelHandle::Caption;
-		/** How far (pixels along its direction) the user dragged a dimension line;
-		 * missing means it still sits at its automatic offset. */
-		std::unordered_map<const Sketcher::Constraint*, float> m_straightDimOffsetPx;
-		/** The radius (pixels) the user dragged an angle annotation arc to. The centre
-		 * stays where the geometry puts it, so this is all that moves - and with it the
-		 * amount of arc that is drawn. */
-		std::unordered_map<const Sketcher::Constraint*, float> m_angleLabelRadiusPx;
-		Base::Vector2d m_labelDragOffsetPx;
+		/** How far (sketch units along its direction) the user dragged a dimension
+		 * line; missing means it still sits at its automatic offset. */
+		std::unordered_map<const Sketcher::Constraint*, float> m_straightDimOffsetSketch;
+		/** The radius (sketch units) the user dragged an angle annotation arc to. The
+		 * centre stays where the geometry puts it, so this is all that moves - and with
+		 * it the amount of arc that is drawn. */
+		std::unordered_map<const Sketcher::Constraint*, float> m_angleLabelRadiusSketch;
+		/** The caption offset (sketch units) the caption drag started from. */
+		Base::Vector2d m_labelDragOffsetSketch;
+		/** Where the caption drag was pressed, in pixels. */
 		Base::Vector2d m_labelDragPressPx;
 		int m_lastLabelClick = -1;
 		std::chrono::steady_clock::time_point m_lastLabelClickTime;

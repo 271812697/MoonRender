@@ -738,7 +738,9 @@ namespace MOON {
                     // Keep the line on its side of the geometry: a dimension that
                     // crosses what it measures is never what the user meant.
                     //constexpr float kMinOffset = 8.0f;
-                    m_straightDimOffsetPx[c] = wanted;// std::max(wanted, kMinOffset);
+                    // The offset is stored in sketch units, so it is taken from the
+                    // cursor in pixels and turned into the drawing's own scale.
+                    m_straightDimOffsetSketch[c] = wanted / pixelsPerSketchUnit();
                 }
                 m_labelHover = m_labelDrag;
                 m_labelHoverHandle = m_labelDragHandle;
@@ -755,8 +757,8 @@ namespace MOON {
                     const float dx = static_cast<float>(mx) - centerX;
                     const float dy = static_cast<float>(my) - centerY;
                     constexpr float kMinRadius = 8.0f;
-                    m_angleLabelRadiusPx[c]
-                        = std::max(std::sqrt(dx * dx + dy * dy), kMinRadius);
+                    const float radiusPx = std::max(std::sqrt(dx * dx + dy * dy), kMinRadius);
+                    m_angleLabelRadiusSketch[c] = radiusPx / pixelsPerSketchUnit();
                 }
                 m_labelHover = m_labelDrag;
                 m_labelHoverHandle = m_labelDragHandle;
@@ -816,10 +818,14 @@ namespace MOON {
                 }
             }
             else {
-                Base::Vector2d offset = m_labelDragOffsetPx;
-                offset.x += mx - m_labelDragPressPx.x;
-                offset.y += my - m_labelDragPressPx.y;
-                m_labelManualOffsetPx[c] = offset;
+                // The caption is free to be carried anywhere: the offset is kept in
+                // sketch units so it travels with the drawing when the view is zoomed,
+                // and only the pixel delta of the drag is converted on the way in.
+                const double perUnit = static_cast<double>(pixelsPerSketchUnit());
+                Base::Vector2d offset = m_labelDragOffsetSketch;
+                offset.x += (mx - m_labelDragPressPx.x) / perUnit;
+                offset.y += (my - m_labelDragPressPx.y) / perUnit;
+                m_labelManualOffsetSketch[c] = offset;
             }
             m_labelHover = m_labelDrag;
             m_labelHoverHandle = m_labelDragHandle;
@@ -1037,8 +1043,14 @@ namespace MOON {
         const float midY = (aS.y() + bS.y()) * 0.5f;
         const bool isHorizDist = constraint->Type == Sketcher::ConstraintType::DistanceX;
         const bool isVertDist = constraint->Type == Sketcher::ConstraintType::DistanceY;
-        const float shaftMargin = 16.0f;
         const float captionGap = 14.0f;
+
+        // The automatic offset is a share of what the dimension measures, in sketch
+        // units: a note that keeps its distance from the geometry on the drawing
+        // rather than on the screen, so zooming does not move it.
+        const double span = (bSk - aSk).Length();
+        const float autoOffsetSketch
+            = static_cast<float>(std::max(span * 0.1, 1.0e-4));
 
         out.measuredA = aSk;
         out.measuredB = bSk;
@@ -1056,7 +1068,7 @@ namespace MOON {
                 out.baseA = Eigen::Vector2f(aS.x(), lineY);
                 out.baseB = Eigen::Vector2f(bS.x(), lineY);
                 out.direction = Eigen::Vector2f(0.0f, -1.0f);
-                out.defaultOffset = shaftMargin;
+                out.defaultOffset = autoOffsetSketch;
                 out.gapX = 0.0f;
                 out.gapY = -captionGap;
             }
@@ -1067,7 +1079,9 @@ namespace MOON {
                 out.baseA = Eigen::Vector2f(lineX, aS.y());
                 out.baseB = Eigen::Vector2f(lineX, bS.y());
                 out.direction = Eigen::Vector2f(1.0f, 0.0f);
-                out.defaultOffset = 26.0f;
+                // The caption sits between the geometry and the line, so this one is a
+                // little further out.
+                out.defaultOffset = autoOffsetSketch * 1.6f;
                 out.gapX = -captionGap;
                 out.gapY = 0.0f;
             }
@@ -1092,13 +1106,9 @@ namespace MOON {
             ny = -ny;
             side = -side;
         }
-        float shaftDist = side - captionGap;
-        // Keep a clear margin between the dimension shaft and the measured
-        // geometry; the caption stays one fixed gap beyond the shaft.
-        const float minShaftDist = 16.0f;
-        if (shaftDist < minShaftDist) {
-            shaftDist = minShaftDist;
-        }
+        // The default caption place only says which side of the geometry the dimension
+        // lives on; how far out it sits is the share of the span from above.
+        const float shaftDist = autoOffsetSketch;
         // A plain length dimension sits parallel to the segment it measures; both ends
         // start on the points themselves and may be pulled along that normal.
         out.baseA = aS;
@@ -1109,6 +1119,29 @@ namespace MOON {
         out.gapY = ny * captionGap;
         return true;
     }
+    float SketcherObj::pixelsPerSketchUnit() const
+    {
+        // One sketch unit is measured on screen through the same mapping the
+        // annotations are drawn with, so that the two cannot disagree about the
+        // scale. The two axes give the same answer for a sketch seen from the front,
+        // which is what the dimension overlay is for.
+        const auto worldOf = [this](const Base::Vector2d& sk) {
+            return mPlane.origin + sk.x * mPlane.xAxis + sk.y * mPlane.yAxis;
+            };
+        const auto screenOf = [this, &worldOf](const Base::Vector2d& sk) {
+            const Base::Vector3d w = worldOf(sk);
+            return renderer->worldToScreen(Eigen::Vector3f(
+                static_cast<float>(w.x), static_cast<float>(w.y), static_cast<float>(w.z)));
+            };
+        const Eigen::Vector2f origin = screenOf(Base::Vector2d(0.0, 0.0));
+        const Eigen::Vector2f unitX = screenOf(Base::Vector2d(1.0, 0.0));
+        const Eigen::Vector2f unitY = screenOf(Base::Vector2d(0.0, 1.0));
+        const float scale = 0.5f * ((unitX - origin).norm() + (unitY - origin).norm());
+        // A sketch seen edge on collapses to nothing; the annotations keep a workable
+        // size instead of collapsing with it.
+        return scale > 1.0e-4f ? scale : 1.0e-4f;
+    }
+
     void SketcherObj::placeDimensionAnnotation(int constrId, float p_screenX, float p_screenY)
     {
         const Sketcher::Constraint* c = getConstraint(constrId);
@@ -1123,9 +1156,13 @@ namespace MOON {
             || c->Type == Sketcher::ConstraintType::DistanceY) {
             StraightDimFrame frame;
             if (straightDimFrame(c, frame)) {
-                m_straightDimOffsetPx[c]
+                // The drop point arrives in screen pixels, the layout is kept in
+                // sketch units: the same conversion the dragging code uses, so the
+                // annotation ends up exactly where the preview had it.
+                const float offsetPx
                     = (p_screenX - frame.baseA.x()) * frame.direction.x()
                     + (p_screenY - frame.baseA.y()) * frame.direction.y();
+                m_straightDimOffsetSketch[c] = offsetPx / pixelsPerSketchUnit();
             }
             m_labelManualParam[c] = 0.5;
             return;
@@ -1138,7 +1175,8 @@ namespace MOON {
             if (computeAngleLabelTrack(c, centerX, centerY, radius, startDeg, sweepDeg)) {
                 const float dx = p_screenX - centerX;
                 const float dy = p_screenY - centerY;
-                m_angleLabelRadiusPx[c] = std::max(std::sqrt(dx * dx + dy * dy), 8.0f);
+                const float radiusPx = std::max(std::sqrt(dx * dx + dy * dy), 8.0f);
+                m_angleLabelRadiusSketch[c] = radiusPx / pixelsPerSketchUnit();
             }
             m_labelManualParam[c] = 0.5;
             return;
@@ -1160,19 +1198,24 @@ namespace MOON {
                     static_cast<float>(world.z)
                 )
             );
-            m_labelManualOffsetPx[c] = Base::Vector2d(
-                static_cast<double>(p_screenX - centerS.x()),
-                static_cast<double>(p_screenY - centerS.y())
+            const double perUnit = static_cast<double>(pixelsPerSketchUnit());
+            m_labelManualOffsetSketch[c] = Base::Vector2d(
+                static_cast<double>(p_screenX - centerS.x()) / perUnit,
+                static_cast<double>(p_screenY - centerS.y()) / perUnit
             );
         }
     }
     float SketcherObj::straightDimOffset(
         const Sketcher::Constraint* constraint,
-        float p_defaultOffset
+        float p_defaultOffsetSketch
     ) const
     {
-        const auto found = m_straightDimOffsetPx.find(constraint);
-        return found == m_straightDimOffsetPx.end() ? p_defaultOffset : found->second;
+        // Kept in sketch units so that the dimension stays where it was put while the
+        // view is zoomed; the drawing needs pixels.
+        const auto found = m_straightDimOffsetSketch.find(constraint);
+        const float offsetSketch
+            = found == m_straightDimOffsetSketch.end() ? p_defaultOffsetSketch : found->second;
+        return offsetSketch * pixelsPerSketchUnit();
     }
     bool SketcherObj::straightDimShaft(
         const Sketcher::Constraint* constraint,
@@ -1310,10 +1353,10 @@ namespace MOON {
         if (p_constraint == nullptr) {
             return;
         }
-        m_labelManualOffsetPx.erase(p_constraint);
+        m_labelManualOffsetSketch.erase(p_constraint);
         m_labelManualParam.erase(p_constraint);
-        m_straightDimOffsetPx.erase(p_constraint);
-        m_angleLabelRadiusPx.erase(p_constraint);
+        m_straightDimOffsetSketch.erase(p_constraint);
+        m_angleLabelRadiusSketch.erase(p_constraint);
     }
     bool SketcherObj::computeAngleLabelTrack(
         const Sketcher::Constraint* constraint,
@@ -1392,19 +1435,23 @@ namespace MOON {
         if (std::fabs(sweep) < 0.5f) {
             return false;
         }
-        // The arc is a fixed size on screen. Measuring it from the drawing - half the
-        // segment, or a share of the two rays - made the annotation grow and shrink
-        // with the zoom, so the same angle was drawn at a different size at every zoom
-        // level. It stays a note about the angle rather than a length of the sketch,
-        // and it can still be pulled in and out by hand (see below).
-        constexpr float kDefaultAngleRadiusPx = 45.0f;
-        radiusPx = kDefaultAngleRadiusPx;
+        // The arc is part of the drawing, so its default size is a share of the lines
+        // it measures - in sketch units. It therefore keeps its place when the view is
+        // zoomed, exactly like the length dimensions do. (A single line against the x
+        // axis has only the segment itself to measure against: the other ray is a unit
+        // vector standing for the axis.)
+        const double referenceLength = constraint->Second == Sketcher::GeoEnum::GeoUndef
+            ? dir2.Length()
+            : std::min(dir1.Length(), dir2.Length());
+        const float defaultRadiusSketch = static_cast<float>(
+            std::max(referenceLength * 0.3, 1.0e-4));
+        radiusPx = defaultRadiusSketch * pixelsPerSketchUnit();
         // The arc can be pulled closer or pushed further out; its centre stays on the
         // vertex, so the radius is the only thing that moves - and the drawn arc grows
         // and shrinks with it (the sweep never changes).
-        const auto dragged = m_angleLabelRadiusPx.find(constraint);
-        if (dragged != m_angleLabelRadiusPx.end()) {
-            radiusPx = dragged->second;
+        const auto dragged = m_angleLabelRadiusSketch.find(constraint);
+        if (dragged != m_angleLabelRadiusSketch.end()) {
+            radiusPx = dragged->second * pixelsPerSketchUnit();
         }
         centerX = vS.x();
         centerY = vS.y();
@@ -1664,8 +1711,8 @@ namespace MOON {
                 const float rimDist = std::sqrt(rx * rx + ry * ry);
                 float dirX = 0.70710678118f;
                 float dirY = -0.70710678118f;  // up-right default
-                const auto manualIt = m_labelManualOffsetPx.find(c);
-                if (manualIt != m_labelManualOffsetPx.end()) {
+                const auto manualIt = m_labelManualOffsetSketch.find(c);
+                if (manualIt != m_labelManualOffsetSketch.end()) {
                     const float dx = static_cast<float>(manualIt->second.x);
                     const float dy = static_cast<float>(manualIt->second.y);
                     const float dLen = std::sqrt(dx * dx + dy * dy);
@@ -1711,17 +1758,22 @@ namespace MOON {
             + anchorSketch.y * mPlane.yAxis;
         const Eigen::Vector3f world(world3.x, world3.y, world3.z);
         const Eigen::Vector2f screen = renderer->worldToScreen(world);
+        const float perUnit = pixelsPerSketchUnit();
+        // Both the hand-placed offset and the default one are sketch units, so the
+        // caption travels with the drawing; only the drawing needs pixels.
         float dx = 0.0f, dy = 0.0f;
-        const auto it = m_labelManualOffsetPx.find(c);
-        if (it != m_labelManualOffsetPx.end()) {
+        const auto it = m_labelManualOffsetSketch.find(c);
+        if (it != m_labelManualOffsetSketch.end()) {
             dx = static_cast<float>(it->second.x);
             dy = static_cast<float>(it->second.y);
         }
         else {
             defaultLabelOffsetPx(c, dx, dy);
+            dx /= perUnit;
+            dy /= perUnit;
         }
-        screenX = screen.x() + dx;
-        screenY = screen.y() + dy;
+        screenX = screen.x() + dx * perUnit;
+        screenY = screen.y() + dy * perUnit;
         return true;
     }
     int SketcherObj::pickConstraintLabelAt(float mouseX, float mouseY) const

@@ -56,6 +56,9 @@ namespace MOON
 		bool pickAtCursor();
 		/** Where the cursor is on the sketch plane, in sketch coordinates. */
 		Base::Vector2d cursorOnSketchPlane() const;
+		/** Where a place in the sketch ends up on screen, through the same mapping the
+		 * annotations use. */
+		Eigen::Vector2f screenOfSketchPos(const Base::Vector2d& p_pos) const;
 		/** Works out again which dimension the picks can take, from where the cursor
 		 * is now. */
 		void updateCandidate();

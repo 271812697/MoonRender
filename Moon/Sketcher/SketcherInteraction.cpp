@@ -199,10 +199,14 @@ namespace MOON {
                 m_labelDragHandle = LabelHandle::Caption;
                 float defDx = 0.0f, defDy = 0.0f;
                 defaultLabelOffsetPx(c, defDx, defDy);
-                const auto it = c ? m_labelManualOffsetPx.find(c) : m_labelManualOffsetPx.end();
-                m_labelDragOffsetPx = (it != m_labelManualOffsetPx.end())
+                // The caption offset lives in sketch units; the default is given in
+                // pixels, so it is converted on the way in and the drag delta is
+                // converted on the way back out (see updateConstraintLabelInteraction).
+                const auto it
+                    = c ? m_labelManualOffsetSketch.find(c) : m_labelManualOffsetSketch.end();
+                m_labelDragOffsetSketch = (it != m_labelManualOffsetSketch.end())
                     ? it->second
-                    : Base::Vector2d(defDx, defDy);
+                    : Base::Vector2d(defDx, defDy) / pixelsPerSketchUnit();
                 m_labelDrag = labelHit;
                 m_labelDragPressPx = Base::Vector2d(mx, my);
                 clearSelect();
@@ -280,7 +284,7 @@ namespace MOON {
     {
         if (m_labelDrag >= 0) {
             // A dimension label was being dragged; the label position is kept
-            // in m_labelManualOffsetPx, so simply end the drag here.
+            // in m_labelManualOffsetSketch, so simply end the drag here.
             m_labelDrag = -1;
             return;
         }
@@ -891,9 +895,10 @@ namespace MOON {
         mConstraintList = std::move(keptConstraints);
         // Deleted constraints invalidate the label overlay bookkeeping, which
         // is keyed by constraint pointer.
-        m_labelManualOffsetPx.clear();
+        m_labelManualOffsetSketch.clear();
         m_labelManualParam.clear();
-        m_straightDimOffsetPx.clear();
+        m_straightDimOffsetSketch.clear();
+        m_angleLabelRadiusSketch.clear();
         m_labelHover = -1;
         m_labelDrag = -1;
         m_labelHoverHandle = LabelHandle::Caption;

@@ -368,6 +368,24 @@ namespace MOON
 			(hitPos - plane2d.origin).Dot(plane2d.yAxis));
 	}
 
+	Eigen::Vector2f SmartDimensionWidget::screenOfSketchPos(const Base::Vector2d& p_pos) const
+	{
+		// The same mapping the annotations use: going through the sketch plane and the
+		// camera keeps the two in one coordinate system, which the raw mouse position
+		// of the window is not guaranteed to be in.
+		SketcherObj* sketch = mInternal->activeSketch();
+		if (sketch == nullptr) {
+			return Eigen::Vector2f(0.0f, 0.0f);
+		}
+		const SketcherPlane2D plane2d = sketch->getPlane();
+		const Base::Vector3d world = plane2d.origin + p_pos.x * plane2d.xAxis
+			+ p_pos.y * plane2d.yAxis;
+		return renderer->worldToScreen(Eigen::Vector3f(
+			static_cast<float>(world.x),
+			static_cast<float>(world.y),
+			static_cast<float>(world.z)));
+	}
+
 	void SmartDimensionWidget::onMouseMove()
 	{
 		if (mInternal->activeSketch() == nullptr) {
@@ -758,9 +776,9 @@ namespace MOON
 			}
 			// The arc sits at the distance of the cursor from the corner, which is what
 			// pulling the annotation in and out does once it is there.
-			auto [mx, my] = m_sceneView->getInutState().GetMousePosition();
-			const float cursorDx = static_cast<float>(mx) - cornerScreen.x;
-			const float cursorDy = static_cast<float>(my) - cornerScreen.y;
+			const Eigen::Vector2f cursorScreen = screenOfSketchPos(state.cursor);
+			const float cursorDx = cursorScreen.x() - cornerScreen.x;
+			const float cursorDy = cursorScreen.y() - cornerScreen.y;
 			const float radius = std::max(
 				std::sqrt(cursorDx * cursorDx + cursorDy * cursorDy), 8.0f);
 			ImPlotCustom::drawDoubleArcArrow(
@@ -871,9 +889,12 @@ namespace MOON
 		const double value = mInternal->measure();
 		{
 			// The annotation is added where the preview stands, not where the sketch
-			// would put it by default.
-			auto [mx, my] = m_sceneView->getInutState().GetMousePosition();
-			mInternal->placeScreen = Base::Vector2d(mx, my);
+			// would put it by default. The cursor is taken through the sketch plane,
+			// where it is already known, rather than from the window, so that the place
+			// is measured in the same screen space the annotation is drawn in.
+			const Eigen::Vector2f screen = screenOfSketchPos(mInternal->cursor);
+			mInternal->placeScreen
+				= Base::Vector2d(static_cast<double>(screen.x()), static_cast<double>(screen.y()));
 		}
 
 		// The dialog is opened from the event loop rather than from inside the mouse
