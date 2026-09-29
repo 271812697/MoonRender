@@ -7,6 +7,9 @@
 #include "editor/UI/TaskPanel/ChamferTask.h"
 #include "editor/UI/TaskPanel/RevolutionTask.h"
 #include "editor/UI/TaskPanel/DatumLineTask.h"
+#include "editor/UI/TaskPanel/PolarPatternTask.h"
+#include "editor/UI/TaskPanel/MirrorTask.h"
+#include "editor/UI/TaskPanel/LinearPatternTask.h"
 #include "TopoShape.h"
 #include "Core/Global/ServiceLocator.h"
 #include "core/ViewTool.h"
@@ -41,6 +44,15 @@ namespace MOON {
 		}
 		if (name == "DatumLine") {
 			return new DatumLineTask();
+		}
+		if (name == "PolarPattern") {
+			return new PolarPatternTask();
+		}
+		if (name == "Mirror") {
+			return new MirrorTask();
+		}
+		if (name == "LinearPattern") {
+			return new LinearPatternTask();
 		}
 		return nullptr;
 	}
@@ -86,6 +98,15 @@ namespace MOON {
 			grooveCommand->setIcon(":/widgets/icons/partdesign/PartDesign_Groove.svg");
 			datumLineCommand = new DesignModelCommand(self, "DatumLine");
 			datumLineCommand->setIcon(":/widgets/icons/partdesign/PartDesign_Line.svg");
+			polarPatternCommand = new DesignModelCommand(self, "PolarPattern");
+			polarPatternCommand->setIcon(
+				":/widgets/icons/partdesign/PartDesign_PolarPattern.svg");
+			mirrorCommand = new DesignModelCommand(self, "Mirror");
+			mirrorCommand->setIcon(
+				":/widgets/icons/partdesign/PartDesign_Mirrored.svg");
+			linearPatternCommand = new DesignModelCommand(self, "LinearPattern");
+			linearPatternCommand->setIcon(
+				":/widgets/icons/partdesign/PartDesign_LinearPattern.svg");
 			self->addAction(padCommand->action());			
 			self->addAction(revolveCommand->action());
 			self->addAction(thicknessCommand->action());
@@ -94,6 +115,9 @@ namespace MOON {
 			self->addAction(pocketCommand->action());
 			self->addAction(grooveCommand->action());
 			self->addAction(datumLineCommand->action());
+			self->addAction(polarPatternCommand->action());
+			self->addAction(mirrorCommand->action());
+			self->addAction(linearPatternCommand->action());
 
 			retranslateUi();
 		}
@@ -106,6 +130,9 @@ namespace MOON {
 			revolveCommand->action()->setText(QCoreApplication::translate("DesignModelingToolbar", "Revolve", nullptr));
 			grooveCommand->action()->setText(QCoreApplication::translate("DesignModelingToolbar", "Groove", nullptr));
 			datumLineCommand->action()->setText(QCoreApplication::translate("DesignModelingToolbar", "Datum Line", nullptr));
+			polarPatternCommand->action()->setText(QCoreApplication::translate("DesignModelingToolbar", "Polar Pattern", nullptr));
+			mirrorCommand->action()->setText(QCoreApplication::translate("DesignModelingToolbar", "Mirror", nullptr));
+			linearPatternCommand->action()->setText(QCoreApplication::translate("DesignModelingToolbar", "Linear Pattern", nullptr));
 		}
 	private:
 		friend class DesignModelingToolbarToolbar;
@@ -118,6 +145,9 @@ namespace MOON {
 		DesignModelCommand* revolveCommand = nullptr;
 		DesignModelCommand* grooveCommand = nullptr;
 		DesignModelCommand* datumLineCommand = nullptr;
+		DesignModelCommand* polarPatternCommand = nullptr;
+		DesignModelCommand* mirrorCommand = nullptr;
+		DesignModelCommand* linearPatternCommand = nullptr;
 	};
 
 	DesignModelingToolbar::DesignModelingToolbar(const QString& title, QWidget* parent)

@@ -1,6 +1,7 @@
 ﻿#pragma once
 #include "core/component/TopoShapeActor.h"
 namespace MOON { 
+	class SketcherObj;
 	class Feature :public TopoActor {
 	public:
 		Feature(const std::string& p_name,const std::string& tag);
@@ -49,6 +50,17 @@ namespace MOON {
 		 * of leaving it to be discovered as a reference that points at the wrong
 		 * element months later. */
 		void setResultShape(Part::TopoShape p_shape);
+		/** The sketch the shape of this feature was built from, if the chain below
+		 * has one.
+		 *
+		 * A transform feature - a pattern or a mirror - normally turns, moves or
+		 * reflects inside the plane of the sketch its body was made of, so this is
+		 * where those features look for their axis, plane or directions. The first
+		 * feature of the chain that was built from a profile wins: for a pad that is
+		 * the sketch the pad was made of, and the features stacked on it only pass
+		 * through here. The sketch the user is editing is used when nothing in the
+		 * chain has one. */
+		SketcherObj* findBaseSketch();
 		void makeDone();
 	protected:
 		/** Resolves one entry of subValues against the *current* shape of the base

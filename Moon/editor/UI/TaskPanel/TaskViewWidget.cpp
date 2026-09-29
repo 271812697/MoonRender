@@ -13,6 +13,12 @@
 #include "feature/FilletFeature.h"
 #include "feature/RevolveFeature.h"
 #include "feature/DatumLineFeature.h"
+#include "feature/PolarPatternFeature.h"
+#include "feature/MirrorFeature.h"
+#include "feature/LinearPatternFeature.h"
+#include "editor/UI/TaskPanel/PolarPatternTask.h"
+#include "editor/UI/TaskPanel/MirrorTask.h"
+#include "editor/UI/TaskPanel/LinearPatternTask.h"
 
 
 namespace MOON {
@@ -47,6 +53,31 @@ namespace MOON {
         DatumLineFeature* datumLine = dynamic_cast<DatumLineFeature*>(feature);
         if (datumLine) {
             DatumLineTask* dialog = new DatumLineTask(nullptr, datumLine);
+            return dialog;
+        }
+        PolarPatternFeature* polarPattern = dynamic_cast<PolarPatternFeature*>(feature);
+        if (polarPattern) {
+            PolarPatternTask* dialog = new PolarPatternTask(
+                nullptr,
+                static_cast<TransformMode>(polarPattern->mode),
+                polarPattern);
+            return dialog;
+        }
+        MirrorFeature* mirror = dynamic_cast<MirrorFeature*>(feature);
+        if (mirror) {
+            MirrorTask* dialog = new MirrorTask(
+                nullptr,
+                static_cast<TransformMode>(mirror->mode),
+                mirror);
+            return dialog;
+        }
+        LinearPatternFeature* linearPattern
+            = dynamic_cast<LinearPatternFeature*>(feature);
+        if (linearPattern) {
+            LinearPatternTask* dialog = new LinearPatternTask(
+                nullptr,
+                static_cast<TransformMode>(linearPattern->mode),
+                linearPattern);
             return dialog;
         }
         return nullptr;

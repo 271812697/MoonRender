@@ -5,9 +5,11 @@
 #include <Core/Global/ServiceLocator.h>
 #include "Feature.h"
 #include "feature/FeatureBody.h"
+#include "feature/FeatureBaseProfile.h"
 #include "feature/SubShapeRef.h"
 #include "SketcherFeature.h"
 #include "Sketcher/SketcherObj.h"
+#include "Sketcher/SketcherObjManager.h"
 #include "TopoShape.h"
 #include "MappedName.h"
 #include "IndexedName.h"
@@ -99,6 +101,19 @@ namespace MOON {
 				GetName());
 		}
 		topoShape->setShape(p_shape);
+	}
+	SketcherObj* Feature::findBaseSketch()
+	{
+		for (Feature* f = getBaseFeature(); f != nullptr; f = f->getBaseFeature()) {
+			auto* profile = dynamic_cast<FeatureBaseProfile*>(f);
+			if (profile == nullptr || profile->getProfile() == nullptr) {
+				continue;
+			}
+			return profile->getProfile()->getSketcherObj();
+		}
+		// Nothing in the chain was built from a sketch, so the one being edited is
+		// the next best guess.
+		return SketcherObjManager::instance().GetCurrentActiveSketcherObj();
 	}
 	Part::TopoShape Feature::resolveBaseSubShape(int p_index)
 	{
