@@ -448,10 +448,29 @@ namespace MOON {
        // -1, so the id cannot double as "nothing was hit".
        bool hit = false;
 
-        // The candidates are the sketch's own curves plus the projected external ones:
-        // an external curve is a reference the user may constrain to, so it has to be
-        // selectable - but only outside a drawing tool, where a reference must not be
-        // mistaken for the geometry the tool is working on.
+        // The sketch origin is a pick target of its own and it is tested first: it is
+        // where both axes start (the root point - GeoEnum gives it the id of the
+        // horizontal axis, the point position start), and it is what a sketch is most
+        // often constrained to. Left to the loops below, the axis lines - which pass
+        // through it - or a curve endpoint sitting on it would take the click. A
+        // coincident element can still be reached by clicking again: the selection
+        // cycles through the points that lie on top of each other.
+        const double originTole = 10.0;
+        if ((p1 - trans * Base::Vector3d(0.0, 0.0, 0.0)).Length() < originTole) {
+            ret.GeoId = Sketcher::GeoEnum::HAxis;
+            ret.pointPos = PointPos::start;
+            return ret;
+        }
+
+        // The candidates are the sketch's own curves plus the external ones (the axes
+        // and the origin among them): an external curve is a reference the user may
+        // constrain to, so it has to be selectable. This used to be skipped while a
+        // draw handler was active, which is exactly when a reference is needed most -
+        // the smart dimension picks the point it measures against through here, and
+        // "constrain this to the origin" is one of those picks. The drawing tools do
+        // not come through this function at all: the sketch only refreshes its hover
+        // pick while no handler runs (see onMouseMove), so nothing is picked here for
+        // them.
         std::vector<std::pair<int, Part::Geometry*>> candidates;
         candidates.reserve(mGeoList.size() + getExternalCurveCount());
         for (int i = 0; i < static_cast<int>(mGeoList.size()); ++i) {
@@ -460,15 +479,13 @@ namespace MOON {
             }
             candidates.emplace_back(i, mGeoList[i].get());
         }
-        if (!isHaveActiveHandler) {
-            for (int i = 0; i < getExternalCurveCount(); ++i) {
-                Part::Geometry* geo = const_cast<Part::Geometry*>(
-                    getExternalCurve(getExternalGeoId(i)));
-                // Only a curve that has been sampled can be hit; a missing cache entry
-                // must not be turned into an empty one here.
-                if (geo != nullptr && findSegment(geo) != nullptr) {
-                    candidates.emplace_back(getExternalGeoId(i), geo);
-                }
+        for (int i = 0; i < getExternalCurveCount(); ++i) {
+            Part::Geometry* geo = const_cast<Part::Geometry*>(
+                getExternalCurve(getExternalGeoId(i)));
+            // Only a curve that has been sampled can be hit; a missing cache entry
+            // must not be turned into an empty one here.
+            if (geo != nullptr && findSegment(geo) != nullptr) {
+                candidates.emplace_back(getExternalGeoId(i), geo);
             }
         }
 
