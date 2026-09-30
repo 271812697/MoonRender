@@ -30,6 +30,7 @@
 #include "Interactive/Widgets/DrawSketchHandlerSymmetry.h"
 #include "Interactive/Widgets/DrawSketchHandlerFillet.h"
 #include "Interactive/Widgets/DrawSketchHandlerOffset.h"
+#include "Interactive/Widgets/DrawSketchHandlerExternalGeometry.h"
 #include "Interactive/Widgets/PrimitiveBox.h"
 #include "Interactive/Widgets/PrimitiveSphere.h"
 #include "Interactive/Widgets/PrimitiveCylinder.h"
@@ -74,6 +75,12 @@ class Editor::Rendering::GizmoRenderPass::GizmoRenderPassInternal {
 			mWidgets["DrawSketchHandlerRotate"] = new MOON::DrawSketchHandlerRotate("DrawSketchHandlerRotate");
 			mWidgets["DrawSketchHandlerTrimming"] = new MOON::DrawSketchHandlerTrimming("DrawSketchHandlerTrimming");
 			mWidgets["DrawSketchHandlerTrimming"]->setActive(false);
+			// One widget, two modes: the sketch toolbar switches it on with the mode of
+			// the button that was pressed (see AddExternalGeometryCommand).
+			mWidgets[MOON::DrawSketchHandlerExternalGeometry::WidgetName]
+				= new MOON::DrawSketchHandlerExternalGeometry(
+					MOON::DrawSketchHandlerExternalGeometry::WidgetName);
+			mWidgets[MOON::DrawSketchHandlerExternalGeometry::WidgetName]->setActive(false);
 			
 			mWidgets["ClipPlane"]->setActive(false);
 			mWidgets["SplitScreen"]->setActive(false);

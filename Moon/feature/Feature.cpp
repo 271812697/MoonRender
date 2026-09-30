@@ -190,4 +190,7 @@ namespace MOON {
 		comp->discretizationShape();
 		FeatureBody::instance().populateFeature(this);
 	}
+	Part::TopoShape Feature3D::getToolShape() {
+		return GetTopoShape();
+	}
 }

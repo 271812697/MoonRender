@@ -129,11 +129,6 @@ namespace MOON {
     void SketcherObj::setPlane(const SketcherPlane2D& plane)
     {
         mPlane = plane;
-        // External geometry is projected into the sketch plane, so it has to be
-        // projected again when the plane moves.
-        for (ExternalGeometry& external : mExternalGeometry) {
-            external.dirty = true;
-        }
         fitCamera();
         //GetService(SketchToolbar).disableAllHandlers();
     }
@@ -160,9 +155,9 @@ namespace MOON {
     {
         if (!flag) {
             // Leaving the sketch leaves its tools: the external geometry button has to
-            // follow, otherwise it would still be pressed the next time the sketch is
-            // opened (and the clicks of the next tool would be taken by it).
-            setExternalGeometryMode(false);
+            // follow - and with it the tool widget it switches on - otherwise it would
+            // still be pressed the next time the sketch is opened (and the clicks of
+            // the next tool would be taken by it).
             GetService(SketchToolbar).uncheckExternalGeometry();
         }
     }
@@ -345,74 +340,93 @@ namespace MOON {
             }
         }
 
-        // Infinite X/Y axes: intersect each axis line with the viewport rectangle
-        // and draw the segment between the two crossings so they span the screen.
-        renderer->pushSize(3);
-        const auto* axisCam = m_sceneView->GetCamera();
-        if (axisCam) {
-            const auto& proj = axisCam->GetProjectionMatrix();
-            const float proj11 = proj(1, 1);
-            const auto& fd = m_sceneView->GetRenderer().GetFrameDescriptor();
-            const float screenH = static_cast<float>(fd.renderHeight);
-            const float aspect = screenH > 0.0f ? static_cast<float>(fd.renderWidth) / screenH : 1.0f;
-            if (proj11 > 0.0f && axisCam->GetProjectionMode() == ::Rendering::Settings::EProjectionMode::ORTHOGRAPHIC) {
-                const auto& viewM = axisCam->GetViewMatrix();
-                const Maths::FVector3 origin3(mPlane.origin.x, mPlane.origin.y, mPlane.origin.z);
-                const Maths::FVector3 v0 = viewM.MulPoint(origin3);
-                const float halfH = 1.0f / proj11;
-                const float hx = halfH * aspect;
-                const float hy = halfH;
-                const Base::Vector3d dirs[2] = { mPlane.xAxis, mPlane.yAxis };
-                const Eigen::Vector4<uint8_t> colors[2] = { {255, 0, 0, 255}, {255, 0, 255, 0} };
-                for (int a = 0; a < 2; ++a) {
-                    const Maths::FVector3 p1 = viewM.MulPoint(Maths::FVector3(
-                        mPlane.origin.x + dirs[a].x, mPlane.origin.y + dirs[a].y, mPlane.origin.z + dirs[a].z));
-                    const Maths::FVector3 dv(p1.x - v0.x, p1.y - v0.y, 0.0f);
-                    const float coords[2] = { v0.x, v0.y };
-                    const float dirC[2] = { dv.x, dv.y };
-                    const float half[2] = { hx, hy };
-                    float lo = -1e9f, hi = 1e9f;
-                    bool crosses = true;
-                    for (int c = 0; c < 2; ++c) {
-                        if (std::abs(dirC[c]) < 1e-9f) {
-                            if (std::abs(coords[c]) > half[c]) { crosses = false; break; }
-                        }
-                        else {
-                            const float t1 = (-half[c] - coords[c]) / dirC[c];
-                            const float t2 = (half[c] - coords[c]) / dirC[c];
-                            lo = std::max(lo, std::min(t1, t2));
-                            hi = std::min(hi, std::max(t1, t2));
-                        }
-                    }
-                    if (crosses && hi >= lo) {
-                        const float ext = std::max((hi - lo) * 0.05f, 1e-3f);
-                        renderer->pushColor(colors[a]);
-                        if (a == 0) {
-                            renderer->drawLine(mPlane.valueEigen(lo - ext, 0.0), mPlane.valueEigen(hi + ext, 0.0));
-                        }
-                        else {
-                            renderer->drawLine(mPlane.valueEigen(0.0, lo - ext), mPlane.valueEigen(0.0, hi + ext));
-                        }
-                        renderer->popColor();
-                    }
+    }
+    void SketcherObj::drawAxisSpanning(int p_axisIndex)
+    {
+        // An axis is drawn as the infinite line it stands for: its geometry is a
+        // segment that *starts* at the origin - the start point of the horizontal
+        // axis is the root point, so it has to stay there - while the line the user
+        // sees and clicks is the whole axis. Each axis line is intersected with the
+        // viewport rectangle and the part between the two crossings is drawn, so the
+        // span follows the view instead of being a huge piece of geometry.
+        const auto* axisCam = m_sceneView ? m_sceneView->GetCamera() : nullptr;
+        if (axisCam == nullptr) {
+            return;
+        }
+        const auto& proj = axisCam->GetProjectionMatrix();
+        const float proj11 = proj(1, 1);
+        const auto& fd = m_sceneView->GetRenderer().GetFrameDescriptor();
+        const float screenH = static_cast<float>(fd.renderHeight);
+        const float aspect = screenH > 0.0f
+            ? static_cast<float>(fd.renderWidth) / screenH
+            : 1.0f;
+
+        if (proj11 <= 0.0f
+            || axisCam->GetProjectionMode() != ::Rendering::Settings::EProjectionMode::ORTHOGRAPHIC) {
+            // No view rectangle to intersect with (a sketch is edited with an
+            // orthographic camera, so this is only a fallback): a fixed span.
+            const double extent = 500.0;
+            if (p_axisIndex == 0) {
+                renderer->drawLine(
+                    mPlane.valueEigen(-extent, 0.0),
+                    mPlane.valueEigen(extent, 0.0));
+            }
+            else {
+                renderer->drawLine(
+                    mPlane.valueEigen(0.0, -extent),
+                    mPlane.valueEigen(0.0, extent));
+            }
+            return;
+        }
+
+        const auto& viewM = axisCam->GetViewMatrix();
+        const Maths::FVector3 origin3(mPlane.origin.x, mPlane.origin.y, mPlane.origin.z);
+        const Maths::FVector3 v0 = viewM.MulPoint(origin3);
+        const float halfH = 1.0f / proj11;
+        const float hx = halfH * aspect;
+        const float hy = halfH;
+        const Base::Vector3d dir = p_axisIndex == 0 ? mPlane.xAxis : mPlane.yAxis;
+        // The direction of the axis in view space: the axis is a line through the
+        // origin, so this is what tells where it leaves the viewport rectangle.
+        const Maths::FVector3 p1 = viewM.MulPoint(Maths::FVector3(
+            mPlane.origin.x + dir.x,
+            mPlane.origin.y + dir.y,
+            mPlane.origin.z + dir.z));
+        const float coords[2] = { v0.x, v0.y };
+        const float dirC[2] = { p1.x - v0.x, p1.y - v0.y };
+        const float half[2] = { hx, hy };
+        float lo = -1e9f;
+        float hi = 1e9f;
+        for (int c = 0; c < 2; ++c) {
+            if (std::abs(dirC[c]) < 1e-9f) {
+                if (std::abs(coords[c]) > half[c]) {
+                    return;  // the axis lies outside the view
                 }
             }
             else {
-                renderer->pushColor({ 255,0,0,255 });
-                renderer->drawLine(mPlane.valueEigen(500, 0), mPlane.valueEigen(-500, 0));
-                renderer->popColor();
-                renderer->pushColor({ 255,0,255,0 });
-                renderer->drawLine(mPlane.valueEigen(0, 500), mPlane.valueEigen(0, -500));
-                renderer->popColor();
+                const float t1 = (-half[c] - coords[c]) / dirC[c];
+                const float t2 = (half[c] - coords[c]) / dirC[c];
+                lo = std::max(lo, std::min(t1, t2));
+                hi = std::min(hi, std::max(t1, t2));
             }
         }
-        renderer->popSize();
-
-        // Origin marker.
-        renderer->pushColor({ 255,255,255,0 });
-        renderer->drawPoint(mPlane.valueEigen(0, 0));
-        renderer->popColor();
+        if (hi < lo) {
+            return;
+        }
+        // A little beyond the crossings so the line reaches the border.
+        const float ext = std::max((hi - lo) * 0.05f, 1e-3f);
+        if (p_axisIndex == 0) {
+            renderer->drawLine(
+                mPlane.valueEigen(lo - ext, 0.0),
+                mPlane.valueEigen(hi + ext, 0.0));
+        }
+        else {
+            renderer->drawLine(
+                mPlane.valueEigen(0.0, lo - ext),
+                mPlane.valueEigen(0.0, hi + ext));
+        }
     }
+
     bool SketcherObj::snapToGridPoint(Base::Vector2d& pos) const
     {
         if (!m_snapToGrid || !m_drawGrid || !m_sceneView) {
@@ -562,6 +576,24 @@ namespace MOON {
                 }();
             const bool isPreSelected = preSelectGeoId.GeoId == geoId
                 && selectState != OperationGeo;
+
+            if (isAxisCurve(geoId)) {
+                // The axes are the one kind of curve that is drawn from its line and
+                // not from its sampled points: the geometry has to start at the origin
+                // (that is the root point), so it could never cover the whole axis the
+                // user sees and clicks. Everything else about them is like any other
+                // external curve - idle colour, selection highlight.
+                renderer->pushColor(isSelected ? selectColor
+                                               : (isPreSelected ? preselectColor
+                                                                : m_drawOption.externalColor));
+                drawAxisSpanning(geoId == Sketcher::GeoEnum::VAxis ? 1 : 0);
+                // The root point: the start of the axis, i.e. the sketch origin. It is
+                // the one point of an axis that is a feature of its own - the far end of
+                // the defining segment is not.
+                renderer->drawPoint(mPlane.valueEigen(0.0, 0.0), pointSize + 1);
+                renderer->popColor();
+                continue;
+            }
 
             auto& segment = segmentOf(const_cast<Part::Geometry*>(externalGeo));
 

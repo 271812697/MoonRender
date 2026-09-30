@@ -23,15 +23,6 @@ namespace MOON {
     };
     void SketcherObj::onMouseMove()
     {
-        // Nothing of the sketch is being picked while external geometry is being
-        // chosen; the scene highlight that the picking pass draws is the feedback.
-        if (m_externalGeometryMode && !isHaveActiveHandler) {
-            if (preSelectGeoId.GeoId != NoGeoId) {
-                preSelectGeoId = { NoGeoId, PointPos::none };
-            }
-            selectState = Stop;
-            return;
-        }
         if (!isHaveActiveHandler && isInEdit) {
             updateConstraintLabelInteraction();
             // While the cursor rests on a dimension label (or drags one) the
@@ -162,14 +153,6 @@ namespace MOON {
 
     void SketcherObj::onLeftMousePressed()
     {
-        // External geometry mode: the click belongs to the scene, not to the sketch.
-        // The pick pass has already resolved the actor under the cursor (the scene
-        // view keeps the last hover pick), so what is under the mouse is what is
-        // referenced - including the highlight the scene draws for it.
-        if (m_externalGeometryMode && !isHaveActiveHandler) {
-            pickExternalGeometry();
-            return;
-        }
         if (!isHaveActiveHandler && isInEdit) {
             auto [mx, my] = m_sceneView->getInutState().GetMousePosition();
             // The annotation itself is a handle as well: a length dimension's line -
@@ -354,11 +337,6 @@ namespace MOON {
     }
     void SketcherObj::onKeyPress(const std::string& key)
     {
-        if (key == "ESCAPE" && m_externalGeometryMode) {
-            setExternalGeometryMode(false);
-            GetService(SketchToolbar).uncheckExternalGeometry();
-            return;
-        }
         if (key == "DELETE" && !isHaveActiveHandler) {
             std::vector<int>deletList(selectIds.size());
             for (int i = 0; i < selectIds.size(); i++) {
@@ -511,6 +489,28 @@ namespace MOON {
         // tested when no point was close enough.
         if (!hit) {
             for (const auto& [geoId, geo] : candidates) {
+                if (isAxisCurve(geoId)) {
+                    // The axes are hit as the infinite lines they stand for: their
+                    // geometry only reaches from the origin outwards (it has to start
+                    // there - that is the root point), while the user clicks anywhere
+                    // along the line that is drawn for them.
+                    const Base::Vector3d origin = trans * Base::Vector3d(0.0, 0.0, 0.0);
+                    const Base::Vector3d tip = trans * (geoId == Sketcher::GeoEnum::VAxis
+                        ? Base::Vector3d(0.0, 1.0, 0.0)
+                        : Base::Vector3d(1.0, 0.0, 0.0));
+                    const Base::Vector3d dir = tip - origin;
+                    const double len = dir.Length();
+                    if (len > 1e-12) {
+                        const double dist = (p1 - origin).Cross(dir).Length() / len;
+                        if (dist < deltaTole && dist < minDist) {
+                            minDist = dist;
+                            ret.GeoId = geoId;
+                            ret.pointPos = PointPos::none;
+                            hit = true;
+                        }
+                    }
+                    continue;
+                }
                 auto& segment = segmentOf(geo);
                 if (geo->isDerivedFrom<Part::GeomCurve>()) {
                     for (int j = 0; j < segment.point.size() - 1; j++) {

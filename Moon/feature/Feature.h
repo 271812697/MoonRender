@@ -108,6 +108,8 @@ namespace MOON {
 		{
 
 		}
+		virtual Part::TopoShape getToolShape()override;
+		virtual bool isToolSubtractive() const override { return false; }
 	};
 	class DatumFeature :public Feature
 	{

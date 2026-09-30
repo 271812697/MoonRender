@@ -105,10 +105,14 @@ namespace MOON {
 		bool InEdit()const;
 		void draw();
 		bool snapToGridPoint(Base::Vector2d& pos) const;
-		// Sketch backdrop (adaptive background grid, infinite X/Y axes, origin
-		// marker). Kept separate from the geometry pass so background visuals
-		// can be tuned/disabled without touching curve rendering.
+		// Sketch backdrop: the adaptive background grid only. The axes and the origin
+		// they meet at are geometry (see ensureAxisGeometry) and are drawn by the
+		// geometry pass, so that what is drawn and what can be picked are one thing.
 		void drawBackground();
+		/** Draws one axis as the infinite line it stands for, clipped to the viewport.
+		 * p_axisIndex 0 = horizontal axis, 1 = vertical axis. The caller sets colour
+		 * and width: the axis is drawn like any other external curve. */
+		void drawAxisSpanning(int p_axisIndex);
 		void makeDone();
 		int solve(bool updateGeoAfterSolving = true);
 		int addGeometry(std::unique_ptr<Part::Geometry>&ptr);
@@ -158,76 +162,42 @@ namespace MOON {
 		);
 		Part::TopoShape toShape() const;
 
-		/** One piece of geometry from outside the sketch, projected into it.
+		/** --- external geometry: geometry of another feature, into this sketch ----
 		 *
-		 * The reference is "<Type>_<index>" on p_source - the same form the task
-		 * panels store when the user picks an edge or a face - and it is resolved by
-		 * mapped name first (see ResolveSubShapeRef), so it survives a recompute of
-		 * the feature it points at.
+		 * The curves are computed outside the sketch (the tool widget
+		 * DrawSketchHandlerExternalGeometry picks a sub-shape of another feature and
+		 * projects it onto the sketch plane, or cuts it with that plane) and stored
+		 * here next to the sketch's own geometry, so both go to the solver as one
+		 * list. The storage is therefore the same kind of plain curve list as
+		 * mGeoList, and adding one is the same kind of operation as addGeometry().
 		 *
-		 * External geometry is *fixed* as far as the solver is concerned: the sketch
-		 * can constrain to it but never change it, which is exactly how FreeCAD feeds
-		 * it to the solver (the trailing entries of the geometry list, see
-		 * Sketch::setUpSketch()).
+		 * The curves are *fixed* as far as the solver is concerned: the sketch can
+		 * constrain to them but never change them, which is how the solver is told -
+		 * the external block is the tail of the geometry list it is handed, see
+		 * Sketch::setUpSketch().
 		 */
-		struct ExternalGeometry
-		{
-			Feature* source = nullptr;
-			std::string reference;
-			/** Reserved for the section mode (FreeCAD's "intersection" option: take the
-			 * section of the source with the sketch plane instead of projecting it).
-			 * Only the projection is implemented so far. */
-			bool intersection = false;
-			/** Names of the source sub-shape, see ResolveSubShapeRef(). */
-			std::vector<std::string> names;
-			/** The projected curves, in sketch (u, v) coordinates. */
-			std::vector<std::unique_ptr<Part::Geometry>> geos;
-			/** The source shape the projection was made from. A refresh resolves and
-			 * projects again only when this is not the shape the source has now, so a
-			 * drag (which solves on every mouse move) does not re-project each step. */
-			TopoDS_Shape sourceShape;
-			/** Force the next refresh to redo the work even when sourceShape matches. */
-			bool dirty = true;
-			/** The source sub-shape cannot be resolved any more. */
-			bool missing = false;
-		};
-
-		/** Adds geometry of another feature to this sketch, projected into its plane.
-		 * @return the index of the new entry, or -1 when it could not be added. */
-		int addExternalGeometry(
-			Feature* p_source,
-			const std::string& p_reference,
-			bool p_intersection = false);
-		void clearExternalGeometry();
-		int getExternalGeometryCount() const {
-			return static_cast<int>(mExternalGeometry.size());
-		}
-		const ExternalGeometry* getExternalGeometry(int p_index) const;
-		/** Recomputes every projection from its source. Done before solving, so the
-		 * solver always sees the sources as they are now. */
-		void updateExternalGeometry();
-		/** Drops one entry and re-solves.
+		/** Adds one already projected curve (in sketch coordinates).
+		 * @return the geoId constraints name it by, or NoGeoId when it was not added. */
+		int addExternalGeometry(std::unique_ptr<Part::Geometry> p_geo);
+		/** Adds a whole projection at once - a face projects to several curves, and
+		 * they are one reference as far as the user is concerned.
+		 * @return the geoId of the first curve added, or NoGeoId. */
+		int addExternalGeometry(std::vector<std::unique_ptr<Part::Geometry>>&& p_geos);
+		/** Drops the curve at p_index of the external list. The constraints that
+		 * named it go with it; the ones on the other curves move to the ids they
+		 * have now.
 		 * @return true when p_index existed. */
 		bool removeExternalGeometry(int p_index);
-		/** Add-external-geometry mode. While it is on, a click in the viewport picks a
-		 * sub-shape of another feature and projects it into this sketch instead of
-		 * selecting sketch geometry - the tool FreeCAD calls "external geometry". The
-		 * mode stays on until it is switched off, so several references can be picked
-		 * one after the other. */
-		void setExternalGeometryMode(bool p_on);
-		/** Whether the picks of the mode are taken as a section of the source with the
-		 * sketch plane instead of an orthographic projection of it (FreeCAD's
-		 * "intersection" flavour of the same tool). */
-		void setExternalGeometryIntersection(bool p_intersection) {
-			m_externalGeometryIntersection = p_intersection;
+		/** Drops the references the user added, and the constraints that named one of
+		 * them. The coordinate axes are not part of this: they are always there. */
+		void clearExternalGeometry();
+		/** How many references the user added - the two axes are not counted, and not
+		 * listed by index either: they cannot be removed. */
+		int getExternalGeometryCount() const {
+			return static_cast<int>(mExternalGeoList.size());
 		}
-		bool isExternalGeometryIntersection() const {
-			return m_externalGeometryIntersection;
-		}
-		bool isExternalGeometryMode() const { return m_externalGeometryMode; }
-		/** The feature this sketch belongs to. Its own geometry can never be an
-		 * external reference. */
-		void setOwnerFeature(Feature* p_owner) { m_ownerFeature = p_owner; }
+		Part::Geometry* getExternalGeometry(int p_index);
+		const Part::Geometry* getExternalGeometry(int p_index) const;
 
 		/** "No geometry" for the selection state. The negative solver ids are taken
 		 * by the external geometry (see below), so an unused element is GeoUndef -
@@ -237,19 +207,33 @@ namespace MOON {
 		/** --- the projected curves as selection targets -------------------------
 		 * Constraints name an external curve by its solver geoId, and those ids
 		 * count from the end of the solver list (the external block is its tail):
-		 * the last curve is -1, the first is -count. The selection therefore speaks
-		 * the same numbering, and these helpers are the only place that knows how a
-		 * negative id maps onto the projection lists. */
+		 * the last curve is -1, the first is -count.
+		 *
+		 * The two coordinate axes are the last entries of that block, so they keep
+		 * the fixed ids GeoEnum documents: the horizontal axis is -1 - its start
+		 * point is the root point, i.e. the origin - and the vertical axis is -2.
+		 * Every reference the user adds sits below them, from -3 down (RefExt). The
+		 * selection therefore speaks the same numbering, and these helpers are the
+		 * only place that knows how a negative id maps onto the curves. */
 		int getExternalCurveCount() const;
-		/** Solver geoId of the curve at p_index of the flattened external list. */
+		/** Solver geoId of the curve at p_index - the user's references first, then
+		 * the two axes. */
 		int getExternalGeoId(int p_index) const;
-		/** Flattened index a negative geoId refers to, or -1 when it is not one of
-		 * the external curves. */
+		/** Index a negative geoId refers to, or -1 when it is not one of the
+		 * external curves. */
 		int getExternalCurveIndex(int p_geoId) const;
 		const Part::Geometry* getExternalCurve(int p_geoId) const;
 		/** True for the ids that name one of the projected curves (GeoUndef and the
 		 * other sentinels are not among them). */
 		bool isExternalGeoId(int p_geoId) const;
+		/** True for the two axis ids: the horizontal axis -1 (whose start point is the
+		 * root point, i.e. the sketch origin) and the vertical axis -2. They are part
+		 * of the external block but are neither added nor removed by the user. */
+		bool isAxisCurve(int p_geoId) const
+		{
+			return p_geoId == Sketcher::GeoEnum::HAxis
+				|| p_geoId == Sketcher::GeoEnum::VAxis;
+		}
 		/** Read-only lookup over both halves of the solver list: internal geometry by
 		 * index, external curves by their negative id. Null when p_geoId names
 		 * nothing. */
@@ -500,10 +484,11 @@ namespace MOON {
 		Sketcher::Sketch solvedSketch;
 		std::vector<Sketcher::Constraint*> mConstraintList;
 		std::vector<std::unique_ptr<Part::Geometry>>mGeoList;
-		std::vector<ExternalGeometry> mExternalGeometry;
-		Feature* m_ownerFeature = nullptr;
-		bool m_externalGeometryMode = false;
-		bool m_externalGeometryIntersection = false;
+		std::vector<std::unique_ptr<Part::Geometry>>mExternalGeoList;
+		/** The sketch axes, [0] vertical and [1] horizontal, i.e. the order the tail
+		 * of the external block is built in (the horizontal axis is the very last, so
+		 * that it is the -1 the root point lives on). */
+		std::unique_ptr<Part::Geometry> mExternalAxes[2];
 		SelectGeoId preSelectGeoId = { NoGeoId, PointPos::none };
 		std::vector<SelectGeoId> selectIds;
 		bool hasClickSelected = false;
@@ -546,19 +531,24 @@ namespace MOON {
 			OverrideSelect,
 			AppendSelect
 		};
-		/** Picks the actor under the cursor and turns it into an external reference.
-		 * @return true when something was added. */
-		bool pickExternalGeometry();
-		/** Identifies every projected curve by (entry, curve in entry). Those keys
-		 * survive the block being renumbered, which the geoIds do not. */
-		std::vector<std::pair<int, int>> externalCurveKeys() const;
-		/** Rebuilds the external geoIds held by the constraints from the keys taken
-		 * before the block changed, and drops the constraints whose curve is gone.
+		/** Rebuilds the external geoIds held by the constraints from the curves the
+		 * block held before it changed, and drops the constraints whose curve is
+		 * gone.
 		 *
 		 * The ids count from the end of the solver list, so adding a curve moves
 		 * every one of them - without this, a constraint would silently end up on
-		 * another curve after the next reference is added. */
-		void remapExternalReferences(const std::vector<std::pair<int, int>>& p_oldKeys);
+		 * another curve after the next reference is added. The curves themselves are
+		 * the identity: p_before are the pointers the block held, so a curve that
+		 * moved to another index is still found. */
+		void remapExternalReferences(const std::vector<Part::Geometry*>& p_before);
+		/** The curves of the external block, in order of their indices. Taken before
+		 * the block is changed, and handed to remapExternalReferences() after. */
+		std::vector<Part::Geometry*> externalGeometryPointers() const;
+		/** Creates the two coordinate axes. They are the fixed tail of the external
+		 * block (see getExternalCurveCount), they exist from the moment the sketch
+		 * does, and nothing ever removes them - so an empty list of references still
+		 * leaves a sketch that can be constrained to the origin and the axes. */
+		void ensureAxisGeometry();
 		bool isHaveActiveHandler = false;
 		SelectState selectState = Stop;
 		SelectMode selectMode = OverrideSelect;
