@@ -463,12 +463,59 @@ namespace MOON {
 		) const;
 		Base::Vector2d constraintLabelAnchor(const Sketcher::Constraint* constraint) const;
 		std::string constraintLabelText(const Sketcher::Constraint* constraint) const;
+		/** The radial annotation of a radius/diameter constraint, in screen space: where
+		 * its shaft starts (the centre of the circle or arc) and where it ends (a point
+		 * of the rim). Both ends are the projection of two points of the sketch, which
+		 * is what keeps them on the centre and on the rim whatever the camera does -
+		 * only a direction that misses an arc is turned onto it.
+		 * @return false when the constraint is not radial, or its geometry is gone. */
+		bool radiusDimShaft(
+			const Sketcher::Constraint* p_constraint,
+			Eigen::Vector2f& p_centerScreen,
+			Eigen::Vector2f& p_rimScreen
+		) const;
+		/** The sketch-space vector that a screen-space vector stands for. The plane is
+		 * projected by an affine map, and only its inverse says what a vector on screen
+		 * means in the sketch: the two are the same only face on.
+		 * @return false when the plane is seen edge on, i.e. when it says nothing. */
+		bool sketchVectorOfScreenVector(
+			const Eigen::Vector2f& p_screenVector,
+			Base::Vector2d& p_out
+		) const;
 		bool constraintInError(int constrId) const;
 		void addSelect(SelectGeoId geoId);
 		void clearSelect();
 		void moveGeo(SelectGeoId geoId,float dx,float dy);
 		Base::Matrix4D updateTransform()const;
 		Base::Vector2d getMouseHitSketchPlanePoint();
+		/** How the sketch plane lies in the viewport right now: what the adaptive
+		 * background grid is drawn from, and what the grid snapping has to agree with -
+		 * they share this so the lines the user sees and the places the cursor snaps to
+		 * are one lattice. An orthographic camera projects along its own view direction,
+		 * so the plane is not necessarily face on, and every length here is measured
+		 * through the camera rather than assumed. */
+		struct GridView
+		{
+			/** View-space position of the plane origin. */
+			float oX = 0.0f;
+			float oY = 0.0f;
+			/** View-space direction the plane axes run in, i.e. how far one sketch unit
+			 * along u / v travels across the screen (1 = not foreshortened). */
+			float uX = 0.0f;
+			float uY = 0.0f;
+			float vX = 0.0f;
+			float vY = 0.0f;
+			/** Viewport half extents, in view-space units. */
+			float hx = 0.0f;
+			float hy = 0.0f;
+			/** The adaptive grid step, in sketch units. */
+			float step = 0.0f;
+		};
+		/** Fills in p_out for the current camera.
+		 * @return false when there is nothing to describe: no camera, a perspective one,
+		 *         or an orthographic one seen along the plane (the plane is a line on
+		 *         screen then, and its visible part runs off to infinity). */
+		bool gridView(GridView& p_out) const;
 		CurveSegment getCurveSegment( Part::Geometry* geo) ;
 		/** The discretization a geometry is drawn from. The sketch's own curves are
 		 * sampled when they are added, the external ones when their projection is
@@ -520,10 +567,6 @@ namespace MOON {
 		 * centre stays where the geometry puts it, so this is all that moves - and with
 		 * it the amount of arc that is drawn. */
 		std::unordered_map<const Sketcher::Constraint*, float> m_angleLabelRadiusSketch;
-		/** The caption offset (sketch units) the caption drag started from. */
-		Base::Vector2d m_labelDragOffsetSketch;
-		/** Where the caption drag was pressed, in pixels. */
-		Base::Vector2d m_labelDragPressPx;
 		int m_lastLabelClick = -1;
 		std::chrono::steady_clock::time_point m_lastLabelClickTime;
 		enum SelectState

@@ -169,7 +169,6 @@ namespace MOON {
             if (annotationHit >= 0 && annotationHandle != LabelHandle::Caption) {
                 m_labelDrag = annotationHit;
                 m_labelDragHandle = annotationHandle;
-                m_labelDragPressPx = Base::Vector2d(mx, my);
                 m_lastLabelClick = -1;
                 clearSelect();
                 selectState = Stop;
@@ -178,20 +177,12 @@ namespace MOON {
             }
             const int labelHit = annotationHit;
             if (labelHit >= 0) {
-                const Sketcher::Constraint* c = getConstraint(labelHit);
                 m_labelDragHandle = LabelHandle::Caption;
-                float defDx = 0.0f, defDy = 0.0f;
-                defaultLabelOffsetPx(c, defDx, defDy);
-                // The caption offset lives in sketch units; the default is given in
-                // pixels, so it is converted on the way in and the drag delta is
-                // converted on the way back out (see updateConstraintLabelInteraction).
-                const auto it
-                    = c ? m_labelManualOffsetSketch.find(c) : m_labelManualOffsetSketch.end();
-                m_labelDragOffsetSketch = (it != m_labelManualOffsetSketch.end())
-                    ? it->second
-                    : Base::Vector2d(defDx, defDy) / pixelsPerSketchUnit();
+                // Where the caption is carried to is read off the cursor as it moves (a
+                // dimension's line, an angle's arc and a radius' leader each in their
+                // own way - see updateConstraintLabelInteraction), so the press itself
+                // only has to start the drag.
                 m_labelDrag = labelHit;
-                m_labelDragPressPx = Base::Vector2d(mx, my);
                 clearSelect();
                 selectState = Stop;
                 preSelectGeoId = { NoGeoId, PointPos::none };
@@ -501,8 +492,17 @@ namespace MOON {
             }
         }
 
-        // travel all segments
+        // The points of every curve first: an endpoint or a centre is what a constraint
+        // usually wants, and it is a smaller target than the curve it belongs to.
         for (const auto& [geoId, geo] : candidates) {
+            if (isAxisCurve(geoId)) {
+                // The axes are not picked by their points: the only one that is a
+                // feature of its own is the root point, and the origin test above has
+                // already taken it. Their defining segment reaches from the origin to a
+                // far end that means nothing, and offering that end as a pick would
+                // hand the user a point that is not drawn anywhere.
+                continue;
+            }
             auto& segment = segmentOf(geo);
             for (int j = 0; j < segment.sepoints.size(); j++) {
                 double dist = (p1 - trans * segment.sepoints[j].coord).Length();
@@ -519,25 +519,7 @@ namespace MOON {
         if (!hit) {
             for (const auto& [geoId, geo] : candidates) {
                 if (isAxisCurve(geoId)) {
-                    // The axes are hit as the infinite lines they stand for: their
-                    // geometry only reaches from the origin outwards (it has to start
-                    // there - that is the root point), while the user clicks anywhere
-                    // along the line that is drawn for them.
-                    const Base::Vector3d origin = trans * Base::Vector3d(0.0, 0.0, 0.0);
-                    const Base::Vector3d tip = trans * (geoId == Sketcher::GeoEnum::VAxis
-                        ? Base::Vector3d(0.0, 1.0, 0.0)
-                        : Base::Vector3d(1.0, 0.0, 0.0));
-                    const Base::Vector3d dir = tip - origin;
-                    const double len = dir.Length();
-                    if (len > 1e-12) {
-                        const double dist = (p1 - origin).Cross(dir).Length() / len;
-                        if (dist < deltaTole && dist < minDist) {
-                            minDist = dist;
-                            ret.GeoId = geoId;
-                            ret.pointPos = PointPos::none;
-                            hit = true;
-                        }
-                    }
+                    // The axes are tried after every curve, see below.
                     continue;
                 }
                 auto& segment = segmentOf(geo);
@@ -567,7 +549,39 @@ namespace MOON {
                 }
             }
         }
-       return ret;
+        // Last of all, and only when nothing else was close enough: the axes, hit as
+        // the infinite lines they stand for - their geometry only reaches from the
+        // origin outwards (it has to start there, that is the root point) while the
+        // user clicks anywhere along the line that is drawn for them.
+        //
+        // They come last because they are infinite: a click anywhere along one of them
+        // is "on the line", so an axis would take every pick of a curve of the sketch
+        // that happens to lie on it - a line drawn over the y axis could never be
+        // selected again. FreeCAD picks in that order as well (its geometry is tested
+        // before the axis cross).
+        if (!hit) {
+            for (const auto& [geoId, geo] : candidates) {
+                if (!isAxisCurve(geoId)) {
+                    continue;
+                }
+                const Base::Vector3d origin = trans * Base::Vector3d(0.0, 0.0, 0.0);
+                const Base::Vector3d tip = trans * (geoId == Sketcher::GeoEnum::VAxis
+                    ? Base::Vector3d(0.0, 1.0, 0.0)
+                    : Base::Vector3d(1.0, 0.0, 0.0));
+                const Base::Vector3d dir = tip - origin;
+                const double len = dir.Length();
+                if (len > 1e-12) {
+                    const double dist = (p1 - origin).Cross(dir).Length() / len;
+                    if (dist < deltaTole && dist < minDist) {
+                        minDist = dist;
+                        ret.GeoId = geoId;
+                        ret.pointPos = PointPos::none;
+                        hit = true;
+                    }
+                }
+            }
+        }
+        return ret;
     }
     bool SketcherObj::findNextCoincidentPoint(
         const Base::Vector2d& pos,

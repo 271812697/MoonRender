@@ -125,6 +125,18 @@
 - [ ] `projectEdge` 每投一条边打一条 `CORE_INFO`（导入一个 12 条边的面就是 12 行），
   压成 debug，或只在投影不是 1:1 时打
 
+### 几何类型判断的坑：`is<Part::GeomArcOfConic>()`
+
+- [ ] `Part::GeomArcOfCircle` 调 `is<Part::GeomArcOfConic>()` 返回 **false**（但它对
+  `is<Part::GeomArcOfCircle>()`、`isDerivedFrom<Part::GeomBoundedCurve>()` 都是 true）。
+  于是 `getGeometryCenterSketch()` 里"先问 `GeomArcOfConic`、不行再问 `GeomBoundedCurve`"
+  的顺序，会让圆弧落到有界曲线分支，返回**两端点的中点**（弦中点）而不是圆心 —— 半径标注
+  的起点因此不在圆心，且与智能标注的预览对不上（预览用的是 sepoint 的 `mid`，那才是圆心）。
+  现在那里已改成先按**具体类型**判断（`GeomArcOfCircle/Ellipse/Hyperbola/Parabola`）。
+  根因未查：`TYPESYSTEM_SOURCE_ABSTRACT(Part::GeomArcOfConic, Part::GeomTrimmedCurve)`
+  的注册，或 `Base::Type::isDerivedFrom()` 的祖先遍历有问题（抽象基类里只有它异常）。
+  其它地方若再按抽象基类判断几何类型，会踩同样的坑
+
 ## 拓扑命名
 
 - [ ] `[TopoName]` 调试日志每个元素打一行，一次重算几十行；

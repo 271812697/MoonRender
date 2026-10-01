@@ -555,6 +555,8 @@ namespace MOON
 		}
 
 		if (pick.isCircular()) {
+			// The mid point of a round curve is its centre (see getCurveSegment), which
+			// is where the annotation starts its radius from as well.
 			if (!sketch->getGeometryPoint(picked.GeoId, SketcherObj::PointPos::mid, pick.centre)) {
 				return false;
 			}
@@ -572,18 +574,14 @@ namespace MOON
 			return;
 		}
 
-		// A single circle or arc is measured by its radius or its diameter.
+		// A single circle or arc is measured by its radius; M switches it to the
+		// diameter and back, because that is the other dimension the same element can
+		// take. (A circle used to start on the diameter, which is not what was picked:
+		// the element the cursor is on is round in either case, and the radius is what
+		// a sketch usually drives a round profile by.)
 		if (state.picks.size() == 1 && state.picks[0].isCircular()) {
-			const bool circle = state.picks[0].kind == Internal::Kind::Circle;
-			const bool first = circle ? !state.secondCandidate : state.secondCandidate;
-			if (circle) {
-				state.type = first ? Sketcher::ConstraintType::Diameter
-								   : Sketcher::ConstraintType::Radius;
-			}
-			else {
-				state.type = first ? Sketcher::ConstraintType::Radius
-								   : Sketcher::ConstraintType::Diameter;
-			}
+			state.type = state.secondCandidate ? Sketcher::ConstraintType::Diameter
+											   : Sketcher::ConstraintType::Radius;
 			return;
 		}
 

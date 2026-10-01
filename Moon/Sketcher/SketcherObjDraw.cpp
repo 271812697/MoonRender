@@ -10,6 +10,7 @@
 #include "Sketcher/SketcheTool2D.h"
 #include "editor/Toolbar/sketchToolbar.h"
 #include <QInputDialog>
+#include <limits>
 namespace MOON {
     // Constraint types that get a numeric viewport label.
     static bool isDimensionLabelType(Sketcher::ConstraintType type)
@@ -263,6 +264,87 @@ namespace MOON {
         p[1] = mPlane.normal.y;
         p[2] = mPlane.normal.z;
     }
+    bool SketcherObj::gridView(GridView& p_out) const
+    {
+        const auto* camera = m_sceneView ? m_sceneView->GetCamera() : nullptr;
+        if (camera == nullptr) {
+            return false;
+        }
+        const auto& proj = camera->GetProjectionMatrix();
+        const float proj11 = proj(1, 1);
+        const auto& fd = m_sceneView->GetRenderer().GetFrameDescriptor();
+        const float screenH = static_cast<float>(fd.renderHeight);
+        const float screenW = static_cast<float>(fd.renderWidth);
+        if (proj11 <= 0.0f || screenH <= 0.0f || screenW <= 0.0f
+            || camera->GetProjectionMode()
+                != ::Rendering::Settings::EProjectionMode::ORTHOGRAPHIC) {
+            return false;
+        }
+        // The viewport rectangle in view space: an orthographic projection keeps only
+        // x and y, so those two coordinates are all a plane point is judged by.
+        const float halfH = 1.0f / proj11;
+
+        // The sketch plane as the camera sees it: the view-space position of its origin
+        // and the view-space direction its axes run in, so that the plane point (u, v)
+        // sits at
+        //     view(u, v) = (oX + u * uX + v * vX, oY + u * uY + v * vY).
+        const auto& view = camera->GetViewMatrix();
+        const auto viewOf = [&view](const Base::Vector3d& p_world) {
+            return view.MulPoint(Maths::FVector3(
+                static_cast<float>(p_world.x),
+                static_cast<float>(p_world.y),
+                static_cast<float>(p_world.z)));
+            };
+        const Maths::FVector3 viewOrigin = viewOf(mPlane.origin);
+        const Maths::FVector3 viewX = viewOf(mPlane.origin + mPlane.xAxis);
+        const Maths::FVector3 viewY = viewOf(mPlane.origin + mPlane.yAxis);
+        const float uX = viewX.x - viewOrigin.x;
+        const float uY = viewX.y - viewOrigin.y;
+        const float vX = viewY.x - viewOrigin.x;
+        const float vY = viewY.y - viewOrigin.y;
+        // Seen along the plane there is nothing to describe: both of the plane's
+        // directions are the view direction then (the plane is a line on screen, and
+        // the visible part of it runs off to infinity).
+        if (std::abs(uX * vY - vX * uY) < 1.0e-9f) {
+            return false;
+        }
+
+        p_out.oX = viewOrigin.x;
+        p_out.oY = viewOrigin.y;
+        p_out.uX = uX;
+        p_out.uY = uY;
+        p_out.vX = vX;
+        p_out.vY = vY;
+        p_out.hx = halfH * screenW / screenH;
+        p_out.hy = halfH;
+
+        // How big one sketch unit is on screen: one unit along an axis covers that
+        // axis' view-space length, and the viewport is 2 * halfH high. Face on both
+        // lengths are 1, which is the plain zoom-based spacing; tilted, the axes are
+        // foreshortened by different amounts, and their geometric mean keeps the step
+        // near the 40 px target in both directions instead of letting one of them pile
+        // its lines up on screen.
+        const float scaleU = std::sqrt(uX * uX + uY * uY);
+        const float scaleV = std::sqrt(vX * vX + vY * vY);
+        const float scale = std::max(std::sqrt(scaleU * scaleV), 1.0e-6f);
+        const float targetStep = 40.0f * 2.0f * halfH / (screenH * scale);
+        const float mag = std::pow(
+            10.0f,
+            std::floor(std::log10(std::max(targetStep, 1.0e-6f)))
+        );
+        float step = mag;
+        if (step < targetStep) {
+            step = 2.0f * mag;
+        }
+        if (step < targetStep) {
+            step = 5.0f * mag;
+        }
+        if (step < targetStep) {
+            step = 10.0f * mag;
+        }
+        p_out.step = step;
+        return true;
+    }
     void SketcherObj::drawBackground()
     {
         if (!InEdit()) return;
@@ -270,65 +352,24 @@ namespace MOON {
         // Adaptive background grid: big cells use the darker tone, the smaller
         // subdivisions inside use the lighter tone. The spacing snaps to a nice
         // 1/2/5 x 10^n step so the on-screen density stays roughly constant while
-        // zooming, and each line spans the whole visible sketch region.
+        // zooming.
+        //
+        // Everything here is worked out in the (u, v) of the sketch plane, because
+        // that is the space the grid lives in - and that is exactly what the camera
+        // angle changes. An orthographic camera projects along its own view direction,
+        // so the part of the plane it shows is not a rectangle in (u, v): it is the
+        // quad where both view-space coordinates of a plane point stay inside the
+        // viewport. Reading the visible range off the viewport corners as an
+        // axis-aligned rectangle only holds face on - tilted, the true quad sticks out
+        // of that rectangle and the grid is left with corners missing.
         if (m_drawGrid) {
             const Eigen::Vector4<uint8_t> minorColor(150, 132, 118, 118); // (A,B,G,R) = (255, b,g,r)
             const Eigen::Vector4<uint8_t> majorColor(255, 66, 56, 56); // (A,B,G,R) = (255, b,g,r)
-            const auto* gridCam = m_sceneView->GetCamera();
-            if (gridCam) {
-                const auto& gProj = gridCam->GetProjectionMatrix();
-                const float gProj11 = gProj(1, 1);
-                const auto& gFd = m_sceneView->GetRenderer().GetFrameDescriptor();
-                const float gScreenH = static_cast<float>(gFd.renderHeight);
-                const float gScreenW = static_cast<float>(gFd.renderWidth);
-                const float gAspect = gScreenH > 0.0f ? gScreenW / gScreenH : 1.0f;
-                if (gProj11 > 0.0f && gScreenH > 0.0f &&
-                    gridCam->GetProjectionMode() == ::Rendering::Settings::EProjectionMode::ORTHOGRAPHIC) {
-                    const float halfH = 1.0f / gProj11;
-                    const float hx = halfH * gAspect;
-                    const float hy = halfH;
-                    // Visible sketch-space rectangle: project the four viewport corners
-                    // onto the sketch plane (view z is irrelevant for an ortho camera).
-                    const auto& gView = gridCam->GetViewMatrix();
-                    const Maths::FMatrix4 gInvView = Maths::FMatrix4::Inverse(gView);
-                    const float xs[2] = { -hx, hx };
-                    const float ys[2] = { -hy, hy };
-                    float uMin = 1e30f, uMax = -1e30f, vMin = 1e30f, vMax = -1e30f;
-                    for (int i = 0; i < 2; ++i) {
-                        for (int j = 0; j < 2; ++j) {
-                            const Maths::FVector3 wp = gInvView.MulPoint(Maths::FVector3(xs[i], ys[j], 0.0f));
-                            const Base::Vector3d d(wp.x - mPlane.origin.x, wp.y - mPlane.origin.y, wp.z - mPlane.origin.z);
-                            const float u = static_cast<float>(d.Dot(mPlane.xAxis));
-                            const float v = static_cast<float>(d.Dot(mPlane.yAxis));
-                            uMin = std::min(uMin, u); uMax = std::max(uMax, u);
-                            vMin = std::min(vMin, v); vMax = std::max(vMax, v);
-                        }
-                    }
-                    // Nice step: smallest 1/2/5 x 10^n candidate above the target so the
-                    // minor lines are roughly 40 px apart on screen.
-                    const float targetStep = 40.0f * (2.0f * halfH) / gScreenH;
-                    const float mag = std::pow(10.0f, std::floor(std::log10(std::max(targetStep, 1e-6f))));
-                    float step = mag;
-                    if (step < targetStep) step = 2.0f * mag;
-                    if (step < targetStep) step = 5.0f * mag;
-                    if (step < targetStep) step = 10.0f * mag;
-                    const int i0 = static_cast<int>(std::ceil(uMin / step));
-                    const int i1 = static_cast<int>(std::floor(uMax / step));
-                    for (int i = i0; i <= i1; ++i) {
-                        const float g = i * step;
-                        const auto& col = (i % 5) == 0 ? majorColor : minorColor;
-                        renderer->drawLine(mPlane.valueEigen(g, vMin), mPlane.valueEigen(g, vMax), 1.0f, col);
-                    }
-                    const int j0 = static_cast<int>(std::ceil(vMin / step));
-                    const int j1 = static_cast<int>(std::floor(vMax / step));
-                    for (int j = j0; j <= j1; ++j) {
-                        const float g = j * step;
-                        const auto& col = (j % 5) == 0 ? majorColor : minorColor;
-                        renderer->drawLine(mPlane.valueEigen(uMin, g), mPlane.valueEigen(uMax, g), 1.0f, col);
-                    }
-                }
-                else {
-                    // Fallback for non-orthographic views: fixed extent grid.
+            if (m_sceneView && m_sceneView->GetCamera()) {
+                // What a camera the analysis below cannot describe gets: a perspective
+                // one, or an orthographic one whose view direction lies in the sketch
+                // plane.
+                const auto drawFixedGrid = [&]() {
                     const float extent = 100.0f;
                     for (int k = -10; k <= 10; ++k) {
                         const float g = k * 10.0f;
@@ -336,10 +377,101 @@ namespace MOON {
                         renderer->drawLine(mPlane.valueEigen(g, -extent), mPlane.valueEigen(g, extent), 1.0f, col);
                         renderer->drawLine(mPlane.valueEigen(-extent, g), mPlane.valueEigen(extent, g), 1.0f, col);
                     }
+                };
+
+                GridView grid;
+                if (!gridView(grid)) {
+                    drawFixedGrid();
+                    return;
                 }
+
+                // The visible quad: its four corners are the crossings of the two pairs
+                // of viewport borders, i.e. of
+                //     oX + u * uX + v * vX = +-hx      (left / right)
+                //     oY + u * uY + v * vY = +-hy      (bottom / top).
+                // The pairs meet in a point unless the view direction lies in the plane
+                // (det == 0), which the fallback above has already taken care of.
+                const float det = grid.uX * grid.vY - grid.vX * grid.uY;
+                float uMin = std::numeric_limits<float>::max();
+                float uMax = -std::numeric_limits<float>::max();
+                float vMin = uMin;
+                float vMax = uMax;
+                for (int sx = 0; sx < 2; ++sx) {
+                    const float cx = (sx == 0 ? grid.hx : -grid.hx) - grid.oX;
+                    for (int sy = 0; sy < 2; ++sy) {
+                        const float cy = (sy == 0 ? grid.hy : -grid.hy) - grid.oY;
+                        const float u = (cx * grid.vY - grid.vX * cy) / det;
+                        const float v = (grid.uX * cy - cx * grid.uY) / det;
+                        uMin = std::min(uMin, u);
+                        uMax = std::max(uMax, u);
+                        vMin = std::min(vMin, v);
+                        vMax = std::max(vMax, v);
+                    }
+                }
+
+                const float step = grid.step;
+
+                // Narrows [p_lo, p_hi] down to the values of the free parameter that keep
+                // p_offset + p_coeff * t inside [-p_limit, p_limit], i.e. to the part of
+                // the line that is inside the viewport.
+                // @return false when no value of t is.
+                const auto narrowSpan = [](
+                    float p_offset, float p_coeff, float p_limit, float& p_lo, float& p_hi) {
+                    if (std::abs(p_coeff) < 1.0e-6f) {
+                        // The line runs parallel to this pair of borders: either all of it
+                        // is between them or none of it is.
+                        return std::abs(p_offset) <= p_limit;
+                    }
+                    const float t1 = (-p_limit - p_offset) / p_coeff;
+                    const float t2 = (p_limit - p_offset) / p_coeff;
+                    p_lo = std::max(p_lo, std::min(t1, t2));
+                    p_hi = std::min(p_hi, std::max(t1, t2));
+                    return p_lo <= p_hi;
+                };
+                // A grazing view stretches the quad without bound; the cap keeps the loop
+                // below finite by dropping the lines farthest out, which are far off
+                // screen by then anyway.
+                constexpr int kMaxLinesPerFamily = 2000;
+                // Lines of constant u (they run along v), then lines of constant v.
+                const auto drawFamily = [&](bool p_constantU) {
+                    const float fixedX = p_constantU ? grid.uX : grid.vX;
+                    const float fixedY = p_constantU ? grid.uY : grid.vY;
+                    const float freeX = p_constantU ? grid.vX : grid.uX;
+                    const float freeY = p_constantU ? grid.vY : grid.uY;
+                    const float fixedMin = p_constantU ? uMin : vMin;
+                    const float fixedMax = p_constantU ? uMax : vMax;
+                    const float freeMin = p_constantU ? vMin : uMin;
+                    const float freeMax = p_constantU ? vMax : uMax;
+                    int first = static_cast<int>(std::ceil(fixedMin / step));
+                    int last = static_cast<int>(std::floor(fixedMax / step));
+                    if (last - first > kMaxLinesPerFamily) {
+                        const int middle = first + (last - first) / 2;
+                        first = middle - kMaxLinesPerFamily / 2;
+                        last = first + kMaxLinesPerFamily;
+                    }
+                    for (int i = first; i <= last; ++i) {
+                        const float g = i * step;
+                        float lo = freeMin;
+                        float hi = freeMax;
+                        if (!narrowSpan(grid.oX + g * fixedX, freeX, grid.hx, lo, hi)
+                            || !narrowSpan(grid.oY + g * fixedY, freeY, grid.hy, lo, hi)) {
+                            continue;
+                        }
+                        const auto& col = (i % 5) == 0 ? majorColor : minorColor;
+                        if (p_constantU) {
+                            renderer->drawLine(
+                                mPlane.valueEigen(g, lo), mPlane.valueEigen(g, hi), 1.0f, col);
+                        }
+                        else {
+                            renderer->drawLine(
+                                mPlane.valueEigen(lo, g), mPlane.valueEigen(hi, g), 1.0f, col);
+                        }
+                    }
+                };
+                drawFamily(true);
+                drawFamily(false);
             }
         }
-
     }
     void SketcherObj::drawAxisSpanning(int p_axisIndex)
     {
@@ -432,39 +564,13 @@ namespace MOON {
         if (!m_snapToGrid || !m_drawGrid || !m_sceneView) {
             return false;
         }
-        // Reuse the same adaptive step as drawBackground(): minor grid lines
-        // are about 40 px apart, snapped to a nice 1/2/5 x 10^n value.
-        const auto* camera = m_sceneView->GetCamera();
-        if (!camera) {
+        // The very step drawBackground() draws its lattice with: the cursor has to
+        // land on the intersections the user sees, whatever the camera does.
+        GridView grid;
+        if (!gridView(grid)) {
             return false;
         }
-        const auto& proj = camera->GetProjectionMatrix();
-        const float proj11 = proj(1, 1);
-        const auto& fd = m_sceneView->GetRenderer().GetFrameDescriptor();
-        const float screenH = static_cast<float>(fd.renderHeight);
-        if (proj11 <= 0.0f || screenH <= 0.0f
-            || camera->GetProjectionMode() != ::Rendering::Settings::EProjectionMode::ORTHOGRAPHIC) {
-            return false;
-        }
-        const float halfH = 1.0f / proj11;
-        const float targetStep = 40.0f * (2.0f * halfH) / screenH;
-        if (targetStep <= 1.0e-6f) {
-            return false;
-        }
-        const float mag = std::pow(
-            10.0f,
-            std::floor(std::log10(std::max(targetStep, 1.0e-6f)))
-        );
-        float step = mag;
-        if (step < targetStep) {
-            step = 2.0f * mag;
-        }
-        if (step < targetStep) {
-            step = 5.0f * mag;
-        }
-        if (step < targetStep) {
-            step = 10.0f * mag;
-        }
+        const float step = grid.step;
         const double gx = std::round(pos.x / step) * step;
         const double gy = std::round(pos.y / step) * step;
         const auto worldOf = [this](const Base::Vector2d& sk) {
@@ -905,14 +1011,21 @@ namespace MOON {
                 }
             }
             else {
-                // The caption is free to be carried anywhere: the offset is kept in
-                // sketch units so it travels with the drawing when the view is zoomed,
-                // and only the pixel delta of the drag is converted on the way in.
-                const double perUnit = static_cast<double>(pixelsPerSketchUnit());
-                Base::Vector2d offset = m_labelDragOffsetSketch;
-                offset.x += (mx - m_labelDragPressPx.x) / perUnit;
-                offset.y += (my - m_labelDragPressPx.y) / perUnit;
-                m_labelManualOffsetSketch[c] = offset;
+                // A radial caption has no track to slide along: what it carries is the
+                // direction its leader runs in, and that is simply the one from the
+                // centre of the circle to where the cursor is on the sketch plane - the
+                // same thing the preview follows, so the two cannot drift apart.
+                // (Accumulating screen deltas instead only worked face on: under a
+                // rotated camera a screen delta is not a sketch delta, and the label
+                // would lag behind the cursor.)
+                Base::Vector2d center;
+                if (getGeometryCenterSketch(c->First, center)) {
+                    const Base::Vector2d cursor = getMouseHitSketchPlanePoint();
+                    const Base::Vector2d wanted = cursor - center;
+                    if (wanted.Length() > 1.0e-9) {
+                        m_labelManualOffsetSketch[c] = wanted;
+                    }
+                }
             }
             m_labelHover = m_labelDrag;
             m_labelHoverHandle = m_labelDragHandle;
@@ -973,11 +1086,20 @@ namespace MOON {
             return false;
         }
         Base::Vector3d center;
-        if (geo->isDerivedFrom<Part::GeomConic>()) {
-            center = static_cast<const Part::GeomConic*>(geo)->getCenter();
-        }
-        else if (geo->is<Part::GeomArcOfConic>()) {
+        // An arc's centre is the centre of the circle it is part of. The bounded-curve
+        // branch further down would answer with the middle of its chord instead, which
+        // is not a centre at all - and it is the branch that used to win for arcs,
+        // because the abstract GeomArcOfConic test does not answer for them. Their
+        // concrete types are asked for instead.
+        const bool isArc = geo->is<Part::GeomArcOfCircle>()
+            || geo->is<Part::GeomArcOfEllipse>()
+            || geo->is<Part::GeomArcOfHyperbola>()
+            || geo->is<Part::GeomArcOfParabola>();
+        if (isArc) {
             center = static_cast<const Part::GeomArcOfConic*>(geo)->getCenter();
+        }
+        else if (geo->isDerivedFrom<Part::GeomConic>()) {
+            center = static_cast<const Part::GeomConic*>(geo)->getCenter();
         }
         else if (geo->is<Part::GeomPoint>()) {
             center = static_cast<const Part::GeomPoint*>(geo)->getPoint();
@@ -1285,11 +1407,15 @@ namespace MOON {
                     static_cast<float>(world.z)
                 )
             );
-            const double perUnit = static_cast<double>(pixelsPerSketchUnit());
-            m_labelManualOffsetSketch[c] = Base::Vector2d(
-                static_cast<double>(p_screenX - centerS.x()) / perUnit,
-                static_cast<double>(p_screenY - centerS.y()) / perUnit
-            );
+            // Only the direction is kept, and in sketch space: the screen offset the
+            // tool dropped has to be turned into the direction it means there, or a
+            // rotated camera would put the leader somewhere else than the drop point.
+            Base::Vector2d direction;
+            if (sketchVectorOfScreenVector(
+                Eigen::Vector2f(p_screenX - centerS.x(), p_screenY - centerS.y()),
+                direction)) {
+                m_labelManualOffsetSketch[c] = direction;
+            }
         }
     }
     float SketcherObj::straightDimOffset(
@@ -1749,70 +1875,19 @@ namespace MOON {
         }
         if (c->Type == Sketcher::ConstraintType::Radius
             || c->Type == Sketcher::ConstraintType::Diameter) {
-            // Radial captions stay outside the rim: direction comes from the
-            // dragged label (or the default up-right corner), distance is the
-            // screen radius plus a small gap.
-            Base::Vector2d centerSk;
-            const Part::Geometry* geo = resolveGeometry(c->First);
-            double radius = -1.0;
-            Base::Vector2d rimDirSk;
-            if (getGeometryCenterSketch(c->First, centerSk) && geo
-                && (geo->is<Part::GeomCircle>() || geo->is<Part::GeomArcOfCircle>())) {
-                radius = geo->is<Part::GeomCircle>()
-                    ? static_cast<const Part::GeomCircle*>(geo)->getRadius()
-                    : static_cast<const Part::GeomArcOfCircle*>(geo)->getRadius();
-                if (geo->is<Part::GeomArcOfCircle>()) {
-                    const auto segIt = mGeoSegment.find(const_cast<Part::Geometry*>(geo));
-                    if (segIt != mGeoSegment.end() && segIt->second.point.size() > 1) {
-                        const Base::Vector3d mid = segIt->second.point[segIt->second.point.size() / 2];
-                        const Base::Vector2d toMid(mid.x - centerSk.x, mid.y - centerSk.y);
-                        const double dLen = std::sqrt(toMid.x * toMid.x + toMid.y * toMid.y);
-                        if (dLen > 1.0e-9) {
-                            rimDirSk = Base::Vector2d(toMid.x / dLen, toMid.y / dLen);
-                        }
-                    }
-                }
-                else {
-                    rimDirSk = Base::Vector2d(0.70710678118, 0.70710678118);
-                }
-            }
-            if (radius > 0.0 && (rimDirSk.x != 0.0 || rimDirSk.y != 0.0)) {
-                const Base::Vector3d centerW = mPlane.origin + centerSk.x * mPlane.xAxis
-                    + centerSk.y * mPlane.yAxis;
-                const Base::Vector3d rimW = centerW + rimDirSk.x * mPlane.xAxis * radius
-                    + rimDirSk.y * mPlane.yAxis * radius;
-                const Eigen::Vector3f centerF(
-                    static_cast<float>(centerW.x),
-                    static_cast<float>(centerW.y),
-                    static_cast<float>(centerW.z)
-                );
-                const Eigen::Vector3f rimF(
-                    static_cast<float>(rimW.x),
-                    static_cast<float>(rimW.y),
-                    static_cast<float>(rimW.z)
-                );
-                const Eigen::Vector2f centerS = renderer->worldToScreen(centerF);
-                const Eigen::Vector2f rimS = renderer->worldToScreen(rimF);
-                float rx = rimS.x() - centerS.x();
-                float ry = rimS.y() - centerS.y();
-                const float rimDist = std::sqrt(rx * rx + ry * ry);
-                float dirX = 0.70710678118f;
-                float dirY = -0.70710678118f;  // up-right default
-                const auto manualIt = m_labelManualOffsetSketch.find(c);
-                if (manualIt != m_labelManualOffsetSketch.end()) {
-                    const float dx = static_cast<float>(manualIt->second.x);
-                    const float dy = static_cast<float>(manualIt->second.y);
-                    const float dLen = std::sqrt(dx * dx + dy * dy);
-                    if (dLen > 1.0f) {
-                        dirX = dx / dLen;
-                        dirY = dy / dLen;
-                    }
-                }
+            // The caption sits just outside the rim, on the line of the shaft itself -
+            // whatever direction that shaft ended up taking (see radiusDimShaft).
+            Eigen::Vector2f centerS;
+            Eigen::Vector2f rimS;
+            if (radiusDimShaft(c, centerS, rimS)) {
+                const float dx = rimS.x() - centerS.x();
+                const float dy = rimS.y() - centerS.y();
+                const float rimDist = std::sqrt(dx * dx + dy * dy);
                 if (rimDist > 1.0f) {
-                    const float labelDist = rimDist + 18.0f;
-                    anchorSketch = centerSk;
-                    screenX = centerS.x() + dirX * labelDist;
-                    screenY = centerS.y() + dirY * labelDist;
+                    const float labelDist = 18.0f;
+                    anchorSketch = constraintLabelAnchor(c);
+                    screenX = rimS.x() + dx / rimDist * labelDist;
+                    screenY = rimS.y() + dy / rimDist * labelDist;
                     return true;
                 }
             }
@@ -1887,21 +1962,6 @@ namespace MOON {
         }
         return -1;
     }
-    /** The angle of a screen position as seen from p_center, in degrees.
-     *
-     * The screen y axis points down, so the angle is taken the other way round; every
-     * angle of the radial annotations is measured this way, which is what makes them
-     * comparable with each other. */
-    static float screenAngleDeg(
-        const Eigen::Vector2f& p_center,
-        const Eigen::Vector2f& p_point
-    )
-    {
-        const float pi = 3.14159265358979f;
-        return -std::atan2(p_point.y() - p_center.y(), p_point.x() - p_center.x())
-            * 180.0f / pi;
-    }
-
     /** True when p_angle lies on the sweep that runs from p_start to p_end the way
      * that passes through p_through; all four in degrees. */
     static bool angleOnSweep(float p_angle, float p_start, float p_end, float p_through)
@@ -1924,6 +1984,102 @@ namespace MOON {
         // The arc runs the other way round, so it covers everything from its end
         // back to its start.
         return angle >= end;
+    }
+
+    bool SketcherObj::sketchVectorOfScreenVector(
+        const Eigen::Vector2f& p_screenVector,
+        Base::Vector2d& p_out
+    ) const
+    {
+        // One sketch unit along x covers uPix on screen and one along y covers vPix,
+        // so the two of them are the affine map the plane is projected by; inverting it
+        // turns a vector that was measured on screen into the one it means here.
+        const auto screenOf = [this](const Base::Vector2d& sk) {
+            return renderer->worldToScreen(mPlane.valueEigen(sk));
+            };
+        const Eigen::Vector2f origin = screenOf(Base::Vector2d(0.0, 0.0));
+        const Eigen::Vector2f uPix = screenOf(Base::Vector2d(1.0, 0.0)) - origin;
+        const Eigen::Vector2f vPix = screenOf(Base::Vector2d(0.0, 1.0)) - origin;
+        const float det = uPix.x() * vPix.y() - uPix.y() * vPix.x();
+        if (std::abs(det) < 1.0e-6f) {
+            return false;
+        }
+        p_out = Base::Vector2d(
+            (p_screenVector.x() * vPix.y() - uPix.y() * p_screenVector.y()) / det,
+            (uPix.x() * p_screenVector.y() - p_screenVector.x() * vPix.x()) / det);
+        return true;
+    }
+
+    bool SketcherObj::radiusDimShaft(
+        const Sketcher::Constraint* p_constraint,
+        Eigen::Vector2f& p_centerScreen,
+        Eigen::Vector2f& p_rimScreen
+    ) const
+    {
+        if (p_constraint == nullptr
+            || (p_constraint->Type != Sketcher::ConstraintType::Radius
+                && p_constraint->Type != Sketcher::ConstraintType::Diameter)) {
+            return false;
+        }
+        const Part::Geometry* geo = resolveGeometry(p_constraint->First);
+        if (geo == nullptr
+            || !(geo->is<Part::GeomCircle>() || geo->is<Part::GeomArcOfCircle>())) {
+            return false;
+        }
+
+        // The shaft runs from the centre of the circle to a point of its rim: the
+        // centre comes from the curve (see getGeometryCenterSketch, which has to answer
+        // with the circle's centre for an arc rather than the middle of its chord), the
+        // direction from where the caption was put - or the arc's own middle, which is
+        // the part of the circle the arc covers - and the length is the radius itself.
+        const CurveSegment* seg = findSegment(geo);
+        Base::Vector2d centerSk;
+        if (!getGeometryCenterSketch(p_constraint->First, centerSk)) {
+            return false;
+        }
+        const double radius = geo->is<Part::GeomCircle>()
+            ? static_cast<const Part::GeomCircle*>(geo)->getRadius()
+            : static_cast<const Part::GeomArcOfCircle*>(geo)->getRadius();
+        if (radius <= 0.0) {
+            return false;
+        }
+
+        // The shaft is built in sketch space and projected at the end, so its two ends
+        // are the centre and a point of the rim by construction. The direction is what
+        // has to be chosen: an arc's own middle is the default (it is the part of the
+        // circle the arc actually covers), and once the caption has been put somewhere
+        // its direction is what the dimension follows - the same rule the preview
+        // obeys while the annotation is being placed. FreeCAD keeps the label on the
+        // arc here; following the label instead is what makes dragging it work.
+        Base::Vector2d dirSk(0.70710678118, 0.70710678118);
+        Base::Vector2d arcMidSk;
+        if (geo->is<Part::GeomArcOfCircle>()) {
+            if (seg != nullptr && seg->point.size() > 2) {
+                const Base::Vector3d& mid = seg->point[seg->point.size() / 2];
+                arcMidSk = Base::Vector2d(mid.x, mid.y);
+                const Base::Vector2d toMid = arcMidSk - centerSk;
+                if (toMid.Length() > 1.0e-9) {
+                    dirSk = Base::Vector2d(
+                        toMid.x / toMid.Length(),
+                        toMid.y / toMid.Length());
+                }
+            }
+        }
+        const auto manualIt = m_labelManualOffsetSketch.find(p_constraint);
+        if (manualIt != m_labelManualOffsetSketch.end()) {
+            // Already a direction of the sketch, whichever way it was put there: the
+            // tool's drop point and the caption drag both store it that way.
+            const Base::Vector2d wanted = manualIt->second;
+            if (wanted.Length() > 1.0e-9) {
+                dirSk = Base::Vector2d(wanted.x / wanted.Length(), wanted.y / wanted.Length());
+            }
+        }
+
+        p_centerScreen = renderer->worldToScreen(mPlane.valueEigen(centerSk));
+        p_rimScreen = renderer->worldToScreen(mPlane.valueEigen(Base::Vector2d(
+            centerSk.x + dirSk.x * radius,
+            centerSk.y + dirSk.y * radius)));
+        return true;
     }
 
     void SketcherObj::drawConstraintLabels()
@@ -2039,110 +2195,44 @@ namespace MOON {
             }
             else if (c->Type == Sketcher::ConstraintType::Radius
                 || c->Type == Sketcher::ConstraintType::Diameter) {
-                // Radial shaft: circles use a 45 degree direction towards the
-                // caption, arcs point at the middle of the arc.
-                Base::Vector2d centerSk;
-                if (getGeometryCenterSketch(c->First, centerSk)) {
-                    double radius = 0.0;
-                    Base::Vector2d dirSk;
-                    // An arc only covers part of its circle, so where the caption
-                    // sits says nothing about where the arc is: its own ends are
-                    // kept to hold the radial line on it.
-                    bool isArc = false;
-                    Base::Vector2d arcStartSk;
-                    Base::Vector2d arcMidSk;
-                    Base::Vector2d arcEndSk;
-                    const Part::Geometry* geo = resolveGeometry(c->First);
-                    if (geo && (geo->is<Part::GeomCircle>() || geo->is<Part::GeomArcOfCircle>())) {
-                        radius = geo->is<Part::GeomCircle>()
-                            ? static_cast<const Part::GeomCircle*>(geo)->getRadius()
-                            : static_cast<const Part::GeomArcOfCircle*>(geo)->getRadius();
-                        if (geo->is<Part::GeomArcOfCircle>()) {
-                            isArc = true;
-                            const auto it = mGeoSegment.find(const_cast<Part::Geometry*>(geo));
-                            if (it != mGeoSegment.end() && it->second.point.size() > 1) {
-                                const std::vector<Base::Vector3d>& sampled = it->second.point;
-                                arcStartSk = Base::Vector2d(sampled.front().x, sampled.front().y);
-                                arcMidSk = Base::Vector2d(
-                                    sampled[sampled.size() / 2].x,
-                                    sampled[sampled.size() / 2].y);
-                                arcEndSk = Base::Vector2d(sampled.back().x, sampled.back().y);
-                                const Base::Vector3d mid = sampled[sampled.size() / 2];
-                                const Base::Vector2d midSk(mid.x, mid.y);
-                                const Base::Vector2d d = midSk - centerSk;
-                                const double dLen = std::sqrt(d.x * d.x + d.y * d.y);
-                                if (dLen > 1.0e-9) {
-                                    dirSk = Base::Vector2d(d.x / dLen, d.y / dLen);
-                                }
-                            }
+                // The radial shaft runs from the centre to a point of the rim; both
+                // ends come out of radiusDimShaft already projected, so they stay on
+                // the centre and on the rim however the camera is turned.
+                Eigen::Vector2f centerS;
+                Eigen::Vector2f rimS;
+                if (radiusDimShaft(c, centerS, rimS)) {
+                    const float rx = rimS.x() - centerS.x();
+                    const float ry = rimS.y() - centerS.y();
+                    const float rimDist = std::sqrt(rx * rx + ry * ry);
+                    if (rimDist > 4.0f) {
+                        // The angle is measured the other way round because the screen
+                        // y axis points down.
+                        const float angleDeg = -std::atan2(ry, rx) * 180.0f / pi;
+                        if (c->Type == Sketcher::ConstraintType::Diameter) {
+                            // A diameter runs from one rim through the centre to the
+                            // other, so it carries an arrow at either end.
+                            ImPlotCustom::drawDoubleArrow(
+                                ImPlotCustom::Transform(
+                                    centerS.x() - rx, centerS.y() - ry, angleDeg
+                                ),
+                                arrowCol,
+                                rimDist * 2.0f,
+                                thickness,
+                                nullptr
+                            );
                         }
                         else {
-                            dirSk = Base::Vector2d(0.70710678118, 0.70710678118);
-                        }
-                    }
-                    if (radius > 0.0 && (dirSk.x != 0.0 || dirSk.y != 0.0)) {
-                        const Eigen::Vector2f centerS = screenOf(centerSk);
-                        const Eigen::Vector2f rimS = screenOf(
-                            Base::Vector2d(centerSk.x + dirSk.x * radius, centerSk.y + dirSk.y * radius)
-                        );
-                        float rx = rimS.x() - centerS.x();
-                        float ry = rimS.y() - centerS.y();
-                        float rimDist = std::sqrt(rx * rx + ry * ry);
-                        if (rimDist > 4.0f) {
-                            // Point the radial shaft towards the caption when
-                            // the user has dragged it to another side.
-                            const float chipDx = sx - centerS.x();
-                            const float chipDy = sy - centerS.y();
-                            const float chipDist = std::sqrt(chipDx * chipDx + chipDy * chipDy);
-                            if (chipDist > 12.0f) {
-                                rx = chipDx / chipDist * rimDist;
-                                ry = chipDy / chipDist * rimDist;
-                            }
-                            // The angle is measured the other way round because the
-                            // screen y axis points down.
-                            float angleDeg = -std::atan2(ry, rx) * 180.0f / pi;
-                            if (isArc) {
-                                // A caption dragged past the end of the arc would put
-                                // the radial line where the arc is not. The arc's own
-                                // span decides whether the direction can stay.
-                                const float startDeg = screenAngleDeg(
-                                    centerS, screenOf(arcStartSk));
-                                const float midDeg = screenAngleDeg(centerS, screenOf(arcMidSk));
-                                const float endDeg = screenAngleDeg(centerS, screenOf(arcEndSk));
-                                if (!angleOnSweep(angleDeg, startDeg, endDeg, midDeg)) {
-                                    angleDeg = midDeg;
-                                    const float rad = angleDeg * pi / 180.0f;
-                                    rx = std::cos(rad) * rimDist;
-                                    ry = -std::sin(rad) * rimDist;
-                                }
-                            }
-                            if (c->Type == Sketcher::ConstraintType::Diameter) {
-                                // A diameter runs from one rim through the centre to
-                                // the other, so it carries an arrow at either end.
-                                ImPlotCustom::drawDoubleArrow(
-                                    ImPlotCustom::Transform(
-                                        centerS.x() - rx, centerS.y() - ry, angleDeg
-                                    ),
-                                    arrowCol,
-                                    rimDist * 2.0f,
-                                    thickness,
-                                    nullptr
-                                );
-                            }
-                            else {
-                                // A radius leaves the centre and ends on the rim, so
-                                // only that end carries an arrow. AddArrow puts its tip
-                                // one head length past the end of the line, so the line
-                                // stops that much short of the rim and the tip lands on
-                                // it.
-                                const float head = 2.0f * 2.5f * thickness;
-                                ImPlotCustom::AddArrow(
-                                    ImPlotCustom::Transform(centerS.x(), centerS.y(), angleDeg),
-                                    arrowCol,
-                                    std::max(rimDist - head, 1.0f),
-                                    thickness
-                                );
-                            }
+                            // A radius leaves the centre and ends on the rim, so only
+                            // that end carries an arrow. AddArrow puts its tip one head
+                            // length past the end of the line, so the line stops that
+                            // much short of the rim and the tip lands on it.
+                            const float head = 2.0f * 2.5f * thickness;
+                            ImPlotCustom::AddArrow(
+                                ImPlotCustom::Transform(centerS.x(), centerS.y(), angleDeg),
+                                arrowCol,
+                                std::max(rimDist - head, 1.0f),
+                                thickness
+                            );
                         }
                     }
                 }
