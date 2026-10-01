@@ -2,6 +2,7 @@
 #include "feature/Feature.h"
 #include "feature/TransformMode.h"
 
+#include <vector>
 #include <gp_Ax2.hxx>
 #include <gp_Dir.hxx>
 #include <gp_Pnt.hxx>
@@ -25,10 +26,10 @@ namespace MOON
 	 * (the sketch plane itself, or the planes that hold its X or Y axis) or a planar
 	 * face picked on the shape below.
 	 *
-	 * The "feature" mode - mirror only the picked features of the body instead of
-	 * the whole of it - is not implemented yet, for the same reason as in the polar
-	 * pattern: the feature graph keeps only the result of a feature, not the
-	 * additive and subtractive shapes apart.
+	 * Its "feature" mode - mirror the material of the picked features instead of the
+	 * whole body - is the default, as it is in FreeCAD: only what those features
+	 * added or took away is reflected onto the same base. The "whole" mode reflects
+	 * the shape below the mirror instead.
 	 *
 	 * It is a Feature3D, like the other features that produce a solid, so that a
 	 * feature built on top of the mirror finds its shape here.
@@ -62,7 +63,10 @@ namespace MOON
 		 * below. \return false when the face is missing or is not planar. */
 		bool applyPlaneFromFace(const Part::TopoShape& p_face);
 
-		int mode = static_cast<int>(TransformMode::Whole);
+		int mode = static_cast<int>(TransformMode::Feature);
+		/** The features whose material is mirrored in the "feature" mode. Empty in
+		 * the whole shape mode, which mirrors the shape below as a whole. */
+		std::vector<Feature*> originals;
 		/** One of PlaneType: where the mirror plane comes from. */
 		int planeType = PlaneSketchNormal;
 		/** Mirror plane, in the world of the shape below: its location is a point of

@@ -126,780 +126,55 @@ namespace MOON {
         }
     }
 
-    namespace
-    {
-        /** The sketch plane plus the conversions between world and sketch
-         * coordinates every projection step needs.
-         *
-         * Sketch coordinates are (u, v, 0), the space the geometry drawn in the
-         * sketch lives in, so both the solver and the viewport can treat a projected
-         * curve like any other curve of the sketch. Dropping the off-plane component
-         * is exactly an orthographic projection along the plane normal, which is what
-         * a sketch references by default. (FreeCAD offers "section" as the
-         * alternative, for shapes a projection would smear into one curve.) */
-        struct SketchProjection
-        {
-            SketcherPlane2D plane;
-            Base::Vector3d xAxis;
-            Base::Vector3d yAxis;
-            Base::Vector3d normal;
-
-            explicit SketchProjection(const SketcherPlane2D& p_plane)
-                : plane(p_plane)
-                , xAxis(p_plane.xAxis)
-                , yAxis(p_plane.yAxis)
-                , normal(p_plane.normal)
-            {
-            }
-
-            /** World point -> sketch (u, v, 0), i.e. the point projected onto the
-             * plane and expressed in its axes. */
-            Base::Vector3d toSketch(const gp_Pnt& p_point) const
-            {
-                const Base::Vector3d offset(
-                    p_point.X() - plane.origin.x,
-                    p_point.Y() - plane.origin.y,
-                    p_point.Z() - plane.origin.z);
-                return Base::Vector3d(offset.Dot(xAxis), offset.Dot(yAxis), 0.0);
-            }
-
-            /** The same for a direction: only its in-plane part survives, which is
-             * the direction the projection of a curve runs along. */
-            Base::Vector2d toSketch(const gp_Vec& p_direction) const
-            {
-                const Base::Vector3d direction(
-                    p_direction.X(), p_direction.Y(), p_direction.Z());
-                return Base::Vector2d(direction.Dot(xAxis), direction.Dot(yAxis));
-            }
-        };
-
-        void addPoint(
-            std::vector<std::unique_ptr<Part::Geometry>>& p_result,
-            const Base::Vector3d& p_point)
-        {
-            p_result.push_back(std::make_unique<Part::GeomPoint>(
-                Base::Vector3d(p_point.x, p_point.y, 0.0)));
-        }
-
-        /** A segment, or the point a segment has collapsed to. */
-        void addSegment(
-            std::vector<std::unique_ptr<Part::Geometry>>& p_result,
-            const Base::Vector3d& p_a,
-            const Base::Vector3d& p_b)
-        {
-            if ((p_b - p_a).Length() < 1e-9) {
-                addPoint(p_result, (p_a + p_b) * 0.5);
-                return;
-            }
-            auto geometry = std::make_unique<Part::GeomLineSegment>();
-            geometry->setPoints(
-                Base::Vector3d(p_a.x, p_a.y, 0.0),
-                Base::Vector3d(p_b.x, p_b.y, 0.0));
-            p_result.push_back(std::move(geometry));
-        }
-
-        /** Turns the image of a curve into a segment when the samples only span a
-         * line - what a projection does to a curve that is seen edge on. Going
-         * through the samples keeps the extremes of the arc, which a plain chord
-         * between its ends would miss.
-         * @return false when the samples are not a line. */
-        bool tryAddCollapsedSegment(
-            std::vector<std::unique_ptr<Part::Geometry>>& p_result,
-            const std::vector<Base::Vector3d>& p_samples)
-        {
-            if (p_samples.empty()) {
-                return true;
-            }
-            if (p_samples.size() == 1) {
-                addPoint(p_result, p_samples.front());
-                return true;
-            }
-
-            // The two samples that are farthest apart span the line.
-            size_t first = 0;
-            size_t last = 0;
-            double longest = -1.0;
-            for (size_t i = 0; i < p_samples.size(); ++i) {
-                for (size_t j = i + 1; j < p_samples.size(); ++j) {
-                    const double distance = (p_samples[i] - p_samples[j]).Sqr();
-                    if (distance > longest) {
-                        longest = distance;
-                        first = i;
-                        last = j;
-                    }
-                }
-            }
-            const Base::Vector3d span = p_samples[last] - p_samples[first];
-            const double length = span.Length();
-            if (length < 1e-12) {
-                addPoint(p_result, p_samples.front());
-                return true;
-            }
-            Base::Vector3d direction = span;
-            direction.Normalize();
-
-            double lowest = 0.0;
-            double highest = length;
-            double stray = 0.0;
-            const Base::Vector3d origin(0.0, 0.0, 0.0);
-            for (const Base::Vector3d& sample : p_samples) {
-                const Base::Vector3d offset = sample - p_samples[first];
-                const double along = offset.Dot(direction);
-                lowest = std::min(lowest, along);
-                highest = std::max(highest, along);
-                stray = std::max(stray, offset.DistanceToLine(origin, direction));
-            }
-            if (stray > length * 1e-6) {
-                return false;
-            }
-            addSegment(
-                p_result,
-                p_samples[first] + direction * lowest,
-                p_samples[first] + direction * highest);
-            return true;
-        }
-
-        /** The direction a world direction runs along inside the sketch. Falls back
-         * to an axis of the plane when the direction is seen edge on. */
-        gp_Dir projectedDirection(
-            const gp_Dir& p_direction,
-            const SketchProjection& p_projection)
-        {
-            Base::Vector3d direction(
-                p_direction.X(), p_direction.Y(), p_direction.Z());
-            Base::Vector2d inPlane = p_projection.toSketch(
-                gp_Vec(direction.x, direction.y, direction.z));
-            Base::Vector3d result(inPlane.x, inPlane.y, 0.0);
-            if (result.Length() < 1e-12) {
-                return gp_Dir(
-                    p_projection.xAxis.x, p_projection.xAxis.y, p_projection.xAxis.z);
-            }
-            result.Normalize();
-            return gp_Dir(result.x, result.y, 0.0);
-        }
-
-        /** Brings both parameters into the same period of a periodic curve, so that
-         * "the parameter is between the two" has a meaning. Copied from
-         * Geom_TrimmedCurve::setTrim(). */
-        void adjustPeriodic(
-            const Handle(Geom_Curve)& p_curve,
-            double& p_first,
-            double& p_last)
-        {
-            if (!p_curve->IsPeriodic()) {
-                return;
-            }
-            ElCLib::AdjustPeriodic(
-                p_curve->FirstParameter(),
-                p_curve->LastParameter(),
-                std::min(std::abs(p_first - p_last) / 2.0, Precision::PConfusion()),
-                p_first,
-                p_last);
-        }
-
-        /** The range of the projected curve that is the image of the source arc.
-         *
-         * A projection can swap the ends of a circle or an ellipse (and it can
-         * choose the other half of a periodic curve), so the middle point of the
-         * source decides which range to keep. FreeCAD's adjustParameterRange(). */
-        void adjustParameterRange(
-            const BRepAdaptor_Curve& p_source,
-            const SketchProjection& p_projection,
-            const Handle(Geom_Curve)& p_projected,
-            double& p_first,
-            double& p_last)
-        {
-            const auto parameterOf = [&p_projection, &p_projected](const gp_Pnt& p_point)
-                {
-                    const Base::Vector3d point = p_projection.toSketch(p_point);
-                    GeomAPI_ProjectPointOnCurve projection(
-                        gp_Pnt(point.x, point.y, 0.0), p_projected);
-                    if (projection.NbPoints() < 1) {
-                        return p_projected->FirstParameter();
-                    }
-                    return projection.LowerDistanceParameter();
-                };
-
-            const double sourceFirst = p_source.FirstParameter();
-            double sourceLast = p_source.LastParameter();
-            // An arc can be stored with its end parameter smaller than its start (it
-            // then runs through the boundary of the period), so the middle of the arc
-            // has to be taken from the range the arc really covers. Circles and
-            // ellipses both have a period of 2*pi.
-            while (sourceLast < sourceFirst) {
-                sourceLast += 2.0 * M_PI;
-            }
-            const double first = parameterOf(p_source.Value(sourceFirst));
-            const double last = parameterOf(p_source.Value(sourceLast));
-            double middle = parameterOf(p_source.Value(0.5 * (sourceFirst + sourceLast)));
-
-            p_first = first;
-            p_last = last;
-            adjustPeriodic(p_projected, p_first, p_last);
-            adjustPeriodic(p_projected, p_first, middle);
-            // The middle of the source is not between the two ends: the image runs
-            // the other way round the curve.
-            if (middle > p_last) {
-                std::swap(p_first, p_last);
-            }
-        }
-
-        /** Samples a curve and maps the samples into the sketch. */
-        std::vector<Base::Vector3d> sampleImage(
-            const TopoDS_Edge& p_edge,
-            const BRepAdaptor_Curve& p_curve,
-            const SketchProjection& p_projection)
-        {
-            // The deflection is relative to the size of the edge, so the result
-            // follows what the user sees whatever unit the model is in.
-            Bnd_Box bounds;
-            BRepBndLib::Add(p_edge, bounds);
-            double extent = 1.0;
-            if (!bounds.IsVoid()) {
-                Standard_Real xMin = 0.0, yMin = 0.0, zMin = 0.0;
-                Standard_Real xMax = 0.0, yMax = 0.0, zMax = 0.0;
-                bounds.Get(xMin, yMin, zMin, xMax, yMax, zMax);
-                extent = std::max(
-                    std::max(xMax - xMin, yMax - yMin), std::max(zMax - zMin, 1e-9));
-            }
-
-            std::vector<Base::Vector3d> samples;
-            GCPnts_QuasiUniformDeflection sampler(p_curve, extent * 1e-3);
-            if (!sampler.IsDone() || sampler.NbPoints() < 2) {
-                return samples;
-            }
-            samples.reserve(sampler.NbPoints());
-            for (int i = 1; i <= sampler.NbPoints(); ++i) {
-                samples.push_back(p_projection.toSketch(sampler.Value(i)));
-            }
-            return samples;
-        }
-
-        /** True when the edge covers a whole period, i.e. it is a full circle or a
-         * full ellipse and not an arc of the same curve. The parameters of an edge
-         * can run through the boundary of the period, hence the wrap. */
-        bool isFullPeriod(double p_first, double p_last)
-        {
-            double range = p_last - p_first;
-            while (range < 0.0) {
-                range += 2.0 * M_PI;
-            }
-            return std::abs(range - 2.0 * M_PI) < 1e-9;
-        }
-
-        /** Circle seen face on: it stays a circle of the same radius, which is what
-         * the solver and the user both want (a spline that looks like a circle
-         * cannot be constrained as one). */
-        void projectFaceOnCircle(
-            const BRepAdaptor_Curve& p_curve,
-            const gp_Circ& p_circle,
-            const SketchProjection& p_projection,
-            std::vector<std::unique_ptr<Part::Geometry>>& p_result)
-        {
-            const Base::Vector3d center = p_projection.toSketch(p_circle.Location());
-            if (isFullPeriod(p_curve.FirstParameter(), p_curve.LastParameter())) {
-                auto geometry = std::make_unique<Part::GeomCircle>();
-                geometry->setRadius(p_circle.Radius());
-                geometry->setCenter(center);
-                p_result.push_back(std::move(geometry));
-                return;
-            }
-
-            Handle(Geom_Circle) curve = new Geom_Circle(gp_Circ(
-                gp_Ax2(
-                    gp_Pnt(center.x, center.y, 0.0),
-                    gp_Dir(0.0, 0.0, 1.0),
-                    projectedDirection(p_circle.XAxis().Direction(), p_projection)),
-                p_circle.Radius()));
-            double first = 0.0;
-            double last = 0.0;
-            adjustParameterRange(p_curve, p_projection, curve, first, last);
-
-            auto geometry = std::make_unique<Part::GeomArcOfCircle>();
-            geometry->setHandle(
-                new Geom_TrimmedCurve(curve, first, last));
-            p_result.push_back(std::move(geometry));
-        }
-
-        /** The projection of a circle that is tilted against the sketch plane: an
-         * ellipse whose major axis is the diameter that stays parallel to the plane
-         * and whose minor radius is the radius seen at an angle. */
-        void projectTiltedCircle(
-            const TopoDS_Edge& p_edge,
-            const BRepAdaptor_Curve& p_curve,
-            const gp_Circ& p_circle,
-            const SketchProjection& p_projection,
-            std::vector<std::unique_ptr<Part::Geometry>>& p_result)
-        {
-            const gp_Dir axis = p_circle.Axis().Direction();
-            const double cosAngle = p_projection.normal.Dot(
-                Base::Vector3d(axis.X(), axis.Y(), axis.Z()));
-
-            // Seen edge on: with no minor radius left there is no ellipse, only the
-            // segment the circle collapses to.
-            const double majorRadius = p_circle.Radius();
-            const double minorRadius = majorRadius * std::abs(cosAngle);
-            if (minorRadius < majorRadius * 1e-9) {
-                tryAddCollapsedSegment(
-                    p_result, sampleImage(p_edge, p_curve, p_projection));
-                return;
-            }
-
-            const Base::Vector3d center = p_projection.toSketch(p_circle.Location());
-            // The major axis is the in-plane direction perpendicular to the axis of
-            // the circle: that is the diameter the projection does not shorten.
-            Base::Vector3d majorAxis = p_projection.normal.Cross(
-                Base::Vector3d(axis.X(), axis.Y(), axis.Z()));
-            if (majorAxis.Length() < 1e-12) {
-                majorAxis = p_projection.xAxis;
-            }
-            majorAxis.Normalize();
-
-            Handle(Geom_Ellipse) curve = new Geom_Ellipse(gp_Elips(
-                gp_Ax2(
-                    gp_Pnt(center.x, center.y, 0.0),
-                    gp_Dir(0.0, 0.0, 1.0),
-                    gp_Dir(majorAxis.x, majorAxis.y, 0.0)),
-                majorRadius,
-                minorRadius));
-            // (IsClosed() of the adaptor would answer for the underlying circle, which
-            // is periodic whether or not the edge covers the whole of it.)
-            if (isFullPeriod(p_curve.FirstParameter(), p_curve.LastParameter())) {
-                auto geometry = std::make_unique<Part::GeomEllipse>();
-                geometry->setHandle(curve);
-                p_result.push_back(std::move(geometry));
-                return;
-            }
-
-            double first = 0.0;
-            double last = 0.0;
-            adjustParameterRange(p_curve, p_projection, curve, first, last);
-            auto geometry = std::make_unique<Part::GeomArcOfEllipse>();
-            geometry->setHandle(new Geom_TrimmedCurve(curve, first, last));
-            p_result.push_back(std::move(geometry));
-        }
-
-        /** Anything the analytic cases above do not cover (splines, and whatever a
-         * model carries in a face that is not a plane). */
-        void projectCurveFallback(
-            const TopoDS_Edge& p_edge,
-            const BRepAdaptor_Curve& p_curve,
-            const SketchProjection& p_projection,
-            std::vector<std::unique_ptr<Part::Geometry>>& p_result)
-        {
-            std::vector<Base::Vector3d> samples
-                = sampleImage(p_edge, p_curve, p_projection);
-            if (samples.size() < 2) {
-                if (!samples.empty()) {
-                    addPoint(p_result, samples.front());
-                }
-                return;
-            }
-            if (tryAddCollapsedSegment(p_result, samples)) {
-                return;
-            }
-
-            const bool closed
-                = (samples.front() - samples.back()).Length()
-                < 1e-6 * (samples.back() - samples.front()).Length()
-                + 1e-12;
-            if (closed) {
-                // The samples of a closed curve start and end on the same point,
-                // which the periodic interpolation must not see twice.
-                samples.pop_back();
-            }
-            std::vector<gp_Pnt> points;
-            points.reserve(samples.size());
-            for (const Base::Vector3d& sample : samples) {
-                points.emplace_back(sample.x, sample.y, 0.0);
-            }
-            auto geometry = std::make_unique<Part::GeomBSplineCurve>();
-            geometry->interpolate(points, closed);
-            p_result.push_back(std::move(geometry));
-        }
-
-        /** Projects one edge of the source shape.
-         *
-         * The type of the source curve decides the type of the result - the same
-         * idea as FreeCAD's processEdge(). BRepAdaptor_Curve is used on purpose:
-         * it applies the location of the edge, and an imported model regularly
-         * carries its arcs in a local frame. Taking the raw curve there would
-         * project geometry that is somewhere else (and, for a circle, tilted
-         * against the sketch plane instead of parallel to it). */
-        void projectEdgeShape(
-            const TopoDS_Edge& p_edge,
-            const SketchProjection& p_projection,
-            std::vector<std::unique_ptr<Part::Geometry>>& p_result)
-        {
-            const BRepAdaptor_Curve curve(p_edge);
-            if (curve.GetType() == GeomAbs_Line) {
-                addSegment(
-                    p_result,
-                    p_projection.toSketch(curve.Value(curve.FirstParameter())),
-                    p_projection.toSketch(curve.Value(curve.LastParameter())));
-                return;
-            }
-            if (curve.GetType() == GeomAbs_Circle) {
-                const gp_Circ circle = curve.Circle();
-                const gp_Dir axis = circle.Axis().Direction();
-                const double cosAngle = p_projection.normal.Dot(
-                    Base::Vector3d(axis.X(), axis.Y(), axis.Z()));
-                if (std::abs(cosAngle) > 1.0 - 1e-9) {
-                    projectFaceOnCircle(curve, circle, p_projection, p_result);
-                }
-                else {
-                    projectTiltedCircle(p_edge, curve, circle, p_projection, p_result);
-                }
-                return;
-            }
-            if (curve.GetType() == GeomAbs_Ellipse) {
-                const gp_Elips ellipse = curve.Ellipse();
-                const gp_Dir axis = ellipse.Axis().Direction();
-                const double cosAngle = p_projection.normal.Dot(
-                    Base::Vector3d(axis.X(), axis.Y(), axis.Z()));
-                if (std::abs(cosAngle) > 1.0 - 1e-9) {
-                    // Face on, the ellipse only moves along the normal and keeps its
-                    // size; the axes are taken as they project.
-                    const Base::Vector3d center
-                        = p_projection.toSketch(ellipse.Location());
-                    Handle(Geom_Ellipse) curveHandle = new Geom_Ellipse(gp_Elips(
-                        gp_Ax2(
-                            gp_Pnt(center.x, center.y, 0.0),
-                            gp_Dir(0.0, 0.0, 1.0),
-                            projectedDirection(ellipse.XAxis().Direction(), p_projection)),
-                        ellipse.MajorRadius(),
-                        ellipse.MinorRadius()));
-                    if (isFullPeriod(curve.FirstParameter(), curve.LastParameter())) {
-                        auto geometry = std::make_unique<Part::GeomEllipse>();
-                        geometry->setHandle(curveHandle);
-                        p_result.push_back(std::move(geometry));
-                        return;
-                    }
-                    double first = 0.0;
-                    double last = 0.0;
-                    adjustParameterRange(curve, p_projection, curveHandle, first, last);
-                    auto geometry = std::make_unique<Part::GeomArcOfEllipse>();
-                    geometry->setHandle(new Geom_TrimmedCurve(curveHandle, first, last));
-                    p_result.push_back(std::move(geometry));
-                    return;
-                }
-            }
-            projectCurveFallback(p_edge, curve, p_projection, p_result);
-        }
-
-        const char* curveTypeName(GeomAbs_CurveType p_type)
-        {
-            switch (p_type) {
-            case GeomAbs_Line: return "line";
-            case GeomAbs_Circle: return "circle";
-            case GeomAbs_Ellipse: return "ellipse";
-            case GeomAbs_Hyperbola: return "hyperbola";
-            case GeomAbs_Parabola: return "parabola";
-            case GeomAbs_BezierCurve: return "bezier";
-            case GeomAbs_BSplineCurve: return "spline";
-            case GeomAbs_OffsetCurve: return "offset curve";
-            default: return "other curve";
-            }
-        }
-
-        const char* geometryTypeName(const Part::Geometry* p_geometry)
-        {
-            if (p_geometry == nullptr) {
-                return "nothing";
-            }
-            if (p_geometry->is<Part::GeomPoint>()) {
-                return "point";
-            }
-            if (p_geometry->is<Part::GeomLineSegment>()) {
-                return "line";
-            }
-            if (p_geometry->is<Part::GeomCircle>()) {
-                return "circle";
-            }
-            if (p_geometry->is<Part::GeomArcOfCircle>()) {
-                return "arc";
-            }
-            if (p_geometry->is<Part::GeomEllipse>()) {
-                return "ellipse";
-            }
-            if (p_geometry->is<Part::GeomArcOfEllipse>()) {
-                return "arc of ellipse";
-            }
-            if (p_geometry->is<Part::GeomBSplineCurve>()) {
-                return "spline";
-            }
-            return "curve";
-        }
-
-        /** Projects an edge and reports what became of it: a projection that
-         * collapses an arc onto a line is decided by the geometry, and the log is
-         * what tells the two cases apart when a reference does not look like the
-         * shape it was taken from. */
-        void projectEdge(
-            const TopoDS_Edge& p_edge,
-            const SketchProjection& p_projection,
-            std::vector<std::unique_ptr<Part::Geometry>>& p_result)
-        {
-            const size_t before = p_result.size();
-            const BRepAdaptor_Curve curve(p_edge);
-            projectEdgeShape(p_edge, p_projection, p_result);
-
-            std::string produced;
-            for (size_t i = before; i < p_result.size(); ++i) {
-                produced += produced.empty() ? "" : " + ";
-                produced += geometryTypeName(p_result[i].get());
-            }
-            CORE_INFO(
-                "[ExternalGeo] projected a {0} edge to {1}",
-                curveTypeName(curve.GetType()),
-                produced.empty() ? "<nothing>" : produced);
-        }
-
-        /** Fits the pieces of one circle back together.
-         *
-         * A plane cutting a sphere (or any revolve) comes back as several arcs of the
-         * same circle, and as far as the sketch is concerned they are one curve - it
-         * would only have to constrain them against each other. FreeCAD does the same
-         * in its fitArcs().
-         *
-         * @return the single circle or arc, or null when the pieces are not one
-         *         circle after all. */
-        std::unique_ptr<Part::Geometry> mergeCirclePieces(
-            const std::vector<const Part::Geometry*>& p_pieces)
-        {
-            double radius = 0.0;
-            Base::Vector3d center;
-            std::vector<std::pair<Base::Vector3d, Base::Vector3d>> ends;
-            for (const Part::Geometry* piece : p_pieces) {
-                if (piece == nullptr || !piece->is<Part::GeomArcOfCircle>()) {
-                    return nullptr;
-                }
-                const auto* arc = static_cast<const Part::GeomArcOfCircle*>(piece);
-                if (radius == 0.0) {
-                    radius = arc->getRadius();
-                    center = arc->getCenter();
-                }
-                else if (std::abs(radius - arc->getRadius())
-                    > std::max(radius, 1.0) * 1e-6) {
-                    return nullptr;  // not the same circle: leave the pieces alone
-                }
-                ends.emplace_back(arc->getStartPoint(), arc->getEndPoint());
-            }
-            if (radius == 0.0 || ends.empty()) {
-                return nullptr;
-            }
-
-            // The ends of the union are the endpoints that only one piece owns; the
-            // junctions between pieces are shared by two and cancel out.
-            const auto samePoint = [&radius](const Base::Vector3d& p_a, const Base::Vector3d& p_b)
-                {
-                    return (p_a - p_b).Length() < std::max(radius, 1.0) * 1e-9;
-                };
-            std::vector<Base::Vector3d> loose;
-            for (const auto& [start, end] : ends) {
-                for (const Base::Vector3d& point : { start, end }) {
-                    const auto found = std::find_if(
-                        loose.begin(), loose.end(),
-                        [&](const Base::Vector3d& existing) { return samePoint(existing, point); });
-                    if (found == loose.end()) {
-                        loose.push_back(point);
-                    }
-                    else {
-                        loose.erase(found);
-                    }
-                }
-            }
-
-            if (loose.size() != 2) {
-                // Nothing is loose: the pieces close the circle.
-                auto geometry = std::make_unique<Part::GeomCircle>();
-                geometry->setRadius(radius);
-                geometry->setCenter(center);
-                return geometry;
-            }
-
-            // A point in the middle of the first piece tells the fitting which way
-            // round the arc runs. It has to be a point *on* the curve - the middle of
-            // the chord is not one - so the arc is evaluated at its middle parameter.
-            const auto* firstPiece
-                = static_cast<const Part::GeomArcOfCircle*>(p_pieces.front());
-            double rangeFirst = 0.0;
-            double rangeLast = 0.0;
-            firstPiece->getRange(rangeFirst, rangeLast, false);
-            Handle(Geom_Curve) firstCurve
-                = Handle(Geom_Curve)::DownCast(firstPiece->handle());
-            if (firstCurve.IsNull()) {
-                return nullptr;
-            }
-            const gp_Pnt through = firstCurve->Value(0.5 * (rangeFirst + rangeLast));
-            const gp_Pnt first(loose[0].x, loose[0].y, 0.0);
-            const gp_Pnt last(loose[1].x, loose[1].y, 0.0);
-            GC_MakeArcOfCircle fitting(first, through, last);
-            if (!fitting.IsDone()) {
-                return nullptr;
-            }
-            auto geometry = std::make_unique<Part::GeomArcOfCircle>();
-            geometry->setHandle(fitting.Value());
-            return geometry;
-        }
-
-        /** The section of the referenced shape with the sketch plane: the curve where
-         * the shape is actually cut, not the shadow it casts (see projectEdge for the
-         * latter). It lies in the plane by construction, so it needs no projection -
-         * what a sketch drawn on a section wants to constrain to is the cut itself.
-         * FreeCAD calls this the intersection mode of its external geometry. */
-        void sectionIntoSketch(
-            const TopoDS_Shape& p_shape,
-            const SketchProjection& p_projection,
-            std::vector<std::unique_ptr<Part::Geometry>>& p_result)
-        {
-            const gp_Pln plane(
-                gp_Pnt(
-                    p_projection.plane.origin.x,
-                    p_projection.plane.origin.y,
-                    p_projection.plane.origin.z),
-                gp_Dir(
-                    p_projection.normal.x,
-                    p_projection.normal.y,
-                    p_projection.normal.z));
-
-            BRepAlgoAPI_Section section(p_shape, plane, Standard_False);
-            // A section of a curved face is rarely exact; the approximation is what
-            // makes it come out at all (FreeCAD sets it as well).
-            section.Approximation(Standard_True);
-            section.Build();
-            if (!section.IsDone() || section.Shape().IsNull()) {
-                CORE_WARN("[ExternalGeo] the section with the sketch plane failed");
-                return;
-            }
-
-            const size_t firstSectionGeo = p_result.size();
-            for (TopExp_Explorer explorer(section.Shape(), TopAbs_EDGE);
-                explorer.More();
-                explorer.Next()) {
-                projectEdge(TopoDS::Edge(explorer.Current()), p_projection, p_result);
-            }
-
-            // The pieces of one circle are one curve for the sketch.
-            std::vector<const Part::Geometry*> pieces;
-            for (size_t i = firstSectionGeo; i < p_result.size(); ++i) {
-                pieces.push_back(p_result[i].get());
-            }
-            bool merged = false;
-            if (pieces.size() > 1) {
-                if (std::unique_ptr<Part::Geometry> fitted = mergeCirclePieces(pieces)) {
-                    p_result.resize(firstSectionGeo);
-                    p_result.push_back(std::move(fitted));
-                    merged = true;
-                }
-            }
-
-            // The corners of the section are useful constraint targets on their own,
-            // so they are imported as points (FreeCAD does the same).
-            //
-            // After a merge they are skipped: those vertices are the seams where the
-            // pieces used to meet, not features of the cut.
-            if (merged) {
-                return;
-            }
-            for (TopExp_Explorer explorer(section.Shape(), TopAbs_VERTEX);
-                explorer.More();
-                explorer.Next()) {
-                const gp_Pnt point = BRep_Tool::Pnt(TopoDS::Vertex(explorer.Current()));
-                addPoint(p_result, p_projection.toSketch(point));
-            }
-            if (p_result.size() == firstSectionGeo) {
-                CORE_INFO(
-                    "[ExternalGeo] the section is empty: the referenced shape does not "
-                    "cross the sketch plane (try the projection flavour instead)");
-            }
-        }
-    }
-
-    /** Projects one sub-shape of another feature into the sketch plane. */
-    static std::vector<std::unique_ptr<Part::Geometry>> projectIntoSketch(
-        const TopoDS_Shape& p_shape,
-        const SketcherPlane2D& p_plane,
-        bool p_intersection = false)
-    {
-        const SketchProjection projection(p_plane);
-        std::vector<std::unique_ptr<Part::Geometry>> result;
-        if (p_shape.IsNull()) {
-            return result;
-        }
-
-        // The section is taken against the plane itself, whatever the shape is: a face
-        // cuts along its outline, a solid along its whole cross section.
-        if (p_intersection) {
-            sectionIntoSketch(p_shape, projection, result);
-            return result;
-        }
-
-        // A vertex becomes a point.
-        if (p_shape.ShapeType() == TopAbs_VERTEX) {
-            addPoint(
-                result,
-                projection.toSketch(BRep_Tool::Pnt(TopoDS::Vertex(p_shape))));
-            return result;
-        }
-
-        // A face is referenced through its boundary.
-        std::vector<TopoDS_Edge> edges;
-        const bool fromFace = p_shape.ShapeType() == TopAbs_FACE;
-        if (fromFace) {
-            for (TopExp_Explorer explorer(p_shape, TopAbs_EDGE); explorer.More(); explorer.Next()) {
-                edges.push_back(TopoDS::Edge(explorer.Current()));
-            }
-        }
-        else if (p_shape.ShapeType() == TopAbs_EDGE) {
-            edges.push_back(TopoDS::Edge(p_shape));
-        }
-
-        for (const TopoDS_Edge& edge : edges) {
-            projectEdge(edge, projection, result);
-        }
-
-        // A planar face seen edge on collapses onto a single line, and its boundary
-        // would hand back several segments that lie on top of each other. FreeCAD
-        // reduces them to one segment as well, so the sketch gets one reference to
-        // constrain to instead of a pile.
-        if (fromFace && result.size() > 1) {
-            gp_Pln facePlane;
-            const Part::TopoShape faceShape(p_shape);
-            const bool planar = faceShape.findPlane(facePlane);
-            const gp_Dir normal(
-                projection.normal.x, projection.normal.y, projection.normal.z);
-            if (planar
-                && facePlane.Axis().Direction().IsNormal(normal, Precision::Angular())) {
-                std::vector<Base::Vector3d> endpoints;
-                for (const std::unique_ptr<Part::Geometry>& geo : result) {
-                    if (geo == nullptr || !geo->is<Part::GeomLineSegment>()) {
-                        endpoints.clear();
-                        break;  // not the flat picture this reduction is for
-                    }
-                    const auto* line = static_cast<const Part::GeomLineSegment*>(geo.get());
-                    endpoints.push_back(line->getStartPoint());
-                    endpoints.push_back(line->getEndPoint());
-                }
-                if (endpoints.size() >= 2) {
-                    std::vector<std::unique_ptr<Part::Geometry>> reduced;
-                    tryAddCollapsedSegment(reduced, endpoints);
-                    if (reduced.size() == 1) {
-                        CORE_INFO(
-                            "[ExternalGeo] a planar face seen edge on was reduced from "
-                            "{0} segments to one line",
-                            result.size());
-                        return reduced;
-                    }
-                }
-            }
-        }
-        return result;
-    }
  
 	SketcherObj::SketcherObj() :EventWidget("SketcherObj")
     {
+        // The axes belong to the sketch from the start: a constraint can always name
+        // the origin or one of the axes, without the user having to bring them in as
+        // external geometry first (see ensureAxisGeometry).
+        ensureAxisGeometry();
         setActive(true);
+    }
+
+    void SketcherObj::ensureAxisGeometry()
+    {
+        if (mExternalAxes[0] != nullptr && mExternalAxes[1] != nullptr) {
+            return;
+        }
+        // The axes are lines of the sketch plane. How far they reach only matters for
+        // drawing and picking - the solver works with the line through their two
+        // points - but they have to *start* at the origin: the root point is the start
+        // point of the horizontal axis, which is the convention GeoEnum documents
+        // (RtPnt and HAxis share the id -1).
+        //
+        // The span matches what the grid draws its own axis lines over, so what the
+        // user sees and what they can click on are the same lines in the positive
+        // quadrant.
+        constexpr double extent = 500.0;
+
+        auto vertical = std::make_unique<Part::GeomLineSegment>();
+        vertical->setPoints(
+            Base::Vector3d(0.0, 0.0, 0.0),
+            Base::Vector3d(0.0, extent, 0.0));
+        // Construction, i.e. reference geometry: it is never part of the sketch's wire
+        // shape (the external flag alone already keeps it out of that).
+        vertical->setConstruction(true);
+
+        auto horizontal = std::make_unique<Part::GeomLineSegment>();
+        horizontal->setPoints(
+            Base::Vector3d(0.0, 0.0, 0.0),
+            Base::Vector3d(extent, 0.0, 0.0));
+        horizontal->setConstruction(true);
+
+        mExternalAxes[0] = std::move(vertical);
+        mExternalAxes[1] = std::move(horizontal);
+
+        // Sampled right away, like every other curve of the sketch: the hit test and
+        // the snapping only look at curves that already have a cache entry, and the
+        // axes have to be selectable from the first frame on.
+        for (const std::unique_ptr<Part::Geometry>& axis : mExternalAxes) {
+            mGeoSegment[axis.get()] = getCurveSegment(axis.get());
+        }
     }
     SketcherObj::~SketcherObj()
     {
@@ -930,12 +205,12 @@ namespace MOON {
             catch (Base::ValueError&e) {
                 CORE_ERROR(e.what());
             }
-
         }
         GetService(SketchToolbar).disableAllHandlers();
     }
     int SketcherObj::solve(bool updateGeoAfterSolving)
     {
+        ensureAxisGeometry();
         //Reset
         solvedSketch.resetInitMove();
         //Set Up geometry and contraint
@@ -945,22 +220,17 @@ namespace MOON {
         }
         // External geometry goes last: setUpSketch() takes the trailing extGeoCount
         // entries as blocked, i.e. as parameters the sketch may use but never move.
-        // The projections are refreshed first, so the solver sees the sources as they
-        // are now.
-        {
-            // A refresh can change how many curves a reference has (its source may have
-            // been rebuilt), and the ids the constraints hold count from the end of the
-            // block - so the references are rebuilt together with the block.
-            const std::vector<std::pair<int, int>> keysBefore = externalCurveKeys();
-            updateExternalGeometry();
-            if (getExternalCurveCount() != static_cast<int>(keysBefore.size())) {
-                remapExternalReferences(keysBefore);
-            }
-        }
+        // The user's references come first and the two axes after them, so the axes
+        // are the last entries of the whole list - which is what gives them the fixed
+        // ids -1 and -2 the constraints and the UI expect (see getExternalCurveCount).
         int externalCount = 0;
-        for (const ExternalGeometry& external : mExternalGeometry) {
-            for (const std::unique_ptr<Part::Geometry>& geo : external.geos) {
-                GeoList.push_back(geo.get());
+        for (const std::unique_ptr<Part::Geometry>& geo : mExternalGeoList) {
+            GeoList.push_back(geo.get());
+            ++externalCount;
+        }
+        for (const std::unique_ptr<Part::Geometry>& axis : mExternalAxes) {
+            if (axis != nullptr) {
+                GeoList.push_back(axis.get());
                 ++externalCount;
             }
         }
@@ -1675,358 +945,241 @@ namespace MOON {
         return planeTransform;
     }
 
-    int SketcherObj::addExternalGeometry(
-        Feature* p_source,
-        const std::string& p_reference,
-        bool p_intersection)
+
+    int SketcherObj::addExternalGeometry(std::unique_ptr<Part::Geometry> p_geo)
     {
-        if (p_source == nullptr || p_reference.empty()) {
-            return -1;
+        if (p_geo == nullptr) {
+            return NoGeoId;
         }
-        // The same sub-shape twice would only add a duplicate curve the solver has to
-        // carry, and it usually means the button was pressed twice.
-        for (int i = 0; i < static_cast<int>(mExternalGeometry.size()); ++i) {
-            const ExternalGeometry& existing = mExternalGeometry[i];
-            if (existing.source == p_source
-                && existing.reference == p_reference
-                && existing.intersection == p_intersection) {
-                return i;
+        // The ids the constraints hold count from the end of the external block, so
+        // appending to it moves them: remember what the block held to be able to move
+        // the constraints along with it.
+        const std::vector<Part::Geometry*> before = externalGeometryPointers();
+        mExternalGeoList.push_back(std::move(p_geo));
+
+        Part::Geometry* geo = mExternalGeoList.back().get();
+        // Sampled as soon as it exists, like the sketch samples its own geometry when
+        // it is added: the drawing, the hit test and the snapping all read that one
+        // cache, so it must not wait for the first frame that happens to draw it.
+        mGeoSegment[geo] = getCurveSegment(geo);
+
+        remapExternalReferences(before);
+        solve();
+        return getExternalGeoId(static_cast<int>(mExternalGeoList.size()) - 1);
+    }
+
+    int SketcherObj::addExternalGeometry(std::vector<std::unique_ptr<Part::Geometry>>&& p_geos)
+    {
+        if (p_geos.empty()) {
+            return NoGeoId;
+        }
+        const std::vector<Part::Geometry*> before = externalGeometryPointers();
+        int firstGeoId = NoGeoId;
+        for (std::unique_ptr<Part::Geometry>& geo : p_geos) {
+            if (geo == nullptr) {
+                continue;
+            }
+            mExternalGeoList.push_back(std::move(geo));
+            Part::Geometry* added = mExternalGeoList.back().get();
+            mGeoSegment[added] = getCurveSegment(added);
+            if (firstGeoId == NoGeoId) {
+                firstGeoId = getExternalGeoId(static_cast<int>(mExternalGeoList.size()) - 1);
             }
         }
-
-        // The ids the constraints hold count from the end of the external block, so
-        // appending curves moves them: remember what the block looked like to be able
-        // to move the constraints along with it.
-        const std::vector<std::pair<int, int>> keysBefore = externalCurveKeys();
-
-        ExternalGeometry external;
-        external.source = p_source;
-        external.reference = p_reference;
-        external.intersection = p_intersection;
-        mExternalGeometry.push_back(std::move(external));
-
-        const int index = static_cast<int>(mExternalGeometry.size()) - 1;
-        updateExternalGeometry();
-        remapExternalReferences(keysBefore);
-        const ExternalGeometry& added = mExternalGeometry[index];
-        CORE_INFO(
-            "[ExternalGeo] {0}: {1} '{2}' of {3} -> {4} curve(s){5}",
-            getName(),
-            p_intersection ? "sectioned" : "projected",
-            p_reference,
-            p_source->GetName(),
-            added.geos.size(),
-            added.missing ? " (missing)" : "");
-
+        if (firstGeoId == NoGeoId) {
+            return NoGeoId;  // everything in the list was null
+        }
+        remapExternalReferences(before);
         solve();
-        return index;
+        return firstGeoId;
+    }
+
+    bool SketcherObj::removeExternalGeometry(int p_index)
+    {
+        if (p_index < 0 || p_index >= static_cast<int>(mExternalGeoList.size())) {
+            return false;
+        }
+        const std::vector<Part::Geometry*> before = externalGeometryPointers();
+        // Dropping the curve has to drop its sampling with it: the cache is keyed by
+        // address, so an entry of a freed geometry would outlive it - and a later
+        // geometry allocated at the same address would be drawn from the wrong curve.
+        mGeoSegment.erase(mExternalGeoList[p_index].get());
+        CORE_INFO(
+            "[ExternalGeo] {0}: dropped external curve {1}",
+            getName(),
+            getExternalGeoId(p_index));
+        mExternalGeoList.erase(mExternalGeoList.begin() + p_index);
+        // The constraints on this curve die with it; the ones on the other curves are
+        // moved to the ids they have now.
+        remapExternalReferences(before);
+        solve();
+        return true;
     }
 
     void SketcherObj::clearExternalGeometry()
     {
-        if (mExternalGeometry.empty()) {
+        if (mExternalGeoList.empty()) {
             return;
         }
-        const std::vector<std::pair<int, int>> keysBefore = externalCurveKeys();
-        for (const ExternalGeometry& external : mExternalGeometry) {
-            for (const std::unique_ptr<Part::Geometry>& geo : external.geos) {
-                mGeoSegment.erase(geo.get());
-            }
+        const std::vector<Part::Geometry*> before = externalGeometryPointers();
+        for (const std::unique_ptr<Part::Geometry>& geo : mExternalGeoList) {
+            mGeoSegment.erase(geo.get());
         }
-        mExternalGeometry.clear();
-        // Every reference is gone, so the constraints that named one go with them.
-        remapExternalReferences(keysBefore);
+        mExternalGeoList.clear();
+        // Every curve is gone, so the constraints that named one go with them.
+        remapExternalReferences(before);
         solve();
     }
 
-	const SketcherObj::ExternalGeometry* SketcherObj::getExternalGeometry(int p_index) const
-	{
-		if (p_index < 0 || p_index >= static_cast<int>(mExternalGeometry.size())) {
-			return nullptr;
-		}
-		return &mExternalGeometry[p_index];
-	}
+    Part::Geometry* SketcherObj::getExternalGeometry(int p_index)
+    {
+        if (p_index < 0 || p_index >= static_cast<int>(mExternalGeoList.size())) {
+            return nullptr;
+        }
+        return mExternalGeoList[p_index].get();
+    }
 
-	int SketcherObj::getExternalCurveCount() const
-	{
-		int count = 0;
-		for (const ExternalGeometry& external : mExternalGeometry) {
-			count += static_cast<int>(external.geos.size());
-		}
-		return count;
-	}
+    const Part::Geometry* SketcherObj::getExternalGeometry(int p_index) const
+    {
+        if (p_index < 0 || p_index >= static_cast<int>(mExternalGeoList.size())) {
+            return nullptr;
+        }
+        return mExternalGeoList[p_index].get();
+    }
 
-	int SketcherObj::getExternalGeoId(int p_index) const
-	{
-		return p_index - getExternalCurveCount();
-	}
+    int SketcherObj::getExternalCurveCount() const
+    {
+        // The user's references, then the two axes - the axes are part of the block
+        // (they are drawn, picked and constrained to like any other curve) even though
+        // they are not in the list the user can add to and remove from.
+        int count = static_cast<int>(mExternalGeoList.size());
+        for (const std::unique_ptr<Part::Geometry>& axis : mExternalAxes) {
+            if (axis != nullptr) {
+                ++count;
+            }
+        }
+        return count;
+    }
 
-	int SketcherObj::getExternalCurveIndex(int p_geoId) const
-	{
-		const int count = getExternalCurveCount();
-		if (count == 0 || p_geoId >= 0 || p_geoId == Sketcher::GeoEnum::GeoUndef) {
-			return -1;
-		}
-		// The last curve of the block is -1, so the ids run the other way round.
-		const int index = count + p_geoId;
-		if (index < 0 || index >= count) {
-			return -1;
-		}
-		return index;
-	}
+    int SketcherObj::getExternalGeoId(int p_index) const
+    {
+        const int count = getExternalCurveCount();
+        if (p_index < 0 || p_index >= count) {
+            return NoGeoId;
+        }
+        return p_index - count;
+    }
 
-	const Part::Geometry* SketcherObj::getExternalCurve(int p_geoId) const
-	{
-		const int index = getExternalCurveIndex(p_geoId);
-		if (index < 0) {
-			return nullptr;
-		}
-		int current = 0;
-		for (const ExternalGeometry& external : mExternalGeometry) {
-			const int count = static_cast<int>(external.geos.size());
-			if (index < current + count) {
-				return external.geos[index - current].get();
-			}
-			current += count;
-		}
-		return nullptr;
-	}
+    int SketcherObj::getExternalCurveIndex(int p_geoId) const
+    {
+        const int count = getExternalCurveCount();
+        if (count == 0 || p_geoId >= 0 || p_geoId == Sketcher::GeoEnum::GeoUndef) {
+            return -1;
+        }
+        // The last curve of the block is -1, so the ids run the other way round.
+        const int index = count + p_geoId;
+        if (index < 0 || index >= count) {
+            return -1;
+        }
+        return index;
+    }
 
-	bool SketcherObj::isExternalGeoId(int p_geoId) const
-	{
-		return getExternalCurveIndex(p_geoId) >= 0;
-	}
+    const Part::Geometry* SketcherObj::getExternalCurve(int p_geoId) const
+    {
+        const int index = getExternalCurveIndex(p_geoId);
+        if (index < 0) {
+            return nullptr;
+        }
+        if (index < static_cast<int>(mExternalGeoList.size())) {
+            return mExternalGeoList[index].get();
+        }
+        // The tail of the block: the vertical axis and then the horizontal one, whose
+        // start point is the root point.
+        return mExternalAxes[index - static_cast<int>(mExternalGeoList.size())].get();
+    }
 
-	const Part::Geometry* SketcherObj::resolveGeometry(int p_geoId) const
-	{
-		if (p_geoId < 0) {
-			return getExternalCurve(p_geoId);
-		}
-		return getGeometry(p_geoId);
-	}
+    bool SketcherObj::isExternalGeoId(int p_geoId) const
+    {
+        return getExternalCurveIndex(p_geoId) >= 0;
+    }
 
-	std::vector<std::pair<int, int>> SketcherObj::externalCurveKeys() const
-	{
-		std::vector<std::pair<int, int>> keys;
-		for (int i = 0; i < static_cast<int>(mExternalGeometry.size()); ++i) {
-			const int count = static_cast<int>(mExternalGeometry[i].geos.size());
-			for (int j = 0; j < count; ++j) {
-				keys.emplace_back(i, j);
-			}
-		}
-		return keys;
-	}
+    const Part::Geometry* SketcherObj::resolveGeometry(int p_geoId) const
+    {
+        if (p_geoId < 0) {
+            return getExternalCurve(p_geoId);
+        }
+        return getGeometry(p_geoId);
+    }
 
-	void SketcherObj::remapExternalReferences(
-		const std::vector<std::pair<int, int>>& p_oldKeys)
-	{
-		const int oldCount = static_cast<int>(p_oldKeys.size());
-		if (oldCount == 0) {
-			return;  // nothing was projected, so no constraint can name it
-		}
-		const int newCount = getExternalCurveCount();
+    std::vector<Part::Geometry*> SketcherObj::externalGeometryPointers() const
+    {
+        std::vector<Part::Geometry*> pointers;
+        pointers.reserve(mExternalGeoList.size());
+        for (const std::unique_ptr<Part::Geometry>& geo : mExternalGeoList) {
+            pointers.push_back(geo.get());
+        }
+        return pointers;
+    }
 
-		// Where each curve of the old block sits now.
-		std::map<std::pair<int, int>, int> position;
-		int index = 0;
-		for (int i = 0; i < static_cast<int>(mExternalGeometry.size()); ++i) {
-			const int count = static_cast<int>(mExternalGeometry[i].geos.size());
-			for (int j = 0; j < count; ++j, ++index) {
-				position.emplace(std::make_pair(i, j), index);
-			}
-		}
+    void SketcherObj::remapExternalReferences(const std::vector<Part::Geometry*>& p_before)
+    {
+        const int oldCount = static_cast<int>(p_before.size());
+        if (oldCount == 0) {
+            return;  // nothing was projected, so no constraint can name it
+        }
+        const int newCount = getExternalCurveCount();
+        // The references sit below the two axes in the external block, so their ids
+        // start at -3 and the index of a curve is its id plus the size of the whole
+        // block - the axes included.
+        const int axisCount = newCount - static_cast<int>(mExternalGeoList.size());
+        const int oldBlockSize = oldCount + axisCount;
+        const int newBlockSize = newCount;
 
-		std::vector<Sketcher::Constraint*> kept;
-		kept.reserve(mConstraintList.size());
-		int dropped = 0;
-		for (Sketcher::Constraint* constraint : mConstraintList) {
-			if (constraint == nullptr) {
-				continue;
-			}
-			bool dead = false;
-			for (int* geoId : { &constraint->First, &constraint->Second, &constraint->Third }) {
-				if (*geoId >= 0 || *geoId == Sketcher::GeoEnum::GeoUndef) {
-					continue;  // an internal element, or an element that is not set
-				}
-				const int oldIndex = *geoId + oldCount;
-				if (oldIndex < 0) {
-					continue;  // more negative than the block: not one of its curves
-				}
-				const auto found = position.find(p_oldKeys[oldIndex]);
-				if (found == position.end()) {
-					dead = true;  // the curve it referenced is gone
-					break;
-				}
-				*geoId = found->second - newCount;
-			}
-			if (dead) {
-				forgetConstraintLayout(constraint);
-				delete constraint;
-				++dropped;
-				continue;
-			}
-			kept.push_back(constraint);
-		}
-		mConstraintList.swap(kept);
-		if (dropped > 0) {
-			CORE_INFO(
-				"[ExternalGeo] {0}: dropped {1} constraint(s) whose reference is gone",
-				getName(),
-				dropped);
-		}
-	}
+        // Where each curve of the old block sits now. The curves themselves are the
+        // identity a constraint is moved by: a curve keeps its place when one next to
+        // it is dropped, and a geoId is only ever a position counted from the end.
+        std::map<const Part::Geometry*, int> position;
+        for (int i = 0; i < static_cast<int>(mExternalGeoList.size()); ++i) {
+            position.emplace(mExternalGeoList[i].get(), i);
+        }
 
-	void SketcherObj::setExternalGeometryMode(bool p_on)
-	{
-		if (m_externalGeometryMode == p_on) {
-			return;
-		}
-		m_externalGeometryMode = p_on;
-		if (p_on) {
-			// The picks of this mode belong to the cursor, like the draw handlers: a
-			// preselect left over from the last tool would only be in the way.
-			preSelectGeoId = { NoGeoId, PointPos::none };
-			selectState = Stop;
-			CORE_INFO(
-				"[ExternalGeo] {0}: click a face or an edge of another feature to "
-				"{1}; Escape or the toolbar button ends the mode",
-				getName(),
-				m_externalGeometryIntersection
-					? "cut it with the sketch plane"
-					: "project it into the sketch plane");
-		}
-	}
-
-	bool SketcherObj::removeExternalGeometry(int p_index)
-	{
-		if (p_index < 0 || p_index >= static_cast<int>(mExternalGeometry.size())) {
-			return false;
-		}
-		const ExternalGeometry& external = mExternalGeometry[p_index];
-		const std::vector<std::pair<int, int>> keysBefore = externalCurveKeys();
-		CORE_INFO(
-			"[ExternalGeo] {0}: dropped '{1}' of {2}",
-			getName(),
-			external.reference,
-			external.source ? external.source->GetName() : "<null>");
-		for (const std::unique_ptr<Part::Geometry>& geo : external.geos) {
-			mGeoSegment.erase(geo.get());
-		}
-		mExternalGeometry.erase(mExternalGeometry.begin() + p_index);
-		// Constraints on this reference die with it; the ones on the other curves are
-		// moved to the ids they have now.
-		remapExternalReferences(keysBefore);
-		solve();
-		return true;
-	}
-
-	bool SketcherObj::pickExternalGeometry()
-	{
-		auto pickingResult = m_sceneView->GetPickResult();
-		if (!pickingResult.has_value()) {
-			return false;
-		}
-		const auto picked
-			= std::get_if<Tools::Utils::OptRef<::Core::ECS::Actor>>(&pickingResult.value());
-		if (picked == nullptr || !picked->has_value()) {
-			return false;
-		}
-		::Core::ECS::Actor* actor = &picked->value();
-		Feature* source = nullptr;
-		std::string reference;
-		if (!ViewTool::getActorBasedFeature(actor, source, reference)) {
-			CORE_WARN(
-				"[ExternalGeo] {0}: '{1}' does not belong to a feature, so it cannot "
-				"be referenced",
-				getName(), actor->GetName());
-			return false;
-		}
-		if (source == m_ownerFeature) {
-			CORE_WARN(
-				"[ExternalGeo] {0}: '{1}' belongs to the sketch itself",
-				getName(), reference);
-			return false;
-		}
-		return addExternalGeometry(source, reference, m_externalGeometryIntersection) >= 0;
-	}
-
-	void SketcherObj::updateExternalGeometry()
-	{
-		// Dropping the projections has to drop their sampling with them: the cache is
-		// keyed by address, so an entry of a freed geometry would outlive it - and a
-		// later geometry allocated at the same address would be drawn from the wrong
-		// curve.
-		const auto dropProjections = [this](ExternalGeometry& p_external) {
-			for (const std::unique_ptr<Part::Geometry>& geo : p_external.geos) {
-				mGeoSegment.erase(geo.get());
-			}
-			p_external.geos.clear();
-		};
-
-		for (ExternalGeometry& external : mExternalGeometry) {
-			if (external.source == nullptr) {
-				external.missing = true;
-				dropProjections(external);
-				continue;
-			}
-			auto comp
-				= external.source->GetComponent<Core::ECS::Components::CTopoShape>();
-			if (comp == nullptr) {
-				external.missing = true;
-				dropProjections(external);
-				continue;
-			}
-
-			// Nothing to do while the source still holds the shape the projection was
-			// taken from: solve() runs on every mouse move of a drag, and resolving and
-			// projecting again each step would only cost time without changing anything.
-			const TopoDS_Shape& sourceShape = comp->GetTopoShape().getShape();
-			if (!external.dirty && !sourceShape.IsNull()
-				&& external.sourceShape.IsSame(sourceShape)) {
-				continue;
-			}
-
-			// Resolve against the source as it is *now*: by name first, so a recompute
-			// of the source cannot move the reference onto another sub-shape.
-			Part::TopoShape subShape
-				= ResolveSubShapeRef(*external.source, external.reference, external.names);
-			// The projections are about to be replaced.
-			dropProjections(external);
-			// The source shape is remembered either way: a reference that does not
-			// resolve (yet) must not be retried - and reported - on every solver step
-			// of a drag.
-			external.sourceShape = sourceShape;
-			external.dirty = false;
-			if (subShape.isNull()) {
-				external.missing = true;
-				CORE_WARN(
-					"[ExternalGeo] {0}: '{1}' of {2} cannot be resolved; the reference "
-					"is kept but draws nothing",
-					getName(),
-					external.reference,
-					external.source->GetName());
-				continue;
-			}
-
-			external.missing = false;
-			external.geos
-				= projectIntoSketch(subShape.getShape(), mPlane, external.intersection);
-			// The curves are sampled here, like the sketch samples its own when they are
-			// added: the drawing, the hit test and the snapping all read that one cache,
-			// so it has to exist as soon as the curves do - not on the first frame that
-			// happens to draw them.
-			for (const std::unique_ptr<Part::Geometry>& geo : external.geos) {
-				if (geo != nullptr) {
-					mGeoSegment[geo.get()] = getCurveSegment(geo.get());
-				}
-			}
-			if (external.geos.empty()) {
-				CORE_WARN(
-					"[ExternalGeo] {0}: '{1}' of {2} projected to nothing",
-					getName(),
-					external.reference,
-					external.source->GetName());
-			}
+        std::vector<Sketcher::Constraint*> kept;
+        kept.reserve(mConstraintList.size());
+        int dropped = 0;
+        for (Sketcher::Constraint* constraint : mConstraintList) {
+            if (constraint == nullptr) {
+                continue;
+            }
+            bool dead = false;
+            for (int* geoId : { &constraint->First, &constraint->Second, &constraint->Third }) {
+                if (*geoId >= 0 || *geoId == Sketcher::GeoEnum::GeoUndef) {
+                    continue;  // an internal element, or an element that is not set
+                }
+                const int oldIndex = *geoId + oldBlockSize;
+                if (oldIndex < 0 || oldIndex >= oldCount) {
+                    continue;  // an axis (-1, -2), or below the block: not a reference
+                }
+                const auto found = position.find(p_before[oldIndex]);
+                if (found == position.end()) {
+                    dead = true;  // the curve it referenced is gone
+                    break;
+                }
+                *geoId = found->second - newBlockSize;
+            }
+            if (dead) {
+                forgetConstraintLayout(constraint);
+                delete constraint;
+                ++dropped;
+                continue;
+            }
+            kept.push_back(constraint);
+        }
+        mConstraintList.swap(kept);
+        if (dropped > 0) {
+            CORE_INFO(
+                "[ExternalGeo] {0}: dropped {1} constraint(s) whose reference is gone",
+                getName(),
+                dropped);
         }
     }
 

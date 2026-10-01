@@ -40,6 +40,14 @@ namespace MOON {
 	RevolveFeature::~RevolveFeature()
 	{
 	}
+	Part::TopoShape RevolveFeature::getToolShape()
+	{
+		return toolShape;
+	}
+	bool RevolveFeature::isToolSubtractive() const
+	{
+		return addSubType == 1;
+	}
 	bool RevolveFeature::execute()
 	{
         try {
@@ -68,6 +76,9 @@ namespace MOON {
                 revolve = face.makeElementRevolve(raxis, radAngle, "Part::FaceMakerBullseye");
                 getPreviewShape() = revolve;
             }
+            // The swept solid is what this feature adds (revolve) or takes away
+            // (groove), whatever it is fused with or cut from below.
+            toolShape = revolve;
 
             Part::TopoShape resShape;
             if (!baseShape.isNull()) {

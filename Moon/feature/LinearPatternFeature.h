@@ -2,6 +2,7 @@
 #include "feature/Feature.h"
 #include "feature/TransformMode.h"
 
+#include <vector>
 #include <gp_Dir.hxx>
 #include <string>
 
@@ -22,10 +23,10 @@ namespace MOON
 	 * The direction is one of the axes of the sketch the shape was built from, or a
 	 * straight edge (or the normal of a planar face) picked on the shape below.
 	 *
-	 * The "feature" mode - pattern only the picked features of the body instead of
-	 * the whole of it - is not implemented yet, for the same reason as in the polar
-	 * pattern: the feature graph keeps only the result of a feature, not its additive
-	 * and subtractive shapes apart.
+	 * Its "feature" mode - pattern the material of the picked features instead of the
+	 * whole body - is the default, as it is in FreeCAD: the copies are fused or cut
+	 * back onto the same base. The "whole" mode duplicates the shape below the
+	 * pattern instead.
 	 *
 	 * It is a Feature3D, like the other features that produce a solid, so that a
 	 * feature built on top of the pattern finds its shape here.
@@ -63,7 +64,10 @@ namespace MOON
 		 */
 		bool applySketchDirection(int p_direction, int p_axis);
 
-		int mode = static_cast<int>(TransformMode::Whole);
+		int mode = static_cast<int>(TransformMode::Feature);
+		/** The features whose material is patterned in the "feature" mode. Empty in
+		 * the whole shape mode, which patterns the shape below as a whole. */
+		std::vector<Feature*> originals;
 
 		/** First direction. */
 		int directionType = DirectionSketchX;

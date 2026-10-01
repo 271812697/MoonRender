@@ -8,6 +8,8 @@
 #include "Widgets/SliderIntProperty.h"
 #include "Widgets/EnumProperty.h"
 #include "Widgets/BoolProperty.h"
+#include "editor/UI/TaskPanel/OriginalsList.h"
+#include "editor/UI/PropertyPanel/Collapsiblegroupboxwidget.h"
 
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
@@ -60,11 +62,28 @@ namespace MOON {
             // common case, so both directions start there.
             feature->applySketchDirection(1, feature->directionType);
             feature->applySketchDirection(2, feature->directionType2);
+            AddBaseFeatureAsDefaultOriginal(*feature, feature->mode, feature->originals);
         }
         ~Internal() {
         }
 
     private:
+        /** True when the pattern takes material away rather than adding it: a pocket,
+         * a groove or a fillet that cut into the shape. */
+        bool isSubtractivePattern() const
+        {
+            if (feature == nullptr
+                || feature->mode != static_cast<int>(TransformMode::Feature)) {
+                return false;
+            }
+            for (Feature* original : feature->originals) {
+                if (original != nullptr && original->isToolSubtractive()) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         LinearPatternTask* self;
         TransformMode linearType;
         friend LinearPatternTask;
@@ -91,7 +110,7 @@ namespace MOON {
     {
         setGenerateShapeName("LinearShape");
 
-        mPreviewOption.isTransparent = true;
+        mPreviewOption.isTransparent = false;
         mPreviewOption.isBlend = true;
         mPreviewOption.useDomainColor = false;
         mPreviewOption.g = 0.0f;
@@ -141,7 +160,33 @@ namespace MOON {
         mInternal->reverseProp2 = new BoolProperty("Reverse", second);
         addParam(mInternal->reverseProp2);
 
+        // The features the pattern works on when it runs in its "feature" mode.
+        addGroupParam("Originals");
+
         buildUi();
+        if (pattern) {
+            const auto it = groupToIndex.find("Originals");
+            if (it != groupToIndex.end()) {
+                auto* group = m_comps[it->second].first;
+                group->setCollapsed(false);
+                group->addSubWidget(new OriginalsList(
+                    *pattern,
+                    pattern->originals,
+                    [this]() { refreshPreview(); },
+                    this));
+            }
+        }
+        refreshPreview();
+    }
+    void LinearPatternTask::refreshPreview()
+    {
+        // A pattern that takes material away - a hole, a groove - happens inside the
+        // shape below it, so its preview is drawn the way the pocket draws: blended,
+        // without a depth test, and the body cannot hide it. A pattern that adds
+        // material keeps the transparent preview.
+        const bool subtractive = mInternal->isSubtractivePattern();
+        mPreviewOption.isTransparent = !subtractive;
+        mPreviewOption.isBlend = true;
         previewShape();
     }
     QVariant LinearPatternTask::getParamValue(const QString& propertyName)
@@ -262,7 +307,7 @@ namespace MOON {
         }
 
         if (updatePreView && hasInitUi) {
-            previewShape();
+            refreshPreview();
         }
     }
     LinearPatternTask::~LinearPatternTask()
@@ -310,7 +355,7 @@ namespace MOON {
                 feature->direction = direction;
                 feature->directionType = LinearPatternFeature::DirectionPickedEdge;
             }
-            previewShape();
+            refreshPreview();
         }
         catch (const Standard_Failure& e) {
             CORE_ERROR(
@@ -352,7 +397,7 @@ namespace MOON {
                 feature->direction = direction;
                 feature->directionType = LinearPatternFeature::DirectionPickedEdge;
             }
-            previewShape();
+            refreshPreview();
         }
         catch (const Standard_Failure& e) {
             CORE_ERROR(

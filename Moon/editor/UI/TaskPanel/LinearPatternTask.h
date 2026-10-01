@@ -10,7 +10,7 @@ namespace MOON {
 	public:
 		explicit LinearPatternTask(
 			QWidget* parent = nullptr,
-			TransformMode mode = TransformMode::Whole,
+			TransformMode mode = TransformMode::Feature,
 			Feature* feature = nullptr
 		);
 		virtual ~LinearPatternTask()override;
@@ -26,6 +26,9 @@ namespace MOON {
 		/** A planar face picked as the direction: its normal is used. */
 		virtual void onSelectFace(const std::vector<Part::TopoShape>& face)override;
 	private:
+		/** Draws the preview again, picking the preview material that fits what the
+		 * pattern does to the shape below it. */
+		void refreshPreview();
 		class Internal;
 		Internal* mInternal = nullptr;
 	};

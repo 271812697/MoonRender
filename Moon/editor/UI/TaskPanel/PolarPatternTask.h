@@ -10,7 +10,7 @@ namespace MOON {
 	public:
 		explicit PolarPatternTask(
 			QWidget* parent = nullptr,
-			TransformMode mode = TransformMode::Whole,
+			TransformMode mode = TransformMode::Feature,
 			Feature* feature = nullptr
 		);
 		virtual ~PolarPatternTask()override;
@@ -24,6 +24,9 @@ namespace MOON {
 		/** The edge picked for the "Select Edge" axis. */
 		virtual void onSelectEdge(const std::vector<Part::TopoShape>& edge)override;
 	private:
+		/** Draws the preview again, picking the preview material that fits what the
+		 * pattern does to the shape below it. */
+		void refreshPreview();
 		class Internal;
 		Internal* mInternal = nullptr;
 	};

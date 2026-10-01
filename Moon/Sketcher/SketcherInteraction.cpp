@@ -23,15 +23,6 @@ namespace MOON {
     };
     void SketcherObj::onMouseMove()
     {
-        // Nothing of the sketch is being picked while external geometry is being
-        // chosen; the scene highlight that the picking pass draws is the feedback.
-        if (m_externalGeometryMode && !isHaveActiveHandler) {
-            if (preSelectGeoId.GeoId != NoGeoId) {
-                preSelectGeoId = { NoGeoId, PointPos::none };
-            }
-            selectState = Stop;
-            return;
-        }
         if (!isHaveActiveHandler && isInEdit) {
             updateConstraintLabelInteraction();
             // While the cursor rests on a dimension label (or drags one) the
@@ -162,14 +153,6 @@ namespace MOON {
 
     void SketcherObj::onLeftMousePressed()
     {
-        // External geometry mode: the click belongs to the scene, not to the sketch.
-        // The pick pass has already resolved the actor under the cursor (the scene
-        // view keeps the last hover pick), so what is under the mouse is what is
-        // referenced - including the highlight the scene draws for it.
-        if (m_externalGeometryMode && !isHaveActiveHandler) {
-            pickExternalGeometry();
-            return;
-        }
         if (!isHaveActiveHandler && isInEdit) {
             auto [mx, my] = m_sceneView->getInutState().GetMousePosition();
             // The annotation itself is a handle as well: a length dimension's line -
@@ -186,7 +169,6 @@ namespace MOON {
             if (annotationHit >= 0 && annotationHandle != LabelHandle::Caption) {
                 m_labelDrag = annotationHit;
                 m_labelDragHandle = annotationHandle;
-                m_labelDragPressPx = Base::Vector2d(mx, my);
                 m_lastLabelClick = -1;
                 clearSelect();
                 selectState = Stop;
@@ -195,16 +177,12 @@ namespace MOON {
             }
             const int labelHit = annotationHit;
             if (labelHit >= 0) {
-                const Sketcher::Constraint* c = getConstraint(labelHit);
                 m_labelDragHandle = LabelHandle::Caption;
-                float defDx = 0.0f, defDy = 0.0f;
-                defaultLabelOffsetPx(c, defDx, defDy);
-                const auto it = c ? m_labelManualOffsetPx.find(c) : m_labelManualOffsetPx.end();
-                m_labelDragOffsetPx = (it != m_labelManualOffsetPx.end())
-                    ? it->second
-                    : Base::Vector2d(defDx, defDy);
+                // Where the caption is carried to is read off the cursor as it moves (a
+                // dimension's line, an angle's arc and a radius' leader each in their
+                // own way - see updateConstraintLabelInteraction), so the press itself
+                // only has to start the drag.
                 m_labelDrag = labelHit;
-                m_labelDragPressPx = Base::Vector2d(mx, my);
                 clearSelect();
                 selectState = Stop;
                 preSelectGeoId = { NoGeoId, PointPos::none };
@@ -280,7 +258,7 @@ namespace MOON {
     {
         if (m_labelDrag >= 0) {
             // A dimension label was being dragged; the label position is kept
-            // in m_labelManualOffsetPx, so simply end the drag here.
+            // in m_labelManualOffsetSketch, so simply end the drag here.
             m_labelDrag = -1;
             return;
         }
@@ -344,17 +322,24 @@ namespace MOON {
                         }
                     }
                 }
+                // The origin belongs to the axes and not to the sketch's geometry, so
+                // the loop above never reaches it - but it is a pick target of its own,
+                // and the point a sketch is most often constrained to, so a rubber band
+                // over it has to take it as well. A point already picked at the same
+                // place wins: the origin and a curve endpoint sitting on it are one
+                // position, and taking both would only leave an extra entry behind.
+                const Base::Vector3d origin(0.0, 0.0, 0.0);
+                if (origin.x >= minPt.x && origin.x <= maxPt.x
+                    && origin.y >= minPt.y && origin.y <= maxPt.y
+                    && !alreadyPicked(origin)) {
+                    addSelect({ Sketcher::GeoEnum::HAxis, PointPos::start });
+                }
                 selectState = Stop;
             }
         }
     }
     void SketcherObj::onKeyPress(const std::string& key)
     {
-        if (key == "ESCAPE" && m_externalGeometryMode) {
-            setExternalGeometryMode(false);
-            GetService(SketchToolbar).uncheckExternalGeometry();
-            return;
-        }
         if (key == "DELETE" && !isHaveActiveHandler) {
             std::vector<int>deletList(selectIds.size());
             for (int i = 0; i < selectIds.size(); i++) {
@@ -466,10 +451,29 @@ namespace MOON {
        // -1, so the id cannot double as "nothing was hit".
        bool hit = false;
 
-        // The candidates are the sketch's own curves plus the projected external ones:
-        // an external curve is a reference the user may constrain to, so it has to be
-        // selectable - but only outside a drawing tool, where a reference must not be
-        // mistaken for the geometry the tool is working on.
+        // The sketch origin is a pick target of its own and it is tested first: it is
+        // where both axes start (the root point - GeoEnum gives it the id of the
+        // horizontal axis, the point position start), and it is what a sketch is most
+        // often constrained to. Left to the loops below, the axis lines - which pass
+        // through it - or a curve endpoint sitting on it would take the click. A
+        // coincident element can still be reached by clicking again: the selection
+        // cycles through the points that lie on top of each other.
+        const double originTole = 10.0;
+        if ((p1 - trans * Base::Vector3d(0.0, 0.0, 0.0)).Length() < originTole) {
+            ret.GeoId = Sketcher::GeoEnum::HAxis;
+            ret.pointPos = PointPos::start;
+            return ret;
+        }
+
+        // The candidates are the sketch's own curves plus the external ones (the axes
+        // and the origin among them): an external curve is a reference the user may
+        // constrain to, so it has to be selectable. This used to be skipped while a
+        // draw handler was active, which is exactly when a reference is needed most -
+        // the smart dimension picks the point it measures against through here, and
+        // "constrain this to the origin" is one of those picks. The drawing tools do
+        // not come through this function at all: the sketch only refreshes its hover
+        // pick while no handler runs (see onMouseMove), so nothing is picked here for
+        // them.
         std::vector<std::pair<int, Part::Geometry*>> candidates;
         candidates.reserve(mGeoList.size() + getExternalCurveCount());
         for (int i = 0; i < static_cast<int>(mGeoList.size()); ++i) {
@@ -478,20 +482,27 @@ namespace MOON {
             }
             candidates.emplace_back(i, mGeoList[i].get());
         }
-        if (!isHaveActiveHandler) {
-            for (int i = 0; i < getExternalCurveCount(); ++i) {
-                Part::Geometry* geo = const_cast<Part::Geometry*>(
-                    getExternalCurve(getExternalGeoId(i)));
-                // Only a curve that has been sampled can be hit; a missing cache entry
-                // must not be turned into an empty one here.
-                if (geo != nullptr && findSegment(geo) != nullptr) {
-                    candidates.emplace_back(getExternalGeoId(i), geo);
-                }
+        for (int i = 0; i < getExternalCurveCount(); ++i) {
+            Part::Geometry* geo = const_cast<Part::Geometry*>(
+                getExternalCurve(getExternalGeoId(i)));
+            // Only a curve that has been sampled can be hit; a missing cache entry
+            // must not be turned into an empty one here.
+            if (geo != nullptr && findSegment(geo) != nullptr) {
+                candidates.emplace_back(getExternalGeoId(i), geo);
             }
         }
 
-        // travel all segments
+        // The points of every curve first: an endpoint or a centre is what a constraint
+        // usually wants, and it is a smaller target than the curve it belongs to.
         for (const auto& [geoId, geo] : candidates) {
+            if (isAxisCurve(geoId)) {
+                // The axes are not picked by their points: the only one that is a
+                // feature of its own is the root point, and the origin test above has
+                // already taken it. Their defining segment reaches from the origin to a
+                // far end that means nothing, and offering that end as a pick would
+                // hand the user a point that is not drawn anywhere.
+                continue;
+            }
             auto& segment = segmentOf(geo);
             for (int j = 0; j < segment.sepoints.size(); j++) {
                 double dist = (p1 - trans * segment.sepoints[j].coord).Length();
@@ -507,6 +518,10 @@ namespace MOON {
         // tested when no point was close enough.
         if (!hit) {
             for (const auto& [geoId, geo] : candidates) {
+                if (isAxisCurve(geoId)) {
+                    // The axes are tried after every curve, see below.
+                    continue;
+                }
                 auto& segment = segmentOf(geo);
                 if (geo->isDerivedFrom<Part::GeomCurve>()) {
                     for (int j = 0; j < segment.point.size() - 1; j++) {
@@ -534,7 +549,39 @@ namespace MOON {
                 }
             }
         }
-       return ret;
+        // Last of all, and only when nothing else was close enough: the axes, hit as
+        // the infinite lines they stand for - their geometry only reaches from the
+        // origin outwards (it has to start there, that is the root point) while the
+        // user clicks anywhere along the line that is drawn for them.
+        //
+        // They come last because they are infinite: a click anywhere along one of them
+        // is "on the line", so an axis would take every pick of a curve of the sketch
+        // that happens to lie on it - a line drawn over the y axis could never be
+        // selected again. FreeCAD picks in that order as well (its geometry is tested
+        // before the axis cross).
+        if (!hit) {
+            for (const auto& [geoId, geo] : candidates) {
+                if (!isAxisCurve(geoId)) {
+                    continue;
+                }
+                const Base::Vector3d origin = trans * Base::Vector3d(0.0, 0.0, 0.0);
+                const Base::Vector3d tip = trans * (geoId == Sketcher::GeoEnum::VAxis
+                    ? Base::Vector3d(0.0, 1.0, 0.0)
+                    : Base::Vector3d(1.0, 0.0, 0.0));
+                const Base::Vector3d dir = tip - origin;
+                const double len = dir.Length();
+                if (len > 1e-12) {
+                    const double dist = (p1 - origin).Cross(dir).Length() / len;
+                    if (dist < deltaTole && dist < minDist) {
+                        minDist = dist;
+                        ret.GeoId = geoId;
+                        ret.pointPos = PointPos::none;
+                        hit = true;
+                    }
+                }
+            }
+        }
+        return ret;
     }
     bool SketcherObj::findNextCoincidentPoint(
         const Base::Vector2d& pos,
@@ -891,9 +938,10 @@ namespace MOON {
         mConstraintList = std::move(keptConstraints);
         // Deleted constraints invalidate the label overlay bookkeeping, which
         // is keyed by constraint pointer.
-        m_labelManualOffsetPx.clear();
+        m_labelManualOffsetSketch.clear();
         m_labelManualParam.clear();
-        m_straightDimOffsetPx.clear();
+        m_straightDimOffsetSketch.clear();
+        m_angleLabelRadiusSketch.clear();
         m_labelHover = -1;
         m_labelDrag = -1;
         m_labelHoverHandle = LabelHandle::Caption;

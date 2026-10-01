@@ -115,6 +115,13 @@ namespace MOON {
 		// the next best guess.
 		return SketcherObjManager::instance().GetCurrentActiveSketcherObj();
 	}
+	Part::TopoShape Feature::getToolShape()
+	{
+		// The features that build something of their own override this; everything
+		// else - sketches, datums, the transform features - has no material to
+		// transform on its own.
+		return Part::TopoShape();
+	}
 	Part::TopoShape Feature::resolveBaseSubShape(int p_index)
 	{
 		if (m_baseFeature == nullptr || p_index < 0
@@ -182,5 +189,8 @@ namespace MOON {
 		auto comp =GetComponent<Core::ECS::Components::CTopoShape>();
 		comp->discretizationShape();
 		FeatureBody::instance().populateFeature(this);
+	}
+	Part::TopoShape Feature3D::getToolShape() {
+		return GetTopoShape();
 	}
 }

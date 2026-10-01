@@ -188,6 +188,8 @@ namespace MOON {
         addParam(new ColorPickerProperty("Curve Color", sketchGroup));
         addParam(new ColorPickerProperty("Construction Color", sketchGroup));
         addParam(new ColorPickerProperty("External Color", sketchGroup));
+        addParam(new ColorPickerProperty("Axis X Color", sketchGroup));
+        addParam(new ColorPickerProperty("Axis Y Color", sketchGroup));
         addParam(new ColorPickerProperty("Constraint Color", sketchGroup));
         auto* curveWidth = new SliderFloatProperty("Curve Line Width", sketchGroup, 0.5f, 10.0f);
         curveWidth->setStep(0.1f);
@@ -295,6 +297,12 @@ namespace MOON {
             if (propertyName == "Sketch:External Color") {
                 return QVariant::fromValue(abgrToQColor(opt.externalColor));
             }
+            if (propertyName == "Sketch:Axis X Color") {
+                return QVariant::fromValue(abgrToQColor(opt.xAxisColor));
+            }
+            if (propertyName == "Sketch:Axis Y Color") {
+                return QVariant::fromValue(abgrToQColor(opt.yAxisColor));
+            }
             if (propertyName == "Sketch:Constraint Color") {
                 return QVariant::fromValue(abgrToQColor(opt.constraintColor));
             }
@@ -335,6 +343,12 @@ namespace MOON {
             }
             else if (propertyName == "Sketch:External Color") {
                 opt.externalColor = qColorToAbgr(value.value<QColor>());
+            }
+            else if (propertyName == "Sketch:Axis X Color") {
+                opt.xAxisColor = qColorToAbgr(value.value<QColor>());
+            }
+            else if (propertyName == "Sketch:Axis Y Color") {
+                opt.yAxisColor = qColorToAbgr(value.value<QColor>());
             }
             else if (propertyName == "Sketch:Constraint Color") {
                 opt.constraintColor = qColorToAbgr(value.value<QColor>());
@@ -463,30 +477,41 @@ namespace MOON {
             curveLines << QString("%1  %2").arg(i).arg(typeName);
         }
 
-        // External geometry: what is referenced, where it comes from and whether the
-        // reference still resolves. It is listed by entry (not by projected curve),
-        // because that is the thing the user can drop again.
+        // External geometry: the curves brought in from another feature. Only the
+        // curves are stored (the tool that computed them - see
+        // DrawSketchHandlerExternalGeometry - does not keep the reference they came
+        // from), so a row is a curve: that is what a constraint names and what the
+        // user can drop again.
         QStringList externalLines;
-        std::vector<bool> externalMissing;
+        const auto typeNameOf = [](const Part::Geometry* g) -> QString {
+            if (g->is<Part::GeomLineSegment>()) {
+                return "Line";
+            }
+            if (g->is<Part::GeomArcOfCircle>()) {
+                return "Arc";
+            }
+            if (g->is<Part::GeomCircle>()) {
+                return "Circle";
+            }
+            if (g->is<Part::GeomEllipse>()) {
+                return "Ellipse";
+            }
+            if (g->is<Part::GeomBSplineCurve>()) {
+                return "BSpline";
+            }
+            if (g->is<Part::GeomPoint>()) {
+                return "Point";
+            }
+            return "Curve";
+        };
         for (int i = 0; i < obj->getExternalGeometryCount(); ++i) {
-            const SketcherObj::ExternalGeometry* external = obj->getExternalGeometry(i);
+            const Part::Geometry* external = obj->getExternalGeometry(i);
             if (external == nullptr) {
                 continue;
             }
-            externalMissing.push_back(external->missing);
-            QString line = external->source
-                ? QString("%1.%2").arg(external->source->GetName().c_str())
-                    .arg(external->reference.c_str())
-                : QString("?.%1").arg(external->reference.c_str());
-            // A section and a projection of the same sub-shape are different
-            // references, so the list has to say which one a row is.
-            if (external->intersection) {
-                line += "  [section]";
-            }
-            if (external->geos.size() != 1) {
-                line += QString("  (%1 curves)").arg(external->geos.size());
-            }
-            externalLines << line;
+            externalLines << QString("%1  %2  [external]")
+                .arg(i)
+                .arg(typeNameOf(external));
         }
 
         // The solver's verdict is part of what is shown, so it is part of the cache
@@ -647,12 +672,9 @@ namespace MOON {
             );
             auto* label = new QLabel(externalLines[i], row);
             label->setAttribute(Qt::WA_TransparentForMouseEvents, true);
-            if (externalMissing[i]) {
-                label->setStyleSheet("color: #ff6b6b;");
-                label->setToolTip(
-                    "The source sub-shape cannot be resolved any more; the reference "
-                    "draws nothing");
-            }
+            label->setToolTip(
+                "Geometry of another feature, brought into this sketch. It is fixed: "
+                "the sketch can constrain to it but never change it.");
             rowLayout->addWidget(remove);
             rowLayout->addWidget(label, 1);
             connect(remove, &QToolButton::clicked, this, [this, obj, i]() {

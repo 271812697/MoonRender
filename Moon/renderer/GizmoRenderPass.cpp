@@ -14,6 +14,7 @@
 #include "Interactive/Widgets/SketchPlane.h"
 #include "Interactive/Widgets/SplitScreen.h"
 #include "Interactive/Widgets/DrawSketchHandlerPoint.h"
+#include "Interactive/Widgets/SmartDimensionWidget.h"
 #include "Interactive/Widgets/DrawSketchHandlerLine.h"
 #include "Interactive/Widgets/DrawSketchHandlerLineSet.h"
 #include "Interactive/Widgets/DrawSketchHandlerCircle.h"
@@ -29,6 +30,7 @@
 #include "Interactive/Widgets/DrawSketchHandlerSymmetry.h"
 #include "Interactive/Widgets/DrawSketchHandlerFillet.h"
 #include "Interactive/Widgets/DrawSketchHandlerOffset.h"
+#include "Interactive/Widgets/DrawSketchHandlerExternalGeometry.h"
 #include "Interactive/Widgets/PrimitiveBox.h"
 #include "Interactive/Widgets/PrimitiveSphere.h"
 #include "Interactive/Widgets/PrimitiveCylinder.h"
@@ -68,10 +70,17 @@ class Editor::Rendering::GizmoRenderPass::GizmoRenderPassInternal {
 			mWidgets["PrimitiveCylinder"] = new MOON::PrimitiveCylinder("PrimitiveCylinder");
 			mWidgets["PrimitiveCone"] = new MOON::PrimitiveCone("PrimitiveCone");
 			mWidgets["ViewCube"] = new MOON::ViewCubeWidget("ViewCube");
+			mWidgets["SmartDimension"] = new MOON::SmartDimensionWidget("SmartDimension");
 			
 			mWidgets["DrawSketchHandlerRotate"] = new MOON::DrawSketchHandlerRotate("DrawSketchHandlerRotate");
 			mWidgets["DrawSketchHandlerTrimming"] = new MOON::DrawSketchHandlerTrimming("DrawSketchHandlerTrimming");
 			mWidgets["DrawSketchHandlerTrimming"]->setActive(false);
+			// One widget, two modes: the sketch toolbar switches it on with the mode of
+			// the button that was pressed (see AddExternalGeometryCommand).
+			mWidgets[MOON::DrawSketchHandlerExternalGeometry::WidgetName]
+				= new MOON::DrawSketchHandlerExternalGeometry(
+					MOON::DrawSketchHandlerExternalGeometry::WidgetName);
+			mWidgets[MOON::DrawSketchHandlerExternalGeometry::WidgetName]->setActive(false);
 			
 			mWidgets["ClipPlane"]->setActive(false);
 			mWidgets["SplitScreen"]->setActive(false);

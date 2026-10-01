@@ -99,6 +99,7 @@
         <file>icons/constraint/Constraint_Radius.svg</file>
         <file>icons/constraint/Constraint_InternalAngle.svg</file>
         <file>icons/constraint/Constraint_PointOnObject.svg</file>
+        <file>icons/constraint/Constraint_Dimension.svg</file>
       
         <file>icons/Sketcher_NewSketch.svg</file>
 		    <file>icons/parametric/Part_Box_Parametric.svg</file>

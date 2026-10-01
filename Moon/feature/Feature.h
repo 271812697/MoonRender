@@ -61,6 +61,19 @@ namespace MOON {
 		 * through here. The sketch the user is editing is used when nothing in the
 		 * chain has one. */
 		SketcherObj* findBaseSketch();
+		/** The material this feature added to, or removed from, the shape below it.
+		 *
+		 * A transform feature in its "feature" mode patterns this instead of the
+		 * whole body: the copies are fused or cut back onto the base, which is what
+		 * keeps the instances attached to one and the same body.
+		 *
+		 * Features that change the shape as a whole (thickness) or that build no
+		 * solid of their own (a sketch, a datum, the transform features themselves)
+		 * have no such material, and return a null shape - which is the default. */
+		virtual Part::TopoShape getToolShape();
+		/** True when the tool shape is material to take away from the base rather
+		 * than to add to it. */
+		virtual bool isToolSubtractive() const { return false; }
 		void makeDone();
 	protected:
 		/** Resolves one entry of subValues against the *current* shape of the base
@@ -95,6 +108,8 @@ namespace MOON {
 		{
 
 		}
+		virtual Part::TopoShape getToolShape()override;
+		virtual bool isToolSubtractive() const override { return false; }
 	};
 	class DatumFeature :public Feature
 	{

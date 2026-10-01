@@ -46,6 +46,14 @@ namespace MOON {
     ExtrudeFeature::~ExtrudeFeature()
 	{
 	}
+	Part::TopoShape ExtrudeFeature::getToolShape()
+	{
+		return toolShape;
+	}
+	bool ExtrudeFeature::isToolSubtractive() const
+	{
+		return addSubType == 1;
+	}
 	bool ExtrudeFeature::execute()
 	{
 		Part::TopoShape face=getProfileFace();
@@ -101,6 +109,9 @@ namespace MOON {
                     CORE_ERROR("Prim is Null");
                     return false;
                 }
+                // What this feature adds or takes away is the prism, whatever the
+                // shape it is fused with below turns out to be.
+                toolShape = prism;
                 Part::TopoShape resShape;
                 if (!baseShape.isNull()) {
                     if (addSubType == 0) {
@@ -200,6 +211,9 @@ namespace MOON {
                 LogTopoElementNames(face, "profile");
                 LogTopoElementNames(prism, "prism");
                 getPreviewShape() = prism;
+                // The prism is this feature's own material, whatever it is fused
+                // with or cut from below.
+                toolShape = prism;
                 Part::TopoShape resShape;
                 if (!baseShape.isNull()) {
                     if (addSubType == 0) {

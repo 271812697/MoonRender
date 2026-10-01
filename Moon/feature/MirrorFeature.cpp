@@ -3,6 +3,7 @@
 #include "core/component/TopoShapeActor.h"
 #include "TopoShape.h"
 #include "ElementNamingUtils.h"
+#include "TransformHelper.h"
 #include "Sketcher/SketcherObj.h"
 #include "core/log.h"
 
@@ -101,14 +102,6 @@ namespace MOON
 	bool MirrorFeature::execute()
 	{
 		try {
-			if (mode == static_cast<int>(TransformMode::Feature)) {
-				CORE_ERROR(
-					"[Mirror] {0}: the feature mode is not implemented yet, use the "
-					"whole shape mode",
-					GetName());
-				return false;
-			}
-
 			Part::TopoShape baseShape = getBaseTopoShape();
 			if (baseShape.isNull()) {
 				CORE_ERROR(
@@ -127,23 +120,37 @@ namespace MOON
 			gp_Trsf reflection;
 			reflection.SetMirror(plane);
 
-			// The original and its image, fused into one shape. The index keeps the
-			// elements of the image apart from the ones they were mirrored from.
-			std::vector<Part::TopoShape> instances;
-			instances.reserve(2);
-			instances.push_back(baseShape);
-			instances.push_back(baseShape.makeElementTransform(
-				reflection, Data::indexSuffix(2).c_str()));
+			// The identity is the original, which the base holds already.
+			std::vector<gp_Trsf> transformations;
+			transformations.push_back(gp_Trsf());
+			transformations.push_back(reflection);
 
 			Part::TopoShape result;
-			result.makeElementFuse(instances);
+			Part::TopoShape preview;
+			if (mode == static_cast<int>(TransformMode::Feature)) {
+				result = BuildFeatureModeResult(
+					*this, originals, transformations, preview);
+			}
+			else {
+				// The original and its image, fused into one shape. The index keeps
+				// the elements of the image apart from the ones they come from.
+				std::vector<Part::TopoShape> instances;
+				instances.reserve(2);
+				instances.push_back(baseShape);
+				instances.push_back(baseShape.makeElementTransform(
+					reflection, Data::indexSuffix(2).c_str()));
+				// The preview shows the image itself; the original is part of the
+				// shape that is already on screen.
+				preview = instances.back();
+				result.makeElementFuse(instances);
+			}
 			if (result.isNull()) {
 				CORE_ERROR(
 					"[Mirror] {0}: fusing the mirror image produced no shape", GetName());
 				return false;
 			}
 
-			getPreviewShape() = result;
+			getPreviewShape() = preview.isNull() ? result : preview;
 			setResultShape(result);
 			CORE_INFO("[Mirror] {0}: mirrored and kept the original", GetName());
 			return true;

@@ -5,9 +5,28 @@
 #include "renderer/GizmoRenderPass.h"
 #include "Sketcher/SketcherObjManager.h"
 #include "Sketcher/SketcherObj.h"
+#include "Interactive/Widgets/DrawSketchHandlerExternalGeometry.h"
 #include "core/log.h"
 #include <QCoreApplication>
 namespace MOON {
+
+	namespace
+	{
+		/** Switches the external geometry tool widget off. Used wherever the tool has
+		 * to be left behind: another tool takes the clicks, the sketch is left, or
+		 * Escape is pressed inside the tool itself. */
+		void DisableExternalGeometryTool()
+		{
+			auto& view = GetService(Editor::Panels::SceneView);
+			auto& gizmoPass
+				= view.GetRenderer().GetPass<Editor::Rendering::GizmoRenderPass>("ImRenderer");
+			auto* tool = dynamic_cast<DrawSketchHandlerExternalGeometry*>(
+				gizmoPass.getGizmoWidget(DrawSketchHandlerExternalGeometry::WidgetName));
+			if (tool != nullptr && tool->isActived()) {
+				tool->setActive(false);
+			}
+		}
+	}
 
 	class  CreateCurveCommand : public Command
 	{
@@ -62,16 +81,18 @@ namespace MOON {
 	};
 	std::unordered_map<std::string, CreateCurveCommand*> CreateCurveCommand::commandMap;
 
-	/** Turns the add-external-geometry mode of the active sketch on and off.
+	/** Turns the add-external-geometry tool on and off.
 	 *
-	 * This is not a draw handler: the mode lives on the sketch, which resolves the
-	 * clicked sub-shape of another feature into a curve projected into its plane
-	 * (see SketcherObj::addExternalGeometry). It is still exclusive with the
-	 * handlers, because both of them want the same clicks.
+	 * The tool is a draw handler of its own (DrawSketchHandlerExternalGeometry):
+	 * it picks a sub-shape of another feature, projects it into the sketch plane -
+	 * or cuts it with that plane - and hands the resulting curves to the sketch
+	 * (SketcherObj::addExternalGeometry). Because it is a handler it is exclusive
+	 * with the drawing tools, as they all want the same clicks.
 	 *
-	 * The command comes in two flavours that share the one mode: the reference is
+	 * The two commands are the two flavours of that one widget: the reference is
 	 * either the projection of the picked shape or the section of it with the sketch
-	 * plane. They therefore switch each other off. */
+	 * plane. They therefore switch each other off, and both switch the same widget
+	 * on - only its mode differs. */
 	class AddExternalGeometryCommand : public Command
 	{
 	public:
@@ -92,9 +113,13 @@ namespace MOON {
 	protected:
 		virtual void execute()override {
 			const bool value = action()->isChecked();
-			SketcherObj* sketch
-				= SketcherObjManager::instance().GetCurrentActiveSketcherObj();
-			if (sketch == nullptr) {
+			auto& view = GetService(Editor::Panels::SceneView);
+			auto& gizmoPass
+				= view.GetRenderer().GetPass<Editor::Rendering::GizmoRenderPass>("ImRenderer");
+			auto* tool = dynamic_cast<DrawSketchHandlerExternalGeometry*>(
+				gizmoPass.getGizmoWidget(DrawSketchHandlerExternalGeometry::WidgetName));
+			if (SketcherObjManager::instance().GetCurrentActiveSketcherObj() == nullptr
+				|| tool == nullptr) {
 				CORE_WARN("[ExternalGeo] no sketch is being edited");
 				action()->setChecked(false);
 				return;
@@ -107,9 +132,6 @@ namespace MOON {
 					}
 				}
 				// One tool at a time: leave whatever draw handler was running.
-				auto& view = GetService(Editor::Panels::SceneView);
-				auto& gizmoPass
-					= view.GetRenderer().GetPass<Editor::Rendering::GizmoRenderPass>("ImRenderer");
 				for (int i = 0; i < static_cast<int>(CreateCurveCommand::blackList.size()); i++) {
 					gizmoPass.enableGizmoWidget(CreateCurveCommand::blackList[i], false);
 					if (CreateCurveCommand::commandMap.find(CreateCurveCommand::blackList[i])
@@ -119,8 +141,12 @@ namespace MOON {
 					}
 				}
 			}
-			sketch->setExternalGeometryIntersection(m_intersection);
-			sketch->setExternalGeometryMode(value);
+			tool->setMode(
+				m_intersection
+					? DrawSketchHandlerExternalGeometry::EMode::Section
+					: DrawSketchHandlerExternalGeometry::EMode::Projection
+			);
+			tool->setActive(value);
 		}
 	};
 	std::vector<AddExternalGeometryCommand*> AddExternalGeometryCommand::s_commands;
@@ -196,12 +222,10 @@ namespace MOON {
 					: AddExternalGeometryCommand::commands()) {
 					if (command->action()->isChecked()) {
 						command->action()->setChecked(false);
-						if (SketcherObj* sketch
-							= SketcherObjManager::instance().GetCurrentActiveSketcherObj()) {
-							sketch->setExternalGeometryMode(false);
-						}
 					}
 				}
+				// And with the buttons goes the tool widget they had switched on.
+				DisableExternalGeometryTool();
 			};
 			for (CreateCurveCommand* command : {
 				point, line, lineSet, arc, arcSlot, ellipse, bspline, circle,
@@ -291,22 +315,31 @@ namespace MOON {
 	}
 	void SketchToolbar::uncheckExternalGeometry()
 	{
+		bool wasOn = false;
 		for (AddExternalGeometryCommand* command : AddExternalGeometryCommand::commands()) {
 			if (!command->action()->isChecked()) {
 				continue;
 			}
-			// Keep the sketch in sync with the buttons: this is also the way the mode is
-			// left when the sketch stops being edited.
+			// Keep the tool in sync with the buttons: this is also the way the mode is
+			// left when the sketch stops being edited, or when Escape is pressed inside
+			// the tool.
 			command->action()->setChecked(false);
-			if (SketcherObj* sketch
-				= SketcherObjManager::instance().GetCurrentActiveSketcherObj()) {
-				sketch->setExternalGeometryMode(false);
-			}
+			wasOn = true;
+		}
+		if (wasOn) {
+			DisableExternalGeometryTool();
 		}
 	}
 	void SketchToolbar::setUncheckedAction(const std::string& name)
 	{
-		CreateCurveCommand::commandMap[name]->action()->setChecked(false);
+		// Not every tool that lives in the gizmo pass is a drawing handler of this
+		// toolbar (the smart dimension of the constraint toolbar is one of those), so
+		// a name that is not in the map is simply nothing to uncheck - looking it up
+		// with operator[] would put a null pointer in the map and crash on it.
+		const auto it = CreateCurveCommand::commandMap.find(name);
+		if (it != CreateCurveCommand::commandMap.end() && it->second != nullptr) {
+			it->second->action()->setChecked(false);
+		}
 	}
 	void SketchToolbar::constructor()
 	{
