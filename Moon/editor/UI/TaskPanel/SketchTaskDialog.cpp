@@ -188,6 +188,8 @@ namespace MOON {
         addParam(new ColorPickerProperty("Curve Color", sketchGroup));
         addParam(new ColorPickerProperty("Construction Color", sketchGroup));
         addParam(new ColorPickerProperty("External Color", sketchGroup));
+        addParam(new ColorPickerProperty("Axis X Color", sketchGroup));
+        addParam(new ColorPickerProperty("Axis Y Color", sketchGroup));
         addParam(new ColorPickerProperty("Constraint Color", sketchGroup));
         auto* curveWidth = new SliderFloatProperty("Curve Line Width", sketchGroup, 0.5f, 10.0f);
         curveWidth->setStep(0.1f);
@@ -295,6 +297,12 @@ namespace MOON {
             if (propertyName == "Sketch:External Color") {
                 return QVariant::fromValue(abgrToQColor(opt.externalColor));
             }
+            if (propertyName == "Sketch:Axis X Color") {
+                return QVariant::fromValue(abgrToQColor(opt.xAxisColor));
+            }
+            if (propertyName == "Sketch:Axis Y Color") {
+                return QVariant::fromValue(abgrToQColor(opt.yAxisColor));
+            }
             if (propertyName == "Sketch:Constraint Color") {
                 return QVariant::fromValue(abgrToQColor(opt.constraintColor));
             }
@@ -335,6 +343,12 @@ namespace MOON {
             }
             else if (propertyName == "Sketch:External Color") {
                 opt.externalColor = qColorToAbgr(value.value<QColor>());
+            }
+            else if (propertyName == "Sketch:Axis X Color") {
+                opt.xAxisColor = qColorToAbgr(value.value<QColor>());
+            }
+            else if (propertyName == "Sketch:Axis Y Color") {
+                opt.yAxisColor = qColorToAbgr(value.value<QColor>());
             }
             else if (propertyName == "Sketch:Constraint Color") {
                 opt.constraintColor = qColorToAbgr(value.value<QColor>());

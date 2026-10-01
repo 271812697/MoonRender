@@ -95,6 +95,36 @@
 - [ ] 可选：标完一个尺寸后是否自动释放鼠标。目前保持连续标注（与 FreeCAD 一致）；
   工具开启期间草图自身交互让路，已添加的标注文字需要关闭工具后才能拖动
 
+### 外部几何（参考导入的重构遗留）
+
+外部几何的导入已经重做：`DrawSketchHandlerExternalGeometry` 负责拾取子形状与投影/求交，
+草图只存投影后的曲线（`SketcherObj::addExternalGeometry`），坐标轴与原点成为外部块的固定尾部。
+下面几条是重构评审时记下、暂时不修的：
+
+- [ ] **引用是冻结的快照，参数化链接断了**：旧实现存 `(Feature*, reference, sourceShape)`，
+  源特征变化时按 `dirty`/`updateExternalGeometry` 重投影；现在只存曲线，改上游特征
+  （pad 长度、源草图）后外部曲线不会更新，任务面板也只能显示 `0  Line  [external]`，
+  说不出它来自谁，可能出现"约束着一段已经和模型不符的几何"却无提示。
+  最小补法：沿曲线再存一份 `(Feature*, reference, names)`，只用于"刷新"命令与面板文案，
+  不做每次 solve 的重解析
+- [ ] **轴末端是看不见的拾取/吸附点**：`ensureAxisGeometry` 给每条轴建了长度 500 的线段，
+  而 `getCurveSegment` 对线段记录 start/end 两个 sepoint，于是 `(HAxis, end)=(500,0)`、
+  `(VAxis, end)=(0,500)` 既能被拾取（`testSelect` 的 sepoint 循环），也是吸附目标
+  （`snapPoint` 的 `snapToExternalPoints`，它在 `if (!ret)` 之前执行，会压过吸附到真实曲线），
+  但那里什么都没画。建议采样后只留根点（`sepoints.resize(1)`），
+  或在 sepoint 循环里滤掉 `isAxisCurve`
+- [ ] `testSelect` 的 `originTole = 10.0` 是普通点容差 `deltaTole = 5.0` 的两倍，而且提前 `return`：
+  原点周围 10px 一律先给原点，循环也只能离开原点、回不到原点
+  （`findNextCoincidentPoint` 只扫 `mGeoList`）。建议对齐成 5
+- [ ] `testSelect` 候选集上的注释说 "The drawing tools do not come through this function at all"，
+  但 `DrawSketchHandlerLineSet::onButtonPressed` 确实调了 `testSelect`，
+  真正兜住的是那句 `GeoId >= 0`。改掉措辞，免得以后新 handler 照这句注释写
+- [ ] `mergeCirclePieces` 对 `loose.size() != 2` 一律返回整圆：
+  只有"0 个散端"才推得出整圆，4 个散端是两段不相交的弧，现在会被换成整个圆。
+  改成 `size()==0 → 圆 / size()!=2 → nullptr`
+- [ ] `projectEdge` 每投一条边打一条 `CORE_INFO`（导入一个 12 条边的面就是 12 行），
+  压成 debug，或只在投影不是 1:1 时打
+
 ## 拓扑命名
 
 - [ ] `[TopoName]` 调试日志每个元素打一行，一次重算几十行；

@@ -37,6 +37,13 @@ namespace MOON {
 			 * geometry (reference only, never part of the shape the sketch produces),
 			 * with its own colour so it cannot be mistaken for something drawn here. */
 			Eigen::Vector4<uint8_t> externalColor { 255, 100, 0, 255 };
+			/** The axes of the sketch plane, each in the colour CAD packages draw it
+			 * in: the horizontal one (the x axis) red, the vertical one (the y axis)
+			 * green. The origin is the start of the horizontal axis and keeps the
+			 * external colour, so the two lines stay apart from the point they meet
+			 * at. */
+			Eigen::Vector4<uint8_t> xAxisColor { 255, 0, 0, 255 };
+			Eigen::Vector4<uint8_t> yAxisColor { 255, 0, 255, 0 };
 			float curveLineWidth = 3.0f;
 			float pointSize = 10.0f;
 		};

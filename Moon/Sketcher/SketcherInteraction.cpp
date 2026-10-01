@@ -331,6 +331,18 @@ namespace MOON {
                         }
                     }
                 }
+                // The origin belongs to the axes and not to the sketch's geometry, so
+                // the loop above never reaches it - but it is a pick target of its own,
+                // and the point a sketch is most often constrained to, so a rubber band
+                // over it has to take it as well. A point already picked at the same
+                // place wins: the origin and a curve endpoint sitting on it are one
+                // position, and taking both would only leave an extra entry behind.
+                const Base::Vector3d origin(0.0, 0.0, 0.0);
+                if (origin.x >= minPt.x && origin.x <= maxPt.x
+                    && origin.y >= minPt.y && origin.y <= maxPt.y
+                    && !alreadyPicked(origin)) {
+                    addSelect({ Sketcher::GeoEnum::HAxis, PointPos::start });
+                }
                 selectState = Stop;
             }
         }
