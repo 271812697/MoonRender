@@ -19,6 +19,7 @@
 #include "editor/UI/TaskPanel/PolarPatternTask.h"
 #include "editor/UI/TaskPanel/MirrorTask.h"
 #include "editor/UI/TaskPanel/LinearPatternTask.h"
+#include "editor/UI/TaskPanel/ShapeHelper.h"
 
 
 namespace MOON {
@@ -144,6 +145,13 @@ namespace MOON {
     bool TaskViewWidget::hasTask()
     {
         return m_currentTask != nullptr;
+    }
+    Feature* TaskViewWidget::editingFeature() const
+    {
+        // Every modelling panel takes its feature from ShapeHelper; the sketch panel
+        // is not one of those and answers with nothing.
+        auto* helper = dynamic_cast<ShapeHelper*>(m_currentTask);
+        return helper != nullptr ? helper->getFeature() : nullptr;
     }
     void TaskViewWidget::clickCancel()
     {

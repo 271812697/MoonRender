@@ -45,8 +45,14 @@ namespace MOON {
 			mIconMaps["Revolve"] = QIcon(":/widgets/icons/partdesign/PartDesign_Revolution.svg");
 			mIconMaps["Thickness"] = QIcon(":/widgets/icons/partdesign/PartDesign_Thickness.svg");
 			mIconMaps["Fillet"] = QIcon(":/widgets/icons/partdesign/PartDesign_Fillet.svg");
+			mIconMaps["Chamfer"] = QIcon(":/widgets/icons/partdesign/PartDesign_Chamfer.svg");
 			mIconMaps["Pocket"] = QIcon(":/widgets/icons/partdesign/PartDesign_Pocket.svg");
 			mIconMaps["Groove"] = QIcon(":/widgets/icons/partdesign/PartDesign_Groove.svg");
+			mIconMaps["DatumLine"] = QIcon(":/widgets/icons/partdesign/PartDesign_Line.svg");
+			// The transform features show the icons their toolbar buttons wear.
+			mIconMaps["PolarPattern"] = QIcon(":/widgets/icons/partdesign/PartDesign_PolarPattern.svg");
+			mIconMaps["Mirror"] = QIcon(":/widgets/icons/partdesign/PartDesign_Mirrored.svg");
+			mIconMaps["LinearPattern"] = QIcon(":/widgets/icons/partdesign/PartDesign_LinearPattern.svg");
 		}
 	private:
 		friend EntityTreeModel;
