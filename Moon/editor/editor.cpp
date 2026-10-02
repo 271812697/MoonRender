@@ -17,6 +17,7 @@
 #include "editor/Toolbar/primitiveToolbar.h"
 #include "editor/Toolbar/DesignModelingToolbar.h"
 #include "Command/menubar/openFile.h"
+#include "Command/menubar/saveFile.h"
 #include "Command/menubar/exportFile.h"
 #include "Command/menubar/cameraMode.h"
 #include "Command/menubar/fpsStat.h"
@@ -87,9 +88,13 @@ namespace MOON {
 		}
 		void buildFileMenu() {
 			auto openFileCommand=new OpenFileCommand(self);
+			auto saveFileCommand = new SaveFileCommand(self, false);
+			auto saveAsFileCommand = new SaveFileCommand(self, true);
 			auto exportFileCommand = new ExportFileCommand(self);
 			
 			menu_File->addAction(openFileCommand->action());
+			menu_File->addAction(saveFileCommand->action());
+			menu_File->addAction(saveAsFileCommand->action());
 			menu_File->addAction(exportFileCommand->action());
 		}
 		void buildDisplayMenu() {

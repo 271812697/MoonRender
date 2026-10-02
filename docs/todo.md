@@ -145,3 +145,57 @@
   （基准线目前没有名字）。现在没有按名字引用基准线的地方，
   如果以后要引用它的边，需要给它一个会建名字的入口
   （`makeElementCopy` 或带 op 的 maker）
+
+## 文档（`.moon` 序列化）
+
+第一版已落地：`MoonDocument::save/open` + File 菜单的 Save / Save As / Open，
+存的是"参数化特征链"（类型 + 参数 + 引用 + 草图），读取时按顺序重算整条链，
+不存任何 B-Rep / 网格。下面这些是刻意的第一期取舍：
+
+- [ ] **视图状态**完全没存：相机、材质、显隐、面板开关。第二期可以单独存一份
+      "视口状态"（和模型分开，这样换机器看同一份模型时不会被别人的视角覆盖）
+- [x] **UpToFace 的 pad/pocket**：面不再只当成一个 `TopoShape` 快照，
+      改成 `upToFaceFeature + "Face_3" + 映射名` 的引用（`ExtrudeFeature::
+      setUpToFaceReference`），`execute()` 每次重新解析，文件里存
+      `<UpToFace feature="下标">`。剩下的取舍：
+  - [ ] 选中面的引用只在**本 body** 的特征上有下标可写；面如果来自别的 body，
+        写文件时仍然降级成普通长度（会 `CORE_WARN`）
+  - [ ] 老文件（没有 `<UpToFace>` 元素）里的 UpToFace pad 仍然降级成普通长度
+        （`CORE_WARN`），需要重新选一次面并保存
+  - [x] **编辑已有特征时的 tip 回滚**（`ShapeHelper::rollBackToBase` /
+        `restoreFeature`）：panel 打开时隐藏本特征、显示它下面的特征，确定时由
+        `generateFinalShape()` 把本特征重新设为 tip，取消/析构时按打开前的显隐恢复。
+        以前不做回滚，被编辑特征自己的形状（= 底座 + 自己加的料，底座的整张脸都在
+        里面）是唯一能点到的，选到的面就会变成自引用。回滚后能点到的只有它下面的
+        形状，引用自然落在正确的特征上。剩余取舍：
+    - [ ] 回滚只处理**直接**的 base feature；链上更下面、但被别的分支隐藏的特征
+          仍然看不见（正常建模路径用不到）
+    - [ ] 选到 preview actor（不是任何特征的形状）的面时，靠"按名字去下面形状找
+          同一个面 + 重心校验"兜底，找不到只 `CORE_WARN` 并保留本次会话的形状
+- [ ] 草图的**标注标签手动位置**（`m_labelManualOffsetSketch` 等）没存，
+      重新打开后标注回到默认位置（约束本身是存的）
+- [ ] 每次加载，材质/模型管理器里按 `名字+ID` 注册的旧条目会**残留**（内存泄漏）。
+      不影响显示（actor 直接持有指针），但反复加载会一直涨；要么给资源管理器加反注册，
+      要么把资源改成按引用计数
+- [x] **refine 挪到"结果被提交"的时刻**：原来只在 task panel 的"确定"
+      （`ShapeHelper::generateFinalShape`）里 refine，读文件走 `execute()` 拿不到，
+      于是保存前合并成一张的面读回来又裂开。现在放在 `Feature::makeDone()`
+      （`refineResultShape()`），确定、整链重算、读文件这三条路都经过它；
+      `execute()` 里不做，因为拖控件时每次鼠标移动都会 execute 一遍，而那时算出来的
+      形状只是拿去显示。`Feature::isRefineActive()` 控制开关，`SketcherFeature` 返回
+      false（草图是一根 wire，没有可合并的东西，名字还要被上层引用）。
+      剩余取舍：
+  - [ ] 拖控件时 preview 显示的是未 refine 的原始结果（省掉每次 refine），
+        确定后才合面；要做成 FreeCAD 那样"预览也是 refine 过的"，得接受拖动时的
+        refeine 开销（或者加节流）
+  - [ ] 取消 panel 时会 `refineResultShape()` + `discretizationShape()` 一次，
+        让留在模型里的形状（参数已经被改过）保持和提交过的一致
+- [ ] 只有**单 body 单文档**（`FeatureBody` 是单例）；也还没有 New / 最近文件 /
+      标题栏显示文件名 / 脏标记与关闭前询问 / 把读写接进撤销栈
+- [ ] feature 之间的引用存的是**下标**（`base` / `profile` / `originals`）。
+      第一期够用，但一旦支持"删除中间特征重排链"或"多文档互相引用"，
+      就得换成稳定的对象 id（文件里再带一张 id → 下标的表即可）
+- [ ] 文件只有 `version` 检查，没有**版本迁移**逻辑；改动格式时要顺手补一条
+      "老版本怎么读"的路径，否则老文件会直接读不动
+- [ ] `MoonDocument.cpp` 里的类型表是**手写的 dynamic_cast 链**（`typeNameOf` /
+      `createFeature`），新增 feature 时容易忘；以后可以改成宏注册

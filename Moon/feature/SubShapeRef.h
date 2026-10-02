@@ -50,4 +50,16 @@ namespace MOON
 		const std::string& p_reference,
 		std::vector<std::string>& p_names,
 		const std::string& p_owner = std::string());
+
+	/** The mapped names an element of p_source is known by.
+	 *
+	 * p_reference is the "<Type>_<index>" the task panels store. The names are
+	 * what a lookup in *another* shape matches, which is how the same face is
+	 * found again when it is taken from the shape below the one it was picked
+	 * on. The source is taken as it is seen, its transform included.
+	 */
+	void CaptureSubShapeNames(
+		const Part::TopoShape& p_source,
+		const std::string& p_reference,
+		std::vector<std::string>& p_names);
 }

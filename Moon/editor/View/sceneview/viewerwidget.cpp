@@ -9,6 +9,7 @@
 #include "Core/Global/ServiceLocator.h"
 #include "Core/ECS/Components/CMaterialRenderer.h"
 #include "editor/parsescene.h"
+#include "feature/MoonDocument.h"
 #include "editor/UI/TreeViewPanel/treeViewpanel.h"
 #include "editor/UI/SettingPanel/PassSettingWidget.h"
 
@@ -143,7 +144,19 @@ namespace MOON {
 			mSceneView->Update(0.01);
 			if (mDoReadFile) {
 				mDoReadFile = false;
-				parser->ParseFile(mReadFilePath.toStdString());
+				const std::string path = mReadFilePath.toUtf8().toStdString();
+				// A .moon file is a feature chain, not a mesh: it is read by rebuilding
+				// the body instead of by the scene parser. Everything here runs in the
+				// render loop because building features touches the scene and the
+				// viewer.
+				if (mReadFilePath.endsWith(QString(".") + MoonDocument::extension(), Qt::CaseInsensitive)) {
+					if (MoonDocument::open(path)) {
+						mRefreshTreeView = true;
+					}
+				}
+				else {
+					parser->ParseFile(path);
+				}
 				mSceneView->UnselectActor();
 			}
 				

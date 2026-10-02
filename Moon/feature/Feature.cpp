@@ -102,6 +102,28 @@ namespace MOON {
 		}
 		topoShape->setShape(p_shape);
 	}
+	void Feature::refineResultShape()
+	{
+		if (!isRefineActive() || topoShape->isNull()) {
+			return;
+		}
+		// The refinement belongs to the moment the result is committed rather than to
+		// execute(): a task panel drags its parameters through execute() on every mouse
+		// move and only displays what comes out, so refining there would merge the
+		// whole shape again and again while the panels are being dragged - and the
+		// shape that is displayed is the raw one anyway. Merging is idempotent, so a
+		// shape that is already refined comes out unchanged.
+		try {
+			topoShape->setShape(topoShape->makeElementRefine());
+		}
+		catch (const Standard_Failure& err) {
+			CORE_ERROR(
+				"[Feature] {0}: the shape could not be refined ({1}); it is used as "
+				"it is",
+				GetName(),
+				err.GetMessageString());
+		}
+	}
 	SketcherObj* Feature::findBaseSketch()
 	{
 		for (Feature* f = getBaseFeature(); f != nullptr; f = f->getBaseFeature()) {
@@ -186,6 +208,11 @@ namespace MOON {
 			GetViewerWidget.addActorToTreeView(this);
 			hasInTree = true;
 		}
+		// This is the commit point: OK of a task panel, the end of a recompute and
+		// reading a document all come through here, and each of them has to leave the
+		// shape the same way - built up to a face, with the coplanar faces it fused
+		// merged into one.
+		refineResultShape();
 		auto comp =GetComponent<Core::ECS::Components::CTopoShape>();
 		comp->discretizationShape();
 		FeatureBody::instance().populateFeature(this);

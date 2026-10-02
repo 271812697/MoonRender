@@ -876,6 +876,15 @@ namespace MOON {
                 "falling back to the plain edge chaining, whose names are lost",
                 namedEdges.size());
         }
+        else {
+            // An empty sketch is fine; a sketch with curves that produced no edge is
+            // not, and without this it would only show up much later as a feature that
+            // has nothing to build on.
+            CORE_WARN(
+                "[SketcherObj] {0}: none of the {1} curve(s) produced an edge",
+                getName(),
+                mGeoList.size());
+        }
 
         // Fallback: the historical path, kept so a sketch whose edges cannot be
         // connected by the named builder still produces the shape it used to.

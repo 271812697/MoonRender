@@ -61,6 +61,33 @@ namespace MOON {
 			}
 		}
 	}
+	void SketcherObjManager::addSketcherFeature(SketcherFeature* p_feature)
+	{
+		if (p_feature == nullptr) {
+			return;
+		}
+		for (SketcherFeature* known : mInternal->sketchers) {
+			if (known == p_feature) {
+				return;
+			}
+		}
+		mInternal->sketchers.push_back(p_feature);
+	}
+	void SketcherObjManager::removeSketcherFeature(SketcherFeature* p_feature)
+	{
+		if (p_feature == nullptr) {
+			return;
+		}
+		for (int i = 0; i < static_cast<int>(mInternal->sketchers.size()); ++i) {
+			if (mInternal->sketchers[i] == p_feature) {
+				mInternal->sketchers.erase(mInternal->sketchers.begin() + i);
+				break;
+			}
+		}
+		if (mInternal->currentSketcher == p_feature) {
+			mInternal->currentSketcher = nullptr;
+		}
+	}
 	std::vector<SketcherObj*> SketcherObjManager::GetAllSketcherObjs()
 	{
 		std::vector<SketcherObj*>res;

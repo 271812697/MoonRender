@@ -128,4 +128,29 @@ namespace MOON {
 		}
 		return false;
 	}
+	const std::vector<Feature*>& FeatureBody::getFeatures() const
+	{
+		return mInternal->featureList;
+	}
+	void FeatureBody::setFeatures(const std::vector<Feature*>& p_features)
+	{
+		mInternal->featureList = p_features;
+	}
+	void FeatureBody::clear()
+	{
+		// The actors go with the features: RemoveFromScene takes a feature's actor - and,
+		// through the scene, the render anchors and the topology actors hanging under it -
+		// out of the scene. The features themselves are deleted afterwards, from a copy,
+		// because a destructor unlists itself from the very list being walked.
+		const std::vector<Feature*> features = mInternal->featureList;
+		for (Feature* feature : features) {
+			if (feature != nullptr) {
+				feature->RemoveFromScene();
+			}
+		}
+		for (Feature* feature : features) {
+			delete feature;
+		}
+		mInternal->featureList.clear();
+	}
 }
