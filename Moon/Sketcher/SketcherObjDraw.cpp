@@ -473,6 +473,88 @@ namespace MOON {
             }
         }
     }
+    void SketcherObj::drawSketchAxes()
+    {
+        // The axes are the one kind of curve that is drawn from its line and not from its
+        // sampled points: the geometry has to start at the origin (that is the root
+        // point), so it could never cover the whole axis the user sees and clicks.
+        //
+        // They are drawn before the sketch's own geometry because they are references,
+        // and because a curve drawn exactly on one of them overlaps it pixel for pixel:
+        // whichever is drawn last is the one that is seen, and it has to be the curve
+        // the user drew here.
+        const Eigen::Vector4<uint8_t>& preselectColor = m_drawOption.preselectColor;
+        const Eigen::Vector4<uint8_t>& selectColor = m_drawOption.selectColor;
+        const float pointSize = m_drawOption.pointSize;
+        // Drawn before the geometry, so the width the geometry pass pushes is not in
+        // effect yet: the axes carry their own.
+        renderer->pushSize(m_drawOption.axisLineWidth);
+        const int axisIds[2] = { Sketcher::GeoEnum::VAxis, Sketcher::GeoEnum::HAxis };
+        for (const int geoId : axisIds) {
+            // The line and the origin are two elements, and the highlight follows the one
+            // that was picked: naming the point must not light the whole axis up, or every
+            // pick of the origin - the point a sketch is most often constrained to - would
+            // paint an infinite line as selected. It is the rule the sketch's own geometry
+            // follows as well (only a whole-curve pick highlights a curve).
+            const bool isLinePicked = [this, geoId]() {
+                for (const SelectGeoId& sel : selectIds) {
+                    if (sel.GeoId == geoId && sel.pointPos == PointPos::none) {
+                        return true;
+                    }
+                }
+                return false;
+                }();
+            const bool isOriginPicked = [this, geoId]() {
+                for (const SelectGeoId& sel : selectIds) {
+                    if (sel.GeoId != geoId) {
+                        continue;
+                    }
+                    // A whole-curve pick covers the point it starts at, the way it does
+                    // for every other curve.
+                    if (sel.pointPos == PointPos::none
+                        || sel.pointPos == PointPos::start) {
+                        return true;
+                    }
+                }
+                return false;
+                }();
+            const bool isLinePreSelected = preSelectGeoId.GeoId == geoId
+                && selectState != OperationGeo
+                && preSelectGeoId.pointPos == PointPos::none;
+            const bool isOriginPreSelected = preSelectGeoId.GeoId == geoId
+                && selectState != OperationGeo
+                && (preSelectGeoId.pointPos == PointPos::none
+                    || preSelectGeoId.pointPos == PointPos::start);
+
+            // The horizontal axis is the x axis and the vertical one the y axis, so each
+            // is drawn in the colour its name stands for.
+            const bool isVertical = geoId == Sketcher::GeoEnum::VAxis;
+            const Eigen::Vector4<uint8_t>& axisColor = isVertical
+                ? m_drawOption.yAxisColor
+                : m_drawOption.xAxisColor;
+            renderer->pushColor(isLinePicked ? selectColor
+                                             : (isLinePreSelected ? preselectColor
+                                                                  : axisColor));
+            drawAxisSpanning(isVertical ? 1 : 0);
+            renderer->popColor();
+
+            // The root point: the start of the horizontal axis, i.e. the sketch origin.
+            // It is the one point of an axis that is a feature of its own - the far end of
+            // the defining segment is not - and it is drawn with the horizontal axis only,
+            // because that is the element it belongs to (GeoEnum gives RtPnt and HAxis the
+            // same id, -1). Drawn by both axes, the idle dot of the one drawn last would
+            // cover the highlight of the other.
+            if (!isVertical) {
+                renderer->drawPoint(
+                    mPlane.valueEigen(0.0, 0.0),
+                    pointSize + 1,
+                    isOriginPicked ? selectColor
+                                   : (isOriginPreSelected ? preselectColor
+                                                          : m_drawOption.externalColor));
+            }
+        }
+        renderer->popSize();
+    }
     void SketcherObj::drawAxisSpanning(int p_axisIndex)
     {
         // An axis is drawn as the infinite line it stands for: its geometry is a
@@ -604,6 +686,10 @@ namespace MOON {
     void SketcherObj::draw() {
         if (InEdit()) {
             drawBackground();
+            // The axes are a backdrop and go under everything else: a line drawn exactly
+            // on one of them overlaps it pixel for pixel, so whichever is drawn last
+            // hides the other (see drawSketchAxes).
+            drawSketchAxes();
         }
         renderer->pushSize(m_drawOption.curveLineWidth);
        
@@ -684,76 +770,7 @@ namespace MOON {
                 && selectState != OperationGeo;
 
             if (isAxisCurve(geoId)) {
-                // The axes are the one kind of curve that is drawn from its line and
-                // not from its sampled points: the geometry has to start at the origin
-                // (that is the root point), so it could never cover the whole axis the
-                // user sees and clicks. Everything else about them is like any other
-                // external curve - idle colour, selection highlight.
-                //
-                // The line and the origin are two elements, and the highlight follows
-                // the one that was picked: naming the point must not light the whole
-                // axis up, or every pick of the origin - the point a sketch is most
-                // often constrained to - would paint an infinite line as selected. It
-                // is the rule the sketch's own geometry follows as well (the loop
-                // above only highlights a curve for a whole-curve pick).
-                const bool isLinePicked = [this, geoId]() {
-                    for (const SelectGeoId& sel : selectIds) {
-                        if (sel.GeoId == geoId && sel.pointPos == PointPos::none) {
-                            return true;
-                        }
-                    }
-                    return false;
-                    }();
-                const bool isOriginPicked = [this, geoId]() {
-                    for (const SelectGeoId& sel : selectIds) {
-                        if (sel.GeoId != geoId) {
-                            continue;
-                        }
-                        // A whole-curve pick covers the point it starts at, the way it
-                        // does for every other curve.
-                        if (sel.pointPos == PointPos::none
-                            || sel.pointPos == PointPos::start) {
-                            return true;
-                        }
-                    }
-                    return false;
-                    }();
-                const bool isLinePreSelected = preSelectGeoId.GeoId == geoId
-                    && selectState != OperationGeo
-                    && preSelectGeoId.pointPos == PointPos::none;
-                const bool isOriginPreSelected = preSelectGeoId.GeoId == geoId
-                    && selectState != OperationGeo
-                    && (preSelectGeoId.pointPos == PointPos::none
-                        || preSelectGeoId.pointPos == PointPos::start);
-
-                // The horizontal axis is the x axis and the vertical one the y axis, so
-                // each is drawn in the colour its name stands for.
-                const bool isVertical = geoId == Sketcher::GeoEnum::VAxis;
-                const Eigen::Vector4<uint8_t>& axisColor = isVertical
-                    ? m_drawOption.yAxisColor
-                    : m_drawOption.xAxisColor;
-                renderer->pushColor(isLinePicked ? selectColor
-                                                 : (isLinePreSelected ? preselectColor
-                                                                      : axisColor));
-                drawAxisSpanning(isVertical ? 1 : 0);
-                renderer->popColor();
-
-                // The root point: the start of the horizontal axis, i.e. the sketch
-                // origin. It is the one point of an axis that is a feature of its own -
-                // the far end of the defining segment is not - and it is drawn with the
-                // horizontal axis only, because that is the element it belongs to
-                // (GeoEnum gives RtPnt and HAxis the same id, -1). Drawn by both axes,
-                // the idle dot of the one drawn last would cover the highlight of the
-                // other.
-                if (!isVertical) {
-                    renderer->drawPoint(
-                        mPlane.valueEigen(0.0, 0.0),
-                        pointSize + 1,
-                        isOriginPicked ? selectColor
-                                       : (isOriginPreSelected ? preselectColor
-                                                              : m_drawOption.externalColor));
-                }
-                continue;
+                continue;  // drawn as a backdrop, before the geometry (drawSketchAxes)
             }
 
             auto& segment = segmentOf(const_cast<Part::Geometry*>(externalGeo));

@@ -44,7 +44,10 @@ namespace MOON {
 			 * at. */
 			Eigen::Vector4<uint8_t> xAxisColor { 255, 0, 0, 255 };
 			Eigen::Vector4<uint8_t> yAxisColor { 255, 0, 255, 0 };
-			float curveLineWidth = 3.0f;
+			float curveLineWidth = 4.0f;
+			/** The axes are a backdrop, but they are what a sketch is laid out against,
+			 * so they are drawn a little heavier than the curves on top of them. */
+			float axisLineWidth = 3.0f;
 			float pointSize = 10.0f;
 		};
 		DrawOption& drawOption() { return m_drawOption; }
@@ -120,6 +123,10 @@ namespace MOON {
 		 * p_axisIndex 0 = horizontal axis, 1 = vertical axis. The caller sets colour
 		 * and width: the axis is drawn like any other external curve. */
 		void drawAxisSpanning(int p_axisIndex);
+		/** Draws the two axes (and the origin they meet at) as the backdrop they are.
+		 * Called before the sketch's own geometry, so a curve drawn on top of an axis
+		 * stays visible instead of being covered by it. */
+		void drawSketchAxes();
 		void makeDone();
 		int solve(bool updateGeoAfterSolving = true);
 		int addGeometry(std::unique_ptr<Part::Geometry>&ptr);
@@ -267,6 +274,11 @@ namespace MOON {
 		int addConstraint(std::unique_ptr<Sketcher::Constraint> constraint);
 		int getConstraintCount() const { return static_cast<int>(mConstraintList.size()); }
 		const Sketcher::Constraint* getConstraint(int index) const;
+		/** Drops the constraint at p_index (the index the panels list it by) and solves
+		 * the sketch again without it. The elements it named are left alone: what goes
+		 * is the constraint, not the geometry it was about.
+		 * @return true when p_index named a constraint. */
+		bool removeConstraint(int p_index);
 		// Find an existing constraint with the same type and elements (datum
 		// value ignored), so dimensional values can be edited via setDatum().
 		int findConstraint(const Sketcher::Constraint* pattern) const;

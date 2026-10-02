@@ -25,6 +25,8 @@
 #include <QLabel>
 #include <QEvent>
 #include <QColor>
+#include <QCursor>
+#include <QMenu>
 #include <Eigen/Core>
 #include <cstdio>
 #include <vector>
@@ -194,6 +196,9 @@ namespace MOON {
         auto* curveWidth = new SliderFloatProperty("Curve Line Width", sketchGroup, 0.5f, 10.0f);
         curveWidth->setStep(0.1f);
         addParam(curveWidth);
+        auto* axisWidth = new SliderFloatProperty("Axis Line Width", sketchGroup, 0.5f, 10.0f);
+        axisWidth->setStep(0.1f);
+        addParam(axisWidth);
         auto* pointSize = new SliderFloatProperty("Point Size", sketchGroup, 2.0f, 40.0f);
         pointSize->setStep(0.5f);
         addParam(pointSize);
@@ -309,6 +314,9 @@ namespace MOON {
             if (propertyName == "Sketch:Curve Line Width") {
                 return QVariant::fromValue(opt.curveLineWidth);
             }
+            if (propertyName == "Sketch:Axis Line Width") {
+                return QVariant::fromValue(opt.axisLineWidth);
+            }
             if (propertyName == "Sketch:Point Size") {
                 return QVariant::fromValue(opt.pointSize);
             }
@@ -355,6 +363,9 @@ namespace MOON {
             }
             else if (propertyName == "Sketch:Curve Line Width") {
                 opt.curveLineWidth = value.toFloat();
+            }
+            else if (propertyName == "Sketch:Axis Line Width") {
+                opt.axisLineWidth = value.toFloat();
             }
             else if (propertyName == "Sketch:Point Size") {
                 opt.pointSize = value.toFloat();
@@ -578,6 +589,32 @@ namespace MOON {
                 rowLayout->addWidget(typeLabel);
             }
             rowLayout->addWidget(label, 1);
+            if (list == mConstraintList) {
+                // Right click drops the constraint. The row is the widget the click
+                // lands on (the labels are transparent to the mouse), so it carries the
+                // menu: the list is the only place a constraint can be taken back
+                // without hunting for the geometry it was put on.
+                row->setContextMenuPolicy(Qt::CustomContextMenu);
+                connect(
+                    row,
+                    &QWidget::customContextMenuRequested,
+                    this,
+                    [this, userData](const QPoint&) {
+                        if (!mInternal || !mInternal->feature) {
+                            return;
+                        }
+                        QMenu menu(this);
+                        QAction* remove = menu.addAction("Delete constraint");
+                        // Opened at the cursor: the request position is in the row's own
+                        // coordinates, and the row is rebuilt whenever the list changes.
+                        if (menu.exec(QCursor::pos()) == remove) {
+                            mInternal->feature->getSketcherObj()->removeConstraint(userData);
+                            mListCache.clear();
+                            refreshLists();
+                        }
+                    }
+                );
+            }
             if (list == mCurveList) {
                 const QVariant rowRef = QVariant::fromValue<QWidget*>(row);
                 const auto installHoverFilter = [this, &rowRef](QWidget* w) {

@@ -1255,6 +1255,28 @@ namespace MOON {
             mConstraintList[constrId]->isVisible = visible;
         }
     }
+    bool SketcherObj::removeConstraint(int p_index)
+    {
+        if (p_index < 0 || p_index >= static_cast<int>(mConstraintList.size())) {
+            return false;
+        }
+        Sketcher::Constraint* constraint = mConstraintList[p_index];
+        // The annotation layout is keyed by the constraint itself and the hover/drag
+        // state by its index; erasing the entry would leave both pointing at whatever
+        // takes its place, so they go first.
+        forgetConstraintLayout(constraint);
+        m_labelHover = -1;
+        m_labelDrag = -1;
+        m_labelHoverHandle = LabelHandle::Caption;
+        m_labelDragHandle = LabelHandle::Caption;
+        delete constraint;
+        mConstraintList.erase(mConstraintList.begin() + p_index);
+        // The other constraints hold the elements they name, not vector positions, so
+        // nothing has to be renumbered - the solver only has to see the sketch as it is
+        // now.
+        solve();
+        return true;
+    }
     void SketcherObj::setGeometryVisible(int geoId, bool visible)
     {
         if (visible) {
