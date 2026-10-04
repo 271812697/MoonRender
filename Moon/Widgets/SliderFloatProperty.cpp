@@ -35,10 +35,14 @@ namespace MOON {
 			auto widget = new FloatSliderWidgetQt(parent);
 			mWidget = widget;
 			widget->setProp(this);
-			widget->setValue(owner->getPropertyValue(mName).toFloat());
+			// The range has to be in place before the value: the number box starts
+			// out with Qt's default range (0 .. 99.99) and clamps whatever it is
+			// given, so a negative value set first came out as 0 and stayed 0 when
+			// the range was applied afterwards.
 			widget->setMinValue(minA);
 			widget->setMaxValue(maxB);
 			widget->setIncrement(step);
+			widget->setValue(owner->getPropertyValue(mName).toFloat());
 			
 		}
 		return mWidget;

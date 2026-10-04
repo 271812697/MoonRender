@@ -143,6 +143,10 @@ namespace MOON {
         }
         slider_->setMinimum(transformMinValueToSlider());
         updateSlider();
+        // The number box clamps what it is shown, so a value that arrived while the
+        // range was still the widget's default has to be put back once the real
+        // range is known.
+        updateSpinBox();
     }
     void BaseSliderWidgetQt::applyMaxValue() {
         QSignalBlocker spinBlock(spinBox_);
@@ -153,6 +157,7 @@ namespace MOON {
         }
         slider_->setMaximum(transformMaxValueToSlider());
         updateSlider();
+        updateSpinBox();
     }
     void BaseSliderWidgetQt::applyIncrement() {
         QSignalBlocker spinBlock(spinBox_);

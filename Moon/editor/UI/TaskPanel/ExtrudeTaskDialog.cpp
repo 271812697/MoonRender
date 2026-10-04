@@ -177,7 +177,7 @@ namespace MOON {
         addParam(dir);
 
         mInternal->extrudeLength1 = new SliderFloatProperty("Length 1", p);
-        mInternal->extrudeLength1->setMinMax(0.1, 1000);
+        mInternal->extrudeLength1->setMinMax(-500, 500);
         mInternal->extrudeLength1->setStep(0.1);
         addParam(mInternal->extrudeLength1);
         mInternal->extrudeAngle1 = new SliderFloatProperty("Angle 1", p);
@@ -186,7 +186,7 @@ namespace MOON {
         addParam(mInternal->extrudeAngle1);
 
         mInternal->extrudeLength2 = new SliderFloatProperty("Length 2", p);
-        mInternal->extrudeLength2->setMinMax(0.1, 1000);
+        mInternal->extrudeLength2->setMinMax(-500, 500);
         mInternal->extrudeLength2->setStep(0.1);
         addParam(mInternal->extrudeLength2);
         mInternal->extrudeAngle2 = new SliderFloatProperty("Angle 2", p);
