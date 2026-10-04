@@ -286,7 +286,13 @@ namespace MOON {
                 Part::TopoShape resShape;
                 if (!baseShape.isNull()) {
                     if (addSubType == 0) {
-                        resShape = prism.makeElementFuse(baseShape);
+                        // The base goes in first and the prism second, the way
+                        // PartDesign does it (makeElementBoolean(Fuse, {base, prism})).
+                        // The boolean is symmetric as a set operation, but the shape
+                        // it hands back is not: built with the prism first, the fused
+                        // body could no longer be merged by the *next* pad, and that
+                        // one came out as two solids instead of one.
+                        resShape = baseShape.makeElementFuse(prism);
                     }
                     else if (addSubType == 1) {
                         resShape = baseShape.makeElementCut(prism);
@@ -390,7 +396,10 @@ namespace MOON {
                 Part::TopoShape resShape;
                 if (!baseShape.isNull()) {
                     if (addSubType == 0) {
-                        resShape = prism.makeElementFuse(baseShape);
+                        // Base first, prism second - see the note in the up-to-face
+                        // branch above: the order decides whether the next pad can
+                        // still merge with this result.
+                        resShape = baseShape.makeElementFuse(prism);
                     }
                     else if (addSubType == 1) {
                         resShape = baseShape.makeElementCut(prism);
