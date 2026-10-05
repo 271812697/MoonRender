@@ -252,6 +252,58 @@ namespace MOON {
 		 * index, external curves by their negative id. Null when p_geoId names
 		 * nothing. */
 		const Part::Geometry* resolveGeometry(int p_geoId) const;
+
+		/** The angle an Angle constraint between two lines would hold with the sketch
+		 * as it stands, measured the way the sketcher measures it before the
+		 * constraint is added (FreeCAD's SketcherGui::calculateAngle).
+		 *
+		 * The angle runs counter-clockwise from the end of the first line that is
+		 * closest to the corner where the two lines meet - the direction pointing
+		 * away from that corner - to the same end of the second line. Those two ends
+		 * are what the constraint stores (FirstPos/SecondPos), so the value a panel
+		 * offers is the one the solver keeps, instead of its supplement: an angle
+		 * whose ends are the far ones would otherwise be solved by flipping one of
+		 * the lines, which is exactly the value the user did not mean. */
+		struct MeasuredAngle
+		{
+			int firstGeoId = Sketcher::GeoEnum::GeoUndef;
+			PointPos firstPos = PointPos::none;
+			int secondGeoId = Sketcher::GeoEnum::GeoUndef;
+			PointPos secondPos = PointPos::none;
+			/** Radians, in [0, pi]: the two ends carry the side, so the value is
+			 * never negative. */
+			double radians = 0.0;
+			/** True when the angle is measured from the second line to the first;
+			 * firstPos/secondPos always sit in the measured order, so a caller that
+			 * names the lines swaps them when this is set. */
+			bool swapped = false;
+			/** False when there is no angle to measure: not two lines, or two lines
+			 * that are parallel and apart. */
+			bool usable = false;
+		};
+		/** p_firstPos / p_secondPos name the end of each line the angle is measured
+		 * from when the user picked that end; `none` measures from the end closest
+		 * to the corner, the way the sketcher does it on its own. */
+		MeasuredAngle measureAngleBetweenLines(
+			int p_firstGeoId,
+			int p_secondGeoId,
+			PointPos p_firstPos = PointPos::none,
+			PointPos p_secondPos = PointPos::none
+		) const;
+
+		/** The angle two lines make at the corner they meet, from the four ends of
+		 * the lines themselves: the one rule both the sketcher tools measure an
+		 * angle by (FreeCAD's SketcherGui::calculateAngle). p_firstPos /
+		 * p_secondPos name an end the user picked, when there is one. */
+		static MeasuredAngle measureAngleBetweenLineEnds(
+			const Base::Vector2d& p_firstStart,
+			const Base::Vector2d& p_firstEnd,
+			const Base::Vector2d& p_secondStart,
+			const Base::Vector2d& p_secondEnd,
+			PointPos p_firstPos = PointPos::none,
+			PointPos p_secondPos = PointPos::none
+		);
+
 		Part::TopoShape getDoneFaceShape() {
 			return doneFaceShape;
 		}

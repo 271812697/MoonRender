@@ -150,6 +150,10 @@ namespace MOON {
 	static double angleCurrentDeg(SketcherObj* obj, const std::vector<SketcherObj::SelectGeoId>& sel)
 	{
 		const double pi = 3.14159265358979323846;
+		// The angle a single line makes with the sketch's horizontal axis. A pair of
+		// lines is measured by SketcherObj::measureAngleBetweenLines() instead: that
+		// one knows which ends the constraint is measured between, which a plain
+		// direction cannot say.
 		if (sel.size() == 1 && sel[0].pointPos == SketcherObj::PointPos::none) {
 			Base::Vector2d s, e;
 			if (lineEnds2d(obj, sel[0].GeoId, s, e)) {
@@ -158,17 +162,6 @@ namespace MOON {
 					deg += 360.0;
 				}
 				return deg;
-			}
-		}
-		if (sel.size() == 2) {
-			Base::Vector2d a1, a2, b1, b2;
-			if (lineEnds2d(obj, sel[0].GeoId, a1, a2)
-				&& lineEnds2d(obj, sel[1].GeoId, b1, b2)) {
-				const double cross = (a2.x - a1.x) * (b2.y - b1.y)
-					- (a2.y - a1.y) * (b2.x - b1.x);
-				const double dot = (a2.x - a1.x) * (b2.x - b1.x)
-					+ (a2.y - a1.y) * (b2.y - b1.y);
-				return std::fabs(std::atan2(cross, dot) * 180.0 / pi);
 			}
 		}
 		return 90.0;
@@ -278,7 +271,18 @@ namespace MOON {
 			CORE_INFO("added constraint id {}", id);
 			const int err = Obj->solve();
 			if (err != 0) {
-				CORE_WARN("add constraint failed, solver error {}", err);
+				// FreeCAD pulls a datum back when the sketch cannot hold it
+				// (SketchObject::setDatum). A constraint that is being added has no
+				// earlier value to fall back on, so it goes again instead: kept, it
+				// would leave every later solve failing - dragging included, since a
+				// drag solves through the same system.
+				if (id >= 0) {
+					Obj->removeConstraint(id);
+				}
+				CORE_WARN(
+					"add constraint failed, solver error {}; the constraint was dropped "
+					"and the sketch is left as it was",
+					err);
 			}
 			else {
 				CORE_INFO("solve ok after add constraint id {}", id);
@@ -977,10 +981,36 @@ namespace MOON {
 
 			int selectNum = listOfGeoIds.size();
 			if (selectNum > 0) {
+				// A pair of lines is measured the way the constraint will hold it: from
+				// the end of each line that points away from the corner, with the two
+				// ends stored on the constraint. Taking the lines' raw directions
+				// instead gave the supplement whenever a line ran the other way, and
+				// the solver then had to flip the line to satisfy the value - which is
+				// a constraint the user did not mean and, when it cannot be reached,
+				// one that fails to solve.
+				SketcherObj::MeasuredAngle pair;
+				bool pairAngle = false;
+				if (selectNum == 2) {
+					pair = Obj->measureAngleBetweenLines(
+						listOfGeoIds[0].GeoId,
+						listOfGeoIds[1].GeoId,
+						listOfGeoIds[0].pointPos,
+						listOfGeoIds[1].pointPos
+					);
+					pairAngle = pair.usable;
+					if (!pairAngle) {
+						CORE_WARN(
+							"[Constraint] angle: the two picked elements are not two lines "
+							"that meet, so there is no angle to constrain");
+						return;
+					}
+				}
 				ParamDialog dialog("Angle");
 				dialog.addParamDef(
 					ParamDialog::ParamDef(
-						"Angle", 0, 360, angleCurrentDeg(Obj, listOfGeoIds)
+						"Angle", 0, 360,
+						pairAngle ? pair.radians * 180.0 / 3.14159265358979323846
+								  : angleCurrentDeg(Obj, listOfGeoIds)
 					)
 				);
 				dialog.setUp();
@@ -991,51 +1021,15 @@ namespace MOON {
 					
 					CORE_INFO("angle is {}", distance);
 					distance = distance * 3.14159265358979323846f / 180.0f;
-					if (selectNum == 3) {
-						if (
-							listOfGeoIds[0].pointPos != SketcherObj::PointPos::none
-							&& listOfGeoIds[1].pointPos != SketcherObj::PointPos::none
-							&& listOfGeoIds[2].pointPos != SketcherObj::PointPos::none
-							) {
-						    
-							//auto newConstr = std::make_unique<Sketcher::Constraint>();
-							//newConstr->Type = Sketcher::ConstraintType::Angle;
-							//newConstr->First = listOfGeoIds[0].GeoId;
-							//newConstr->FirstPos = listOfGeoIds[0].pointPos;
-							//newConstr->Second = listOfGeoIds[1].GeoId;
-							//newConstr->SecondPos = listOfGeoIds[1].pointPos;
-							//newConstr->Third = listOfGeoIds[2].GeoId;
-							//newConstr->ThirdPos = listOfGeoIds[2].pointPos;
-							//newConstr->setValue(distance);
-							//Obj->addConstraint(std::move(newConstr));
-							//Obj->solve();
-						}
-					}
-					else if (selectNum == 2) {
-						// line to line
-						if (
-							listOfGeoIds[0].pointPos != SketcherObj::PointPos::none
-							&& listOfGeoIds[1].pointPos != SketcherObj::PointPos::none
-							) {
-
-							auto newConstr = std::make_unique<Sketcher::Constraint>();
-							newConstr->Type = Sketcher::ConstraintType::Angle;
-							newConstr->First = listOfGeoIds[0].GeoId;
-							newConstr->FirstPos = listOfGeoIds[0].pointPos;
-							newConstr->Second = listOfGeoIds[1].GeoId;
-							newConstr->SecondPos = listOfGeoIds[1].pointPos;
-							newConstr->setValue(distance);
-							addOrSetDatumConstraint(Obj, std::move(newConstr));
-						}
-						else if (listOfGeoIds[0].pointPos == SketcherObj::PointPos::none
-							&& listOfGeoIds[1].pointPos == SketcherObj::PointPos::none) {
-							auto newConstr = std::make_unique<Sketcher::Constraint>();
-							newConstr->Type = Sketcher::ConstraintType::Angle;
-							newConstr->First = listOfGeoIds[0].GeoId;
-							newConstr->Second = listOfGeoIds[1].GeoId;
-							newConstr->setValue(distance);
-							addOrSetDatumConstraint(Obj, std::move(newConstr));
-						}
+					if (pairAngle) {
+						auto newConstr = std::make_unique<Sketcher::Constraint>();
+						newConstr->Type = Sketcher::ConstraintType::Angle;
+						newConstr->First = pair.firstGeoId;
+						newConstr->FirstPos = pair.firstPos;
+						newConstr->Second = pair.secondGeoId;
+						newConstr->SecondPos = pair.secondPos;
+						newConstr->setValue(distance);
+						addOrSetDatumConstraint(Obj, std::move(newConstr));
 					}
 					else if (selectNum == 1) {
 						if (

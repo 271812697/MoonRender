@@ -151,16 +151,51 @@ namespace MOON
 			return type == Sketcher::ConstraintType::Angle;
 		}
 
-		/** The angle between the two picked lines, in radians. */
-		double angleRadians() const
+		/** The angle the two picked lines make and the ends it is measured between,
+		 * measured the way the angle tool measures it (the sketcher's rule, which
+		 * SketcherObj shares with the constraint toolbar): from the end of each line
+		 * that points away from the corner. Those ends go on the constraint with the
+		 * value, so the solver holds the angle the annotation shows instead of having
+		 * to turn one of the lines to satisfy its supplement. */
+		bool measuredAngle(
+			int& p_firstGeoId,
+			SketcherObj::PointPos& p_firstPos,
+			int& p_secondGeoId,
+			SketcherObj::PointPos& p_secondPos,
+			double& p_radians) const
 		{
 			if (picks.size() != 2 || !picks[0].isLine() || !picks[1].isLine()) {
+				return false;
+			}
+			const SketcherObj::MeasuredAngle measured = SketcherObj::measureAngleBetweenLineEnds(
+				picks[0].first,
+				picks[0].second,
+				picks[1].first,
+				picks[1].second
+			);
+			if (!measured.usable) {
+				return false;  // parallel lines: there is no angle between them
+			}
+			p_firstGeoId = measured.swapped ? picks[1].geoId : picks[0].geoId;
+			p_firstPos = measured.firstPos;
+			p_secondGeoId = measured.swapped ? picks[0].geoId : picks[1].geoId;
+			p_secondPos = measured.secondPos;
+			p_radians = measured.radians;
+			return true;
+		}
+
+		/** The angle the picks make, in radians (0 when they make none). */
+		double angleRadians() const
+		{
+			int firstGeoId = -1;
+			int secondGeoId = -1;
+			SketcherObj::PointPos firstPos = SketcherObj::PointPos::none;
+			SketcherObj::PointPos secondPos = SketcherObj::PointPos::none;
+			double radians = 0.0;
+			if (!measuredAngle(firstGeoId, firstPos, secondGeoId, secondPos, radians)) {
 				return 0.0;
 			}
-			const Base::Vector2d d1 = (picks[0].second - picks[0].first).Normalize();
-			const Base::Vector2d d2 = (picks[1].second - picks[1].first).Normalize();
-			const double dot = std::clamp(d1 * d2, -1.0, 1.0);
-			return std::acos(dot);
+			return radians;
 		}
 
 		/** The two points a distance would be measured between, as the picks define
@@ -585,9 +620,18 @@ namespace MOON
 			return;
 		}
 
-		// Two lines are measured by the angle between them.
+		// Two lines are measured by the angle between them - unless they run parallel
+		// to each other, where there is no angle to put a dimension on.
 		if (state.picks.size() == 2 && state.picks[0].isLine() && state.picks[1].isLine()) {
-			state.type = Sketcher::ConstraintType::Angle;
+			int firstGeoId = -1;
+			int secondGeoId = -1;
+			SketcherObj::PointPos firstPos = SketcherObj::PointPos::none;
+			SketcherObj::PointPos secondPos = SketcherObj::PointPos::none;
+			double radians = 0.0;
+			state.type = state.measuredAngle(
+							 firstGeoId, firstPos, secondGeoId, secondPos, radians)
+				? Sketcher::ConstraintType::Angle
+				: Sketcher::ConstraintType::None;
 			return;
 		}
 
@@ -740,8 +784,18 @@ namespace MOON
 		}
 
 		if (state.isAngle()) {
-			// An arc at the corner the two lines share, spanning from one direction to
-			// the other.
+			// An arc at the corner the two lines share, spanning the angle the
+			// constraint will hold: from the direction the first stored end reads in
+			// to the second one, through the size the caption shows.
+			int firstGeoId = -1;
+			int secondGeoId = -1;
+			SketcherObj::PointPos firstPos = SketcherObj::PointPos::none;
+			SketcherObj::PointPos secondPos = SketcherObj::PointPos::none;
+			double measuredRadians = 0.0;
+			if (!state.measuredAngle(
+					firstGeoId, firstPos, secondGeoId, secondPos, measuredRadians)) {
+				return;
+			}
 			const Internal::Pick& firstLine = state.picks[0];
 			const Internal::Pick& secondLine = state.picks[1];
 			Base::Vector2d corner = firstLine.first;
@@ -749,29 +803,30 @@ namespace MOON
 				corner = firstLine.first;
 			}
 			const ImVec2 cornerScreen = toImVec(toScreen(corner));
-			Base::Vector2d d1 = firstLine.second - firstLine.first;
-			Base::Vector2d d2 = secondLine.second - secondLine.first;
+			// The two lines the picks hold, in the order the constraint names them.
+			const Internal::Pick& measuredFirst = firstGeoId == firstLine.geoId ? firstLine : secondLine;
+			const Internal::Pick& measuredSecond = secondGeoId == firstLine.geoId ? firstLine : secondLine;
+			Base::Vector2d d1 = measuredFirst.second - measuredFirst.first;
+			Base::Vector2d d2 = measuredSecond.second - measuredSecond.first;
 			if (d1.Length() < Precision::Confusion() || d2.Length() < Precision::Confusion()) {
 				return;
 			}
 			d1.Normalize();
 			d2.Normalize();
-			if ((state.cursor - corner) * Internal::normalOf(d1) > 0.0) {
+			// `start` reads a line from its start to its end, `end` the other way
+			// round; the ends are what the constraint stores.
+			if (firstPos == SketcherObj::PointPos::end) {
 				d1 = -d1;
 			}
-			if ((state.cursor - corner) * Internal::normalOf(d2) > 0.0) {
+			if (secondPos == SketcherObj::PointPos::end) {
 				d2 = -d2;
 			}
 			const ImVec2 screen1 = toImVec(toScreen(corner + d1));
-			const ImVec2 screen2 = toImVec(toScreen(corner + d2));
-			float start = angleOf(cornerScreen, screen1);
-			float sweep = angleOf(cornerScreen, screen2) - start;
-			while (sweep > 180.0f) {
-				sweep -= 360.0f;
-			}
-			while (sweep < -180.0f) {
-				sweep += 360.0f;
-			}
+			const float start = angleOf(cornerScreen, screen1);
+			// The screen's y axis points down, so the counter-clockwise angle the
+			// constraint holds is drawn the other way round.
+			const float sweep
+				= -static_cast<float>(measuredRadians) * 180.0f / static_cast<float>(kPi);
 			// The arc sits at the distance of the cursor from the corner, which is what
 			// pulling the annotation in and out does once it is there.
 			const Eigen::Vector2f cursorScreen = screenOfSketchPos(state.cursor);
@@ -913,9 +968,23 @@ namespace MOON
 			constraint->Type = captured.type;
 			const std::vector<Internal::Pick>& picks = captured.picks;
 			if (captured.type == Sketcher::ConstraintType::Angle) {
-				// The solver keeps an angle in radians; the dialog asked in degrees.
-				constraint->First = picks[0].geoId;
-				constraint->Second = picks[1].geoId;
+				// The solver keeps an angle in radians; the dialog asked in degrees. The
+				// ends the angle is measured between go on the constraint with the value:
+				// they are what makes it the angle the annotation showed instead of its
+				// supplement.
+				int firstGeoId = -1;
+				int secondGeoId = -1;
+				SketcherObj::PointPos firstPos = SketcherObj::PointPos::none;
+				SketcherObj::PointPos secondPos = SketcherObj::PointPos::none;
+				double measured = 0.0;
+				if (!captured.measuredAngle(
+						firstGeoId, firstPos, secondGeoId, secondPos, measured)) {
+					return;
+				}
+				constraint->First = firstGeoId;
+				constraint->FirstPos = firstPos;
+				constraint->Second = secondGeoId;
+				constraint->SecondPos = secondPos;
 				constraint->setValue(entered * kPi / 180.0);
 			}
 			else if (captured.type == Sketcher::ConstraintType::Radius
@@ -981,7 +1050,20 @@ namespace MOON
 				added = active->addConstraint(std::move(constraint));
 				const int error = active->solve();
 				if (error != 0) {
-					CORE_WARN("[Dimension] adding the constraint failed, solver error {}", error);
+					// FreeCAD pulls a datum back when the sketch cannot hold it
+					// (SketchObject::setDatum); a constraint that is being added has
+					// no earlier value to fall back on, so it goes again instead -
+					// kept, it would leave every later solve failing, dragging too.
+					if (added >= 0) {
+						active->removeConstraint(added);
+						added = -1;
+					}
+					CORE_WARN(
+						"[Dimension] adding the constraint failed, solver error {}; it "
+						"was dropped and the sketch is left as it was",
+						error);
+					mInternal->reset();
+					return;
 				}
 			}
 			// Put the annotation where the preview was, or the sketch would draw it at

@@ -28,6 +28,9 @@
 #include <TopExp_Explorer.hxx>
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Vertex.hxx>
+#include <algorithm>
+#include <cmath>
+#include <limits>
 #include <TopTools_IndexedMapOfShape.hxx>
 #include <BRepBndLib.hxx>
 #include <Bnd_Box.hxx>
@@ -1118,6 +1121,147 @@ namespace MOON {
             return getExternalCurve(p_geoId);
         }
         return getGeometry(p_geoId);
+    }
+
+    SketcherObj::MeasuredAngle SketcherObj::measureAngleBetweenLineEnds(
+        const Base::Vector2d& p_firstStart,
+        const Base::Vector2d& p_firstEnd,
+        const Base::Vector2d& p_secondStart,
+        const Base::Vector2d& p_secondEnd,
+        PointPos p_firstPos,
+        PointPos p_secondPos)
+    {
+        MeasuredAngle measured;
+        const Base::Vector2d& firstStart = p_firstStart;
+        const Base::Vector2d& firstEnd = p_firstEnd;
+        const Base::Vector2d& secondStart = p_secondStart;
+        const Base::Vector2d& secondEnd = p_secondEnd;
+        const Base::Vector2d firstDir = firstEnd - firstStart;
+        const Base::Vector2d secondDir = secondEnd - secondStart;
+        const double determinant = firstDir.x * secondDir.y - firstDir.y * secondDir.x;
+
+        const bool needFirstEnd = p_firstPos == PointPos::none;
+        const bool needSecondEnd = p_secondPos == PointPos::none;
+        if ((needFirstEnd || needSecondEnd) && std::abs(determinant) > 1.0e-9) {
+            // Where the two lines meet; the angle is measured from the end of each
+            // line that sits closest to that corner.
+            const Base::Vector2d delta = secondStart - firstStart;
+            const double along = (delta.x * secondDir.y - delta.y * secondDir.x) / determinant;
+            const Base::Vector2d corner = firstStart + firstDir * along;
+            if (needFirstEnd) {
+                measured.firstPos = (corner - firstStart).Length() < (corner - firstEnd).Length()
+                    ? PointPos::start
+                    : PointPos::end;
+            }
+            if (needSecondEnd) {
+                measured.secondPos
+                    = (corner - secondStart).Length() < (corner - secondEnd).Length()
+                    ? PointPos::start
+                    : PointPos::end;
+            }
+        }
+        else {
+            // Parallel: the closest pair of ends plays the same part. A pair that is
+            // not collinear has no angle between it at all, which the caller refuses
+            // exactly like the sketcher does.
+            if (needFirstEnd || needSecondEnd) {
+                double closest = std::numeric_limits<double>::max();
+                for (int i = 0; i < 2; ++i) {
+                    for (int j = 0; j < 2; ++j) {
+                        const Base::Vector2d& first = i == 0 ? firstStart : firstEnd;
+                        const Base::Vector2d& second = j == 0 ? secondStart : secondEnd;
+                        const double distance = (first - second).Length();
+                        if (distance < closest) {
+                            closest = distance;
+                            if (needFirstEnd) {
+                                measured.firstPos
+                                    = i == 0 ? PointPos::start : PointPos::end;
+                            }
+                            if (needSecondEnd) {
+                                measured.secondPos
+                                    = j == 0 ? PointPos::start : PointPos::end;
+                            }
+                        }
+                    }
+                }
+                if (closest > Precision::Confusion()) {
+                    return measured;
+                }
+            }
+        }
+        if (p_firstPos != PointPos::none) {
+            measured.firstPos = p_firstPos;
+        }
+        if (p_secondPos != PointPos::none) {
+            measured.secondPos = p_secondPos;
+        }
+
+        // The two directions the angle runs between: each points away from the end
+        // that was picked above.
+        const Base::Vector2d dir1
+            = (measured.firstPos == PointPos::start ? 1.0 : -1.0) * firstDir;
+        const Base::Vector2d dir2
+            = (measured.secondPos == PointPos::start ? 1.0 : -1.0) * secondDir;
+
+        double radians = std::atan2(
+            dir1.x * dir2.y - dir1.y * dir2.x,
+            dir1.x * dir2.x + dir1.y * dir2.y
+        );
+        if (radians < 0.0) {
+            // Kept positive: the two lines swap places instead, which is what makes
+            // the two supplements read out of the same pair of lines.
+            radians = -radians;
+            std::swap(measured.firstPos, measured.secondPos);
+            measured.swapped = true;
+        }
+        measured.radians = radians;
+        measured.usable = true;
+        return measured;
+    }
+
+    SketcherObj::MeasuredAngle SketcherObj::measureAngleBetweenLines(
+        int p_firstGeoId,
+        int p_secondGeoId,
+        PointPos p_firstPos,
+        PointPos p_secondPos) const
+    {
+        const auto lineEnds = [this](int p_geoId, Base::Vector2d& p_start, Base::Vector2d& p_end) {
+            const Part::Geometry* geo = resolveGeometry(p_geoId);
+            if (geo == nullptr || !geo->is<Part::GeomLineSegment>()) {
+                return false;
+            }
+            const auto* line = static_cast<const Part::GeomLineSegment*>(geo);
+            const Base::Vector3d start = line->getStartPoint();
+            const Base::Vector3d end = line->getEndPoint();
+            p_start = Base::Vector2d(start.x, start.y);
+            p_end = Base::Vector2d(end.x, end.y);
+            return true;
+        };
+
+        Base::Vector2d firstStart;
+        Base::Vector2d firstEnd;
+        Base::Vector2d secondStart;
+        Base::Vector2d secondEnd;
+        if (!lineEnds(p_firstGeoId, firstStart, firstEnd)
+            || !lineEnds(p_secondGeoId, secondStart, secondEnd)) {
+            return MeasuredAngle();
+        }
+
+        MeasuredAngle measured = measureAngleBetweenLineEnds(
+            firstStart,
+            firstEnd,
+            secondStart,
+            secondEnd,
+            p_firstPos,
+            p_secondPos
+        );
+        if (!measured.usable) {
+            return measured;
+        }
+        // The measured order, not the order the two lines were handed in.
+        measured.firstGeoId = measured.swapped ? p_secondGeoId : p_firstGeoId;
+        measured.secondGeoId = measured.swapped ? p_firstGeoId : p_secondGeoId;
+        return measured;
     }
 
     std::vector<Part::Geometry*> SketcherObj::externalGeometryPointers() const
