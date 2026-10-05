@@ -1,7 +1,7 @@
 ﻿#pragma once
 #include "feature/FeatureBaseProfile.h"
 #include <gp_Vec.hxx>
-namespace MOON { 
+namespace MOON {	
 	class SketcherFeature;
 	class ExtrudeFeature :public FeatureBaseProfile {
 	public:

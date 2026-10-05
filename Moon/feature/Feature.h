@@ -22,7 +22,7 @@ namespace MOON {
 		const std::vector<std::vector<std::string>>& getReferenceNames() const {
 			return m_referenceNames;
 		}
-		void setReferenceNames(std::vector<std::vector<std::string>> p_names) {
+		void setReferenceNames(const std::vector<std::vector<std::string>>& p_names) {
 			m_referenceNames = std::move(p_names);
 		}
 		Feature* getBaseFeature() { return m_baseFeature; }

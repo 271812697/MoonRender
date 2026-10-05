@@ -104,31 +104,7 @@ namespace MOON {
 			upToFaceRef,
 			p_feature != nullptr ? p_feature->GetName() : "<preview>");
 
-		// A face of the feature being built is not a face it can end at: that shape
-		// holds the body *with* what this feature adds, while the prism is built
-		// against the shape below it. Operations keep the faces of that shape, and
-		// their names with them, so the picked face is looked for there and is only
-		// kept when the two are really the same face.
-		const bool pickedOnItself
-			= p_feature == nullptr || p_feature == this;
-		if (pickedOnItself && m_baseFeature != nullptr) {
-			std::vector<std::string> names = upToFaceNames;
-			Part::TopoShape onBase = ResolveSubShapeRef(
-				*m_baseFeature, upToFaceRef, names, GetName());
-			Part::TopoShape picked = upToFace;
-			Feature::applyWorldTransform(*this, picked);
-			if (!onBase.isNull() && IsSameFacePlacement(picked, onBase)) {
-				upToFaceFeature = m_baseFeature;
-				upToFaceNames = std::move(names);
-				upToFace = onBase;
-				CORE_INFO(
-					"[UpToFace] {0}: '{1}' is a face of '{2}' as well; the reference is "
-					"taken there",
-					GetName(), upToFaceRef, m_baseFeature->GetName());
-				return;
-			}
-		}
-		else if (p_feature != nullptr && p_feature != this) {
+        if (p_feature != nullptr && p_feature != this) {
 			// Resolving here does two things at once: the preview has a face to
 			// extrude to, and the mapped names of that face are captured, so the
 			// reference can be re-resolved later and written to a document as a name
@@ -240,7 +216,7 @@ namespace MOON {
         if (extrudeType==2 && !upToFace.isNull()) {
             try
             {
-                Part::TopoShape tempShape =face.makeElementFace(nullptr, "Part::FaceMakerBullseye");
+                Part::TopoShape tempShape = face.hasSubShape(TopAbs_FACE)?face: face.makeElementFace(nullptr, "Part::FaceMakerBullseye");
 
                 // The picked face can sit on either side of the sketch: the
                 // direction only says which way the feature is built, not where
