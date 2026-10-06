@@ -592,54 +592,16 @@ namespace MOON {
         const Eigen::Vector4<uint8_t>& preselectColor = m_drawOption.preselectColor;
         const Eigen::Vector4<uint8_t>& selectColor = m_drawOption.selectColor;
         const float pointSize = m_drawOption.pointSize;
-        for (int i = 0;i < m_sketch->geometries().size();i++) {
-            if (!m_sketch->isGeometryVisible(i)) {
-                continue;
-            }
-            bool isSelect = false;
-            for (int j = 0;j < m_sketch->getSelectGeoPosIds().size();j++) {
-                if (m_sketch->getSelectGeoPosIds()[j].GeoId == i) {
-                    if (m_sketch->getSelectGeoPosIds()[j].pointPos == PointPos::none) {
-                        isSelect = true;
-                    }
-                }
-            }
-            auto& geo = m_sketch->geometries()[i];
-            const bool isConstruction
-                = m_sketch->isConstructionGeometry(i) != 0 || geo->getConstruction();
-            if (isSelect) {
-                renderer->pushColor(selectColor);
-            }
-            else if (i == m_sketch->getPreSelectGeoId().GeoId && selectState != OperationGeo) {
-                renderer->pushColor(preselectColor);
-            }
-            else {
-                renderer->pushColor(
-                    isConstruction ? m_drawOption.constructionColor : m_drawOption.curveColor
-                );
-            }
-            if (geo->isDerivedFrom<Part::GeomCurve>()) {
-                auto& seg = m_sketch->segmentOf(geo.get());
-                if (isConstruction) {
-                    drawDashedSketchPolyline(renderer, m_sketch->plane(), seg.point);
-                }
-                else {
-                    for (int k = 0; k + 1 < static_cast<int>(seg.point.size()); k++) {
-                        renderer->drawLine(
-                            m_sketch->plane().valueEigen(seg.point[k].x, seg.point[k].y),
-                            m_sketch->plane().valueEigen(seg.point[k + 1].x, seg.point[k + 1].y)
-                        );
-                    }
-                }
-            }
-            renderer->popColor();
-        }
-        // Geometry projected in from another feature: drawn in its own colour and
-        // always solid, because it is a reference - the sketch may constrain to it but
-        // never edits it, and it must not be mistaken for something drawn here.
-        // External geometry is selectable like the sketch's own curves (it is what a
-        // constraint is applied to), so it is highlighted like them - only its idle
-        // colour sets it apart as a reference.
+        // Geometry projected in from another feature: drawn *before* the sketch's own
+        // curves, because the sketch's own are what the user is drawing. Tracing a
+        // contour runs exactly along the reference, and whichever of the two is drawn
+        // last hides the other pixel for pixel (the same reason the axes are a
+        // backdrop, see drawSketchAxes), so the reference has to go underneath.
+        // It is drawn in its own colour and always solid, because it is a reference -
+        // the sketch may constrain to it but never edits it, and it must not be
+        // mistaken for something drawn here. External geometry is selectable like the
+        // sketch's own curves (it is what a constraint is applied to), so it is
+        // highlighted like them - only its idle colour sets it apart as a reference.
         for (int externalIndex = 0; externalIndex < m_sketch->getExternalCurveCount(); ++externalIndex) {
             const int geoId = m_sketch->getExternalGeoId(externalIndex);
             const Part::Geometry* externalGeo = m_sketch->getExternalCurve(geoId);
@@ -702,6 +664,48 @@ namespace MOON {
                                   : (pointPreSelected ? preselectColor
                                                       : m_drawOption.externalColor));
             }
+        }
+        for (int i = 0;i < m_sketch->geometries().size();i++) {
+            if (!m_sketch->isGeometryVisible(i)) {
+                continue;
+            }
+            bool isSelect = false;
+            for (int j = 0;j < m_sketch->getSelectGeoPosIds().size();j++) {
+                if (m_sketch->getSelectGeoPosIds()[j].GeoId == i) {
+                    if (m_sketch->getSelectGeoPosIds()[j].pointPos == PointPos::none) {
+                        isSelect = true;
+                    }
+                }
+            }
+            auto& geo = m_sketch->geometries()[i];
+            const bool isConstruction
+                = m_sketch->isConstructionGeometry(i) != 0 || geo->getConstruction();
+            if (isSelect) {
+                renderer->pushColor(selectColor);
+            }
+            else if (i == m_sketch->getPreSelectGeoId().GeoId && selectState != OperationGeo) {
+                renderer->pushColor(preselectColor);
+            }
+            else {
+                renderer->pushColor(
+                    isConstruction ? m_drawOption.constructionColor : m_drawOption.curveColor
+                );
+            }
+            if (geo->isDerivedFrom<Part::GeomCurve>()) {
+                auto& seg = m_sketch->segmentOf(geo.get());
+                if (isConstruction) {
+                    drawDashedSketchPolyline(renderer, m_sketch->plane(), seg.point);
+                }
+                else {
+                    for (int k = 0; k + 1 < static_cast<int>(seg.point.size()); k++) {
+                        renderer->drawLine(
+                            m_sketch->plane().valueEigen(seg.point[k].x, seg.point[k].y),
+                            m_sketch->plane().valueEigen(seg.point[k + 1].x, seg.point[k + 1].y)
+                        );
+                    }
+                }
+            }
+            renderer->popColor();
         }
         // Point markers are drawn after the curves so they stay on top.
         for (int geoIndex = 0; geoIndex < static_cast<int>(m_sketch->geometries().size()); ++geoIndex) {
