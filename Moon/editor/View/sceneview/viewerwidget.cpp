@@ -7,6 +7,8 @@
 #include "renderer/Context.h"
 #include "renderer/SceneView.h"
 #include "Core/Global/ServiceLocator.h"
+#include <Core/ECS/Components/CModelRenderer.h>
+#include <Core/SceneSystem/Scene.h>
 #include "Core/ECS/Components/CMaterialRenderer.h"
 #include "editor/parsescene.h"
 #include "feature/MoonDocument.h"
@@ -158,6 +160,35 @@ namespace MOON {
 					parser->ParseFile(path);
 				}
 				mSceneView->UnselectActor();
+				// A file that was just read - an imported model or a rebuilt feature
+				// chain - arrives without scene query structures and with the camera
+				// still on the previous one, so it has to be built and framed. That
+				// cannot be done here unconditionally: a STEP import builds its shape
+				// on a job thread, so its actors can already be in the scene while
+				// the models they will hold are still empty, and framing those would
+				// frame the previous file. The request is left pending for the frames
+				// below, which fit as soon as there is something to frame.
+				mPendingViewFit = true;
+				mPendingViewFitFrames = kViewFitTimeoutFrames;
+			}
+
+			if (mPendingViewFit)
+			{
+				if (hasModelToFrame())
+				{
+					mPendingViewFit = false;
+					// Still inside the render loop, which is what BuildBvh needs:
+					// it copies the mesh domain palettes through the GL context.
+					mSceneView->BuildBvh();
+					mSceneView->FitToFocus(mSceneView->GetCamera()->GetTransform().GetWorldForward());
+				}
+				else if (--mPendingViewFitFrames <= 0)
+				{
+					// Nothing frameable ever came out of the read (an unreadable
+					// file): stop waiting, so an unrelated later actor cannot
+					// trigger this fit after the fact.
+					mPendingViewFit = false;
+				}
 			}
 				
 			if (mAddActors.size() > 0|| mRemoveActors.size() > 0||mModifyActors.size()>0) {
@@ -208,6 +239,25 @@ namespace MOON {
 			mReadFilePath = path;
 			mDoReadFile = true;
 		}
+		/** True when some model in the scene has bounds to frame. A read can put
+		 * its actors in the scene before the shapes they will hold exist (a STEP
+		 * import builds them on a job thread), and framing those would frame the
+		 * previous file instead of the one that was just read. */
+		bool hasModelToFrame()
+		{
+			auto* scene = mSceneView->GetScene();
+			if (scene == nullptr)
+				return false;
+			for (auto* modelRenderer : scene->GetFastAccessComponents().modelRenderers)
+			{
+				if (modelRenderer == nullptr || !modelRenderer->owner.IsActive())
+					continue;
+				auto* model = modelRenderer->GetModel();
+				if (model != nullptr && model->GetBoundingSphere().radius > 0.0f)
+					return true;
+			}
+			return false;
+		}
 	private:
 		friend ViewerWidget;
 		ViewerWidget* mSelf = nullptr;
@@ -224,6 +274,12 @@ namespace MOON {
 		bool mRefreshTreeView = false;
 		QString mReadFilePath = "";
 		bool mDoReadFile = false;
+		// A read is framed as soon as the scene has a model to frame - see
+		// hasModelToFrame - and gives up after this many frames, so an unreadable
+		// file cannot leave a fit waiting to fire when a later feature adds one.
+		static constexpr int kViewFitTimeoutFrames = 600;
+		bool mPendingViewFit = false;
+		int mPendingViewFitFrames = 0;
 		QElapsedTimer m_fpsTimer;
 		double m_fps = 0.0;
 		double m_frameMs = 0.0;

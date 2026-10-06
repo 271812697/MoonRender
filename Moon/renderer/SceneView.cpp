@@ -346,9 +346,14 @@ void Editor::Panels::SceneView::FitToFocusWithRotation(const Maths::FQuaternion&
 
 void Editor::Panels::SceneView::BuildBvh()
 {
-	auto& scene = *GetScene();
-
-	//scene.BuildBVH();
+	// The scene query structures are built on demand and nothing fills them for a
+	// file that was just read, so this is the place a load can ask for them. The
+	// caller has to be inside the render loop: BvhService::Process copies the mesh
+	// domain palettes through the GL context.
+	if (auto* scene = GetScene())
+	{
+		scene->BuildSceneBvh();
+	}
 }
 
 void Editor::Panels::SceneView::SetGizmoOperation(Editor::Core::EGizmoOperation p_operation)
