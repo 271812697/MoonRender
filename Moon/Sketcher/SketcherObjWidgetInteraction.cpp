@@ -1,7 +1,6 @@
 #include "Sketcher/SketcherObjWidget.h"
-#include "Sketcher/SketchPicking.h"
+#include "Interactive/SketchPicking.h"
 #include "renderer/SceneView.h"
-#include "editor/Toolbar/sketchToolbar.h"
 #include "Core/Global/ServiceLocator.h"
 #include <cmath>
 namespace MOON {

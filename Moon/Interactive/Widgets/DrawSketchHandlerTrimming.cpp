@@ -2,7 +2,7 @@
 #include "Interactive/Widgets/DrawSketchHandlerTrimming.h"
 #include "Sketcher/SketcherObjManager.h"
 #include "Sketcher/SketcherObj.h"
-#include "Sketcher/SketchPicking.h"
+#include "Interactive/SketchPicking.h"
 #include "renderer/SceneView.h"
 #include "Qtimgui/imgui/imgui.h"
 #include "core/log.h"

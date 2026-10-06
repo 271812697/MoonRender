@@ -58,7 +58,6 @@ namespace MOON {
 		* sketch, so ending a session never travels from the data layer back up here. */
 		void finishEdit();
 		void fitCamera();
-		virtual void onSetActive(bool flag) override;
 
 		// ----------------------------------------------------------------- drawing
 		virtual void onUpdate() override;

@@ -1,5 +1,5 @@
 #include "Sketcher/SketcherObjWidget.h"
-#include "Sketcher/SketchPicking.h"
+#include "Interactive/SketchPicking.h"
 #include "Interactive/Widgets/DrawSketchHandler.h"
 #include "Geometry.h"
 #include "renderer/SceneView.h"
@@ -9,7 +9,6 @@
 #include "Qtimgui/imgui/imgui.h"
 #include "Qtimgui/implot/implotCustom.h"
 #include "Sketcher/SketcheTool2D.h"
-#include "editor/Toolbar/sketchToolbar.h"
 #include <QInputDialog>
 #include <limits>
 namespace MOON {
@@ -248,17 +247,6 @@ namespace MOON {
         isInEdit = false;
         auto& view = GetService(Editor::Panels::SceneView);
         view.GetCameraController().EnableRotate(true);
-        GetService(SketchToolbar).disableAllHandlers();
-    }
-    void SketcherObjWidget::onSetActive(bool flag)
-    {
-        if (!flag) {
-            // Leaving the sketch leaves its tools: the external geometry button has to
-            // follow - and with it the tool widget it switches on - otherwise it would
-            // still be pressed the next time the sketch is opened (and the clicks of
-            // the next tool would be taken by it).
-            GetService(SketchToolbar).uncheckExternalGeometry();
-        }
     }
     void SketcherObjWidget::onUpdate()
     {
@@ -2638,6 +2626,7 @@ namespace MOON {
         }
     }
 }
+
 
 
 

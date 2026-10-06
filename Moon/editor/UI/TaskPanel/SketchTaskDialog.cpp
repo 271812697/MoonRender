@@ -9,6 +9,8 @@
 #include "Widgets/ColorPickerProperty.h"
 #include "Widgets/SliderFloatProperty.h"
 #include "core/ViewTool.h"
+#include "core/Global/ServiceLocator.h"
+#include "editor/Toolbar/sketchToolbar.h"
 #include "Interactive/Widgets/SketchPlane.h"
 #include <QLabel>
 #include <QLineEdit>
@@ -167,6 +169,10 @@ namespace MOON {
         ~Internal() {
             if (widget) {
                 widget->setActive(false);
+                // Leaving the sketch leaves its tools: the external geometry button has
+                // to follow - and with it the tool widget it switches on - otherwise it
+                // would still be pressed the next time the sketch is opened.
+                GetService(SketchToolbar).uncheckExternalGeometry();
             }
             if (behaviour) {
                 delete behaviour;
@@ -403,6 +409,8 @@ namespace MOON {
     void SketchTaskDialog::clickOk()
     {
         mInternal->ensureWidget()->finishEdit();
+        // The drawing tools belong to the finished session too.
+        GetService(SketchToolbar).disableAllHandlers();
         mInternal->feature->execute();
         mInternal->feature->makeDone();
     }

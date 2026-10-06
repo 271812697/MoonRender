@@ -1,8 +1,6 @@
-﻿#include "Sketcher/SketcherObjManager.h"
+#include "Sketcher/SketcherObjManager.h"
 #include "Sketcher/SketcherObj.h"
 #include "feature/SketcherFeature.h"
-#include "editor/UI/TreeViewPanel/treeViewpanel.h"
-#include "Core/Global/ServiceLocator.h"
 #include <memory>
 #include <vector>
 namespace MOON {

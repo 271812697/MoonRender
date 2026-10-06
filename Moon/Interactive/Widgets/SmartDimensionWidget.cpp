@@ -7,7 +7,7 @@
 #include "Interactive/Interactive/WidgetEvent.h"
 #include "Sketcher/SketcherObjManager.h"
 #include "Sketcher/SketcherObj.h"
-#include "Sketcher/SketchPicking.h"
+#include "Interactive/SketchPicking.h"
 #include "Geometry.h"
 #include "core/Global/ServiceLocator.h"
 #include "core/log.h"

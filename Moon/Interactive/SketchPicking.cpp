@@ -1,4 +1,4 @@
-#include "Sketcher/SketchPicking.h"
+#include "Interactive/SketchPicking.h"
 
 #include "Interactive/Im3DRenderer.h"
 #include "renderer/SceneView.h"

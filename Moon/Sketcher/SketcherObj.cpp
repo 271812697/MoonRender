@@ -1,17 +1,10 @@
-﻿#include "Sketcher/SketcherObj.h"
+#include "Sketcher/SketcherObj.h"
 #include "Sketcher/SketcheTool2D.h"
-#include "editor/Toolbar/sketchToolbar.h"
 #include "Geometry.h"
-#include "renderer/SceneView.h"
 
-#include "Core/Global/ServiceLocator.h"
 #include "base/Tools.h"
 #include "core/log.h"
 #include "core/TopoNameDebug.h"
-#include "core/ViewTool.h"
-#include "core/component/CTopoShape.h"
-#include "feature/Feature.h"
-#include "feature/SubShapeRef.h"
 
 #include "ElementMap.h"
 #include "MappedElement.h"

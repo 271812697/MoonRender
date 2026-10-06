@@ -1,7 +1,7 @@
 #include "Interactive/Widgets/DrawSketchHandlerLineSet.h"
 #include "Sketcher/SketcherObjManager.h"
 #include "Sketcher/SketcherObj.h"
-#include "Sketcher/SketchPicking.h"
+#include "Interactive/SketchPicking.h"
 #include "Maths/FMatrix4.h"
 #include "renderer/SceneView.h"
 #include <numbers>
