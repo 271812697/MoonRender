@@ -1,9 +1,10 @@
-﻿#include "editor/Toolbar/ContraintToolbar.h"
+#include "editor/Toolbar/ContraintToolbar.h"
 #include "editor/Command/command.h"
 #include "Core/Global/ServiceLocator.h"
 #include "renderer/SceneView.h"
 #include "Sketcher/SketcherObjManager.h"
 #include "Sketcher/SketcherObj.h"
+#include "Sketcher/SketcherObjWidget.h"
 #include "Interactive/Widgets/DrawSketchHandler.h"
 #include "editor/Toolbar/sketchToolbar.h"
 #include "renderer/GizmoRenderPass.h"
@@ -19,6 +20,15 @@
 #include <QTimer>
 #include <cmath>
 namespace MOON {
+	/** What the sketch panel works on: the selection lives in the editing widget,
+	 * not in the sketch data. */
+	static std::vector<SketcherObj::SelectGeoId> currentSketchSelection()
+	{
+		SketcherObjWidget* widget
+			= SketcherObjManager::instance().GetCurrentActiveSketcherWidget();
+		return widget != nullptr ? widget->getSelectGeoPosIds()
+			: std::vector<SketcherObj::SelectGeoId>();
+	}
 	// ---- helpers: derive constraint dialog defaults from the current sketch
 	static double dist2d(const Base::Vector2d& a, const Base::Vector2d& b)
 	{
@@ -365,7 +375,7 @@ namespace MOON {
 	protected:
 		virtual void execute()override {
 			SketcherObj* Obj = SketcherObjManager::instance().GetCurrentActiveSketcherObj();
-			std::vector<SketcherObj::SelectGeoId> listOfGeoIds = Obj->getSelectGeoPosIds();
+			std::vector<SketcherObj::SelectGeoId> listOfGeoIds = currentSketchSelection();
 
 			if (listOfGeoIds.size() > 1) {
 				if (listOfGeoIds.size() == 2) {
@@ -425,7 +435,7 @@ namespace MOON {
 	protected:
 		virtual void execute()override {
 			SketcherObj* Obj = SketcherObjManager::instance().GetCurrentActiveSketcherObj();
-			std::vector<SketcherObj::SelectGeoId> listOfGeoIds = Obj->getSelectGeoPosIds();
+			std::vector<SketcherObj::SelectGeoId> listOfGeoIds = currentSketchSelection();
 
 			if (listOfGeoIds.size() == 1) {
 				// horizontal line
@@ -453,7 +463,7 @@ namespace MOON {
 	protected:
 		virtual void execute()override {
 			SketcherObj* Obj = SketcherObjManager::instance().GetCurrentActiveSketcherObj();
-			std::vector<SketcherObj::SelectGeoId> listOfGeoIds = Obj->getSelectGeoPosIds();
+			std::vector<SketcherObj::SelectGeoId> listOfGeoIds = currentSketchSelection();
 			if (listOfGeoIds.size() == 1) {
 				// vertical line
 				Obj->addConstraint(
@@ -480,7 +490,7 @@ namespace MOON {
 	protected:
 		virtual void execute()override {
 			SketcherObj* Obj = SketcherObjManager::instance().GetCurrentActiveSketcherObj();
-			std::vector<SketcherObj::SelectGeoId> listOfGeoIds = Obj->getSelectGeoPosIds();
+			std::vector<SketcherObj::SelectGeoId> listOfGeoIds = currentSketchSelection();
 			if (listOfGeoIds.size() == 2) {
 				const Part::Geometry* g0 = Obj->resolveGeometry(listOfGeoIds[0].GeoId);
 				const Part::Geometry* g1 = Obj->resolveGeometry(listOfGeoIds[1].GeoId);
@@ -505,7 +515,7 @@ namespace MOON {
 	protected:
 		virtual void execute()override {
 			SketcherObj* Obj = SketcherObjManager::instance().GetCurrentActiveSketcherObj();
-			std::vector<SketcherObj::SelectGeoId> listOfGeoIds = Obj->getSelectGeoPosIds();
+			std::vector<SketcherObj::SelectGeoId> listOfGeoIds = currentSketchSelection();
 			if (listOfGeoIds.size() == 2) {
 				const bool hasPoint0 = listOfGeoIds[0].pointPos != SketcherObj::PointPos::none;
 				const bool hasPoint1 = listOfGeoIds[1].pointPos != SketcherObj::PointPos::none;
@@ -528,7 +538,7 @@ namespace MOON {
 	protected:
 		virtual void execute()override {
 			SketcherObj* Obj = SketcherObjManager::instance().GetCurrentActiveSketcherObj();
-			std::vector<SketcherObj::SelectGeoId> listOfGeoIds = Obj->getSelectGeoPosIds();
+			std::vector<SketcherObj::SelectGeoId> listOfGeoIds = currentSketchSelection();
 			if (listOfGeoIds.size() == 2) {
 				const bool hasPoint0 = listOfGeoIds[0].pointPos != SketcherObj::PointPos::none;
 				const bool hasPoint1 = listOfGeoIds[1].pointPos != SketcherObj::PointPos::none;
@@ -583,7 +593,7 @@ namespace MOON {
 	protected:
 		virtual void execute()override {
 			SketcherObj* Obj = SketcherObjManager::instance().GetCurrentActiveSketcherObj();
-			std::vector<SketcherObj::SelectGeoId> listOfGeoIds = Obj->getSelectGeoPosIds();
+			std::vector<SketcherObj::SelectGeoId> listOfGeoIds = currentSketchSelection();
 
 			int selectNum = listOfGeoIds.size();
 			CORE_INFO("DistanceX execute: {} selected", selectNum);
@@ -668,7 +678,7 @@ namespace MOON {
 	protected:
 		virtual void execute()override {
 			SketcherObj* Obj = SketcherObjManager::instance().GetCurrentActiveSketcherObj();
-			std::vector<SketcherObj::SelectGeoId> listOfGeoIds = Obj->getSelectGeoPosIds();
+			std::vector<SketcherObj::SelectGeoId> listOfGeoIds = currentSketchSelection();
 
 			int selectNum = listOfGeoIds.size();
 			CORE_INFO("DistanceY execute: {} selected", selectNum);
@@ -750,7 +760,7 @@ namespace MOON {
 	protected:
 		virtual void execute()override {
 			SketcherObj* Obj = SketcherObjManager::instance().GetCurrentActiveSketcherObj();
-			std::vector<SketcherObj::SelectGeoId> listOfGeoIds = Obj->getSelectGeoPosIds();
+			std::vector<SketcherObj::SelectGeoId> listOfGeoIds = currentSketchSelection();
 
 			int selectNum = listOfGeoIds.size();
 			if (selectNum == 2) {
@@ -772,7 +782,7 @@ namespace MOON {
 	protected:
 		virtual void execute()override {
 			SketcherObj* Obj = SketcherObjManager::instance().GetCurrentActiveSketcherObj();
-			std::vector<SketcherObj::SelectGeoId> listOfGeoIds = Obj->getSelectGeoPosIds();
+			std::vector<SketcherObj::SelectGeoId> listOfGeoIds = currentSketchSelection();
 
 			int selectNum = listOfGeoIds.size();
 			if (selectNum == 3) {
@@ -805,7 +815,7 @@ namespace MOON {
 	protected:
 		virtual void execute()override {
 			SketcherObj* Obj = SketcherObjManager::instance().GetCurrentActiveSketcherObj();
-			std::vector<SketcherObj::SelectGeoId> listOfGeoIds = Obj->getSelectGeoPosIds();
+			std::vector<SketcherObj::SelectGeoId> listOfGeoIds = currentSketchSelection();
 			int selectNum = listOfGeoIds.size();
 			if (selectNum > 0) {
 				ParamDialog dialog("Distance");
@@ -882,7 +892,7 @@ namespace MOON {
 	protected:
 		virtual void execute()override {
 			SketcherObj* Obj = SketcherObjManager::instance().GetCurrentActiveSketcherObj();
-			std::vector<SketcherObj::SelectGeoId> listOfGeoIds = Obj->getSelectGeoPosIds();
+			std::vector<SketcherObj::SelectGeoId> listOfGeoIds = currentSketchSelection();
 
 			int selectNum = listOfGeoIds.size();
 			if (selectNum > 0) {
@@ -920,7 +930,7 @@ namespace MOON {
 	protected:
 		virtual void execute()override {
 			SketcherObj* Obj = SketcherObjManager::instance().GetCurrentActiveSketcherObj();
-			std::vector<SketcherObj::SelectGeoId> listOfGeoIds = Obj->getSelectGeoPosIds();
+			std::vector<SketcherObj::SelectGeoId> listOfGeoIds = currentSketchSelection();
 
 			int selectNum = listOfGeoIds.size();
 			if (selectNum > 0) {
@@ -958,7 +968,7 @@ namespace MOON {
 	protected:
 		virtual void execute()override {
 			SketcherObj* Obj = SketcherObjManager::instance().GetCurrentActiveSketcherObj();
-			std::vector<SketcherObj::SelectGeoId> listOfGeoIds = Obj->getSelectGeoPosIds();
+			std::vector<SketcherObj::SelectGeoId> listOfGeoIds = currentSketchSelection();
 			for (int i = 0; i < listOfGeoIds.size(); i++) {
 				if (listOfGeoIds[i].pointPos == SketcherObj::PointPos::none) {
 					Obj->addConstraint(
@@ -977,7 +987,7 @@ namespace MOON {
 	protected:
 		virtual void execute()override {
 			SketcherObj* Obj = SketcherObjManager::instance().GetCurrentActiveSketcherObj();
-			std::vector<SketcherObj::SelectGeoId> listOfGeoIds = Obj->getSelectGeoPosIds();
+			std::vector<SketcherObj::SelectGeoId> listOfGeoIds = currentSketchSelection();
 
 			int selectNum = listOfGeoIds.size();
 			if (selectNum > 0) {

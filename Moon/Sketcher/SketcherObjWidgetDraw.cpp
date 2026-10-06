@@ -1,4 +1,4 @@
-﻿#include "Sketcher/SketcherObj.h"
+#include "Sketcher/SketcherObjWidget.h"
 #include "Interactive/Widgets/DrawSketchHandler.h"
 #include "Geometry.h"
 #include "renderer/SceneView.h"
@@ -39,7 +39,7 @@ namespace MOON {
     // the view is zoomed). Construction geometry uses this style.
     static void drawDashedSketchPolyline(
         ImRenderer* renderer,
-        SketcherPlane2D& plane,
+        const SketcherPlane2D& plane,
         const std::vector<Base::Vector3d>& points,
         float dashPx = 8.0f,
         float gapPx = 6.0f
@@ -127,32 +127,98 @@ namespace MOON {
         }
         return false;
     }
-    void SketcherObj::setPlane(const SketcherPlane2D& plane)
-    {
-        mPlane = plane;
-        fitCamera();
-        //GetService(SketchToolbar).disableAllHandlers();
-    }
-    void SketcherObj::fitCamera()
+    void SketcherObjWidget::fitCamera()
     {
         auto& view = GetService(Editor::Panels::SceneView);
         //view.GetCameraController().EnableRotate(false);
         view.GetCamera()->SetSize(100);
         view.GetCamera()->SetProjectionMode(Rendering::Settings::EProjectionMode::ORTHOGRAPHIC);
         float pos = view.GetCamera()->GetFar() / 2.0;
-        Maths::FVector3 normal(mPlane.normal.x, mPlane.normal.y, mPlane.normal.z);
-        Maths::FVector3 up(mPlane.yAxis.x, mPlane.yAxis.y, mPlane.yAxis.z);
+        Maths::FVector3 normal(m_sketch->plane().normal.x, m_sketch->plane().normal.y, m_sketch->plane().normal.z);
+        Maths::FVector3 up(m_sketch->plane().yAxis.x, m_sketch->plane().yAxis.y, m_sketch->plane().yAxis.z);
         Maths::FQuaternion quat = Maths::FQuaternion::LookAt(-normal, up);
-        view.GetCameraController().MoveToPose(Maths::FVector3(mPlane.origin.x, mPlane.origin.y, mPlane.origin.z) + normal * pos, quat);
-        planeTransform = updateTransform();
+        view.GetCameraController().MoveToPose(Maths::FVector3(m_sketch->plane().origin.x, m_sketch->plane().origin.y, m_sketch->plane().origin.z) + normal * pos, quat);
+        // m_sketch->getplaneTransform() is the plane's own, set by setPlane(): this only
+        // puts the camera where it looks at that plane.
     }
-    void SketcherObj::beginEdit()
+    void SketcherObjWidget::beginEdit()
     {
         isInEdit = true;
         setActive(true);
         fitCamera();
+        // Whatever the sketch had done before this session, it has been seen.
+        m_seenPlaneRevision = m_sketch->planeRevision();
+        m_seenConstraintRevision = m_sketch->constraintRevision();
     }
-    void SketcherObj::onSetActive(bool flag)
+    /** The sketch is done: commit its shape, then leave the edit session. The task
+    * dialog calls this instead of the sketch's makeDone(), so ending a session never
+    * travels from the data layer back up to the widget. */
+    void SketcherObjWidget::finishEdit()
+    {
+        m_sketch->makeDone();
+        leaveEdit();
+    }
+    /** The sketch data does not call this widget - it counts its changes. Reading
+    * those counters here keeps the dependency one way. */
+    void SketcherObjWidget::syncWithSketch()
+    {
+        if (m_sketch == nullptr) {
+            return;
+        }
+        if (m_seenPlaneRevision != m_sketch->planeRevision()) {
+            m_seenPlaneRevision = m_sketch->planeRevision();
+            // The sketch lies somewhere else now: look at it.
+            fitCamera();
+        }
+        if (m_seenConstraintRevision != m_sketch->constraintRevision()) {
+            m_seenConstraintRevision = m_sketch->constraintRevision();
+            pruneConstraintLayout();
+        }
+    }
+    /** Drops the annotation layout of constraints that are gone. The maps are keyed
+    * by the constraint itself, so an entry a dead constraint left behind would be
+    * inherited by a later one allocated at the same address. */
+    void SketcherObjWidget::pruneConstraintLayout()
+    {
+        const auto alive = [this](const Sketcher::Constraint* p_constraint) {
+            for (int i = 0; i < m_sketch->getConstraintCount(); ++i) {
+                if (m_sketch->getConstraint(i) == p_constraint) {
+                    return true;
+                }
+            }
+            return false;
+        };
+        const auto prune = [&alive](auto& p_map) {
+            for (auto it = p_map.begin(); it != p_map.end();) {
+                if (alive(it->first)) {
+                    ++it;
+                }
+                else {
+                    it = p_map.erase(it);
+                }
+            }
+        };
+        prune(m_labelManualOffsetSketch);
+        prune(m_labelManualParam);
+        prune(m_straightDimOffsetSketch);
+        prune(m_angleLabelRadiusSketch);
+        // The hover/drag state is held by index, and the indices have moved.
+        m_labelHover = -1;
+        m_labelDrag = -1;
+        m_labelHoverHandle = LabelHandle::Caption;
+        m_labelDragHandle = LabelHandle::Caption;
+    }
+    /** Leaves the edit session: the camera goes back to the user and the drawing
+     * tools are switched off. The sketch data is not touched - SketcherObj::makeDone()
+     * does that part before calling this (see there). */
+    void SketcherObjWidget::leaveEdit()
+    {
+        isInEdit = false;
+        auto& view = GetService(Editor::Panels::SceneView);
+        view.GetCameraController().EnableRotate(true);
+        GetService(SketchToolbar).disableAllHandlers();
+    }
+    void SketcherObjWidget::onSetActive(bool flag)
     {
         if (!flag) {
             // Leaving the sketch leaves its tools: the external geometry button has to
@@ -162,78 +228,7 @@ namespace MOON {
             GetService(SketchToolbar).uncheckExternalGeometry();
         }
     }
-    SketcherObj::CurveSegment SketcherObj::getCurveSegment(Part::Geometry* geo)
-    {
-        CurveSegment seg;
-        CurveConvert::toVector2D(geo, 50, seg.point, seg.params);
-        if (geo->isDerivedFrom<Part::GeomCurve>()) {
-            if (geo->is<Part::GeomArcOfCircle>()) {
-                Part::GeomArcOfCircle* curve = static_cast<Part::GeomArcOfCircle*>(geo);
-                seg.sepoints.push_back({ curve->getStartPoint(),PointPos::start });
-                seg.sepoints.push_back({ curve->getEndPoint() ,PointPos::end });
-                seg.sepoints.push_back({ curve->getCenter() ,PointPos::mid });
-            }
-            else if (geo->is<Part::GeomLineSegment>()) {
-                Part::GeomLineSegment* lineSeg = static_cast<Part::GeomLineSegment*>(geo);
-                seg.sepoints.push_back({ lineSeg->getStartPoint(),PointPos::start });
-                seg.sepoints.push_back({ lineSeg->getEndPoint(),PointPos::end });
-            }
-            else if (geo->is<Part::GeomArcOfConic>()) {
-                Part::GeomArcOfConic* curve = static_cast<Part::GeomArcOfConic*>(geo);
-                seg.sepoints.push_back({ curve->getStartPoint(),PointPos::start });
-                seg.sepoints.push_back({ curve->getEndPoint() ,PointPos::end });
-                seg.sepoints.push_back({ curve->getCenter() ,PointPos::mid });
-            }
-            else if (geo->is<Part::GeomCircle>()) {
-                Part::GeomCircle* curve = static_cast<Part::GeomCircle*>(geo);
-                seg.sepoints.push_back({ curve->getCenter() ,PointPos::mid });
-            }
-            else if (geo->isDerivedFrom<Part::GeomConic>()) {
-                // A full conic (ellipse, hyperbola, parabola) has no ends, so its centre
-                // is the only anchor it can offer. Without this an ellipse - which is
-                // what a circle tilted against the sketch plane projects to - had no
-                // marker at all: nothing to draw, to pick or to snap to.
-                const auto* conic = static_cast<const Part::GeomConic*>(geo);
-                seg.sepoints.push_back({ conic->getCenter() ,PointPos::mid });
-            }
-            else if (geo->is<Part::GeomBSplineCurve>()) {
-                Part::GeomBSplineCurve* curve = static_cast<Part::GeomBSplineCurve*>(geo);
-                std::vector<Base::Vector3d>poles = curve->getPoles();
-                for (int i = 0; i < poles.size(); i++) {
-                    seg.sepoints.push_back({ poles[i],PointPos::mid });
-                }
-            }
-        }
-        else if (geo->is<Part::GeomPoint>()) {
-            Base::Vector3d pos = static_cast<Part::GeomPoint*>(geo)->getPoint();
-            seg.sepoints.push_back({ pos, PointPos::start });
-        }
-        return seg;
-    }
-    SketcherObj::CurveSegment& SketcherObj::segmentOf(Part::Geometry* geo)
-    {
-        // An entry existing means "this geometry is sampled": a point samples to no
-        // polyline at all, so the content cannot be used to tell.
-        const auto found = mGeoSegment.find(geo);
-        if (found != mGeoSegment.end()) {
-            return found->second;
-        }
-        return mGeoSegment.emplace(geo, getCurveSegment(geo)).first->second;
-    }
-    const SketcherObj::CurveSegment* SketcherObj::findSegment(
-        const Part::Geometry* geo) const
-    {
-        const auto found = mGeoSegment.find(const_cast<Part::Geometry*>(geo));
-        if (found == mGeoSegment.end()) {
-            return nullptr;
-        }
-        return &found->second;
-    }
-    SketcherPlane2D SketcherObj::getPlane()
-    {
-        return mPlane;
-    }    
-    void SketcherObj::onUpdate()
+    void SketcherObjWidget::onUpdate()
     {
         isHaveActiveHandler = false;
         auto& gizmoWidgets = renderer->getGizmoWidgets();
@@ -253,18 +248,13 @@ namespace MOON {
             // from before the tool was started would be read as a curve of this
             // sketch by them.
             if (preSelectGeoId.GeoId < 0) {
-                preSelectGeoId = { NoGeoId, PointPos::none };
+            preSelectGeoId = { NoGeoId, PointPos::none };
             }
-        }
-        draw();
-    }
-    void SketcherObj::getPlaneNormal(double* p)
-    {
-        p[0] = mPlane.normal.x;
-        p[1] = mPlane.normal.y;
-        p[2] = mPlane.normal.z;
-    }
-    bool SketcherObj::gridView(GridView& p_out) const
+            }
+            syncWithSketch();
+            draw();
+            }
+    bool SketcherObjWidget::gridView(GridView& p_out) const
     {
         const auto* camera = m_sceneView ? m_sceneView->GetCamera() : nullptr;
         if (camera == nullptr) {
@@ -295,9 +285,9 @@ namespace MOON {
                 static_cast<float>(p_world.y),
                 static_cast<float>(p_world.z)));
             };
-        const Maths::FVector3 viewOrigin = viewOf(mPlane.origin);
-        const Maths::FVector3 viewX = viewOf(mPlane.origin + mPlane.xAxis);
-        const Maths::FVector3 viewY = viewOf(mPlane.origin + mPlane.yAxis);
+        const Maths::FVector3 viewOrigin = viewOf(m_sketch->plane().origin);
+        const Maths::FVector3 viewX = viewOf(m_sketch->plane().origin + m_sketch->plane().xAxis);
+        const Maths::FVector3 viewY = viewOf(m_sketch->plane().origin + m_sketch->plane().yAxis);
         const float uX = viewX.x - viewOrigin.x;
         const float uY = viewX.y - viewOrigin.y;
         const float vX = viewY.x - viewOrigin.x;
@@ -345,7 +335,7 @@ namespace MOON {
         p_out.step = step;
         return true;
     }
-    void SketcherObj::drawBackground()
+    void SketcherObjWidget::drawBackground()
     {
         if (!InEdit()) return;
 
@@ -362,7 +352,7 @@ namespace MOON {
         // viewport. Reading the visible range off the viewport corners as an
         // axis-aligned rectangle only holds face on - tilted, the true quad sticks out
         // of that rectangle and the grid is left with corners missing.
-        if (m_drawGrid) {
+        if (m_sketch->isDrawGrid()) {
             const Eigen::Vector4<uint8_t> minorColor(150, 132, 118, 118); // (A,B,G,R) = (255, b,g,r)
             const Eigen::Vector4<uint8_t> majorColor(255, 66, 56, 56); // (A,B,G,R) = (255, b,g,r)
             if (m_sceneView && m_sceneView->GetCamera()) {
@@ -374,8 +364,8 @@ namespace MOON {
                     for (int k = -10; k <= 10; ++k) {
                         const float g = k * 10.0f;
                         const auto& col = (k % 5) == 0 ? majorColor : minorColor;
-                        renderer->drawLine(mPlane.valueEigen(g, -extent), mPlane.valueEigen(g, extent), 1.0f, col);
-                        renderer->drawLine(mPlane.valueEigen(-extent, g), mPlane.valueEigen(extent, g), 1.0f, col);
+                        renderer->drawLine(m_sketch->plane().valueEigen(g, -extent), m_sketch->plane().valueEigen(g, extent), 1.0f, col);
+                        renderer->drawLine(m_sketch->plane().valueEigen(-extent, g), m_sketch->plane().valueEigen(extent, g), 1.0f, col);
                     }
                 };
 
@@ -460,11 +450,11 @@ namespace MOON {
                         const auto& col = (i % 5) == 0 ? majorColor : minorColor;
                         if (p_constantU) {
                             renderer->drawLine(
-                                mPlane.valueEigen(g, lo), mPlane.valueEigen(g, hi), 1.0f, col);
+                                m_sketch->plane().valueEigen(g, lo), m_sketch->plane().valueEigen(g, hi), 1.0f, col);
                         }
                         else {
                             renderer->drawLine(
-                                mPlane.valueEigen(lo, g), mPlane.valueEigen(hi, g), 1.0f, col);
+                                m_sketch->plane().valueEigen(lo, g), m_sketch->plane().valueEigen(hi, g), 1.0f, col);
                         }
                     }
                 };
@@ -473,7 +463,7 @@ namespace MOON {
             }
         }
     }
-    void SketcherObj::drawSketchAxes()
+    void SketcherObjWidget::drawSketchAxes()
     {
         // The axes are the one kind of curve that is drawn from its line and not from its
         // sampled points: the geometry has to start at the origin (that is the root
@@ -546,7 +536,7 @@ namespace MOON {
             // cover the highlight of the other.
             if (!isVertical) {
                 renderer->drawPoint(
-                    mPlane.valueEigen(0.0, 0.0),
+                    m_sketch->plane().valueEigen(0.0, 0.0),
                     pointSize + 1,
                     isOriginPicked ? selectColor
                                    : (isOriginPreSelected ? preselectColor
@@ -555,7 +545,7 @@ namespace MOON {
         }
         renderer->popSize();
     }
-    void SketcherObj::drawAxisSpanning(int p_axisIndex)
+    void SketcherObjWidget::drawAxisSpanning(int p_axisIndex)
     {
         // An axis is drawn as the infinite line it stands for: its geometry is a
         // segment that *starts* at the origin - the start point of the horizontal
@@ -582,30 +572,30 @@ namespace MOON {
             const double extent = 500.0;
             if (p_axisIndex == 0) {
                 renderer->drawLine(
-                    mPlane.valueEigen(-extent, 0.0),
-                    mPlane.valueEigen(extent, 0.0));
+                    m_sketch->plane().valueEigen(-extent, 0.0),
+                    m_sketch->plane().valueEigen(extent, 0.0));
             }
             else {
                 renderer->drawLine(
-                    mPlane.valueEigen(0.0, -extent),
-                    mPlane.valueEigen(0.0, extent));
+                    m_sketch->plane().valueEigen(0.0, -extent),
+                    m_sketch->plane().valueEigen(0.0, extent));
             }
             return;
         }
 
         const auto& viewM = axisCam->GetViewMatrix();
-        const Maths::FVector3 origin3(mPlane.origin.x, mPlane.origin.y, mPlane.origin.z);
+        const Maths::FVector3 origin3(m_sketch->plane().origin.x, m_sketch->plane().origin.y, m_sketch->plane().origin.z);
         const Maths::FVector3 v0 = viewM.MulPoint(origin3);
         const float halfH = 1.0f / proj11;
         const float hx = halfH * aspect;
         const float hy = halfH;
-        const Base::Vector3d dir = p_axisIndex == 0 ? mPlane.xAxis : mPlane.yAxis;
+        const Base::Vector3d dir = p_axisIndex == 0 ? m_sketch->plane().xAxis : m_sketch->plane().yAxis;
         // The direction of the axis in view space: the axis is a line through the
         // origin, so this is what tells where it leaves the viewport rectangle.
         const Maths::FVector3 p1 = viewM.MulPoint(Maths::FVector3(
-            mPlane.origin.x + dir.x,
-            mPlane.origin.y + dir.y,
-            mPlane.origin.z + dir.z));
+            m_sketch->plane().origin.x + dir.x,
+            m_sketch->plane().origin.y + dir.y,
+            m_sketch->plane().origin.z + dir.z));
         const float coords[2] = { v0.x, v0.y };
         const float dirC[2] = { p1.x - v0.x, p1.y - v0.y };
         const float half[2] = { hx, hy };
@@ -631,19 +621,19 @@ namespace MOON {
         const float ext = std::max((hi - lo) * 0.05f, 1e-3f);
         if (p_axisIndex == 0) {
             renderer->drawLine(
-                mPlane.valueEigen(lo - ext, 0.0),
-                mPlane.valueEigen(hi + ext, 0.0));
+                m_sketch->plane().valueEigen(lo - ext, 0.0),
+                m_sketch->plane().valueEigen(hi + ext, 0.0));
         }
         else {
             renderer->drawLine(
-                mPlane.valueEigen(0.0, lo - ext),
-                mPlane.valueEigen(0.0, hi + ext));
+                m_sketch->plane().valueEigen(0.0, lo - ext),
+                m_sketch->plane().valueEigen(0.0, hi + ext));
         }
     }
 
-    bool SketcherObj::snapToGridPoint(Base::Vector2d& pos) const
+    bool SketcherObjWidget::snapToGridPoint(Base::Vector2d& pos) const
     {
-        if (!m_snapToGrid || !m_drawGrid || !m_sceneView) {
+        if (!m_sketch->isSnapToGrid() || !m_sketch->isDrawGrid() || !m_sceneView) {
             return false;
         }
         // The very step drawBackground() draws its lattice with: the cursor has to
@@ -656,7 +646,7 @@ namespace MOON {
         const double gx = std::round(pos.x / step) * step;
         const double gy = std::round(pos.y / step) * step;
         const auto worldOf = [this](const Base::Vector2d& sk) {
-            return mPlane.origin + sk.x * mPlane.xAxis + sk.y * mPlane.yAxis;
+            return m_sketch->plane().origin + sk.x * m_sketch->plane().xAxis + sk.y * m_sketch->plane().yAxis;
         };
         const auto screenOf = [this, &worldOf](const Base::Vector2d& sk) {
             const Base::Vector3d w = worldOf(sk);
@@ -683,7 +673,7 @@ namespace MOON {
         return false;
     }
 
-    void SketcherObj::draw() {
+    void SketcherObjWidget::draw() {
         if (InEdit()) {
             drawBackground();
             // The axes are a backdrop and go under everything else: a line drawn exactly
@@ -694,18 +684,18 @@ namespace MOON {
         renderer->pushSize(m_drawOption.curveLineWidth);
        
         if (selectState == DragRect && sketchDrawRect && !isHaveActiveHandler) {
-            Eigen::Vector3f p1 = mPlane.valueEigen(Base::Vector2d(std::min(onSketchPosP1.x, onSketchPosP2.x), std::min(onSketchPosP1.y, onSketchPosP2.y)));
-            Eigen::Vector3f p2 = mPlane.valueEigen(Base::Vector2d(std::max(onSketchPosP1.x, onSketchPosP2.x), std::min(onSketchPosP1.y, onSketchPosP2.y)));
-            Eigen::Vector3f p3 = mPlane.valueEigen(Base::Vector2d(std::max(onSketchPosP1.x, onSketchPosP2.x), std::max(onSketchPosP1.y, onSketchPosP2.y)));
-            Eigen::Vector3f p4 = mPlane.valueEigen(Base::Vector2d(std::min(onSketchPosP1.x, onSketchPosP2.x), std::max(onSketchPosP1.y, onSketchPosP2.y)));
+            Eigen::Vector3f p1 = m_sketch->plane().valueEigen(Base::Vector2d(std::min(onSketchPosP1.x, onSketchPosP2.x), std::min(onSketchPosP1.y, onSketchPosP2.y)));
+            Eigen::Vector3f p2 = m_sketch->plane().valueEigen(Base::Vector2d(std::max(onSketchPosP1.x, onSketchPosP2.x), std::min(onSketchPosP1.y, onSketchPosP2.y)));
+            Eigen::Vector3f p3 = m_sketch->plane().valueEigen(Base::Vector2d(std::max(onSketchPosP1.x, onSketchPosP2.x), std::max(onSketchPosP1.y, onSketchPosP2.y)));
+            Eigen::Vector3f p4 = m_sketch->plane().valueEigen(Base::Vector2d(std::min(onSketchPosP1.x, onSketchPosP2.x), std::max(onSketchPosP1.y, onSketchPosP2.y)));
             renderer->drawQuad(p1, p2, p3, p4);
         }
         const Eigen::Vector4<uint8_t>& pointColor = m_drawOption.pointColor;
         const Eigen::Vector4<uint8_t>& preselectColor = m_drawOption.preselectColor;
         const Eigen::Vector4<uint8_t>& selectColor = m_drawOption.selectColor;
         const float pointSize = m_drawOption.pointSize;
-        for (int i = 0;i < mGeoList.size();i++) {
-            if (mHiddenGeoIds.count(i)) {
+        for (int i = 0;i < m_sketch->geometries().size();i++) {
+            if (!m_sketch->isGeometryVisible(i)) {
                 continue;
             }
             bool isSelect = false;
@@ -716,9 +706,9 @@ namespace MOON {
                     }
                 }
             }
-            auto& geo = mGeoList[i];
+            auto& geo = m_sketch->geometries()[i];
             const bool isConstruction
-                = mConstructionGeoIds.count(i) != 0 || geo->getConstruction();
+                = m_sketch->isConstructionGeometry(i) != 0 || geo->getConstruction();
             if (isSelect) {
                 renderer->pushColor(selectColor);
             }
@@ -731,15 +721,15 @@ namespace MOON {
                 );
             }
             if (geo->isDerivedFrom<Part::GeomCurve>()) {
-                auto& seg = mGeoSegment[geo.get()];
+                auto& seg = m_sketch->segmentOf(geo.get());
                 if (isConstruction) {
-                    drawDashedSketchPolyline(renderer, mPlane, seg.point);
+                    drawDashedSketchPolyline(renderer, m_sketch->plane(), seg.point);
                 }
                 else {
                     for (int k = 0; k + 1 < static_cast<int>(seg.point.size()); k++) {
                         renderer->drawLine(
-                            mPlane.valueEigen(seg.point[k].x, seg.point[k].y),
-                            mPlane.valueEigen(seg.point[k + 1].x, seg.point[k + 1].y)
+                            m_sketch->plane().valueEigen(seg.point[k].x, seg.point[k].y),
+                            m_sketch->plane().valueEigen(seg.point[k + 1].x, seg.point[k + 1].y)
                         );
                     }
                 }
@@ -752,9 +742,9 @@ namespace MOON {
         // External geometry is selectable like the sketch's own curves (it is what a
         // constraint is applied to), so it is highlighted like them - only its idle
         // colour sets it apart as a reference.
-        for (int externalIndex = 0; externalIndex < getExternalCurveCount(); ++externalIndex) {
-            const int geoId = getExternalGeoId(externalIndex);
-            const Part::Geometry* externalGeo = getExternalCurve(geoId);
+        for (int externalIndex = 0; externalIndex < m_sketch->getExternalCurveCount(); ++externalIndex) {
+            const int geoId = m_sketch->getExternalGeoId(externalIndex);
+            const Part::Geometry* externalGeo = m_sketch->getExternalCurve(geoId);
             if (externalGeo == nullptr) {
                 continue;
             }
@@ -769,11 +759,11 @@ namespace MOON {
             const bool isPreSelected = preSelectGeoId.GeoId == geoId
                 && selectState != OperationGeo;
 
-            if (isAxisCurve(geoId)) {
+            if (m_sketch->isAxisCurve(geoId)) {
                 continue;  // drawn as a backdrop, before the geometry (drawSketchAxes)
             }
 
-            auto& segment = segmentOf(const_cast<Part::Geometry*>(externalGeo));
+            auto& segment = m_sketch->segmentOf(const_cast<Part::Geometry*>(externalGeo));
 
             // The curve first, its markers on top: the same order the sketch's own
             // geometry is drawn in, because a marker under its own curve is invisible.
@@ -786,8 +776,8 @@ namespace MOON {
                 // sketch geometry already uses.
                 for (int k = 0; k + 1 < static_cast<int>(segment.point.size()); k++) {
                     renderer->drawLine(
-                        mPlane.valueEigen(segment.point[k].x, segment.point[k].y),
-                        mPlane.valueEigen(segment.point[k + 1].x, segment.point[k + 1].y)
+                        m_sketch->plane().valueEigen(segment.point[k].x, segment.point[k].y),
+                        m_sketch->plane().valueEigen(segment.point[k + 1].x, segment.point[k + 1].y)
                     );
                 }
             }
@@ -808,7 +798,7 @@ namespace MOON {
                 const bool pointPreSelected
                     = isPreSelected && preSelectGeoId.pointPos == pos;
                 renderer->drawPoint(
-                    mPlane.valueEigen(segment.sepoints[k].coord.x, segment.sepoints[k].coord.y),
+                    m_sketch->plane().valueEigen(segment.sepoints[k].coord.x, segment.sepoints[k].coord.y),
                     pointSize + 1,
                     pointSelected ? selectColor
                                   : (pointPreSelected ? preselectColor
@@ -816,14 +806,14 @@ namespace MOON {
             }
         }
         // Point markers are drawn after the curves so they stay on top.
-        for (int geoIndex = 0; geoIndex < static_cast<int>(mGeoList.size()); ++geoIndex) {
-            if (mHiddenGeoIds.count(geoIndex)) {
+        for (int geoIndex = 0; geoIndex < static_cast<int>(m_sketch->geometries().size()); ++geoIndex) {
+            if (!m_sketch->isGeometryVisible(geoIndex)) {
                 continue;
             }
             const bool isConstruction
-                = mConstructionGeoIds.count(geoIndex) != 0
-                || mGeoList[geoIndex]->getConstruction();
-            auto& sePoints = mGeoSegment[mGeoList[geoIndex].get()].sepoints;
+                = m_sketch->isConstructionGeometry(geoIndex) != 0
+                || m_sketch->geometries()[geoIndex]->getConstruction();
+            auto& sePoints = m_sketch->segmentOf(m_sketch->geometries()[geoIndex].get()).sepoints;
             for (int k = 0; k < static_cast<int>(sePoints.size()); ++k) {
                 bool pointSelected = false;
                 for (const auto& sel : selectIds) {
@@ -836,7 +826,7 @@ namespace MOON {
                     continue;  // already drawn in its selection colour above
                 }
                 renderer->drawPoint(
-                    mPlane.valueEigen(sePoints[k].coord.x, sePoints[k].coord.y),
+                    m_sketch->plane().valueEigen(sePoints[k].coord.x, sePoints[k].coord.y),
                     pointSize + 1,
                     isConstruction ? m_drawOption.constructionColor : pointColor
                 );
@@ -844,17 +834,17 @@ namespace MOON {
         }
         // Selected points are drawn last so they stay clearly on top.
         for (const auto& sel : selectIds) {
-            if (sel.GeoId < 0 || sel.GeoId >= static_cast<int>(mGeoList.size())) {
+            if (sel.GeoId < 0 || sel.GeoId >= static_cast<int>(m_sketch->geometries().size())) {
                 continue;
             }
-            if (mHiddenGeoIds.count(sel.GeoId)) {
+            if (!m_sketch->isGeometryVisible(sel.GeoId)) {
                 continue;
             }
-            auto& sePoints = mGeoSegment[mGeoList[sel.GeoId].get()].sepoints;
+            auto& sePoints = m_sketch->segmentOf(m_sketch->geometries()[sel.GeoId].get()).sepoints;
             for (const auto& sp : sePoints) {
                 if (sp.pointPos == sel.pointPos) {
                     renderer->drawPoint(
-                        mPlane.valueEigen(sp.coord.x, sp.coord.y),
+                        m_sketch->plane().valueEigen(sp.coord.x, sp.coord.y),
                         pointSize + 2,
                         selectColor
                     );
@@ -914,7 +904,7 @@ namespace MOON {
         out.y = p1.y + t * dy1;
         return true;
     }
-    void SketcherObj::updateConstraintLabelInteraction()
+    void SketcherObjWidget::updateConstraintLabelInteraction()
     {
         // While geometry itself is being dragged the label overlay must stay
         // out of the way; a label drag, however, is always continued here.
@@ -926,7 +916,7 @@ namespace MOON {
         }
         auto [mx, my] = m_sceneView->getInutState().GetMousePosition();
         if (m_labelDrag >= 0) {
-            const Sketcher::Constraint* c = getConstraint(m_labelDrag);
+            const Sketcher::Constraint* c = m_sketch->getConstraint(m_labelDrag);
             if (!c) {
                 m_labelDrag = -1;
                 return;
@@ -1036,7 +1026,7 @@ namespace MOON {
                 // rotated camera a screen delta is not a sketch delta, and the label
                 // would lag behind the cursor.)
                 Base::Vector2d center;
-                if (getGeometryCenterSketch(c->First, center)) {
+                if (m_sketch->getGeometryCenterSketch(c->First, center)) {
                     const Base::Vector2d cursor = getMouseHitSketchPlanePoint();
                     const Base::Vector2d wanted = cursor - center;
                     if (wanted.Length() > 1.0e-9) {
@@ -1051,97 +1041,7 @@ namespace MOON {
         pickLabelTarget(
             static_cast<float>(mx), static_cast<float>(my), m_labelHover, m_labelHoverHandle);
     }
-    bool SketcherObj::getGeometryPointSketch(int geoId, PointPos pos, Base::Vector2d& out) const
-    {
-        // External references are drawn and labelled like the sketch's own curves, so
-        // the lookup has to cover both halves of the solver list.
-        const Part::Geometry* geo = resolveGeometry(geoId);
-        // The origin is the fallback for the root-point id, but only when that id is
-        // not one of the external curves (the ids of the block run up to -1).
-        if (geo == nullptr && geoId == Sketcher::GeoEnum::RtPnt
-            && (pos == PointPos::start || pos == PointPos::mid)) {
-            out.x = 0.0;
-            out.y = 0.0;
-            return true;
-        }
-        if (!geo) {
-            return false;
-        }
-        if (geo->is<Part::GeomPoint>()) {
-            const Base::Vector3d p = static_cast<const Part::GeomPoint*>(geo)->getPoint();
-            out.x = p.x;
-            out.y = p.y;
-            return true;
-        }
-        auto it = mGeoSegment.find(const_cast<Part::Geometry*>(geo));
-        if (it == mGeoSegment.end()) {
-            return false;
-        }
-        for (const auto& sp : it->second.sepoints) {
-            if (sp.pointPos == pos) {
-                out.x = sp.coord.x;
-                out.y = sp.coord.y;
-                return true;
-            }
-        }
-        return false;
-    }
-    bool SketcherObj::getGeometryCenterSketch(int geoId, Base::Vector2d& out) const
-    {
-        if (geoId == NoGeoId) {
-            return false;
-        }
-        const Part::Geometry* geo = resolveGeometry(geoId);
-        // The origin stands in for the root-point id, but only when that id does not
-        // name one of the external curves.
-        if (geo == nullptr && geoId == Sketcher::GeoEnum::RtPnt) {
-            out.x = 0.0;
-            out.y = 0.0;
-            return true;
-        }
-        if (!geo) {
-            return false;
-        }
-        Base::Vector3d center;
-        // An arc's centre is the centre of the circle it is part of. The bounded-curve
-        // branch further down would answer with the middle of its chord instead, which
-        // is not a centre at all - and it is the branch that used to win for arcs,
-        // because the abstract GeomArcOfConic test does not answer for them. Their
-        // concrete types are asked for instead.
-        const bool isArc = geo->is<Part::GeomArcOfCircle>()
-            || geo->is<Part::GeomArcOfEllipse>()
-            || geo->is<Part::GeomArcOfHyperbola>()
-            || geo->is<Part::GeomArcOfParabola>();
-        if (isArc) {
-            center = static_cast<const Part::GeomArcOfConic*>(geo)->getCenter();
-        }
-        else if (geo->isDerivedFrom<Part::GeomConic>()) {
-            center = static_cast<const Part::GeomConic*>(geo)->getCenter();
-        }
-        else if (geo->is<Part::GeomPoint>()) {
-            center = static_cast<const Part::GeomPoint*>(geo)->getPoint();
-        }
-        else if (geo->isDerivedFrom<Part::GeomBoundedCurve>()) {
-            const auto* bounded = static_cast<const Part::GeomBoundedCurve*>(geo);
-            center = (bounded->getStartPoint() + bounded->getEndPoint()) * 0.5;
-        }
-        else if (geo->isDerivedFrom<Part::GeomCurve>()) {
-            const auto it = mGeoSegment.find(const_cast<Part::Geometry*>(geo));
-            if (it != mGeoSegment.end() && !it->second.point.empty()) {
-                center = it->second.point[it->second.point.size() / 2];
-            }
-            else {
-                return false;
-            }
-        }
-        else {
-            return false;
-        }
-        out.x = center.x;
-        out.y = center.y;
-        return true;
-    }
-    bool SketcherObj::getConstraintMeasureEndpoints(
+    bool SketcherObjWidget::getConstraintMeasureEndpoints(
         const Sketcher::Constraint* constraint,
         Base::Vector2d& a,
         Base::Vector2d& b
@@ -1154,17 +1054,17 @@ namespace MOON {
         case Sketcher::ConstraintType::DistanceX:
         case Sketcher::ConstraintType::DistanceY: {
             if (constraint->Second != Sketcher::GeoEnum::GeoUndef) {
-                return getGeometryPointSketch(constraint->First, constraint->FirstPos, a)
-                    && getGeometryPointSketch(constraint->Second, constraint->SecondPos, b);
+                return m_sketch->getGeometryPointSketch(constraint->First, constraint->FirstPos, a)
+                    && m_sketch->getGeometryPointSketch(constraint->Second, constraint->SecondPos, b);
             }
             if (constraint->FirstPos == PointPos::none) {
-                return getGeometryPointSketch(constraint->First, PointPos::start, a)
-                    && getGeometryPointSketch(constraint->First, PointPos::end, b);
+                return m_sketch->getGeometryPointSketch(constraint->First, PointPos::start, a)
+                    && m_sketch->getGeometryPointSketch(constraint->First, PointPos::end, b);
             }
             // Coordinate constraint of a single point: DistanceX fixes the
             // x-coordinate, so the shaft spans from the point to the Y axis;
             // DistanceY fixes the y-coordinate and spans to the X axis.
-            if (!getGeometryPointSketch(constraint->First, constraint->FirstPos, a)) {
+            if (!m_sketch->getGeometryPointSketch(constraint->First, constraint->FirstPos, a)) {
                 return false;
             }
             if (constraint->Type == Sketcher::ConstraintType::DistanceX) {
@@ -1179,15 +1079,15 @@ namespace MOON {
         }
         case Sketcher::ConstraintType::Distance: {
             if (constraint->Second == Sketcher::GeoEnum::GeoUndef) {
-                return getGeometryPointSketch(constraint->First, PointPos::start, a)
-                    && getGeometryPointSketch(constraint->First, PointPos::end, b);
+                return m_sketch->getGeometryPointSketch(constraint->First, PointPos::start, a)
+                    && m_sketch->getGeometryPointSketch(constraint->First, PointPos::end, b);
             }
             if (constraint->FirstPos != PointPos::none
                 && constraint->SecondPos == PointPos::none) {
                 Base::Vector2d la, lb;
-                if (getGeometryPointSketch(constraint->First, constraint->FirstPos, a)
-                    && getGeometryPointSketch(constraint->Second, PointPos::start, la)
-                    && getGeometryPointSketch(constraint->Second, PointPos::end, lb)) {
+                if (m_sketch->getGeometryPointSketch(constraint->First, constraint->FirstPos, a)
+                    && m_sketch->getGeometryPointSketch(constraint->Second, PointPos::start, la)
+                    && m_sketch->getGeometryPointSketch(constraint->Second, PointPos::end, lb)) {
                     projectPointOnSegment2d(a, la, lb, b);
                     return true;
                 }
@@ -1195,17 +1095,17 @@ namespace MOON {
             }
             if (constraint->FirstPos != PointPos::none
                 && constraint->SecondPos != PointPos::none) {
-                return getGeometryPointSketch(constraint->First, constraint->FirstPos, a)
-                    && getGeometryPointSketch(constraint->Second, constraint->SecondPos, b);
+                return m_sketch->getGeometryPointSketch(constraint->First, constraint->FirstPos, a)
+                    && m_sketch->getGeometryPointSketch(constraint->Second, constraint->SecondPos, b);
             }
-            return getGeometryCenterSketch(constraint->First, a)
-                && getGeometryCenterSketch(constraint->Second, b);
+            return m_sketch->getGeometryCenterSketch(constraint->First, a)
+                && m_sketch->getGeometryCenterSketch(constraint->Second, b);
         }
         default:
             return false;
         }
     }
-    bool SketcherObj::computeStraightLabelTrack(
+    bool SketcherObjWidget::computeStraightLabelTrack(
         const Sketcher::Constraint* constraint,
         float& trackAx,
         float& trackAy,
@@ -1230,7 +1130,7 @@ namespace MOON {
         gapY = frame.gapY;
         return true;
     }
-    bool SketcherObj::straightDimFrame(
+    bool SketcherObjWidget::straightDimFrame(
         const Sketcher::Constraint* constraint,
         StraightDimFrame& out
     ) const
@@ -1243,7 +1143,7 @@ namespace MOON {
             return false;
         }
         const auto worldOf = [this](const Base::Vector2d& sk) {
-            return mPlane.origin + sk.x * mPlane.xAxis + sk.y * mPlane.yAxis;
+            return m_sketch->plane().origin + sk.x * m_sketch->plane().xAxis + sk.y * m_sketch->plane().yAxis;
             };
         const Eigen::Vector3f wa(
             static_cast<float>(worldOf(aSk).x),
@@ -1345,14 +1245,14 @@ namespace MOON {
         out.gapY = ny * captionGap;
         return true;
     }
-    float SketcherObj::pixelsPerSketchUnit() const
+    float SketcherObjWidget::pixelsPerSketchUnit() const
     {
         // One sketch unit is measured on screen through the same mapping the
         // annotations are drawn with, so that the two cannot disagree about the
         // scale. The two axes give the same answer for a sketch seen from the front,
         // which is what the dimension overlay is for.
         const auto worldOf = [this](const Base::Vector2d& sk) {
-            return mPlane.origin + sk.x * mPlane.xAxis + sk.y * mPlane.yAxis;
+            return m_sketch->plane().origin + sk.x * m_sketch->plane().xAxis + sk.y * m_sketch->plane().yAxis;
             };
         const auto screenOf = [this, &worldOf](const Base::Vector2d& sk) {
             const Base::Vector3d w = worldOf(sk);
@@ -1368,9 +1268,9 @@ namespace MOON {
         return scale > 1.0e-4f ? scale : 1.0e-4f;
     }
 
-    void SketcherObj::placeDimensionAnnotation(int constrId, float p_screenX, float p_screenY)
+    void SketcherObjWidget::placeDimensionAnnotation(int constrId, float p_screenX, float p_screenY)
     {
-        const Sketcher::Constraint* c = getConstraint(constrId);
+        const Sketcher::Constraint* c = m_sketch->getConstraint(constrId);
         if (c == nullptr) {
             return;
         }
@@ -1412,11 +1312,11 @@ namespace MOON {
         if (c->Type == Sketcher::ConstraintType::Radius
             || c->Type == Sketcher::ConstraintType::Diameter) {
             Base::Vector2d centerSk;
-            if (!getGeometryCenterSketch(c->First, centerSk)) {
+            if (!m_sketch->getGeometryCenterSketch(c->First, centerSk)) {
                 return;
             }
             const Base::Vector3d world
-                = mPlane.origin + centerSk.x * mPlane.xAxis + centerSk.y * mPlane.yAxis;
+                = m_sketch->plane().origin + centerSk.x * m_sketch->plane().xAxis + centerSk.y * m_sketch->plane().yAxis;
             const Eigen::Vector2f centerS = renderer->worldToScreen(
                 Eigen::Vector3f(
                     static_cast<float>(world.x),
@@ -1435,7 +1335,7 @@ namespace MOON {
             }
         }
     }
-    float SketcherObj::straightDimOffset(
+    float SketcherObjWidget::straightDimOffset(
         const Sketcher::Constraint* constraint,
         float p_defaultOffsetSketch
     ) const
@@ -1447,7 +1347,7 @@ namespace MOON {
             = found == m_straightDimOffsetSketch.end() ? p_defaultOffsetSketch : found->second;
         return offsetSketch * pixelsPerSketchUnit();
     }
-    bool SketcherObj::straightDimShaft(
+    bool SketcherObjWidget::straightDimShaft(
         const Sketcher::Constraint* constraint,
         Eigen::Vector2f& p_a,
         Eigen::Vector2f& p_b
@@ -1462,7 +1362,7 @@ namespace MOON {
         p_b = Eigen::Vector2f(trackBx, trackBy);
         return true;
     }
-    int SketcherObj::pickConstraintDimLineAt(float p_mouseX, float p_mouseY) const
+    int SketcherObjWidget::pickConstraintDimLineAt(float p_mouseX, float p_mouseY) const
     {
         if (!InEdit()) {
             return -1;
@@ -1473,8 +1373,8 @@ namespace MOON {
         float bestDistance = kLineTolerance;
         // Last constraint first, like the caption hit test: what was added later sits
         // on top.
-        for (int i = static_cast<int>(mConstraintList.size()) - 1; i >= 0; --i) {
-            const Sketcher::Constraint* c = mConstraintList[i];
+        for (int i = static_cast<int>(m_sketch->constraints().size()) - 1; i >= 0; --i) {
+            const Sketcher::Constraint* c = m_sketch->constraints()[i];
             if (!c || !c->isVisible || !isStraightDimension(c->Type)) {
                 continue;
             }
@@ -1500,15 +1400,15 @@ namespace MOON {
         }
         return best;
     }
-    int SketcherObj::pickConstraintAngleArcAt(float p_mouseX, float p_mouseY) const
+    int SketcherObjWidget::pickConstraintAngleArcAt(float p_mouseX, float p_mouseY) const
     {
         if (!InEdit()) {
             return -1;
         }
         constexpr float kArcTolerance = 8.0f;
         constexpr float kPi = 3.14159265358979f;
-        for (int i = static_cast<int>(mConstraintList.size()) - 1; i >= 0; --i) {
-            const Sketcher::Constraint* c = mConstraintList[i];
+        for (int i = static_cast<int>(m_sketch->constraints().size()) - 1; i >= 0; --i) {
+            const Sketcher::Constraint* c = m_sketch->constraints()[i];
             if (!c || !c->isVisible || c->Type != Sketcher::ConstraintType::Angle) {
                 continue;
             }
@@ -1553,7 +1453,7 @@ namespace MOON {
         }
         return -1;
     }
-    void SketcherObj::pickLabelTarget(
+    void SketcherObjWidget::pickLabelTarget(
         float p_mouseX,
         float p_mouseY,
         int& p_constrId,
@@ -1578,17 +1478,8 @@ namespace MOON {
             p_handle = LabelHandle::AngleArc;
         }
     }
-    void SketcherObj::forgetConstraintLayout(const Sketcher::Constraint* p_constraint)
-    {
-        if (p_constraint == nullptr) {
-            return;
-        }
-        m_labelManualOffsetSketch.erase(p_constraint);
-        m_labelManualParam.erase(p_constraint);
-        m_straightDimOffsetSketch.erase(p_constraint);
-        m_angleLabelRadiusSketch.erase(p_constraint);
-    }
-    bool SketcherObj::computeAngleLabelTrack(
+    
+    bool SketcherObjWidget::computeAngleLabelTrack(
         const Sketcher::Constraint* constraint,
         float& centerX,
         float& centerY,
@@ -1608,8 +1499,8 @@ namespace MOON {
         if (constraint->Second == Sketcher::GeoEnum::GeoUndef) {
             // Single line angle against the sketch x-axis: arc center is the
             // line start, sweep goes from the x-axis to the segment direction.
-            if (getGeometryPointSketch(constraint->First, PointPos::start, p1)
-                && getGeometryPointSketch(constraint->First, PointPos::end, p2)) {
+            if (m_sketch->getGeometryPointSketch(constraint->First, PointPos::start, p1)
+                && m_sketch->getGeometryPointSketch(constraint->First, PointPos::end, p2)) {
                 vertex = p1;
                 dir1 = Base::Vector2d(1.0, 0.0);
                 dir2 = p2 - p1;
@@ -1620,10 +1511,10 @@ namespace MOON {
             // Angle between two lines: arc at the intersection, sweeping
             // between the far ends of both segments.
             Base::Vector2d a1, a2, b1, b2;
-            if (getGeometryPointSketch(constraint->First, PointPos::start, a1)
-                && getGeometryPointSketch(constraint->First, PointPos::end, a2)
-                && getGeometryPointSketch(constraint->Second, PointPos::start, b1)
-                && getGeometryPointSketch(constraint->Second, PointPos::end, b2)
+            if (m_sketch->getGeometryPointSketch(constraint->First, PointPos::start, a1)
+                && m_sketch->getGeometryPointSketch(constraint->First, PointPos::end, a2)
+                && m_sketch->getGeometryPointSketch(constraint->Second, PointPos::start, b1)
+                && m_sketch->getGeometryPointSketch(constraint->Second, PointPos::end, b2)
                 && intersectLines2d(a1, a2, b1, b2, vertex)) {
                 const auto distSq = [](const Base::Vector2d& a, const Base::Vector2d& b) {
                     const double dx = a.x - b.x;
@@ -1641,7 +1532,7 @@ namespace MOON {
             return false;
         }
         const auto worldOf = [this](const Base::Vector2d& sk) {
-            return mPlane.origin + sk.x * mPlane.xAxis + sk.y * mPlane.yAxis;
+            return m_sketch->plane().origin + sk.x * m_sketch->plane().xAxis + sk.y * m_sketch->plane().yAxis;
             };
         const auto screenOf = [this, &worldOf](const Base::Vector2d& sk) {
             const Base::Vector3d w = worldOf(sk);
@@ -1689,7 +1580,7 @@ namespace MOON {
         sweepDeg = sweep;
         return true;
     }
-    Base::Vector2d SketcherObj::constraintLabelAnchor(const Sketcher::Constraint* c) const
+    Base::Vector2d SketcherObjWidget::constraintLabelAnchor(const Sketcher::Constraint* c) const
     {
         Base::Vector2d p1, p2;
         if (!c) {
@@ -1699,19 +1590,19 @@ namespace MOON {
         case Sketcher::ConstraintType::DistanceX:
         case Sketcher::ConstraintType::DistanceY: {
             if (c->Second != Sketcher::GeoEnum::GeoUndef) {
-                if (getGeometryPointSketch(c->First, c->FirstPos, p1)
-                    && getGeometryPointSketch(c->Second, c->SecondPos, p2)) {
+                if (m_sketch->getGeometryPointSketch(c->First, c->FirstPos, p1)
+                    && m_sketch->getGeometryPointSketch(c->Second, c->SecondPos, p2)) {
                     return (p1 + p2) * 0.5;
                 }
             }
             else if (c->FirstPos != PointPos::none) {
                 // coordinate of a single point
-                if (getGeometryPointSketch(c->First, c->FirstPos, p1)) {
+                if (m_sketch->getGeometryPointSketch(c->First, c->FirstPos, p1)) {
                     return p1;
                 }
             }
-            else if (getGeometryPointSketch(c->First, PointPos::start, p1)
-                && getGeometryPointSketch(c->First, PointPos::end, p2)) {
+            else if (m_sketch->getGeometryPointSketch(c->First, PointPos::start, p1)
+                && m_sketch->getGeometryPointSketch(c->First, PointPos::end, p2)) {
                 return (p1 + p2) * 0.5;
             }
             break;
@@ -1719,11 +1610,11 @@ namespace MOON {
         case Sketcher::ConstraintType::Distance: {
             if (c->Second == Sketcher::GeoEnum::GeoUndef) {
                 // length of a single edge: anchor on the middle of its curve
-                const Part::Geometry* geo = resolveGeometry(c->First);
+                const Part::Geometry* geo = m_sketch->resolveGeometry(c->First);
                 if (geo) {
-                    const auto it = mGeoSegment.find(const_cast<Part::Geometry*>(geo));
-                    if (it != mGeoSegment.end() && !it->second.point.empty()) {
-                        const Base::Vector3d mid = it->second.point[it->second.point.size() / 2];
+                    const SketcherObj::CurveSegment* segment = m_sketch->findSegment(geo);
+                    if (segment != nullptr && !segment->point.empty()) {
+                        const Base::Vector3d mid = segment->point[segment->point.size() / 2];
                         return Base::Vector2d(mid.x, mid.y);
                     }
                 }
@@ -1731,9 +1622,9 @@ namespace MOON {
             else if (c->FirstPos != PointPos::none && c->SecondPos == PointPos::none) {
                 // point -> line distance
                 Base::Vector2d la, lb;
-                if (getGeometryPointSketch(c->First, c->FirstPos, p1)
-                    && getGeometryPointSketch(c->Second, PointPos::start, la)
-                    && getGeometryPointSketch(c->Second, PointPos::end, lb)) {
+                if (m_sketch->getGeometryPointSketch(c->First, c->FirstPos, p1)
+                    && m_sketch->getGeometryPointSketch(c->Second, PointPos::start, la)
+                    && m_sketch->getGeometryPointSketch(c->Second, PointPos::end, lb)) {
                     Base::Vector2d proj;
                     projectPointOnSegment2d(p1, la, lb, proj);
                     return (p1 + proj) * 0.5;
@@ -1741,14 +1632,14 @@ namespace MOON {
             }
             else if (c->FirstPos == PointPos::none && c->SecondPos == PointPos::none) {
                 // curve -> curve distance
-                if (getGeometryCenterSketch(c->First, p1) && getGeometryCenterSketch(c->Second, p2)) {
+                if (m_sketch->getGeometryCenterSketch(c->First, p1) && m_sketch->getGeometryCenterSketch(c->Second, p2)) {
                     return (p1 + p2) * 0.5;
                 }
             }
             else if (c->FirstPos != PointPos::none && c->SecondPos != PointPos::none) {
                 // point -> point distance
-                if (getGeometryPointSketch(c->First, c->FirstPos, p1)
-                    && getGeometryPointSketch(c->Second, c->SecondPos, p2)) {
+                if (m_sketch->getGeometryPointSketch(c->First, c->FirstPos, p1)
+                    && m_sketch->getGeometryPointSketch(c->Second, c->SecondPos, p2)) {
                     return (p1 + p2) * 0.5;
                 }
             }
@@ -1756,7 +1647,7 @@ namespace MOON {
         }
         case Sketcher::ConstraintType::Radius:
         case Sketcher::ConstraintType::Diameter: {
-            if (getGeometryCenterSketch(c->First, p1)) {
+            if (m_sketch->getGeometryCenterSketch(c->First, p1)) {
                 return p1;
             }
             break;
@@ -1765,13 +1656,13 @@ namespace MOON {
             if (c->Second == Sketcher::GeoEnum::GeoUndef) {
                 // single line against the sketch x-axis: anchor at the start
                 // so the caption stays close to the angle arc
-                if (getGeometryPointSketch(c->First, PointPos::start, p1)) {
+                if (m_sketch->getGeometryPointSketch(c->First, PointPos::start, p1)) {
                     return p1;
                 }
             }
             else if (c->FirstPos != PointPos::none && c->SecondPos != PointPos::none) {
-                if (getGeometryPointSketch(c->First, c->FirstPos, p1)
-                    && getGeometryPointSketch(c->Second, c->SecondPos, p2)) {
+                if (m_sketch->getGeometryPointSketch(c->First, c->FirstPos, p1)
+                    && m_sketch->getGeometryPointSketch(c->Second, c->SecondPos, p2)) {
                     return (p1 + p2) * 0.5;
                 }
             }
@@ -1779,10 +1670,10 @@ namespace MOON {
                 // angle between two lines: use their intersection when it is
                 // near the segments, otherwise fall back to the middle point
                 Base::Vector2d a1, a2, b1, b2;
-                if (getGeometryPointSketch(c->First, PointPos::start, a1)
-                    && getGeometryPointSketch(c->First, PointPos::end, a2)
-                    && getGeometryPointSketch(c->Second, PointPos::start, b1)
-                    && getGeometryPointSketch(c->Second, PointPos::end, b2)) {
+                if (m_sketch->getGeometryPointSketch(c->First, PointPos::start, a1)
+                    && m_sketch->getGeometryPointSketch(c->First, PointPos::end, a2)
+                    && m_sketch->getGeometryPointSketch(c->Second, PointPos::start, b1)
+                    && m_sketch->getGeometryPointSketch(c->Second, PointPos::end, b2)) {
                     Base::Vector2d inter;
                     if (intersectLines2d(a1, a2, b1, b2, inter)) {
                         return inter;
@@ -1797,12 +1688,12 @@ namespace MOON {
         }
         // Fall back to the first geometry centre so the caption still has a
         // reasonable home even for less common element combinations.
-        if (getGeometryCenterSketch(c->First, p1)) {
+        if (m_sketch->getGeometryCenterSketch(c->First, p1)) {
             return p1;
         }
         return Base::Vector2d();
     }
-    std::string SketcherObj::constraintLabelText(const Sketcher::Constraint* c) const
+    std::string SketcherObjWidget::constraintLabelText(const Sketcher::Constraint* c) const
     {
         if (!c) {
             return std::string();
@@ -1825,46 +1716,23 @@ namespace MOON {
         }
         return std::string(buf);
     }
-    bool SketcherObj::constraintInError(int constrId) const
+    bool SketcherObjWidget::constraintInError(int constrId) const
     {
-        auto contains = [constrId](const std::vector<int>& list) {
-            return std::find(list.begin(), list.end(), constrId) != list.end();
-            };
-        return contains(lastConflicting) || contains(lastRedundant)
-            || contains(lastPartiallyRedundant) || contains(lastMalformedConstraints);
+        // The sketch keeps the solver's diagnosis of the last solve; the most severe
+        // entry a constraint shows up in is what a label should look like.
+        return m_sketch->getConstraintStatus(constrId) != SketcherObj::ConstraintStatus::Ok;
     }
-    SketcherObj::ConstraintStatus SketcherObj::getConstraintStatus(int p_constrId) const
-    {
-        const auto contains = [p_constrId](const std::vector<int>& list) {
-            return std::find(list.begin(), list.end(), p_constrId) != list.end();
-            };
-        // A constraint can show up in more than one list; the most severe one is the
-        // one worth showing.
-        if (contains(lastConflicting)) {
-            return ConstraintStatus::Conflicting;
-        }
-        if (contains(lastMalformedConstraints)) {
-            return ConstraintStatus::Malformed;
-        }
-        if (contains(lastRedundant)) {
-            return ConstraintStatus::Redundant;
-        }
-        if (contains(lastPartiallyRedundant)) {
-            return ConstraintStatus::PartiallyRedundant;
-        }
-        return ConstraintStatus::Ok;
-    }
-    bool SketcherObj::computeConstraintLabel(
+    bool SketcherObjWidget::computeConstraintLabel(
         int constrId,
         Base::Vector2d& anchorSketch,
         float& screenX,
         float& screenY
     ) const
     {
-        if (constrId < 0 || constrId >= static_cast<int>(mConstraintList.size())) {
+        if (constrId < 0 || constrId >= static_cast<int>(m_sketch->constraints().size())) {
             return false;
         }
-        const Sketcher::Constraint* c = mConstraintList[constrId];
+        const Sketcher::Constraint* c = m_sketch->constraints()[constrId];
         if (!c || !c->isVisible || !isDimensionLabelType(c->Type)) {
             return false;
         }
@@ -1933,8 +1801,8 @@ namespace MOON {
             }
         }
         anchorSketch = constraintLabelAnchor(c);
-        const Base::Vector3d world3 = mPlane.origin + anchorSketch.x * mPlane.xAxis
-            + anchorSketch.y * mPlane.yAxis;
+        const Base::Vector3d world3 = m_sketch->plane().origin + anchorSketch.x * m_sketch->plane().xAxis
+            + anchorSketch.y * m_sketch->plane().yAxis;
         const Eigen::Vector3f world(world3.x, world3.y, world3.z);
         const Eigen::Vector2f screen = renderer->worldToScreen(world);
         const float perUnit = pixelsPerSketchUnit();
@@ -1955,13 +1823,13 @@ namespace MOON {
         screenY = screen.y() + dy * perUnit;
         return true;
     }
-    int SketcherObj::pickConstraintLabelAt(float mouseX, float mouseY) const
+    int SketcherObjWidget::pickConstraintLabelAt(float mouseX, float mouseY) const
     {
         if (!InEdit()) {
             return -1;
         }
-        for (int i = static_cast<int>(mConstraintList.size()) - 1; i >= 0; --i) {
-            const Sketcher::Constraint* c = mConstraintList[i];
+        for (int i = static_cast<int>(m_sketch->constraints().size()) - 1; i >= 0; --i) {
+            const Sketcher::Constraint* c = m_sketch->constraints()[i];
             if (!c || !c->isVisible || !isDimensionLabelType(c->Type)) {
                 continue;
             }
@@ -2003,7 +1871,7 @@ namespace MOON {
         return angle >= end;
     }
 
-    bool SketcherObj::sketchVectorOfScreenVector(
+    bool SketcherObjWidget::sketchVectorOfScreenVector(
         const Eigen::Vector2f& p_screenVector,
         Base::Vector2d& p_out
     ) const
@@ -2012,7 +1880,7 @@ namespace MOON {
         // so the two of them are the affine map the plane is projected by; inverting it
         // turns a vector that was measured on screen into the one it means here.
         const auto screenOf = [this](const Base::Vector2d& sk) {
-            return renderer->worldToScreen(mPlane.valueEigen(sk));
+            return renderer->worldToScreen(m_sketch->plane().valueEigen(sk));
             };
         const Eigen::Vector2f origin = screenOf(Base::Vector2d(0.0, 0.0));
         const Eigen::Vector2f uPix = screenOf(Base::Vector2d(1.0, 0.0)) - origin;
@@ -2027,7 +1895,7 @@ namespace MOON {
         return true;
     }
 
-    bool SketcherObj::radiusDimShaft(
+    bool SketcherObjWidget::radiusDimShaft(
         const Sketcher::Constraint* p_constraint,
         Eigen::Vector2f& p_centerScreen,
         Eigen::Vector2f& p_rimScreen
@@ -2038,20 +1906,20 @@ namespace MOON {
                 && p_constraint->Type != Sketcher::ConstraintType::Diameter)) {
             return false;
         }
-        const Part::Geometry* geo = resolveGeometry(p_constraint->First);
+        const Part::Geometry* geo = m_sketch->resolveGeometry(p_constraint->First);
         if (geo == nullptr
             || !(geo->is<Part::GeomCircle>() || geo->is<Part::GeomArcOfCircle>())) {
             return false;
         }
 
         // The shaft runs from the centre of the circle to a point of its rim: the
-        // centre comes from the curve (see getGeometryCenterSketch, which has to answer
+        // centre comes from the curve (see m_sketch->getGeometryCenterSketch, which has to answer
         // with the circle's centre for an arc rather than the middle of its chord), the
         // direction from where the caption was put - or the arc's own middle, which is
         // the part of the circle the arc covers - and the length is the radius itself.
-        const CurveSegment* seg = findSegment(geo);
+        const CurveSegment* seg = m_sketch->findSegment(geo);
         Base::Vector2d centerSk;
-        if (!getGeometryCenterSketch(p_constraint->First, centerSk)) {
+        if (!m_sketch->getGeometryCenterSketch(p_constraint->First, centerSk)) {
             return false;
         }
         const double radius = geo->is<Part::GeomCircle>()
@@ -2092,16 +1960,16 @@ namespace MOON {
             }
         }
 
-        p_centerScreen = renderer->worldToScreen(mPlane.valueEigen(centerSk));
-        p_rimScreen = renderer->worldToScreen(mPlane.valueEigen(Base::Vector2d(
+        p_centerScreen = renderer->worldToScreen(m_sketch->plane().valueEigen(centerSk));
+        p_rimScreen = renderer->worldToScreen(m_sketch->plane().valueEigen(Base::Vector2d(
             centerSk.x + dirSk.x * radius,
             centerSk.y + dirSk.y * radius)));
         return true;
     }
 
-    void SketcherObj::drawConstraintLabels()
+    void SketcherObjWidget::drawConstraintLabels()
     {
-        if (!InEdit() || mConstraintList.empty()) {
+        if (!InEdit() || m_sketch->constraints().empty()) {
             return;
         }
         // Keep the hover state in sync with the mouse even when the cursor did
@@ -2127,8 +1995,8 @@ namespace MOON {
         }
         const float thickness = 2.0f;
         const float pi = 3.14159265358979f;
-        for (int i = 0; i < static_cast<int>(mConstraintList.size()); ++i) {
-            const Sketcher::Constraint* c = mConstraintList[i];
+        for (int i = 0; i < static_cast<int>(m_sketch->constraints().size()); ++i) {
+            const Sketcher::Constraint* c = m_sketch->constraints()[i];
             if (!c || !c->isVisible || !isDimensionLabelType(c->Type)) {
                 continue;
             }
@@ -2147,7 +2015,7 @@ namespace MOON {
             const ImU32 arrowCol = isError ? IM_COL32(255, 110, 110, 255)
                 : abgrToImU32(m_drawOption.constraintColor);
             auto screenOf = [&](const Base::Vector2d& sk) -> Eigen::Vector2f {
-                return renderer->worldToScreen(mPlane.valueEigen(sk));
+                return renderer->worldToScreen(m_sketch->plane().valueEigen(sk));
                 };
             // Straight dimension shaft drawn with the shared double-arrow
             // primitive. The shaft position only depends on the measured
@@ -2296,9 +2164,9 @@ namespace MOON {
             drawList->AddText(ImVec2(sx - ts.x * 0.5f, sy - ts.y * 0.5f), textCol, text.c_str());
         }
     }
-    void SketcherObj::editConstraintValue(int constrId)
+    void SketcherObjWidget::editConstraintValue(int constrId)
     {
-        const Sketcher::Constraint* c = getConstraint(constrId);
+        const Sketcher::Constraint* c = m_sketch->getConstraint(constrId);
         if (!c || !isDimensionLabelType(c->Type)) {
             return;
         }
@@ -2323,12 +2191,12 @@ namespace MOON {
             return;
         }
         const double datum = isAngle ? entered * 3.14159265358979323846 / 180.0 : entered;
-        const int err = setDatum(constrId, datum);
+        const int err = m_sketch->setDatum(constrId, datum);
         if (err != 0) {
             CORE_ERROR("Constraint datum change failed, solver error code {}", err);
         }
     }
-    bool SketcherObj::computeTangentIconAnchor(
+    bool SketcherObjWidget::computeTangentIconAnchor(
         const Sketcher::Constraint* constraint,
         Base::Vector2d& anchorSketch,
         Base::Vector2d& dirSketch,
@@ -2349,14 +2217,14 @@ namespace MOON {
         };
         // Tangent direction of a geometry at a sketch point.
         auto tangentDirAt = [this, &normalize2d](int geoId, const Base::Vector2d& pt, Base::Vector2d& dir) {
-            const Part::Geometry* geo = resolveGeometry(geoId);
+            const Part::Geometry* geo = m_sketch->resolveGeometry(geoId);
             if (!geo) {
                 return false;
             }
             if (geo->is<Part::GeomLineSegment>()) {
                 Base::Vector2d s, e;
-                if (getGeometryPointSketch(geoId, PointPos::start, s)
-                    && getGeometryPointSketch(geoId, PointPos::end, e)) {
+                if (m_sketch->getGeometryPointSketch(geoId, PointPos::start, s)
+                    && m_sketch->getGeometryPointSketch(geoId, PointPos::end, e)) {
                     dir = e - s;
                     return normalize2d(dir);
                 }
@@ -2375,12 +2243,12 @@ namespace MOON {
         };
         // Constraint stored with explicit point elements: anchor there.
         if (constraint->FirstPos != PointPos::none) {
-            if (getGeometryPointSketch(constraint->First, constraint->FirstPos, anchorSketch)
+            if (m_sketch->getGeometryPointSketch(constraint->First, constraint->FirstPos, anchorSketch)
                 && tangentDirAt(constraint->First, anchorSketch, dirSketch)) {
                 Base::Vector2d center;
                 double radius = 0.0;
-                if (getCircleArcInfo(resolveGeometry(constraint->First), center, radius)
-                    || getCircleArcInfo(resolveGeometry(constraint->Second), center, radius)) {
+                if (getCircleArcInfo(m_sketch->resolveGeometry(constraint->First), center, radius)
+                    || getCircleArcInfo(m_sketch->resolveGeometry(constraint->Second), center, radius)) {
                     normalSketch = Base::Vector2d(
                         anchorSketch.x - center.x,
                         anchorSketch.y - center.y
@@ -2394,12 +2262,12 @@ namespace MOON {
             }
         }
         if (constraint->SecondPos != PointPos::none) {
-            if (getGeometryPointSketch(constraint->Second, constraint->SecondPos, anchorSketch)
+            if (m_sketch->getGeometryPointSketch(constraint->Second, constraint->SecondPos, anchorSketch)
                 && tangentDirAt(constraint->Second, anchorSketch, dirSketch)) {
                 Base::Vector2d center;
                 double radius = 0.0;
-                if (getCircleArcInfo(resolveGeometry(constraint->First), center, radius)
-                    || getCircleArcInfo(resolveGeometry(constraint->Second), center, radius)) {
+                if (getCircleArcInfo(m_sketch->resolveGeometry(constraint->First), center, radius)
+                    || getCircleArcInfo(m_sketch->resolveGeometry(constraint->Second), center, radius)) {
                     normalSketch = Base::Vector2d(
                         anchorSketch.x - center.x,
                         anchorSketch.y - center.y
@@ -2413,8 +2281,8 @@ namespace MOON {
             }
         }
 
-        const Part::Geometry* g1 = resolveGeometry(constraint->First);
-        const Part::Geometry* g2 = resolveGeometry(constraint->Second);
+        const Part::Geometry* g1 = m_sketch->resolveGeometry(constraint->First);
+        const Part::Geometry* g2 = m_sketch->resolveGeometry(constraint->Second);
         if (!g1 || !g2) {
             return false;
         }
@@ -2438,8 +2306,8 @@ namespace MOON {
                 Base::Vector2d l0, l1;
                 const bool firstIsLine = (g1 == lineGeo);
                 const int lineId = firstIsLine ? constraint->First : constraint->Second;
-                if (getGeometryPointSketch(lineId, PointPos::start, l0)
-                    && getGeometryPointSketch(lineId, PointPos::end, l1)) {
+                if (m_sketch->getGeometryPointSketch(lineId, PointPos::start, l0)
+                    && m_sketch->getGeometryPointSketch(lineId, PointPos::end, l1)) {
                     Base::Vector2d u = l1 - l0;
                     if (normalize2d(u)) {
                         const double t = (center.x - l0.x) * u.x + (center.y - l0.y) * u.y;
@@ -2477,7 +2345,7 @@ namespace MOON {
         }
         return false;
     }
-    void SketcherObj::drawTangentIcons()
+    void SketcherObjWidget::drawTangentIcons()
     {
         if (!InEdit()) {
             return;
@@ -2486,8 +2354,8 @@ namespace MOON {
         if (!drawList) {
             return;
         }
-        for (int i = 0; i < static_cast<int>(mConstraintList.size()); ++i) {
-            const Sketcher::Constraint* c = mConstraintList[i];
+        for (int i = 0; i < static_cast<int>(m_sketch->constraints().size()); ++i) {
+            const Sketcher::Constraint* c = m_sketch->constraints()[i];
             if (!c || !c->isVisible || c->Type != Sketcher::ConstraintType::Tangent) {
                 continue;
             }
@@ -2501,8 +2369,8 @@ namespace MOON {
             const ImU32 col = isError ? IM_COL32(255, 110, 110, 255)
                                       : abgrToImU32(m_drawOption.constraintColor);
             const auto screenOfSketch = [this](const Base::Vector2d& sk) {
-                const Base::Vector3d w = mPlane.origin + sk.x * mPlane.xAxis
-                    + sk.y * mPlane.yAxis;
+                const Base::Vector3d w = m_sketch->plane().origin + sk.x * m_sketch->plane().xAxis
+                    + sk.y * m_sketch->plane().yAxis;
                 return renderer->worldToScreen(
                     Eigen::Vector3f(
                         static_cast<float>(w.x),
@@ -2547,7 +2415,7 @@ namespace MOON {
             drawList->AddLine(ImVec2(lx0, ly0), ImVec2(lx1, ly1), col, 2.0f);
         }
     }
-    void SketcherObj::drawConstraintIcons()
+    void SketcherObjWidget::drawConstraintIcons()
     {
         if (!InEdit()) {
             return;
@@ -2564,16 +2432,16 @@ namespace MOON {
                 return false;
             }
             if (pos != Sketcher::PointPos::none) {
-                return getGeometryPointSketch(geoId, pos, out);
+                return m_sketch->getGeometryPointSketch(geoId, pos, out);
             }
-            return getGeometryCenterSketch(geoId, out);
+            return m_sketch->getGeometryCenterSketch(geoId, out);
         };
         const auto screenOf = [this](const Base::Vector2d& sk) {
-            return renderer->worldToScreen(mPlane.valueEigen(sk));
+            return renderer->worldToScreen(m_sketch->plane().valueEigen(sk));
         };
 
-        for (int i = 0; i < static_cast<int>(mConstraintList.size()); ++i) {
-            const Sketcher::Constraint* c = mConstraintList[i];
+        for (int i = 0; i < static_cast<int>(m_sketch->constraints().size()); ++i) {
+            const Sketcher::Constraint* c = m_sketch->constraints()[i];
             if (!c || !c->isVisible || c->isDimensional()) {
                 continue;
             }
@@ -2727,8 +2595,8 @@ namespace MOON {
                     // constraint index, like Equal.
                     Base::Vector2d p1, p2;
                     Base::Vector2d dir;
-                    if (getGeometryPointSketch(c->First, PointPos::start, p1)
-                        && getGeometryPointSketch(c->First, PointPos::end, p2)) {
+                    if (m_sketch->getGeometryPointSketch(c->First, PointPos::start, p1)
+                        && m_sketch->getGeometryPointSketch(c->First, PointPos::end, p2)) {
                         dir = p2 - p1;
                         const double dlen = std::sqrt(dir.x * dir.x + dir.y * dir.y);
                         if (dlen > 1.0e-6) {
@@ -2860,3 +2728,8 @@ namespace MOON {
         }
     }
 }
+
+
+
+
+

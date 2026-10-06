@@ -1,57 +1,40 @@
-﻿#pragma once
-#include<memory>
+#pragma once
+#include <memory>
+#include <string>
 #include <unordered_map>
-#include <chrono>
 #include <set>
-#include "Interactive/EventWidget.h"
 #include "TopoShape.h"
 #include "Sketcher/SketchePlane2D.h"
 #include "Sketcher/Datatypes/Constraint.h"
 #include "Sketcher/Datatypes/Sketch.h"
+#include "Sketcher/SketcherTypes.h"
 
 namespace Part {
 	class  Geometry;
 }
 namespace MOON {
-	class Feature;
-	void defaultLabelOffsetPx(const Sketcher::Constraint* c, float& dx, float& dy);
-	class SketcherObj :public EventWidget
+	/** The sketch as data: its curves, the references projected into it, the
+	 * constraints, and the solver they are handed to.
+	 *
+	 * Nothing in here knows about the viewport. Every curve is sampled into a cache
+	 * (CurveSegment) that drawing, picking and snapping read; the operations that
+	 * change the geometry maintain that cache, so the data stays consistent
+	 * whatever draws it. Editing - selection, dragging, picking, dimension
+	 * annotations - lives in SketcherObjWidget, which holds one of these and goes
+	 * through this interface to change it. */
+	class SketcherObj
 	{
 	public:
 		// Point positions are provided by the ported Sketcher::PointPos
 		// (GeoEnum.h); keep a short alias for use inside this class and by
 		// code that refers to SketcherObj::PointPos.
 		using PointPos = Sketcher::PointPos;
-		// Viewport drawing options for sketch geometry and constraint
-		// annotations. Colours are stored in ABGR byte order, matching the
-		// renderer's Eigen::Vector4<uint8_t> convention.
-		struct DrawOption
-		{
-			Eigen::Vector4<uint8_t> pointColor { 255, 0, 0, 255 };
-			Eigen::Vector4<uint8_t> preselectColor { 255, 0, 255, 255 };
-			Eigen::Vector4<uint8_t> selectColor { 255, 255, 255, 0 };
-			Eigen::Vector4<uint8_t> constraintColor { 255, 255, 47, 186 };
-			Eigen::Vector4<uint8_t> curveColor { 255, 255, 134, 120 };
-			Eigen::Vector4<uint8_t> constructionColor { 255, 255, 107, 142 };
-			/** Geometry projected in from another feature: same idea as construction
-			 * geometry (reference only, never part of the shape the sketch produces),
-			 * with its own colour so it cannot be mistaken for something drawn here. */
-			Eigen::Vector4<uint8_t> externalColor { 255, 100, 0, 255 };
-			/** The axes of the sketch plane, each in the colour CAD packages draw it
-			 * in: the horizontal one (the x axis) red, the vertical one (the y axis)
-			 * green. The origin is the start of the horizontal axis and keeps the
-			 * external colour, so the two lines stay apart from the point they meet
-			 * at. */
-			Eigen::Vector4<uint8_t> xAxisColor { 255, 0, 0, 255 };
-			Eigen::Vector4<uint8_t> yAxisColor { 255, 0, 255, 0 };
-			float curveLineWidth = 4.0f;
-			/** The axes are a backdrop, but they are what a sketch is laid out against,
-			 * so they are drawn a little heavier than the curves on top of them. */
-			float axisLineWidth = 3.0f;
-			float pointSize = 10.0f;
-		};
-		DrawOption& drawOption() { return m_drawOption; }
-		const DrawOption& drawOption() const { return m_drawOption; }
+		using SelectGeoId = MOON::SelectGeoId;
+		/** "No geometry" for selection and lookups: the negative solver ids are taken
+		 * by the external geometry, so an unused element is GeoUndef - the same value
+		 * the solver uses for an element that is not set. */
+		static constexpr int NoGeoId = MOON::NoGeoId;
+
 		/** How the solver sees a constraint of this sketch. The diagnosis is the one of
 		 * the last solve (see retrieveSolverDiagnostics). */
 		enum class ConstraintStatus
@@ -76,81 +59,79 @@ namespace MOON {
 		bool hasRedundantConstraints() const { return lastHasRedundancies; }
 		bool hasPartiallyRedundantConstraints() const { return lastHasPartialRedundancies; }
 		bool hasMalformedConstraints() const { return lastHasMalformedConstraints; }
-		struct SelectGeoId
-		{
-			int GeoId;
-			PointPos pointPos = PointPos::none;
-		};
+
 		SketcherObj();
 		~SketcherObj();
 
-		virtual void onUpdate()override;
-		virtual void onMouseMove()override;
-		virtual void onLeftMousePressed()override;
-		virtual void onLeftMouseReleased()override;
-		virtual void onKeyPress(const std::string& key)override;
-		virtual void onKeyRelease(const std::string& key)override;
-		virtual void onSetActive(bool flag)override;
-		void setPlane(const SketcherPlane2D&plane);
-		void fitCamera();
-		void beginEdit();
-		void setDrawGrid(bool v) { m_drawGrid = v; }
-		bool isDrawGrid() const { return m_drawGrid; }
-		void setSnapToGrid(bool v) { m_snapToGrid = v; }
-		bool isSnapToGrid() const { return m_snapToGrid; }
-		// Marks geometry that is only used internally to build a shape (e.g.
-		// rounded-rectangle corner points). Such geometry stays in the solver
-		// but its point markers are hidden in the viewport.
-		void setConstruction(int geoId, bool construction);
-		void setConstraintVisible(int constrId, bool visible);
-		void setGeometryVisible(int geoId, bool visible);
-		void selectGeo(int geoId);
-		void setPreselect(int geoId);
-		bool isGeometryVisible(int geoId) const
+		/** --- what changed, for whoever edits this sketch -------------------------
+		* The sketch is the layer *below* its editing widget: it does not know the
+		* widget and never calls into it. What it does is count the changes a viewer
+		* has to react to - the plane it lies on, and its list of constraints. The
+		* widget keeps the numbers it has already seen and compares them while it
+		* updates (see SketcherObjWidget::syncWithSketch), so learning about a change
+		* never has to travel upwards as a call.
+		*
+		* Nothing here is persisted: the counters only order events within one run. */
+		unsigned int planeRevision() const { return m_planeRevision; }
+		unsigned int constraintRevision() const { return m_constraintRevision; }
+
+		/** --- what the editing widget reads ---------------------------------------
+		 * The widget above draws, picks and snaps from the sketch's data. These are
+		 * plain reads on purpose: the sketch hands its data out, it still does not
+		 * know who asks for it. */
+		const std::vector<std::unique_ptr<Part::Geometry>>& geometries() const { return mGeoList; }
+		const std::vector<Sketcher::Constraint*>& constraints() const { return mConstraintList; }
+		int geometryCount() const { return static_cast<int>(mGeoList.size()); }
+		/** How the sketch plane lies, without a copy (see getPlane for one). */
+		const SketcherPlane2D& plane() const { return mPlane; }
+		/** True for a curve the sketch keeps as a construction aid (see
+		 * setConstruction). */
+		bool isConstructionGeometry(int geoId) const { return mConstructionGeoIds.count(geoId) != 0; }
+
+		/** --- the solver, for the drag gestures of the widget ---------------------
+		 * The widget grabs elements, moves them and hands the solved geometry back;
+		 * the solver itself lives here, so these are the operations it needs. */
+		void resetInitialMove() { solvedSketch.resetInitMove(); }
+		/** Anchors a drag at the elements it grabbed. @return false when the solver
+		 * cannot move them, i.e. when the gesture has to fall back to the plain
+		 * parameter edits. */
+		bool beginMove(const std::vector<Sketcher::GeoElementId>& p_ids)
 		{
-			return mHiddenGeoIds.count(geoId) == 0;
+			solvedSketch.resetInitMove();
+			return solvedSketch.initMove(p_ids) == 0;
 		}
-		SketcherPlane2D getPlane();
-		void getPlaneNormal(double*p);
-		bool InEdit()const;
-		void draw();
-		bool snapToGridPoint(Base::Vector2d& pos) const;
-		// Sketch backdrop: the adaptive background grid only. The axes and the origin
-		// they meet at are geometry (see ensureAxisGeometry) and are drawn by the
-		// geometry pass, so that what is drawn and what can be picked are one thing.
-		void drawBackground();
-		/** Draws one axis as the infinite line it stands for, clipped to the viewport.
-		 * p_axisIndex 0 = horizontal axis, 1 = vertical axis. The caller sets colour
-		 * and width: the axis is drawn like any other external curve. */
-		void drawAxisSpanning(int p_axisIndex);
-		/** Draws the two axes (and the origin they meet at) as the backdrop they are.
-		 * Called before the sketch's own geometry, so a curve drawn on top of an axis
-		 * stays visible instead of being covered by it. */
-		void drawSketchAxes();
-		void makeDone();
-		int solve(bool updateGeoAfterSolving = true);
-		int addGeometry(std::unique_ptr<Part::Geometry>&ptr);
+		int moveGeometries(
+			const std::vector<Sketcher::GeoElementId>& p_ids,
+			const Base::Vector3d& p_to,
+			bool p_relative)
+		{
+			return solvedSketch.moveGeometries(p_ids, p_to, p_relative);
+		}
+		/** Takes the geometry the solver just produced as the sketch's own: the list
+		 * keeps its length and order, so the geoIds - and with them every constraint -
+		 * stay valid. */
+		void takeSolvedGeometry();
+
+		/** A name for the messages this sketch writes. The feature names it after
+		 * itself; a sketch that has none is just "SketcherObj". */
+		const std::string& getName() const { return m_name; }
+		void setName(const std::string& p_name) { m_name = p_name; }
+
+		/** --- geometry -------------------------------------------------------------
+		 * The sketch's own curves, in the order they were added: a curve's geoId is
+		 * its index here. */
+		int addGeometry(std::unique_ptr<Part::Geometry>& ptr);
 		int addGeometry(Part::Geometry* curve);
 		void addGeometry(const std::vector<Part::Geometry*>& curveList);
 		Part::Geometry* getGeometry(int GeoId);
 		const Part::Geometry* getGeometry(int GeoId) const;
-		bool getGeometryPoint(int GeoId, PointPos pos, Base::Vector2d& out) const
-		{
-			return getGeometryPointSketch(GeoId, pos, out);
-		}
 		int getHighestCurveIndex();
-		int getPickGeoIndex(const Base::Vector2d& pos, const Base::Matrix4D& viewPortMat);
-		SelectGeoId testSelect(const Base::Vector2d& pos);
-		std::vector<int> getSelectIds() const;
-		void addSelect(int id);
-		std::vector<SelectGeoId> getSelectGeoPosIds() const {
-			return selectIds;
-		}
-		
-		void removeSelect(const std::vector<int>& idList);
-		int getPreselectId()const {return preSelectGeoId.GeoId;}
-		SelectGeoId getPreSelectGeoId()const { return preSelectGeoId; }
-		bool snapPoint(Base::Vector2d& pos,const std::set<int>&avoid={});
+		void deleteGeometry(int GeoId);
+		void deleteGeometries(const std::vector<int>& GeoIds);
+		void replaceGeometry(int oldGeoId, std::unique_ptr<Part::Geometry>& newGeo);
+		void replaceGeometries(const std::vector<int>& oldGeoIds, std::vector<std::unique_ptr<Part::Geometry>>& newGeos);
+		bool isClosedCurve(const Part::Geometry* geo);
+
 		int fillet(int geoId1,int geoId2,const Base::Vector3d& refPnt1,const Base::Vector3d& refPnt2,double radius,bool trim = true,bool createCorner = false,bool chamfer = false);
 		bool seekTrimPoints(
 			int GeoId,
@@ -160,13 +141,7 @@ namespace MOON {
 			int& GeoId2,
 			Base::Vector3d& intersect2,double& u1,double&u2
 		);
-		void deleteGeometry(int GeoId);
-		void deleteGeometries(const std::vector<int>& GeoIds);
-		void replaceGeometry(int oldGeoId, std::unique_ptr<Part::Geometry>& newGeo);
-		void replaceGeometries(const std::vector<int>& oldGeoIds, std::vector<std::unique_ptr<Part::Geometry>>& newGeos);
-		bool isClosedCurve(const Part::Geometry* geo);
 		bool trim(int GeoId,double u1,double u2, const Base::Vector3d& point1, const Base::Vector3d& point2);
-		// clang-format on
 		int addSymmetric(const std::vector<int>& geoIdList,int refGeoId);
 		std::vector<Part::Geometry*> getSymmetric(
 			const std::vector<int>& geoIdList,
@@ -175,6 +150,11 @@ namespace MOON {
 			int refGeoId
 		);
 		Part::TopoShape toShape() const;
+
+		/** Construction geometry is a property of the sketch's own curve: it stays in
+		 * the solver, but it is never part of the shape the sketch produces (e.g. the
+		 * corner points of a rounded rectangle). */
+		void setConstruction(int geoId, bool construction);
 
 		/** --- external geometry: geometry of another feature, into this sketch ----
 		 *
@@ -213,11 +193,6 @@ namespace MOON {
 		Part::Geometry* getExternalGeometry(int p_index);
 		const Part::Geometry* getExternalGeometry(int p_index) const;
 
-		/** "No geometry" for the selection state. The negative solver ids are taken
-		 * by the external geometry (see below), so an unused element is GeoUndef -
-		 * the same value the solver uses for an element that is not set. */
-		static constexpr int NoGeoId = Sketcher::GeoEnum::GeoUndef;
-
 		/** --- the projected curves as selection targets -------------------------
 		 * Constraints name an external curve by its solver geoId, and those ids
 		 * count from the end of the solver list (the external block is its tail):
@@ -253,6 +228,65 @@ namespace MOON {
 		 * nothing. */
 		const Part::Geometry* resolveGeometry(int p_geoId) const;
 
+		/** --- constraints ---------------------------------------------------------- */
+		/// add constraint
+		int addConstraint(const Sketcher::Constraint* constraint);
+		/// add constraint
+		int addConstraint(std::unique_ptr<Sketcher::Constraint> constraint);
+		int getConstraintCount() const { return static_cast<int>(mConstraintList.size()); }
+		const Sketcher::Constraint* getConstraint(int index) const;
+		/** Drops the constraint at p_index (the index the panels list it by) and solves
+		 * the sketch again without it. The elements it named are left alone: what goes
+		 * is the constraint, not the geometry it was about.
+		 * @return true when p_index named a constraint. */
+		bool removeConstraint(int p_index);
+		// Find an existing constraint with the same type and elements (datum
+		// value ignored), so dimensional values can be edited via setDatum().
+		int findConstraint(const Sketcher::Constraint* pattern) const;
+		// Change the datum of an existing dimensional/tangent/perpendicular
+		// constraint and re-solve; on failure the value is rolled back.
+		int setDatum(int constrId, double datum);
+		// helper function to create a new constraint and move it to the Constraint Property
+		void addConstraint(
+			Sketcher::ConstraintType constrType,
+			int firstGeoId,
+			Sketcher::PointPos firstPos,
+			int secondGeoId = Sketcher::GeoEnum::GeoUndef,
+			Sketcher::PointPos secondPos = Sketcher::PointPos::none,
+			int thirdGeoId = Sketcher::GeoEnum::GeoUndef,
+			Sketcher::PointPos thirdPos = Sketcher::PointPos::none
+		);
+		// creates a new constraint
+		std::unique_ptr<Sketcher::Constraint> createConstraint(
+			Sketcher::ConstraintType constrType,
+			int firstGeoId,
+			Sketcher::PointPos firstPos,
+			int secondGeoId = Sketcher::GeoEnum::GeoUndef,
+			Sketcher::PointPos secondPos = Sketcher::PointPos::none,
+			int thirdGeoId = Sketcher::GeoEnum::GeoUndef,
+			Sketcher::PointPos thirdPos = Sketcher::PointPos::none
+		);
+		void setConstraintVisible(int constrId, bool visible);
+
+		/** --- solver -------------------------------------------------------------- */
+		int solve(bool updateGeoAfterSolving = true);
+		/** Marks the sketch as finished: the wire (and the face made from it) is what
+		 * the features above build on. Called when the sketch is closed. */
+		void makeDone();
+		Part::TopoShape getDoneFaceShape() const { return doneFaceShape; }
+		Part::TopoShape getDoneWireShape() const { return doneWireShape; }
+
+		/** --- the plane the sketch lies on ---------------------------------------- */
+		void setPlane(const SketcherPlane2D& plane);
+		SketcherPlane2D getPlane();
+		void getPlaneNormal(double*p);
+		Base::Matrix4D getplaneTransform() const;
+		Base::Vector3d getPlaneOrigin() const { return mPlane.origin; }
+		Base::Vector3d getPlaneXAxis() const { return mPlane.xAxis; }
+		Base::Vector3d getPlaneYAxis() const { return mPlane.yAxis; }
+		Base::Matrix4D updateTransform() const;
+
+		/** --- the angle two lines make -------------------------------------------- */
 		/** The angle an Angle constraint between two lines would hold with the sketch
 		 * as it stands, measured the way the sketcher measures it before the
 		 * constraint is added (FreeCAD's SketcherGui::calculateAngle).
@@ -304,92 +338,58 @@ namespace MOON {
 			PointPos p_secondPos = PointPos::none
 		);
 
-		Part::TopoShape getDoneFaceShape() {
-			return doneFaceShape;
+		/** --- what the sketch shows -----------------------------------------------
+		 * The flags the document keeps with the geometry: the drawing grid, the grid
+		 * snapping, and which curves and constraints the user hid. They are data of
+		 * the sketch (they are written to the .moon file with it), so they live
+		 * here - the widget reads them to draw, the panels read and set them. */
+		void setDrawGrid(bool v) { m_drawGrid = v; }
+		bool isDrawGrid() const { return m_drawGrid; }
+		void setSnapToGrid(bool v) { m_snapToGrid = v; }
+		bool isSnapToGrid() const { return m_snapToGrid; }
+		void setGeometryVisible(int geoId, bool visible);
+		bool isGeometryVisible(int geoId) const
+		{
+			return mHiddenGeoIds.count(geoId) == 0;
 		}
-		Part::TopoShape getDoneWireShape() {
-			return doneWireShape;
+
+		/** --- the sampled curves ---------------------------------------------------
+		 * What a curve is drawn, picked and snapped from: a polyline plus the
+		 * markers that stand on it (start, end, centre). The sketch's own curves are
+		 * sampled when they are added, the external ones when their projection is
+		 * computed, so an entry is normally already there. */
+		struct SegPoint
+		{
+			PointPos pointPos;
+			Base::Vector3d coord;
+			SegPoint(const Base::Vector3d& c,const PointPos& p):coord(c),pointPos(p) {}
+		};
+		struct CurveSegment
+		{
+			//point discret of curver
+			std::vector<Base::Vector3d> point;
+			//the param value of point
+			std::vector<double> params;
+			//the start、center、end position of the curve
+			std::vector<SegPoint>sepoints;
+			CurveSegment() {}
+		};
+		/** The discretization a geometry is drawn from. Having an entry is what marks
+		 * a geometry as sampled (a point samples to no polyline at all, so the
+		 * content cannot tell). */
+		CurveSegment getCurveSegment(Part::Geometry* geo);
+		CurveSegment& segmentOf(Part::Geometry* geo);
+		/** The same without creating an entry: the hit test and the snapping must not
+		 * turn a missing cache into an empty one. */
+		const CurveSegment* findSegment(const Part::Geometry* geo) const;
+		void updateGeoSegment(int id);
+		bool getGeometryPoint(int GeoId, PointPos pos, Base::Vector2d& out) const
+		{
+			return getGeometryPointSketch(GeoId, pos, out);
 		}
-		Base::Matrix4D getplaneTransform() const;
-		Base::Vector3d getPlaneOrigin() {
-			return mPlane.origin;
-		}
-		Base::Vector3d getPlaneXAxis() {
-			return mPlane.xAxis;
-		}
-		Base::Vector3d getPlaneYAxis() {
-			return mPlane.yAxis;
-		}	
-		/// add constraint
-		int addConstraint(const Sketcher::Constraint* constraint);
-		/// add constraint
-		int addConstraint(std::unique_ptr<Sketcher::Constraint> constraint);
-		int getConstraintCount() const { return static_cast<int>(mConstraintList.size()); }
-		const Sketcher::Constraint* getConstraint(int index) const;
-		/** Drops the constraint at p_index (the index the panels list it by) and solves
-		 * the sketch again without it. The elements it named are left alone: what goes
-		 * is the constraint, not the geometry it was about.
-		 * @return true when p_index named a constraint. */
-		bool removeConstraint(int p_index);
-		// Find an existing constraint with the same type and elements (datum
-		// value ignored), so dimensional values can be edited via setDatum().
-		int findConstraint(const Sketcher::Constraint* pattern) const;
-		// Change the datum of an existing dimensional/tangent/perpendicular
-		// constraint and re-solve; on failure the value is rolled back.
-		int setDatum(int constrId, double datum);
-		// helper function to create a new constraint and move it to the Constraint Property
-		void addConstraint(
-			Sketcher::ConstraintType constrType,
-			int firstGeoId,
-			Sketcher::PointPos firstPos,
-			int secondGeoId = Sketcher::GeoEnum::GeoUndef,
-			Sketcher::PointPos secondPos = Sketcher::PointPos::none,
-			int thirdGeoId = Sketcher::GeoEnum::GeoUndef,
-			Sketcher::PointPos thirdPos = Sketcher::PointPos::none
-		);
-		// creates a new constraint
-		std::unique_ptr<Sketcher::Constraint> createConstraint(
-			Sketcher::ConstraintType constrType,
-			int firstGeoId,
-			Sketcher::PointPos firstPos,
-			int secondGeoId = Sketcher::GeoEnum::GeoUndef,
-			Sketcher::PointPos secondPos = Sketcher::PointPos::none,
-			int thirdGeoId = Sketcher::GeoEnum::GeoUndef,
-			Sketcher::PointPos thirdPos = Sketcher::PointPos::none
-		);
-		// Dimension label overlay (P0): every dimensional constraint gets a
-		// draggable text caption while the sketch is edited. Double-clicking a
-		// caption opens an editor for the datum value.
-		void drawConstraintLabels();
-		bool computeConstraintLabel(
-			int constrId,
-			Base::Vector2d& anchorSketch,
-			float& screenX,
-			float& screenY
-		) const;
-		int pickConstraintLabelAt(float mouseX, float mouseY) const;
-		/** How many screen pixels one sketch unit is worth right now.
-		 *
-		 * The dimension annotations are laid out in sketch units and only turned into
-		 * pixels for drawing, so that they keep their place on the drawing when the
-		 * view is zoomed. */
-		float pixelsPerSketchUnit() const;
-		void editConstraintValue(int constrId);
-		/** Puts the annotation of a dimension where the smart dimension tool dropped
-		 * it.
-		 *
-		 * p_screenX / p_screenY is that place in screen pixels. What is stored are the
-		 * offsets a drag of the dimension to that place would have stored, so the
-		 * annotation the sketch draws afterwards sits exactly where the preview of the
-		 * tool was. */
-		void placeDimensionAnnotation(int constrId, float p_screenX, float p_screenY);
-		// Small geometric marker for tangent constraints: a tangent line
-		// segment through the computed tangency point.
-		void drawTangentIcons();
-		// Small viewport markers for the remaining geometric constraints
-		// (coincident/horizontal/vertical/parallel/...), placed near the
-		// geometry they act on.
-		void drawConstraintIcons();
+		bool getGeometryPointSketch(int geoId, PointPos pos, Base::Vector2d& out) const;
+		bool getGeometryCenterSketch(int geoId, Base::Vector2d& out) const;
+
 	private:
 		void retrieveSolverDiagnostics();
 		int lastDoF;
@@ -405,200 +405,14 @@ namespace MOON {
 	private:
 		Part::TopoShape doneWireShape;
 		Part::TopoShape doneFaceShape;
-		struct CurveSegment;
-		void updateGeoSegment(int id);
-		void pickGeo();
-		void updateConstraintLabelInteraction();
-		bool findNextCoincidentPoint(
-			const Base::Vector2d& pos,
-			const SelectGeoId& current,
-			SelectGeoId& next
-		) const;
-		bool getGeometryPointSketch(int geoId, PointPos pos, Base::Vector2d& out) const;
-		bool getGeometryCenterSketch(int geoId, Base::Vector2d& out) const;
-		bool getConstraintMeasureEndpoints(
-			const Sketcher::Constraint* constraint,
-			Base::Vector2d& a,
-			Base::Vector2d& b
-		) const;
-		/** Which part of a dimension an interaction is on. The caption only slides
-		 * along the dimension line; the line itself - arrows included - is one handle
-		 * that moves the dimension as a whole along the direction its extension lines
-		 * run in. */
-		enum class LabelHandle
-		{
-			Caption,
-			/** A length dimension: the line - arrows included - is one handle that
-			 * moves the dimension as a whole along its extension direction. */
-			DimensionLine,
-			/** An angle dimension: the arc is the handle, and dragging it changes the
-			 * radius it is drawn at while its centre stays on the vertex. */
-			AngleArc
-		};
-
-		/** Everything a linear dimension is laid out from: the measured points (in
-		 * sketch and screen space), where each end of the dimension line starts from
-		 * and the direction the line may be dragged in, the offset it sits at until it
-		 * is moved, and the pixel gap that keeps the caption clear of the line. */
-		struct StraightDimFrame
-		{
-			Base::Vector2d measuredA;
-			Base::Vector2d measuredB;
-			Eigen::Vector2f screenA;
-			Eigen::Vector2f screenB;
-			/** The two ends of the line the dimension is drawn from (each one is tied to
-			 * the point it measures by an extension line) and the unit direction the
-			 * whole line is dragged in. Both ends share the offset, so the line always
-			 * stays parallel to what it measures - axis aligned for DistanceX/Y. */
-			Eigen::Vector2f baseA;
-			Eigen::Vector2f baseB;
-			Eigen::Vector2f direction;
-			float defaultOffset = 0.0f;
-			float gapX = 0.0f;
-			float gapY = 0.0f;
-		};
-		bool straightDimFrame(
-			const Sketcher::Constraint* constraint,
-			StraightDimFrame& out
-		) const;
-		/** The offset of the dimension line along its direction: where the user dragged
-		 * it to, or the automatic offset while it was never moved. Both are given in
-		 * sketch units, so the annotation keeps its place on the drawing when the view
-		 * is zoomed; the result is in pixels. */
-		float straightDimOffset(
-			const Sketcher::Constraint* constraint,
-			float p_defaultOffsetSketch
-		) const;
-		/** The dimension line's two ends in screen space, with the dragged offsets
-		 * applied. @return false when the dimension cannot be laid out. */
-		bool straightDimShaft(
-			const Sketcher::Constraint* constraint,
-			Eigen::Vector2f& p_a,
-			Eigen::Vector2f& p_b
-		) const;
-		/** Which dimension line the cursor is on, if any. The whole line is the handle,
-		 * not only its arrow heads. */
-		int pickConstraintDimLineAt(float p_mouseX, float p_mouseY) const;
-		/** Which angle annotation arc the cursor is on, if any. */
-		int pickConstraintAngleArcAt(float p_mouseX, float p_mouseY) const;
-		/** What the cursor is on: the constraint and which of its handles, or -1.
-		 * The arrows are tested before the caption - they sit at the ends of the
-		 * dimension line, the caption in its middle. */
-		void pickLabelTarget(
-			float p_mouseX,
-			float p_mouseY,
-			int& p_constrId,
-			LabelHandle& p_handle
-		) const;
-		/** Drops the placement the user gave a dimension (caption offset, caption
-		 * parameter, arrow offsets). The maps are keyed by the constraint's address,
-		 * so a constraint that goes away has to take its entries with it - otherwise a
-		 * later constraint allocated at the same address would inherit them. */
-		void forgetConstraintLayout(const Sketcher::Constraint* p_constraint);
-		// Computes the straight dimension shaft (trackA..trackB) in screen
-		// space plus the fixed pixel gap that separates the caption from the
-		// shaft. Used both for drawing and for constraining label dragging.
-		bool computeStraightLabelTrack(
-			const Sketcher::Constraint* constraint,
-			float& trackAx,
-			float& trackAy,
-			float& trackBx,
-			float& trackBy,
-			float& gapX,
-			float& gapY
-		) const;
-		// Computes the angle annotation arc (center, radius, start and sweep
-		// in screen degrees). For a single line the center is the line start
-		// and the radius is half the line length; the caption can then only
-		// slide along this arc.
-		bool computeAngleLabelTrack(
-			const Sketcher::Constraint* constraint,
-			float& centerX,
-			float& centerY,
-			float& radiusPx,
-			float& startDeg,
-			float& sweepDeg
-		) const;
-		bool computeTangentIconAnchor(
-			const Sketcher::Constraint* constraint,
-			Base::Vector2d& anchorSketch,
-			Base::Vector2d& dirSketch,
-			Base::Vector2d& normalSketch
-		) const;
-		Base::Vector2d constraintLabelAnchor(const Sketcher::Constraint* constraint) const;
-		std::string constraintLabelText(const Sketcher::Constraint* constraint) const;
-		/** The radial annotation of a radius/diameter constraint, in screen space: where
-		 * its shaft starts (the centre of the circle or arc) and where it ends (a point
-		 * of the rim). Both ends are the projection of two points of the sketch, which
-		 * is what keeps them on the centre and on the rim whatever the camera does -
-		 * only a direction that misses an arc is turned onto it.
-		 * @return false when the constraint is not radial, or its geometry is gone. */
-		bool radiusDimShaft(
-			const Sketcher::Constraint* p_constraint,
-			Eigen::Vector2f& p_centerScreen,
-			Eigen::Vector2f& p_rimScreen
-		) const;
-		/** The sketch-space vector that a screen-space vector stands for. The plane is
-		 * projected by an affine map, and only its inverse says what a vector on screen
-		 * means in the sketch: the two are the same only face on.
-		 * @return false when the plane is seen edge on, i.e. when it says nothing. */
-		bool sketchVectorOfScreenVector(
-			const Eigen::Vector2f& p_screenVector,
-			Base::Vector2d& p_out
-		) const;
-		bool constraintInError(int constrId) const;
-		void addSelect(SelectGeoId geoId);
-		void clearSelect();
-		void moveGeo(SelectGeoId geoId,float dx,float dy);
-		Base::Matrix4D updateTransform()const;
-		Base::Vector2d getMouseHitSketchPlanePoint();
-		/** How the sketch plane lies in the viewport right now: what the adaptive
-		 * background grid is drawn from, and what the grid snapping has to agree with -
-		 * they share this so the lines the user sees and the places the cursor snaps to
-		 * are one lattice. An orthographic camera projects along its own view direction,
-		 * so the plane is not necessarily face on, and every length here is measured
-		 * through the camera rather than assumed. */
-		struct GridView
-		{
-			/** View-space position of the plane origin. */
-			float oX = 0.0f;
-			float oY = 0.0f;
-			/** View-space direction the plane axes run in, i.e. how far one sketch unit
-			 * along u / v travels across the screen (1 = not foreshortened). */
-			float uX = 0.0f;
-			float uY = 0.0f;
-			float vX = 0.0f;
-			float vY = 0.0f;
-			/** Viewport half extents, in view-space units. */
-			float hx = 0.0f;
-			float hy = 0.0f;
-			/** The adaptive grid step, in sketch units. */
-			float step = 0.0f;
-		};
-		/** Fills in p_out for the current camera.
-		 * @return false when there is nothing to describe: no camera, a perspective one,
-		 *         or an orthographic one seen along the plane (the plane is a line on
-		 *         screen then, and its visible part runs off to infinity). */
-		bool gridView(GridView& p_out) const;
-		CurveSegment getCurveSegment( Part::Geometry* geo) ;
-		/** The discretization a geometry is drawn from. The sketch's own curves are
-		 * sampled when they are added, the external ones when their projection is
-		 * computed, so an entry is normally already there; this only samples when one
-		 * is missing, because drawing nothing would be worse than the extra work.
-		 * Having an entry is what marks a geometry as sampled (a point samples to no
-		 * polyline at all, so the content cannot tell). */
-		CurveSegment& segmentOf(Part::Geometry* geo);
-		/** The same without creating an entry: the hit test and the snapping must not
-		 * turn a missing cache into an empty one. */
-		const CurveSegment* findSegment(const Part::Geometry* geo) const;
-		SketcherPlane2D mPlane ;
+		/** What the sketch calls itself in its messages (see getName). */
+		std::string m_name = "SketcherObj";
+		SketcherPlane2D mPlane;
 		Base::Matrix4D planeTransform;
-		bool isInEdit = true;
 		bool m_drawGrid = true;
 		bool m_snapToGrid = false;
 		std::set<int> mConstructionGeoIds;
 		std::set<int> mHiddenGeoIds;
-		DrawOption m_drawOption;
 		Sketcher::Sketch solvedSketch;
 		std::vector<Sketcher::Constraint*> mConstraintList;
 		std::vector<std::unique_ptr<Part::Geometry>>mGeoList;
@@ -607,44 +421,10 @@ namespace MOON {
 		 * of the external block is built in (the horizontal axis is the very last, so
 		 * that it is the -1 the root point lives on). */
 		std::unique_ptr<Part::Geometry> mExternalAxes[2];
-		SelectGeoId preSelectGeoId = { NoGeoId, PointPos::none };
-		std::vector<SelectGeoId> selectIds;
-		bool hasClickSelected = false;
-		bool m_dragSolverInit = false;
-		bool sketchDrawRect = false;
-		// P0 dimension-label overlay state. The offsets are kept in sketch units, so
-		// that an annotation stays where it was put while the view is zoomed; drawing
-		// converts them with pixelsPerSketchUnit().
-		std::unordered_map<const Sketcher::Constraint*, Base::Vector2d> m_labelManualOffsetSketch;
-		// 0..1 parameter of the caption along the straight dimension shaft
-		std::unordered_map<const Sketcher::Constraint*, double> m_labelManualParam;
-		int m_labelHover = -1;
-		int m_labelDrag = -1;
-		/** Which handle of the dimension m_labelHover / m_labelDrag is on. The arrows
-		 * move the dimension line itself, the caption only slides along it. */
-		LabelHandle m_labelHoverHandle = LabelHandle::Caption;
-		LabelHandle m_labelDragHandle = LabelHandle::Caption;
-		/** How far (sketch units along its direction) the user dragged a dimension
-		 * line; missing means it still sits at its automatic offset. */
-		std::unordered_map<const Sketcher::Constraint*, float> m_straightDimOffsetSketch;
-		/** The radius (sketch units) the user dragged an angle annotation arc to. The
-		 * centre stays where the geometry puts it, so this is all that moves - and with
-		 * it the amount of arc that is drawn. */
-		std::unordered_map<const Sketcher::Constraint*, float> m_angleLabelRadiusSketch;
-		int m_lastLabelClick = -1;
-		std::chrono::steady_clock::time_point m_lastLabelClickTime;
-		enum SelectState
-		{
-			Stop,
-			Hot,
-			OperationGeo,
-			DragRect,
-			End
-		};
-		enum SelectMode {
-			OverrideSelect,
-			AppendSelect
-		};
+		std::unordered_map<Part::Geometry*, CurveSegment>mGeoSegment;
+		/** Change counters (see planeRevision / constraintRevision). */
+		unsigned int m_planeRevision = 0;
+		unsigned int m_constraintRevision = 0;
 		/** Rebuilds the external geoIds held by the constraints from the curves the
 		 * block held before it changed, and drops the constraints whose curve is
 		 * gone.
@@ -663,30 +443,7 @@ namespace MOON {
 		 * does, and nothing ever removes them - so an empty list of references still
 		 * leaves a sketch that can be constrained to the origin and the axes. */
 		void ensureAxisGeometry();
-		bool isHaveActiveHandler = false;
-		SelectState selectState = Stop;
-		SelectMode selectMode = OverrideSelect;
-		Base::Vector2d onSketchPosP1;
-		Base::Vector2d onSketchPosClicked;//used for click when select geometry curve
-		Base::Vector2d onSketchPosMove;//used for mouse move
-		Base::Vector2d onSketchPosP2;
-
-		struct SegPoint
-		{
-			PointPos pointPos;
-			Base::Vector3d coord;
-			SegPoint(const Base::Vector3d& c,const PointPos& p):coord(c),pointPos(p) {}
-		};
-		struct CurveSegment
-		{
-			//point discret of curver
-			std::vector<Base::Vector3d> point;
-			//the param value of point 
-			std::vector<double> params;
-			//the start、center、end position of the curve
-			std::vector<SegPoint>sepoints;
-			CurveSegment() {}
-		};
-		std::unordered_map<Part::Geometry*, CurveSegment>mGeoSegment;
 	};
 }
+
+

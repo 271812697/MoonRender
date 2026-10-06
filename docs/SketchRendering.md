@@ -52,7 +52,7 @@ CurveSegment {
 
 ### 2.2 颜色与选中态
 
-颜色集中定义在 `SketcherObj::DrawOption`，按 ABGR 字节序（`{A,B,G,R}`）存放，
+颜色集中定义在 `DrawOption`（`SketcherTypes.h`，`SketcherObjWidget` 持有实例；重构前是 `SketcherObj::DrawOption`），按 ABGR 字节序（`{A,B,G,R}`）存放，
 UI 面板（SketchTaskDialog）用 `ColorPickerProperty` 修改：
 
 | 字段 | 含义 |

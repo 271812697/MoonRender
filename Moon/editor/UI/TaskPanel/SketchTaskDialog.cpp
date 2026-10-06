@@ -3,6 +3,7 @@
 #include "editor/UI/PropertyPanel/Collapsiblegroupboxwidget.h"
 #include "Sketcher/SketcherObjManager.h"
 #include "Sketcher/SketcherObj.h"
+#include "Sketcher/SketcherObjWidget.h"
 #include "feature/SketcherFeature.h"
 #include "Widgets/BoolProperty.h"
 #include "Widgets/ColorPickerProperty.h"
@@ -121,7 +122,8 @@ namespace MOON {
             if (f) {
                 //
 				feature = dynamic_cast<SketcherFeature*>(f);
-                feature->getSketcherObj()->beginEdit();
+                // Opening the sketch for editing: this is where its widget is built.
+                feature->ensureSketcherWidget()->beginEdit();
 
             }
             else
@@ -150,11 +152,17 @@ namespace MOON {
 					behaviour = new SketchPlane("selectPlane");
                     behaviour->AddObserver(SketchPlaneEvent::SelectPlane,self, &SketchTaskDialog::onSelectPlane);
                 }
+                // The sketch is created in order to be edited: build its editing widget
+                // now. It is what fits the camera to the plane (set above, or picked
+                // below) and what the drawing tools render into.
+                ///feature->ensureSketcherWidget()->beginEdit();
             }
             SketcherObjManager::instance().setCurrentActiveSketcherFeature(feature);
         }
         ~Internal() {
-            feature->getSketcherObj()->setActive(false);
+            if (SketcherObjWidget* widget = feature->getSketcherWidget()) {
+                widget->setActive(false);
+            }
             if (behaviour) {
                 delete behaviour;
             }
@@ -257,13 +265,13 @@ namespace MOON {
         connect(mCurveList, &QListWidget::itemClicked, this, [this](QListWidgetItem* item) {
             if (mInternal && mInternal->feature) {
                 const int geoId = item->data(Qt::UserRole).toInt();
-                mInternal->feature->getSketcherObj()->selectGeo(geoId);
+                mInternal->feature->ensureSketcherWidget()->selectGeo(geoId);
             }
         });
         connect(mCurveList, &QListWidget::itemEntered, this, [this](QListWidgetItem* item) {
             if (mInternal && mInternal->feature) {
                 const int geoId = item->data(Qt::UserRole).toInt();
-                mInternal->feature->getSketcherObj()->setPreselect(geoId);
+                mInternal->feature->ensureSketcherWidget()->setPreselect(geoId);
             }
         });
         refreshLists();
@@ -283,7 +291,7 @@ namespace MOON {
             return QVariant::fromValue(mInternal->feature->getSketcherObj()->isSnapToGrid());
         }
         if (mInternal && mInternal->feature) {
-            const auto& opt = mInternal->feature->getSketcherObj()->drawOption();
+            const auto& opt = mInternal->feature->ensureSketcherWidget()->drawOption();
             if (propertyName == "Sketch:Point Color") {
                 return QVariant::fromValue(abgrToQColor(opt.pointColor));
             }
@@ -333,7 +341,7 @@ namespace MOON {
             mInternal->feature->getSketcherObj()->setSnapToGrid(value.value<bool>());
         }
         if (mInternal && mInternal->feature) {
-            auto& opt = mInternal->feature->getSketcherObj()->drawOption();
+            auto& opt = mInternal->feature->ensureSketcherWidget()->drawOption();
             if (propertyName == "Sketch:Point Color") {
                 opt.pointColor = qColorToAbgr(value.value<QColor>());
             }
@@ -376,7 +384,7 @@ namespace MOON {
     
     void SketchTaskDialog::clickOk()
     {
-        mInternal->feature->getSketcherObj()->makeDone();
+        mInternal->feature->ensureSketcherWidget()->finishEdit();
         mInternal->feature->execute();
         mInternal->feature->makeDone();
     }
@@ -776,8 +784,12 @@ namespace MOON {
         if (!obj) {
             return;
         }
+        SketcherObjWidget* widget = mInternal->feature->getSketcherWidget();
+        if (!widget) {
+            return;
+        }
         std::set<int> selected;
-        for (int geoId : obj->getSelectIds()) {
+        for (int geoId : widget->getSelectIds()) {
             selected.insert(geoId);
         }
         for (int row = 0; row < mCurveList->count(); ++row) {
@@ -810,7 +822,7 @@ namespace MOON {
             mCurveHoverRow = row;
             row->setStyleSheet("background-color: #cfe2f5;");
             if (mInternal && mInternal->feature) {
-                mInternal->feature->getSketcherObj()->setPreselect(geoId);
+                mInternal->feature->ensureSketcherWidget()->setPreselect(geoId);
             }
         }
         else if (mCurveHoverRow == row) {
@@ -820,3 +832,4 @@ namespace MOON {
         return QWidget::eventFilter(watched, event);
     }
 }
+

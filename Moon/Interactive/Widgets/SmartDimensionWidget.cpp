@@ -7,6 +7,7 @@
 #include "Interactive/Interactive/WidgetEvent.h"
 #include "Sketcher/SketcherObjManager.h"
 #include "Sketcher/SketcherObj.h"
+#include "Sketcher/SketcherObjWidget.h"
 #include "Geometry.h"
 #include "core/Global/ServiceLocator.h"
 #include "core/log.h"
@@ -128,8 +129,10 @@ namespace MOON
 		SketcherObj* activeSketch() const
 		{
 			SketcherObj* sketch
-				= SketcherObjManager::instance().GetCurrentActiveSketcherObj();
-			if (sketch == nullptr || !sketch->InEdit()) {
+			= SketcherObjManager::instance().GetCurrentActiveSketcherObj();
+			SketcherObjWidget* widget
+			= SketcherObjManager::instance().GetCurrentActiveSketcherWidget();
+			if (sketch == nullptr || widget == nullptr || !widget->InEdit()) {
 				return nullptr;
 			}
 			return sketch;
@@ -527,7 +530,8 @@ namespace MOON
 			return false;
 		}
 
-		const SketcherObj::SelectGeoId picked = sketch->testSelect(mInternal->cursor);
+		SketcherObjWidget* widget = SketcherObjManager::instance().GetCurrentActiveSketcherWidget();
+		const SketcherObj::SelectGeoId picked = widget->testSelect(mInternal->cursor);
 		if (picked.GeoId == SketcherObj::NoGeoId) {
 			return false;
 		}
@@ -1068,12 +1072,17 @@ namespace MOON
 			}
 			// Put the annotation where the preview was, or the sketch would draw it at
 			// its default place instead.
-			active->placeDimensionAnnotation(
-				added,
-				static_cast<float>(captured.placeScreen.x),
-				static_cast<float>(captured.placeScreen.y)
-			);
+			if (SketcherObjWidget* activeWidget = SketcherObjManager::instance().GetCurrentActiveSketcherWidget()) {
+				activeWidget->placeDimensionAnnotation(
+					added,
+					static_cast<float>(captured.placeScreen.x),
+					static_cast<float>(captured.placeScreen.y)
+				);
+			}
 			mInternal->reset();
 		});
 	}
 }
+
+
+

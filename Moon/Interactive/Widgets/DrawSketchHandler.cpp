@@ -1,8 +1,9 @@
-﻿#pragma once
+#pragma once
 #include "DrawSketchHandler.h"
 #include "Interactive/Im3DRenderer.h"
 #include "Sketcher/SketcherObjManager.h"
 #include "Sketcher/SketcherObj.h"
+#include "Sketcher/SketcherObjWidget.h"
 #include "Qtimgui/imgui/imgui.h"
 #include "renderer/SceneView.h"
 #include "Sketcher/SketcheTool2D.h"
@@ -67,10 +68,10 @@ namespace MOON
         double x = (hitPos - plane.origin).Dot(plane.xAxis);
         double y = (hitPos - plane.origin).Dot(plane.yAxis);
         onSketchPos = Base::Vector2d(int(x * 100) / 100.0, int(y * 100) / 100.0);
-        auto sketchobj = SketcherObjManager::instance().GetCurrentActiveSketcherObj();
+        auto widget = SketcherObjManager::instance().GetCurrentActiveSketcherWidget();
 		isSnapedSketchPos = false;
-        if (sketchobj) {
-            isSnapedSketchPos=sketchobj->snapPoint(onSketchPos);
+        if (widget) {
+            isSnapedSketchPos = widget->snapPoint(onSketchPos);
         }
     }
     void DrawSketchHandler::drawEdit(const std::vector<Base::Vector2d>& EditCurve)
@@ -122,8 +123,8 @@ namespace MOON
     }
     int DrawSketchHandler::getPreselectCurve() const
     {
-        SketcherObj* Obj = SketcherObjManager::instance().GetCurrentActiveSketcherObj();
-        return Obj->getPreselectId();
+        SketcherObjWidget* widget = SketcherObjManager::instance().GetCurrentActiveSketcherWidget();
+        return widget != nullptr ? widget->getPreselectId() : SketcherObj::NoGeoId;
     }
     Maths::FVector3 DrawSketchHandler::getWorldPosFromSketchPos(Base::Vector2d sketchPos)
     {

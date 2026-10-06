@@ -1,4 +1,5 @@
 ﻿#include "Sketcher/SketcherObj.h"
+#include "Sketcher/SketcheTool2D.h"
 #include "editor/Toolbar/sketchToolbar.h"
 #include "Geometry.h"
 #include "renderer/SceneView.h"
@@ -130,13 +131,12 @@ namespace MOON {
     }
 
  
-	SketcherObj::SketcherObj() :EventWidget("SketcherObj")
+	SketcherObj::SketcherObj()
     {
         // The axes belong to the sketch from the start: a constraint can always name
         // the origin or one of the axes, without the user having to bring them in as
         // external geometry first (see ensureAxisGeometry).
         ensureAxisGeometry();
-        setActive(true);
     }
 
     void SketcherObj::ensureAxisGeometry()
@@ -186,15 +186,8 @@ namespace MOON {
         }
         mConstraintList.clear();
     }
-    bool SketcherObj::InEdit() const
-    {
-        return isInEdit;
-    }
     void SketcherObj::makeDone()
     {
-        isInEdit = false;
-        auto& view = GetService(Editor::Panels::SceneView);
-        view.GetCameraController().EnableRotate(true);
         doneWireShape = toShape();
         if (!doneWireShape.isEmpty()) {
             try
@@ -209,8 +202,11 @@ namespace MOON {
                 CORE_ERROR(e.what());
             }
         }
-        GetService(SketchToolbar).disableAllHandlers();
+        // Leaving the edit session (camera, tools) is the widget's business: it is the
+        // one that calls this when the user commits the sketch, see
+        // SketcherObjWidget::finishEdit().
     }
+
     int SketcherObj::solve(bool updateGeoAfterSolving)
     {
         ensureAxisGeometry();
@@ -269,21 +265,28 @@ namespace MOON {
             // the internal list directly and never route through
             // deleteGeometries() (that would wipe constraints referencing the
             // very elements we just solved).
-            for (auto& geo : mGeoList) {
-                mGeoSegment.erase(geo.get());
-            }
-            mGeoList.clear();
-            std::vector<Part::Geometry*> geomlist = solvedSketch.extractGeometry();
-            for (Part::Geometry* geo : geomlist) {
-                addGeometry(geo);  // copies into owned storage
-            }
-            for (Part::Geometry* geo : geomlist) {
-                delete geo;        // extractGeometry() hands out clones
-            }
+            takeSolvedGeometry();
         }
+      
         return err;
     }
  
+    void SketcherObj::takeSolvedGeometry()
+    {
+        // The solver hands out clones of what it solved and the sketch keeps its own
+        // copies, so the sampling cache of the curves that are replaced goes first.
+        for (auto& geo : mGeoList) {
+            mGeoSegment.erase(geo.get());
+        }
+        mGeoList.clear();
+        std::vector<Part::Geometry*> geomlist = solvedSketch.extractGeometry();
+        for (Part::Geometry* geo : geomlist) {
+            addGeometry(geo);  // copies into owned storage
+        }
+        for (Part::Geometry* geo : geomlist) {
+            delete geo;        // extractGeometry() hands out clones
+        }
+    }
     int SketcherObj::fillet(int GeoId1, int GeoId2, const Base::Vector3d& refPnt1, const Base::Vector3d& refPnt2, double radius, bool trim, bool createCorner, bool chamfer)
     {
         if (GeoId1 < 0 || GeoId1 > getHighestCurveIndex() || GeoId2 < 0 || GeoId2 > getHighestCurveIndex()) {
@@ -1320,7 +1323,6 @@ namespace MOON {
                 *geoId = found->second - newBlockSize;
             }
             if (dead) {
-                forgetConstraintLayout(constraint);
                 delete constraint;
                 ++dropped;
                 continue;
@@ -1329,6 +1331,7 @@ namespace MOON {
         }
         mConstraintList.swap(kept);
         if (dropped > 0) {
+            ++m_constraintRevision;
             CORE_INFO(
                 "[ExternalGeo] {0}: dropped {1} constraint(s) whose reference is gone",
                 getName(),
@@ -1361,4 +1364,549 @@ namespace MOON {
     }
 
 
+
+    // ---------------------------------------------------------------------------
+    // Curves, external references and constraints: the operations on the sketch
+    // data. They used to sit in SketcherInteraction.cpp next to the interaction;
+    // they are the model half, so they live with the class they belong to.
+    // ---------------------------------------------------------------------------
+    int SketcherObj::addGeometry(std::unique_ptr<Part::Geometry>& ptr)
+    {
+        Part::Geometry* geo = ptr.get();
+        mGeoSegment[geo] = getCurveSegment(geo);
+        mGeoList.push_back(std::move(ptr));
+        return mGeoList.size() - 1;
+    }
+    int SketcherObj::addGeometry(Part::Geometry* curve)
+    {
+        std::unique_ptr<Part::Geometry>temp(curve->copy());
+        return addGeometry(temp);
+    }
+    void SketcherObj::addGeometry(const std::vector<Part::Geometry*>& curveList)
+    {
+        for (int i = 0; i < curveList.size(); i++) {
+            std::unique_ptr<Part::Geometry> temp(curveList[i]->copy());
+            addGeometry(temp);
+        }
+    }
+    Part::Geometry* SketcherObj::getGeometry(int GeoId)
+    {
+        if (GeoId >= 0 && GeoId < mGeoList.size()) {
+            return mGeoList[GeoId].get();
+        }
+        return nullptr;
+    }
+    const Part::Geometry* SketcherObj::getGeometry(int GeoId) const
+    {
+        if (GeoId >= 0 && GeoId < static_cast<int>(mGeoList.size())) {
+            return mGeoList[GeoId].get();
+        }
+        return nullptr;
+    }
+    int SketcherObj::getHighestCurveIndex()
+    {
+        return mGeoList.size() - 1;
+    }
+    void SketcherObj::deleteGeometry(int GeoId)
+    {
+        if (GeoId < mGeoList.size()) {
+            auto it = mGeoList.begin();
+            std::advance(it, GeoId);
+            mGeoSegment.erase((*it).get());
+            mGeoList.erase(it);
+        }
+    }
+    void SketcherObj::deleteGeometries(const std::vector<int>& GeoIds)
+    {
+        if (GeoIds.size() == 0) {
+            return;
+        }
+        const int oldSize = static_cast<int>(mGeoList.size());
+        std::vector<int> deletePos(oldSize, 0);
+        for (int i = 0;i < GeoIds.size();i++) {
+            if (GeoIds[i] >= 0 && GeoIds[i] < oldSize) {
+                deletePos[GeoIds[i]] = 1;
+            }
+        }
+        // Construction aids (e.g. rounded-rectangle corner points) that are no
+        // longer referenced by any surviving constraint become garbage after
+        // this deletion; remove them together with the selected geometry so
+        // they cannot be left behind as undeletable points.
+        std::vector<char> survivorReferenced(oldSize, 0);
+        auto referencesDeleted = [&](int geoId) {
+            return geoId >= 0 && geoId < oldSize && deletePos[geoId];
+        };
+        for (Sketcher::Constraint* c : mConstraintList) {
+            if (referencesDeleted(c->First) || referencesDeleted(c->Second)
+                || referencesDeleted(c->Third)) {
+                continue;  // this constraint dies with the selection
+            }
+            if (c->First >= 0 && c->First < oldSize) {
+                survivorReferenced[c->First] = 1;
+            }
+            if (c->Second >= 0 && c->Second < oldSize) {
+                survivorReferenced[c->Second] = 1;
+            }
+            if (c->Third >= 0 && c->Third < oldSize) {
+                survivorReferenced[c->Third] = 1;
+            }
+        }
+        for (int oldId : mConstructionGeoIds) {
+            if (oldId >= 0 && oldId < oldSize && !deletePos[oldId]
+                && !survivorReferenced[oldId]) {
+                deletePos[oldId] = 1;
+            }
+        }
+        // Map every surviving old index to its new index after removal.
+        std::vector<int> newIndex(oldSize, -1);
+        int nextIndex = 0;
+        for (int i = 0; i < oldSize; ++i) {
+            if (!deletePos[i]) {
+                newIndex[i] = nextIndex++;
+            }
+        }
+        std::set<int> remappedHidden;
+        for (int oldId : mHiddenGeoIds) {
+            if (oldId >= 0 && oldId < oldSize && !deletePos[oldId]) {
+                remappedHidden.insert(newIndex[oldId]);
+            }
+        }
+        mHiddenGeoIds.swap(remappedHidden);
+        // Keep construction markers attached to their (surviving) geometry
+        // after the index remap.
+        std::set<int> remappedConstruction;
+        for (int oldId : mConstructionGeoIds) {
+            if (oldId >= 0 && oldId < oldSize && !deletePos[oldId]) {
+                remappedConstruction.insert(newIndex[oldId]);
+            }
+        }
+        mConstructionGeoIds.swap(remappedConstruction);
+
+		auto it = mGeoList.begin();
+        int index = 0;
+        while (it != mGeoList.end()) {
+            if (deletePos[index] == 1) {
+                mGeoSegment.erase((*it).get());
+                it = mGeoList.erase(it);
+                if (index >= oldSize) {
+                    break;
+                }
+            }
+            else {
+                it++;
+            }
+            index++;
+        }
+
+        // FreeCAD deletes every constraint that references a removed geometry
+        // and shifts the GeoIds of all constraints after the deletion point.
+        auto remapGeoId = [&](int& geoId) -> bool {
+            if (geoId >= 0 && geoId < oldSize) {
+                if (deletePos[geoId]) {
+                    return false;  // constraint refers to a deleted element
+                }
+                geoId = newIndex[geoId];
+            }
+            return true;
+            };
+
+        std::vector<Sketcher::Constraint*> keptConstraints;
+        keptConstraints.reserve(mConstraintList.size());
+        for (Sketcher::Constraint* c : mConstraintList) {
+            bool keep = remapGeoId(c->First);
+            keep = keep && remapGeoId(c->Second);
+            keep = keep && remapGeoId(c->Third);
+            if (keep) {
+                keptConstraints.push_back(c);
+            }
+            else {
+                delete c;
+            }
+        }
+        mConstraintList = std::move(keptConstraints);
+        // Deleted constraints invalidate the label overlay bookkeeping, which
+        // is keyed by constraint pointer.
+        // Constraints can die with the geometry they named; whoever edits the sketch
+        // notices that through the revision rather than being told.
+        ++m_constraintRevision;
+    }
+    void SketcherObj::replaceGeometry(int oldGeoId, std::unique_ptr<Part::Geometry>& newGeo)
+    {
+        if (oldGeoId < mGeoList.size()) {
+            mGeoSegment.erase(mGeoList[oldGeoId].get());
+            mGeoList[oldGeoId] = std::move((newGeo));
+            mGeoSegment[mGeoList[oldGeoId].get()] = getCurveSegment(mGeoList[oldGeoId].get());
+        }
+    }
+    void SketcherObj::replaceGeometries(const std::vector<int>& oldGeoIds, std::vector<std::unique_ptr<Part::Geometry>>& newGeos)
+    {
+        int i = 0;
+        for (;i < oldGeoIds.size() && i < newGeos.size();i++) {
+            int oldGeoId = oldGeoIds[i];
+            if (oldGeoId < mGeoList.size()) {
+                replaceGeometry(oldGeoId, newGeos[i]);
+            }
+        }
+        for (;i < newGeos.size();i++) {
+            addGeometry(newGeos[i]);
+        }
+    }
+    int SketcherObj::addConstraint(const Sketcher::Constraint* constraint)
+    {
+        auto constraint_ptr = std::unique_ptr<Sketcher::Constraint>(constraint->clone());
+        return addConstraint(std::move(constraint_ptr));
+    }
+    int  SketcherObj::addConstraint(std::unique_ptr<Sketcher::Constraint> constraint)
+    {
+        if (!constraint) {
+            return -1;
+        }
+
+        // Basic index validation: elements used by a constraint must exist.
+        auto isValidGeoId = [this](int geoId) {
+            return geoId < 0 || (geoId < static_cast<int>(mGeoList.size()));
+            };
+        if (!isValidGeoId(constraint->First) || !isValidGeoId(constraint->Second)
+            || !isValidGeoId(constraint->Third)) {
+            return -2;
+        }
+
+        for (int i = 0; i < mConstraintList.size(); i++) {
+            if (
+                mConstraintList[i]->Type == constraint->Type &&
+                mConstraintList[i]->First == constraint->First &&
+                mConstraintList[i]->FirstPos == constraint->FirstPos &&
+                mConstraintList[i]->Second == constraint->Second &&
+                mConstraintList[i]->SecondPos == constraint->SecondPos &&
+                mConstraintList[i]->Third == constraint->Third &&
+                mConstraintList[i]->ThirdPos == constraint->ThirdPos
+                )
+            {
+                return -1;
+            }
+        }
+        Sketcher::Constraint* constNew = constraint.release();
+        mConstraintList.push_back(constNew);
+        ++m_constraintRevision;
+        return mConstraintList.size() - 1;
+    }
+    const Sketcher::Constraint* SketcherObj::getConstraint(int index) const
+    {
+        if (index < 0 || index >= static_cast<int>(mConstraintList.size())) {
+            return nullptr;
+        }
+        return mConstraintList[index];
+    }
+    int SketcherObj::findConstraint(const Sketcher::Constraint* pattern) const
+    {
+        if (!pattern) {
+            return -1;
+        }
+        for (int i = 0; i < static_cast<int>(mConstraintList.size()); ++i) {
+            const Sketcher::Constraint* c = mConstraintList[i];
+            if (c->Type == pattern->Type && c->First == pattern->First
+                && c->FirstPos == pattern->FirstPos && c->Second == pattern->Second
+                && c->SecondPos == pattern->SecondPos && c->Third == pattern->Third
+                && c->ThirdPos == pattern->ThirdPos) {
+                return i;
+            }
+        }
+        return -1;
+    }
+    int SketcherObj::setDatum(int constrId, double datum)
+    {
+        if (constrId < 0 || constrId >= static_cast<int>(mConstraintList.size())) {
+            return -1;
+        }
+
+        Sketcher::Constraint* c = mConstraintList[constrId];
+        if (!c->isDimensional() && c->Type != Sketcher::ConstraintType::Tangent
+            && c->Type != Sketcher::ConstraintType::Perpendicular) {
+            return -1;
+        }
+
+        const double oldValue = c->getValue();
+        c->setValue(datum);
+        const int err = solve();
+        if (err != 0) {
+            c->setValue(oldValue);  // keep the sketch consistent with the old datum
+        }
+        return err;
+    }
+    void SketcherObj::addConstraint(Sketcher::ConstraintType constrType, int firstGeoId, Sketcher::PointPos firstPos, int secondGeoId, Sketcher::PointPos secondPos, int thirdGeoId, Sketcher::PointPos thirdPos)
+    {
+        auto newConstr = createConstraint(
+            constrType, firstGeoId, firstPos, secondGeoId, secondPos, thirdGeoId, thirdPos);
+
+        this->addConstraint(std::move(newConstr));
+    }
+    std::unique_ptr<Sketcher::Constraint> SketcherObj::createConstraint(Sketcher::ConstraintType constrType, int firstGeoId, Sketcher::PointPos firstPos, int secondGeoId, Sketcher::PointPos secondPos, int thirdGeoId, Sketcher::PointPos thirdPos)
+    {
+        auto newConstr = std::make_unique<Sketcher::Constraint>();
+
+        newConstr->Type = constrType;
+        newConstr->First = firstGeoId;
+        newConstr->FirstPos = firstPos;
+        newConstr->Second = secondGeoId;
+        newConstr->SecondPos = secondPos;
+        newConstr->Third = thirdGeoId;
+        newConstr->ThirdPos = thirdPos;
+        return newConstr;
+    }
+    void SketcherObj::updateGeoSegment(int id)
+    {
+        if (id < mGeoList.size()) {
+            mGeoSegment[mGeoList[id].get()] = getCurveSegment(mGeoList[id].get());
+        }
+    }
+    void SketcherObj::setConstruction(int geoId, bool construction)
+    {
+        // Construction is a property of the sketch's own geometry; an external
+        // reference is never part of mGeoList.
+        if (geoId < 0 || geoId >= static_cast<int>(mGeoList.size())) {
+            return;
+        }
+        mGeoList[geoId]->setConstruction(construction);
+        if (construction) {
+            mConstructionGeoIds.insert(geoId);
+        }
+        else {
+            mConstructionGeoIds.erase(geoId);
+        }
+    }
+    void SketcherObj::setConstraintVisible(int constrId, bool visible)
+    {
+        if (constrId >= 0 && constrId < static_cast<int>(mConstraintList.size())) {
+            mConstraintList[constrId]->isVisible = visible;
+        }
+    }
+    bool SketcherObj::removeConstraint(int p_index)
+    {
+        if (p_index < 0 || p_index >= static_cast<int>(mConstraintList.size())) {
+            return false;
+        }
+        Sketcher::Constraint* constraint = mConstraintList[p_index];
+        // The annotation layout is keyed by the constraint itself and the hover/drag
+        // state by its index; erasing the entry would leave both pointing at whatever
+        // takes its place, so they go first.
+        delete constraint;
+        mConstraintList.erase(mConstraintList.begin() + p_index);
+        ++m_constraintRevision;
+        // The other constraints hold the elements they name, not vector positions, so
+        // nothing has to be renumbered - the solver only has to see the sketch as it is
+        // now.
+        solve();
+        return true;
+    }
+    void SketcherObj::setGeometryVisible(int geoId, bool visible)
+    {
+        if (visible) {
+            mHiddenGeoIds.erase(geoId);
+        }
+        else {
+            mHiddenGeoIds.insert(geoId);
+        }
+    }
+
+    void SketcherObj::setPlane(const SketcherPlane2D& plane)
+    {
+        mPlane = plane;
+        // The plane is data, and so is what it means for the shape the sketch hands
+        // out: the matrix that puts the sketch's 2D coordinates into the model comes
+        // straight from it. It has to be updated here, not by whoever draws the
+        // sketch - a document that is only read (no widget exists yet) still has to
+        // come out in the right place.
+        planeTransform = updateTransform();
+        // Pointing the camera at the plane is the widget's business: it sees the change
+        // through the revision instead (SketcherObjWidget::syncWithSketch).
+        ++m_planeRevision;
+    }
+    SketcherObj::CurveSegment SketcherObj::getCurveSegment(Part::Geometry* geo)
+    {
+        CurveSegment seg;
+        CurveConvert::toVector2D(geo, 50, seg.point, seg.params);
+        if (geo->isDerivedFrom<Part::GeomCurve>()) {
+            if (geo->is<Part::GeomArcOfCircle>()) {
+                Part::GeomArcOfCircle* curve = static_cast<Part::GeomArcOfCircle*>(geo);
+                seg.sepoints.push_back({ curve->getStartPoint(),PointPos::start });
+                seg.sepoints.push_back({ curve->getEndPoint() ,PointPos::end });
+                seg.sepoints.push_back({ curve->getCenter() ,PointPos::mid });
+            }
+            else if (geo->is<Part::GeomLineSegment>()) {
+                Part::GeomLineSegment* lineSeg = static_cast<Part::GeomLineSegment*>(geo);
+                seg.sepoints.push_back({ lineSeg->getStartPoint(),PointPos::start });
+                seg.sepoints.push_back({ lineSeg->getEndPoint(),PointPos::end });
+            }
+            else if (geo->is<Part::GeomArcOfConic>()) {
+                Part::GeomArcOfConic* curve = static_cast<Part::GeomArcOfConic*>(geo);
+                seg.sepoints.push_back({ curve->getStartPoint(),PointPos::start });
+                seg.sepoints.push_back({ curve->getEndPoint() ,PointPos::end });
+                seg.sepoints.push_back({ curve->getCenter() ,PointPos::mid });
+            }
+            else if (geo->is<Part::GeomCircle>()) {
+                Part::GeomCircle* curve = static_cast<Part::GeomCircle*>(geo);
+                seg.sepoints.push_back({ curve->getCenter() ,PointPos::mid });
+            }
+            else if (geo->isDerivedFrom<Part::GeomConic>()) {
+                // A full conic (ellipse, hyperbola, parabola) has no ends, so its centre
+                // is the only anchor it can offer. Without this an ellipse - which is
+                // what a circle tilted against the sketch plane projects to - had no
+                // marker at all: nothing to draw, to pick or to snap to.
+                const auto* conic = static_cast<const Part::GeomConic*>(geo);
+                seg.sepoints.push_back({ conic->getCenter() ,PointPos::mid });
+            }
+            else if (geo->is<Part::GeomBSplineCurve>()) {
+                Part::GeomBSplineCurve* curve = static_cast<Part::GeomBSplineCurve*>(geo);
+                std::vector<Base::Vector3d>poles = curve->getPoles();
+                for (int i = 0; i < poles.size(); i++) {
+                    seg.sepoints.push_back({ poles[i],PointPos::mid });
+                }
+            }
+        }
+        else if (geo->is<Part::GeomPoint>()) {
+            Base::Vector3d pos = static_cast<Part::GeomPoint*>(geo)->getPoint();
+            seg.sepoints.push_back({ pos, PointPos::start });
+        }
+        return seg;
+    }
+    SketcherObj::CurveSegment& SketcherObj::segmentOf(Part::Geometry* geo)
+    {
+        // An entry existing means "this geometry is sampled": a point samples to no
+        // polyline at all, so the content cannot be used to tell.
+        const auto found = mGeoSegment.find(geo);
+        if (found != mGeoSegment.end()) {
+            return found->second;
+        }
+        return mGeoSegment.emplace(geo, getCurveSegment(geo)).first->second;
+    }
+    const SketcherObj::CurveSegment* SketcherObj::findSegment(
+        const Part::Geometry* geo) const
+    {
+        const auto found = mGeoSegment.find(const_cast<Part::Geometry*>(geo));
+        if (found == mGeoSegment.end()) {
+            return nullptr;
+        }
+        return &found->second;
+    }
+    SketcherPlane2D SketcherObj::getPlane()
+    {
+        return mPlane;
+    }    
+    void SketcherObj::getPlaneNormal(double* p)
+    {
+        p[0] = mPlane.normal.x;
+        p[1] = mPlane.normal.y;
+        p[2] = mPlane.normal.z;
+    }
+    bool SketcherObj::getGeometryPointSketch(int geoId, PointPos pos, Base::Vector2d& out) const
+    {
+        // External references are drawn and labelled like the sketch's own curves, so
+        // the lookup has to cover both halves of the solver list.
+        const Part::Geometry* geo = resolveGeometry(geoId);
+        // The origin is the fallback for the root-point id, but only when that id is
+        // not one of the external curves (the ids of the block run up to -1).
+        if (geo == nullptr && geoId == Sketcher::GeoEnum::RtPnt
+            && (pos == PointPos::start || pos == PointPos::mid)) {
+            out.x = 0.0;
+            out.y = 0.0;
+            return true;
+        }
+        if (!geo) {
+            return false;
+        }
+        if (geo->is<Part::GeomPoint>()) {
+            const Base::Vector3d p = static_cast<const Part::GeomPoint*>(geo)->getPoint();
+            out.x = p.x;
+            out.y = p.y;
+            return true;
+        }
+        auto it = mGeoSegment.find(const_cast<Part::Geometry*>(geo));
+        if (it == mGeoSegment.end()) {
+            return false;
+        }
+        for (const auto& sp : it->second.sepoints) {
+            if (sp.pointPos == pos) {
+                out.x = sp.coord.x;
+                out.y = sp.coord.y;
+                return true;
+            }
+        }
+        return false;
+    }
+    bool SketcherObj::getGeometryCenterSketch(int geoId, Base::Vector2d& out) const
+    {
+        if (geoId == NoGeoId) {
+            return false;
+        }
+        const Part::Geometry* geo = resolveGeometry(geoId);
+        // The origin stands in for the root-point id, but only when that id does not
+        // name one of the external curves.
+        if (geo == nullptr && geoId == Sketcher::GeoEnum::RtPnt) {
+            out.x = 0.0;
+            out.y = 0.0;
+            return true;
+        }
+        if (!geo) {
+            return false;
+        }
+        Base::Vector3d center;
+        // An arc's centre is the centre of the circle it is part of. The bounded-curve
+        // branch further down would answer with the middle of its chord instead, which
+        // is not a centre at all - and it is the branch that used to win for arcs,
+        // because the abstract GeomArcOfConic test does not answer for them. Their
+        // concrete types are asked for instead.
+        const bool isArc = geo->is<Part::GeomArcOfCircle>()
+            || geo->is<Part::GeomArcOfEllipse>()
+            || geo->is<Part::GeomArcOfHyperbola>()
+            || geo->is<Part::GeomArcOfParabola>();
+        if (isArc) {
+            center = static_cast<const Part::GeomArcOfConic*>(geo)->getCenter();
+        }
+        else if (geo->isDerivedFrom<Part::GeomConic>()) {
+            center = static_cast<const Part::GeomConic*>(geo)->getCenter();
+        }
+        else if (geo->is<Part::GeomPoint>()) {
+            center = static_cast<const Part::GeomPoint*>(geo)->getPoint();
+        }
+        else if (geo->isDerivedFrom<Part::GeomBoundedCurve>()) {
+            const auto* bounded = static_cast<const Part::GeomBoundedCurve*>(geo);
+            center = (bounded->getStartPoint() + bounded->getEndPoint()) * 0.5;
+        }
+        else if (geo->isDerivedFrom<Part::GeomCurve>()) {
+            const auto it = mGeoSegment.find(const_cast<Part::Geometry*>(geo));
+            if (it != mGeoSegment.end() && !it->second.point.empty()) {
+                center = it->second.point[it->second.point.size() / 2];
+            }
+            else {
+                return false;
+            }
+        }
+        else {
+            return false;
+        }
+        out.x = center.x;
+        out.y = center.y;
+        return true;
+    }
+    SketcherObj::ConstraintStatus SketcherObj::getConstraintStatus(int p_constrId) const
+    {
+        const auto contains = [p_constrId](const std::vector<int>& list) {
+            return std::find(list.begin(), list.end(), p_constrId) != list.end();
+            };
+        // A constraint can show up in more than one list; the most severe one is the
+        // one worth showing.
+        if (contains(lastConflicting)) {
+            return ConstraintStatus::Conflicting;
+        }
+        if (contains(lastMalformedConstraints)) {
+            return ConstraintStatus::Malformed;
+        }
+        if (contains(lastRedundant)) {
+            return ConstraintStatus::Redundant;
+        }
+        if (contains(lastPartiallyRedundant)) {
+            return ConstraintStatus::PartiallyRedundant;
+        }
+        return ConstraintStatus::Ok;
+    }
 }

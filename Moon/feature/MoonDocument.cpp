@@ -644,12 +644,10 @@ namespace MOON
 			p_sketch->setSnapToGrid(getFlag(p_node, "snapGrid", false));
 			p_sketch->solve();
 			p_sketch->makeDone();
-			// A sketch that is not being edited does not draw itself: the curves come
-			// from the feature's actor (which the tree view's eye switches off). The
-			// sketch object is active by default - it is created to be edited - and
-			// nobody else would switch it off for a sketch that was read from a file,
-			// so it would keep painting its curves over the viewport.
-			p_sketch->setActive(false);
+			// A sketch read from a file is not being edited: it has no editing widget,
+			// and without one nothing draws it - the curves come from the feature's
+			// actor, which the tree view's eye switches off. The widget is built when
+			// the sketch is actually opened for editing.
 			return true;
 		}
 

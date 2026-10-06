@@ -1,20 +1,52 @@
 # SketcherObj：工作职责、功能清单与开发计划
 
-> 本文基于 `Moon/Sketcher/SketcherObj.h` / `SketcherObj.cpp` 的实际实现整理，并对照 FreeCAD 的
+> 本文基于 `Moon/Sketcher/` 的实际实现整理，并对照 FreeCAD 的
 > `src/Mod/Sketcher/App/SketchObject*`（App 侧）与 `src/Mod/Sketcher/Gui/ViewProviderSketch`（交互侧）
-> 说明本类完成了其中哪些、还缺哪些。
+> 说明本项目完成了其中哪些、还缺哪些。
+
+---
+
+## 0. 2026-10 重构：数据与编辑面拆开了
+
+文中的行为描述仍然有效，但**职责已经拆成两个类**（这就是 FreeCAD 的那条线）：
+
+| 现在在哪 | 文件 | 负责 |
+| --- | --- | --- |
+| `SketcherObj` | `SketcherObj.h` / `SketcherObj.cpp` | 草图**数据**：几何增删改、外部参考、约束增删改、GCS 求解、采样缓存（`mGeoSegment`）、平面与变换、`toShape()/makeDone()`、网格/吸附/隐藏这些随文档保存的显示数据。**不再是 `EventWidget`**，不依赖渲染器，可以在没有 GUI 的情况下加载/求解/写出。 |
+| `SketcherObjWidget : EventWidget` | `SketcherObjWidget.h` + `SketcherObjWidgetInteraction.cpp`（事件、拾取、吸附、拖拽、选择）+ `SketcherObjWidgetDraw.cpp`（绘制、网格与轴、尺寸标注与命中、约束图标） | 草图**编辑面**：选择/预选、拖拽、拾取、吸附、绘制、标注布局与交互。它持有 `SketcherObj*`（不拥有），所有几何/约束改动都走 `SketcherObj` 的接口。 |
+| 共用类型 | `SketcherTypes.h` | `SelectGeoId` / `NoGeoId` / `DrawOption`（颜色与线宽）。 |
+
+所有权：`SketcherFeature` 持有草图数据（`shared_ptr`），编辑 widget 在**第一次打开草图编辑时创建**
+（`SketcherFeature::ensureSketcherWidget()`），在此之前（例如刚读取文档）不存在——所以“没有 widget”
+就是“没在编辑”的正常状态。查找入口：`SketcherObjManager::GetCurrentActiveSketcherWidget()`。
+
+依赖方向是单向的（下层不知道上层）：
+
+- `SketcherObj` **不 include widget 头、不持有 widget 指针、不调用 widget，也没有 friend**。它对上面的
+  世界只发布两样东西：只读数据访问（`geometries() / constraints() / geometryCount() / plane() /
+  isConstructionGeometry() / findSegment() / segmentOf()` 等）和 solver 的拖拽接口
+  （`beginMove() / moveGeometries() / takeSolvedGeometry()`）。
+- 反过来，它用两个**变更计数**告诉外面“有什么变了”：`planeRevision()`（`setPlane` 时 +1）与
+  `constraintRevision()`（约束增删、几何删除连带删约束时 +1）。这只是数据，模型并不关心谁在读。
+- `SketcherObjWidget` 在每帧 `onUpdate()` 里 `syncWithSketch()` 比对自己上次看到的计数：平面变了就
+  重新把相机对到平面上，约束集合变了就 `pruneConstraintLayout()` 清掉失效的标注布局。结束编辑也由
+  widget 自己发起（`finishEdit()` = `SketcherObj::makeDone()` + `leaveEdit()`），不需要模型回调过来。
+
+> 下面章节里的 `![...](images/*.svg)` 示意图画的是重构**之前**一个类包办全部职责的样子，尚未重画；
+> 表里标注了每个成员现在归谁。
 
 ---
 
 ## 1. 一句话总览
 
-**`SketcherObj` 是一个事件驱动的 2D 草图编辑对象**：它持有草图平面、2D 几何与约束，把
-`EventWidget` 的鼠标/键盘事件翻译成“选择 → 拖动 → 求解 → 重绘”，并能在完成编辑时把草图几何
-输出为可用于 3D 建模的拓扑（wire / compound）。
+**`SketcherObj` 是草图的 2D 数据与求解**：它持有草图平面、2D 几何与约束，把约束交给 GCS 求解，
+并在完成编辑时把草图几何输出为可用于 3D 建模的拓扑（wire / compound）。鼠标/键盘事件、选择、
+拖动与绘制由 **`SketcherObjWidget`**（一个 `EventWidget`）承担，它把“选择 → 拖动 → 求解 → 重绘”
+翻译成对 `SketcherObj` 的调用。
 
 FreeCAD 中这一套逻辑被拆在多个类里（`SketchObject` 管数据与求解、`ViewProviderSketch` 管拾取绘制、
-`DrawSketchHandler*` 管工具交互、`Constraint` 管约束类型），本项目的 `SketcherObj` 把它们**合并成一个
-`EventWidget` 子类**，工具交互则仍然拆到 `Moon/Interactive/Widgets/DrawSketchHandler*`。
+`DrawSketchHandler*` 管工具交互、`Constraint` 管约束类型）；本项目对应 `SketcherObj` +
+`SketcherObjWidget` + `Moon/Interactive/Widgets/DrawSketchHandler*`。
 
 ![SketcherObj 职责与数据流](images/sketcherobj_architecture.svg)
 
@@ -31,9 +63,9 @@ FreeCAD 中这一套逻辑被拆在多个类里（`SketchObject` 管数据与求
 | `mGeoList` | `vector<unique_ptr<Part::Geometry>>` | 草图几何（线/圆弧/圆/样条/点），平面局部坐标 | `SketchObject.Geometry` |
 | `mConstraintList` | `vector<Constraint*>`（裸指针） | 约束列表 | `SketchObject.Constraints` |
 | `solvedSketch` | `Sketcher::Sketch` | GCS 求解器封装 | `Sketcher::Sketch`（内部求解器） |
-| `mGeoSegment` | `unordered_map<Geometry*, CurveSegment>` | 每条曲线的离散折线 + 参数 + Start/End/Center 关键点缓存 | `ViewProviderSketch` 内部的显示缓存 |
-| `selectIds / preSelectGeoId` | `vector<SelectGeoId>` / `SelectGeoId` | 选中项与悬停预选项（GeoId + 点类型） | `ViewProviderSketch` 选择逻辑 |
-| `basedTopoShape / doneFaceShape` | `Part::TopoShape` | 编辑前基准 / 编辑完成后输出的拓扑 | `SketchObject` 的 Shape 输出 |
+| `mGeoSegment` | `unordered_map<Geometry*, CurveSegment>` | 每条曲线的离散折线 + 参数 + Start/End/Center 关键点缓存（**留在 `SketcherObj`**：这是数据，绘制/拾取/吸附都读它） | `ViewProviderSketch` 内部的显示缓存 |
+| `selectIds / preSelectGeoId` | `vector<SelectGeoId>` / `SelectGeoId` | 选中项与悬停预选项（GeoId + 点类型）→**现在在 `SketcherObjWidget`** | `ViewProviderSketch` 选择逻辑 |
+| `basedTopoShape / doneFaceShape` | `Part::TopoShape` | 编辑前基准 / 编辑完成后输出的拓扑（**仍在 `SketcherObj`**） | `SketchObject` 的 Shape 输出 |
 
 ### 2.2 职责分解
 

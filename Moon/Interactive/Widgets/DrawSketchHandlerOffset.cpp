@@ -8,6 +8,7 @@
 #include "Geometry2d.h"
 #include "Sketcher/SketcherObjManager.h"
 #include "Sketcher/SketcherObj.h"
+#include "Sketcher/SketcherObjWidget.h"
 #include "core/log.h"
 
 #include <BRepOffsetAPI_MakeOffset.hxx>
@@ -133,9 +134,9 @@ namespace MOON
 	void DrawSketchHandlerOffset::onUpdate()
 	{
 		DrawSketchHandler::onUpdate();
-		SketcherObj* Obj = SketcherObjManager::instance().GetCurrentActiveSketcherObj();
-		if (Obj) {
-			listOfGeoIds = Obj->getSelectIds();
+		SketcherObjWidget* widget = SketcherObjManager::instance().GetCurrentActiveSketcherWidget();
+		if (widget) {
+			listOfGeoIds = widget->getSelectIds();
 		}
 	}
 

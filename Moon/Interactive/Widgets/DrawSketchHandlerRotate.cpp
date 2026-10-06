@@ -1,4 +1,5 @@
-﻿#include "Interactive/Widgets/DrawSketchHandlerRotate.h"
+#include "Interactive/Widgets/DrawSketchHandlerRotate.h"
+#include "Sketcher/SketcherObjWidget.h"
 #include "Interactive/Im3DRenderer.h"
 #include "renderer/SceneView.h"
 #include "Qtimgui/imgui/imgui.h"
@@ -34,8 +35,10 @@ namespace MOON {
 	void DrawSketchHandlerRotate::onUpdate()
 	{
         DrawSketchHandler::onUpdate();
-        SketcherObj* Obj = SketcherObjManager::instance().GetCurrentActiveSketcherObj();
-		listOfGeoIds = Obj->getSelectIds();
+        SketcherObjWidget* widget = SketcherObjManager::instance().GetCurrentActiveSketcherWidget();
+        if (widget) {
+            listOfGeoIds = widget->getSelectIds();
+        }
 	}
 
 	void DrawSketchHandlerRotate::updateDataAndDrawToPosition(Base::Vector2d onSketchPos)
