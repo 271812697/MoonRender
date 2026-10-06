@@ -1,4 +1,4 @@
-#include "SketchTaskDialog.h"
+﻿#include "SketchTaskDialog.h"
 #include "TaskBox.h"
 #include "editor/UI/PropertyPanel/Collapsiblegroupboxwidget.h"
 #include "Sketcher/SketcherObjManager.h"
@@ -133,6 +133,9 @@ namespace MOON {
             }
             else
             {
+                // A sketch that does not exist yet is created here and belongs to this
+                // dialog until OK hands it to the document (see dropUncommittedFeature).
+                isCreateFeature = true;
                 feature = SketcherObjManager::instance().CreateSketcherFeature();
                 //feature->getSketcherObj()->setActive(true);
 				self->setFeature(feature);
@@ -157,32 +160,75 @@ namespace MOON {
 					behaviour = new SketchPlane("selectPlane");
                     behaviour->AddObserver(SketchPlaneEvent::SelectPlane,self, &SketchTaskDialog::onSelectPlane);
                 }
-                // The sketch is created in order to be edited: build its editing widget
-                // now. It is what fits the camera to the plane (set above, or picked
-                // below) and what the drawing tools render into.
-                if (SketcherObjWidget* w = ensureWidget()) {
-                    w->beginEdit();
-                }
             }
             SketcherObjManager::instance().setCurrentActiveSketcherFeature(feature);
         }
         ~Internal() {
             if (widget) {
                 widget->setActive(false);
-                // Leaving the sketch leaves its tools: the external geometry button has
-                // to follow - and with it the tool widget it switches on - otherwise it
-                // would still be pressed the next time the sketch is opened.
-                GetService(SketchToolbar).uncheckExternalGeometry();
+                widget.reset();
+            }
+            // Closing the sketch leaves its tools: the buttons (external geometry has
+            // one of its own) and the tool widgets they switch on would otherwise stay
+            // pressed into the next session - and they reach the sketch through the
+            // manager, which is about to forget this one. Only while this sketch is
+            // still the one being edited: the panel destroys its dialog with
+            // deleteLater, so by the time this runs the task panel may already have
+            // opened another sketch, whose tools must not be taken down here.
+            if (SketcherObjManager::instance().GetCurrentActiveSketcherFeature() == feature) {
+                GetService(SketchToolbar).disableAllHandlers();
             }
             if (behaviour) {
                 delete behaviour;
             }
+            // Whatever is left of a sketch this dialog created goes with it: the panel
+            // is also taken down by paths that never call clickCancel (picking another
+            // feature in the tree, for instance), and each of them has to leave the
+            // document exactly like Cancel does.
+            dropUncommittedFeature();
+        }
+        /** Drops the feature, its sketch and its actors when this dialog created them
+         * and OK never committed them.
+         *
+         * A new sketch is registered - it lists itself in the feature body and the
+         * manager hands it to the drawing tools - from the moment it is constructed,
+         * so an abandoned one has to be unregistered again or the whole chain of it
+         * is left behind: the feature, the geometry the user drew into it and the
+         * actors it spawned in the scene. Calling this twice is harmless. */
+        void dropUncommittedFeature()
+        {
+            if (!isCreateFeature || committed || feature == nullptr) {
+                return;
+            }
+            // The widget first: it holds the sketch's pointer and keeps drawing and
+            // editing it every frame until the panel is really gone (the task panel
+            // destroys the dialog with deleteLater), so it must not outlive the data.
+            if (widget) {
+                widget->setActive(false);
+                widget.reset();
+            }
+            // The manager is what the drawing tools ask for the sketch being edited,
+            // and what the modelling panels look the last sketch up in: it has to
+            // forget this one before it is freed.
+            SketcherObjManager::instance().removeSketcherFeature(feature);
+            // The actor and, through the scene, the topology actors hanging under it.
+            // The feature body is handled by the destructor, which unlists the feature.
+            feature->RemoveFromScene();
+            delete feature;
+            feature = nullptr;
+            self->setFeature(nullptr);
         }
     private:
         friend SketchTaskDialog;
         SketchTaskDialog* self = nullptr;
         SketcherFeature* feature = nullptr;
         SketchPlane* behaviour = nullptr;
+        /** True when the feature above was created by this dialog, i.e. when the user
+         * asked for a new sketch rather than opened an existing one. */
+        bool isCreateFeature = false;
+        /** Set by clickOk: from there on the document owns the sketch, so the
+         * destructor leaves it alone. */
+        bool committed = false;
         /** The widget that edits this sketch: born with the dialog, destroyed with it
          * (nothing else holds it - the feature and the sketch data do not know it). */
         std::unique_ptr<SketcherObjWidget> widget;
@@ -413,12 +459,19 @@ namespace MOON {
         GetService(SketchToolbar).disableAllHandlers();
         mInternal->feature->execute();
         mInternal->feature->makeDone();
+        // The document owns the sketch from here on - it is in the body and in the
+        // tree - so closing the panel must not drop it (see dropUncommittedFeature).
+        mInternal->committed = true;
     }
     void SketchTaskDialog::clickApply()
     {
     }
     void SketchTaskDialog::clickCancel()
     {
+        // The panel itself is destroyed later (deleteLater), so the sketch this dialog
+        // created goes now: everything that holds it - the drawing tools through the
+        // manager, the tree panel rebuilding the chain - has to see it gone.
+        mInternal->dropUncommittedFeature();
     }
     void SketchTaskDialog::onSelectPlane()
     {
