@@ -37,7 +37,22 @@ namespace MOON {
 			Feature::applyWorldTransform(*mProfile, face);
 			return face;
 		}
-		CORE_ERROR("{0}: it has no profile sketch and no shape below it", GetName());
-		return getBaseTopoFaceShape();
+		// No sketch: the profile is then a face or an edge picked on the shape below
+		// (that is what a pad built on the body is), which the feature stores as a
+		// sub-shape reference. The lookup belongs here, and a lookup that finds
+		// something is not a problem to report - only one that comes back empty is.
+		Part::TopoShape subShape = getBaseTopoFaceShape();
+		if (subShape.isNull()) {
+			CORE_ERROR(
+				"{0}: it has no profile: neither a sketch nor a sub-shape that can be "
+				"resolved on the shape below",
+				GetName());
+			return subShape;
+		}
+		CORE_INFO(
+			"{0}: the profile is the sub-shape '{1}' of the shape below",
+			GetName(),
+			getSubValues().empty() ? std::string("<none>") : getSubValues().front());
+		return subShape;
 	}
 }

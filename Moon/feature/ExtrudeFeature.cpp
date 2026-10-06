@@ -363,7 +363,15 @@ namespace MOON {
                         Part::TopoShape::SingleShapeCompoundCreationPolicy::returnShape
                     );
                 }
-                LogTopoElementNames(face, "profile");
+                // The profile is dumped only when it is a sketch's face: a profile
+                // that came from the body below (a face or an edge picked on it) is a
+                // sub-shape of that shape and keeps its names in the shape it was
+                // taken from instead of carrying a map of its own, so the dump would
+                // only warn about a map it is never supposed to have. What came out of
+                // it is visible in the prism dump right below either way.
+                if (getProfile() != nullptr) {
+                    LogTopoElementNames(face, "profile");
+                }
                 LogTopoElementNames(prism, "prism");
                 getPreviewShape() = prism;
                 // The prism is this feature's own material, whatever it is fused
