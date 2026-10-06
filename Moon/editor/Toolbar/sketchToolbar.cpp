@@ -8,6 +8,8 @@
 #include "Interactive/Widgets/DrawSketchHandlerExternalGeometry.h"
 #include "core/log.h"
 #include <QCoreApplication>
+#include <algorithm>
+#include <vector>
 namespace MOON {
 
 	namespace
@@ -151,6 +153,54 @@ namespace MOON {
 	};
 	std::vector<AddExternalGeometryCommand*> AddExternalGeometryCommand::s_commands;
 
+	/** Switches the selected curves between defining geometry and construction
+	 * geometry - FreeCAD's Toggle Construction Geometry button.
+	 *
+	 * A construction curve stays in the sketch and in the solver but is never part
+	 * of the shape the sketch produces, so it is a reference the rest of the sketch
+	 * is constrained against (SketcherObj::setConstruction).
+	 *
+	 * FreeCAD's button has a second half - with nothing selected it switches the
+	 * mode the *next* curves are created in - which this one does not: every drawing
+	 * tool hands the flag for the geometry it creates itself, so that mode would
+	 * have to be plumbed through all of them. */
+	class ToggleConstructionCommand : public Command
+	{
+	public:
+		ToggleConstructionCommand(QObject* parent) :Command(parent) {
+			auto action = new QAction(this);
+			setAction(action);
+		}
+	protected:
+		virtual void execute()override {
+			SketcherObj* sketch
+				= SketcherObjManager::instance().GetCurrentActiveSketcherObj();
+			if (sketch == nullptr) {
+				CORE_WARN("[ToggleConstruction] no sketch is being edited");
+				return;
+			}
+			// The same curve can be selected as a curve and through one of its
+			// markers: toggling it once per selection entry would leave it as it was.
+			std::vector<int> geoIds;
+			for (int geoId : sketch->getSelectIds()) {
+				if (geoId < 0) {
+					continue;  // an external reference is not the sketch's own curve
+				}
+				if (std::find(geoIds.begin(), geoIds.end(), geoId) == geoIds.end()) {
+					geoIds.push_back(geoId);
+				}
+			}
+			if (geoIds.empty()) {
+				// The selection is what says which curves are meant.
+				CORE_WARN("[ToggleConstruction] no curve is selected");
+				return;
+			}
+			for (int geoId : geoIds) {
+				sketch->setConstruction(geoId, !sketch->isConstructionGeometry(geoId));
+			}
+		}
+	};
+
 	class SketchToolbar::SketchToolbarInternal {
 	public:
 
@@ -175,6 +225,7 @@ namespace MOON {
 			symmetry=new CreateCurveCommand(self, "DrawSketchHandlerSymmetry");
 			fillet = new CreateCurveCommand(self, "DrawSketchHandlerFillet");
 			offset = new CreateCurveCommand(self, "DrawSketchHandlerOffset");
+			toggleConstruction = new ToggleConstructionCommand(self);
 			external = new AddExternalGeometryCommand(self, /*intersection*/ false);
 			externalIntersection = new AddExternalGeometryCommand(self, /*intersection*/ true);
 			point->setIcon(":/widgets/icons/Sketcher_CreatePoint.svg");
@@ -193,6 +244,7 @@ namespace MOON {
 			symmetry->setIcon(":/widgets/icons/Sketcher_Symmetry.svg");
 			fillet->setIcon(":/widgets/icons/Sketcher_CreateFillet.svg");
 			offset->setIcon(":/widgets/icons/Sketcher_Offset.svg");
+			toggleConstruction->setIcon(":/widgets/icons/Sketcher_ToggleConstruction.svg");
 			external->setIcon(":/widgets/icons/Sketcher_Projection.svg");
 			externalIntersection->setIcon(":/widgets/icons/Sketcher_Intersection.svg");
 			self->addAction(point->action());
@@ -211,6 +263,7 @@ namespace MOON {
 			self->addAction(symmetry->action());
 			self->addAction(fillet->action());
 			self->addAction(offset->action());
+			self->addAction(toggleConstruction->action());
 			self->addAction(external->action());
 			self->addAction(externalIntersection->action());
 			// A draw handler takes the clicks back, so it ends the external geometry
@@ -253,6 +306,7 @@ namespace MOON {
 			symmetry->action()->setText(QCoreApplication::translate("SketchToolbar", "Symmetry", nullptr));
 			fillet->action()->setText(QCoreApplication::translate("SketchToolbar", "Fillet", nullptr));
 			offset->action()->setText(QCoreApplication::translate("SketchToolbar", "Offset", nullptr));
+			toggleConstruction->action()->setText(QCoreApplication::translate("SketchToolbar", "Toggle Construction Geometry", nullptr));
 			external->action()->setText(QCoreApplication::translate("SketchToolbar", "External Geometry", nullptr));
 			externalIntersection->action()->setText(QCoreApplication::translate("SketchToolbar", "External Intersection", nullptr));
 		}
@@ -275,6 +329,7 @@ namespace MOON {
 		CreateCurveCommand* symmetry;
 		CreateCurveCommand* fillet;
 		CreateCurveCommand* offset;
+		ToggleConstructionCommand* toggleConstruction = nullptr;
 		AddExternalGeometryCommand* external = nullptr;
 		AddExternalGeometryCommand* externalIntersection = nullptr;
 		
