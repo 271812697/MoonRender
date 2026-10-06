@@ -15,7 +15,7 @@
 | `SketcherObj` | `SketcherObj.h` / `SketcherObj.cpp` | 草图**数据**：几何增删改、外部参考、约束增删改、GCS 求解、采样缓存（`mGeoSegment`）、平面与变换、`toShape()/makeDone()`、网格/吸附/隐藏这些随文档保存的显示数据。**不再是 `EventWidget`**，不依赖渲染器，可以在没有 GUI 的情况下加载/求解/写出。 |
 | `SketcherObjWidget : EventWidget` | `SketcherObjWidget.h` + `SketcherObjWidgetInteraction.cpp`（事件、拾取、吸附、拖拽、选择）+ `SketcherObjWidgetDraw.cpp`（绘制、网格与轴、尺寸标注与命中、约束图标） | 草图**编辑面**：选择/预选、拖拽、拾取、吸附、绘制、标注布局与交互。它持有 `SketcherObj*`（不拥有），所有几何/约束改动都走 `SketcherObj` 的接口。 |
 | 共用类型 | `SketcherTypes.h` | `SelectGeoId` / `NoGeoId` / `DrawOption`（颜色与线宽）。 |
-| 拾取/吸附 | `SketchPicking.h` / `SketchPicking.cpp` | 无状态的视图层查询：`testSelect`（点到元素）、`pickGeoIndex`（点到曲线）、`snapPoint` / `snapToGridPoint` / `gridView`（吸附与自适应网格）。它们只读草图数据 + 相机/渲染器，编辑 widget 和绘制工具都调这一份。 |
+| 拾取/吸附 | `Interactive/SketchPicking.h` / `Interactive/SketchPicking.cpp` | 无状态的视图层查询：`testSelect`（点到元素）、`pickGeoIndex`（点到曲线）、`snapPoint` / `snapToGridPoint` / `gridView`（吸附与自适应网格）。它们只读草图数据 + 相机/渲染器，编辑 widget 和绘制工具都调这一份。它属于交互层，所以放在 `Interactive/` 而不是 `Sketcher/`。 |
 
 所有权：
 
@@ -24,6 +24,9 @@
 - 编辑 widget（`SketcherObjWidget`）由 **`SketchTaskDialog` 持有**（其 `Internal` 里的 `unique_ptr`），
   生命周期与对话框一致：打开草图时创建、关闭对话框时销毁。刚读取文档时它不存在——“没有 widget”就是
   “没在编辑”的常态。
+- 工具栏里的绘制工具也归 **`SketchTaskDialog`** 收尾：`finishEdit()` 后调 `disableAllHandlers()`，
+  析构时（`widget->setActive(false)` 之后）调 `uncheckExternalGeometry()`。这样 widget 不必反过来
+  依赖工具栏，数据层更不必（`SketcherObj.cpp` 已不 include 视图/编辑器头）。
 - 草图的其它工具（`DrawSketchHandler*`、`SmartDimensionWidget`）**不需要 widget**：拾取/吸附调
   `SketchPicking` 的无状态函数（自己带相机），选中/预选从 `SketcherObj` 查，尺寸工具想放的标注位置写进
   `SketcherObj` 的 `annotationDropPoints()`，由编辑 widget 取走并转成它自己的标注布局。
