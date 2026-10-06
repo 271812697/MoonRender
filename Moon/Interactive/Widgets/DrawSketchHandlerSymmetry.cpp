@@ -1,5 +1,4 @@
 #include "Interactive/Widgets/DrawSketchHandlerSymmetry.h"
-#include "Sketcher/SketcherObjWidget.h"
 #include "Interactive/Im3DRenderer.h"
 #include "renderer/SceneView.h"
 #include "Qtimgui/imgui/imgui.h"
@@ -31,9 +30,9 @@ namespace MOON {
 	void DrawSketchHandlerSymmetry::onUpdate()
 	{
         DrawSketchHandler::onUpdate();
-        SketcherObjWidget* widget = SketcherObjManager::instance().GetCurrentActiveSketcherWidget();
-        if (widget) {
-            listOfGeoIds = widget->getSelectIds();
+        SketcherObj* Obj = SketcherObjManager::instance().GetCurrentActiveSketcherObj();
+        if (Obj) {
+            listOfGeoIds = Obj->getSelectIds();
         }
 	}
 
@@ -113,3 +112,4 @@ namespace MOON {
     }
 
 }
+

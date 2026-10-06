@@ -4,7 +4,6 @@
 #include "renderer/SceneView.h"
 #include "Sketcher/SketcherObjManager.h"
 #include "Sketcher/SketcherObj.h"
-#include "Sketcher/SketcherObjWidget.h"
 #include "Interactive/Widgets/DrawSketchHandler.h"
 #include "editor/Toolbar/sketchToolbar.h"
 #include "renderer/GizmoRenderPass.h"
@@ -24,10 +23,10 @@ namespace MOON {
 	 * not in the sketch data. */
 	static std::vector<SketcherObj::SelectGeoId> currentSketchSelection()
 	{
-		SketcherObjWidget* widget
-			= SketcherObjManager::instance().GetCurrentActiveSketcherWidget();
-		return widget != nullptr ? widget->getSelectGeoPosIds()
-			: std::vector<SketcherObj::SelectGeoId>();
+		SketcherObj* obj
+		= SketcherObjManager::instance().GetCurrentActiveSketcherObj();
+		return obj != nullptr ? obj->getSelectGeoPosIds()
+		: std::vector<SketcherObj::SelectGeoId>();
 	}
 	// ---- helpers: derive constraint dialog defaults from the current sketch
 	static double dist2d(const Base::Vector2d& a, const Base::Vector2d& b)
@@ -1170,3 +1169,4 @@ namespace MOON {
 		}
 	}
 }
+

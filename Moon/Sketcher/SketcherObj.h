@@ -76,6 +76,51 @@ namespace MOON {
 		unsigned int constraintRevision() const { return m_constraintRevision; }
 
 		/** --- what the editing widget reads ---------------------------------------
+		/** --- the editing session --------------------------------------------------
+		 * Whether something is editing the sketch right now. The tools of a sketch
+		 * ask this to know when to switch themselves off; the editing widget keeps
+		 * the flag up to date, and nothing here knows what that widget is. */
+		bool isBeingEdited() const { return m_beingEdited; }
+		void setBeingEdited(bool p_edited) { m_beingEdited = p_edited; }
+
+		/** --- where a dimension's annotation was dropped ---------------------------
+		 * The dimension tool knows the sketch point under the cursor when it adds a
+		 * constraint, and the widget that draws the annotation turns that point into
+		 * the layout it keeps. The point is data of the sketch - the tool and the
+		 * drawing widget are two different widgets - and goes away with the
+		 * constraint it belongs to. */
+		void setAnnotationDropPoint(const Sketcher::Constraint* p_constraint, const Base::Vector2d& p_sketchPos);
+		const std::unordered_map<const Sketcher::Constraint*, Base::Vector2d>& annotationDropPoints() const { return m_annotationDrops; }
+		void clearAnnotationDropPoint(const Sketcher::Constraint* p_constraint);
+
+		/** --- the selection --------------------------------------------------------
+		 * What is picked in the sketch: the element under the cursor (the
+		 * preselection) and the elements that are selected. They are data of the
+		 * sketch, not of the widget that drew them - the tool that adds a constraint
+		 * reads what the drawing tools picked, and a panel lists it - so they live
+		 * here and every widget goes through these calls. */
+		int getPreselectId() const { return preSelectGeoId.GeoId; }
+		const SelectGeoId& getPreSelectGeoId() const { return preSelectGeoId; }
+		void setPreselect(int geoId) { preSelectGeoId = { geoId, PointPos::none }; }
+		void setPreselect(const SelectGeoId& p_geoId) { preSelectGeoId = p_geoId; }
+		void clearPreselect() { preSelectGeoId = { NoGeoId, PointPos::none }; }
+
+		const std::vector<SelectGeoId>& getSelectGeoPosIds() const { return selectIds; }
+		/** The ids of the selected elements, without the markers on them. */
+		std::vector<int> getSelectIds() const;
+		/** True when exactly this element - a curve, or a marker on one - is
+		 * selected. */
+		bool isSelected(const SelectGeoId& p_geoId) const;
+		/** Adds one element; an element that is already selected stays as it is. */
+		void addSelect(const SelectGeoId& p_geoId);
+		void addSelect(int geoId) { addSelect({ geoId, PointPos::none }); }
+		/** Drops every entry that names one of these curves, markers included. */
+		void removeSelect(const std::vector<int>& idList);
+		void clearSelect() { selectIds.clear(); }
+		/** Selects one curve and nothing else. */
+		void selectGeo(int geoId);
+
+		/** --- what the editing widget reads ---------------------------------------
 		 * The widget above draws, picks and snaps from the sketch's data. These are
 		 * plain reads on purpose: the sketch hands its data out, it still does not
 		 * know who asks for it. */
@@ -425,6 +470,16 @@ namespace MOON {
 		/** Change counters (see planeRevision / constraintRevision). */
 		unsigned int m_planeRevision = 0;
 		unsigned int m_constraintRevision = 0;
+		/** The selection (see getPreselectId / getSelectGeoPosIds). */
+		SelectGeoId preSelectGeoId = { NoGeoId, PointPos::none };
+		std::vector<SelectGeoId> selectIds;
+		/** True while a widget is editing the sketch (see isBeingEdited). */
+		bool m_beingEdited = false;
+		/** Where the annotation of a dimension was dropped (see
+		 * annotationDropPoints). */
+		std::unordered_map<const Sketcher::Constraint*, Base::Vector2d> m_annotationDrops;
+		/** Drops the drop points of constraints that are gone. */
+		void pruneAnnotationDrops();
 		/** Rebuilds the external geoIds held by the constraints from the curves the
 		 * block held before it changed, and drops the constraints whose curve is
 		 * gone.

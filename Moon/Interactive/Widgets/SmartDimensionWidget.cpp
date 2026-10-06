@@ -7,7 +7,7 @@
 #include "Interactive/Interactive/WidgetEvent.h"
 #include "Sketcher/SketcherObjManager.h"
 #include "Sketcher/SketcherObj.h"
-#include "Sketcher/SketcherObjWidget.h"
+#include "Sketcher/SketchPicking.h"
 #include "Geometry.h"
 #include "core/Global/ServiceLocator.h"
 #include "core/log.h"
@@ -130,10 +130,10 @@ namespace MOON
 		{
 			SketcherObj* sketch
 			= SketcherObjManager::instance().GetCurrentActiveSketcherObj();
-			SketcherObjWidget* widget
-			= SketcherObjManager::instance().GetCurrentActiveSketcherWidget();
-			if (sketch == nullptr || widget == nullptr || !widget->InEdit()) {
-				return nullptr;
+			// Whether a sketch is open is data of the sketch: the widget that edits it keeps
+			// the flag (see SketcherObj::isBeingEdited).
+			if (sketch == nullptr || !sketch->isBeingEdited()) {
+			    return nullptr;
 			}
 			return sketch;
 		}
@@ -340,6 +340,10 @@ namespace MOON
 		/** Where the dimension was dropped, in screen pixels: the annotation is put
 		 * there when it is added, so that it does not jump to its default place. */
 		Base::Vector2d placeScreen;
+		/** The same place in sketch coordinates. It is what goes into the sketch's data
+		 * (SketcherObj::setAnnotationDropPoint): the widget that draws the annotation
+		 * takes it from there and turns it into the layout it keeps. */
+		Base::Vector2d placeSketch;
 	};
 
 	SmartDimensionWidget::SmartDimensionWidget(const std::string& name)
@@ -530,8 +534,8 @@ namespace MOON
 			return false;
 		}
 
-		SketcherObjWidget* widget = SketcherObjManager::instance().GetCurrentActiveSketcherWidget();
-		const SketcherObj::SelectGeoId picked = widget->testSelect(mInternal->cursor);
+		const SketcherObj::SelectGeoId picked
+		    = SketchPicking::testSelect(*sketch, *m_sceneView, mInternal->cursor);
 		if (picked.GeoId == SketcherObj::NoGeoId) {
 			return false;
 		}
@@ -952,6 +956,7 @@ namespace MOON
 			const Eigen::Vector2f screen = screenOfSketchPos(mInternal->cursor);
 			mInternal->placeScreen
 				= Base::Vector2d(static_cast<double>(screen.x()), static_cast<double>(screen.y()));
+			mInternal->placeSketch = mInternal->cursor;
 		}
 
 		// The dialog is opened from the event loop rather than from inside the mouse
@@ -1070,19 +1075,19 @@ namespace MOON
 					return;
 				}
 			}
-			// Put the annotation where the preview was, or the sketch would draw it at
-			// its default place instead.
-			if (SketcherObjWidget* activeWidget = SketcherObjManager::instance().GetCurrentActiveSketcherWidget()) {
-				activeWidget->placeDimensionAnnotation(
-					added,
-					static_cast<float>(captured.placeScreen.x),
-					static_cast<float>(captured.placeScreen.y)
-				);
+			// Put the annotation where the preview was, or the sketch would draw it at its
+			// default place instead: the point is left in the sketch data and the widget that
+			// draws the annotation takes it from there (see SketcherObjWidget).
+			if (added >= 0) {
+			    active->setAnnotationDropPoint(active->getConstraint(added), captured.placeSketch);
 			}
 			mInternal->reset();
 		});
 	}
 }
+
+
+
 
 
 

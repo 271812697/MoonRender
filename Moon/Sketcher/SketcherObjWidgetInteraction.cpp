@@ -1,4 +1,5 @@
-﻿#include "Sketcher/SketcherObjWidget.h"
+#include "Sketcher/SketcherObjWidget.h"
+#include "Sketcher/SketchPicking.h"
 #include "renderer/SceneView.h"
 #include "editor/Toolbar/sketchToolbar.h"
 #include "Core/Global/ServiceLocator.h"
@@ -8,30 +9,21 @@ namespace MOON {
      * It does not own the sketch: the feature does, and the sketch outlives it (a
      * document can be solved and written without any widget at all). */
     SketcherObjWidget::SketcherObjWidget(SketcherObj* p_sketch)
-        : EventWidget("SketcherObj"), m_sketch(p_sketch)
+    : EventWidget("SketcherObj"), m_sketch(p_sketch)
     {
+        // The tools of a sketch ask the data whether one is being edited; this is the
+        // widget that makes that true, and nothing in the data knows who it is.
+        if (m_sketch != nullptr) {
+            m_sketch->setBeingEdited(true);
+        }
         setActive(true);
     }
     SketcherObjWidget::~SketcherObjWidget()
     {
+        if (m_sketch != nullptr) {
+            m_sketch->setBeingEdited(false);
+        }
     }
-    static double pointToSegmentDist(const Base::Vector3d& p, const Base::Vector3d& s, const Base::Vector3d& e, double& u) {
-        Base::Vector3d se = e - s;
-        Base::Vector3d sp = p - s;
-        double t = sp.Dot(se) / se.Dot(se);
-        if (t < 0.0) {
-            u = 0.0;
-            return sp.Length();
-        }
-
-        if (t > 1.0) {
-            u = 1.0;
-            return (p - e).Length();
-        }
-        u = t;
-        Base::Vector3d proj = s + t * se;
-        return (p - proj).Length();
-    };
     void SketcherObjWidget::onMouseMove()
     {
         if (!isHaveActiveHandler && isInEdit) {
@@ -39,7 +31,7 @@ namespace MOON {
             // While the cursor rests on a dimension label (or drags one) the
             // mouse must not select/move the geometry underneath it.
             if (m_labelDrag >= 0 || m_labelHover != -1) {
-                preSelectGeoId = { NoGeoId, PointPos::none };
+                m_sketch->clearPreselect();
                 return;
             }
         }
@@ -47,15 +39,15 @@ namespace MOON {
         Base::Vector2d preOnSketchPosMove = onSketchPosMove;
         if (!isHaveActiveHandler && isInEdit) {
             pickGeo();
-            if (selectState == Stop && preSelectGeoId.GeoId != NoGeoId) {
+            if (selectState == Stop && m_sketch->getPreSelectGeoId().GeoId != NoGeoId) {
                 selectState = Hot;
             }
             else if (selectState == OperationGeo) {
                 const bool singleCircleArcDrag = [&]() {
-                    if (selectIds.size() != 1) {
+                    if (m_sketch->getSelectGeoPosIds().size() != 1) {
                         return false;
                     }
-                    Part::Geometry* geo = m_sketch->getGeometry(selectIds[0].GeoId);
+                    Part::Geometry* geo = m_sketch->getGeometry(m_sketch->getSelectGeoPosIds()[0].GeoId);
                     return geo
                         && (geo->is<Part::GeomCircle>() || geo->is<Part::GeomArcOfCircle>());
                 }();
@@ -65,7 +57,7 @@ namespace MOON {
                 // constrained composites (e.g. a slot cap) resize without the
                 // center drifting.
                 const bool radiusDrag
-                    = singleCircleArcDrag && selectIds[0].pointPos == PointPos::none;
+                    = singleCircleArcDrag && m_sketch->getSelectGeoPosIds()[0].pointPos == PointPos::none;
 
                 if (singleCircleArcDrag && !radiusDrag) {
                     // Endpoint/center drags keep the element's own parameter
@@ -79,7 +71,7 @@ namespace MOON {
                         m_sketch->solve();
                         m_dragSolverInit = true;
                     }
-                    for (const auto& sel : selectIds) {
+                    for (const auto& sel : m_sketch->getSelectGeoPosIds()) {
                         moveGeo(
                             sel,
                             static_cast<float>(onSketchPosMove.x - preOnSketchPosMove.x),
@@ -91,8 +83,8 @@ namespace MOON {
                 }
 
                 std::vector<Sketcher::GeoElementId> dragIds;
-                dragIds.reserve(selectIds.size());
-                for (const auto& sel : selectIds) {
+                dragIds.reserve(m_sketch->getSelectGeoPosIds().size());
+                for (const auto& sel : m_sketch->getSelectGeoPosIds()) {
                     // An external reference cannot be dragged: the solver is told it is
                     // fixed, so moving it would only fight with its own definition.
                     if (sel.GeoId < 0) {
@@ -133,9 +125,9 @@ namespace MOON {
                 }
 
                 bool solveS = false;
-                for (int i = 0; i < selectIds.size(); i++) {
+                for (int i = 0; i < m_sketch->getSelectGeoPosIds().size(); i++) {
                     moveGeo(
-                        selectIds[i],
+                        m_sketch->getSelectGeoPosIds()[i],
                         onSketchPosMove.x - preOnSketchPosMove.x,
                         onSketchPosMove.y - preOnSketchPosMove.y
                     );
@@ -145,7 +137,7 @@ namespace MOON {
                     m_sketch->solve();
                 }
             }
-            else if (selectState == Hot && preSelectGeoId.GeoId == NoGeoId) {
+            else if (selectState == Hot && m_sketch->getPreSelectGeoId().GeoId == NoGeoId) {
                 selectState = Stop;
             }
         }
@@ -172,7 +164,7 @@ namespace MOON {
                 m_lastLabelClick = -1;
                 clearSelect();
                 selectState = Stop;
-                preSelectGeoId = { NoGeoId, PointPos::none };
+                m_sketch->clearPreselect();
                 return;
             }
             const int labelHit = annotationHit;
@@ -185,7 +177,7 @@ namespace MOON {
                 m_labelDrag = labelHit;
                 clearSelect();
                 selectState = Stop;
-                preSelectGeoId = { NoGeoId, PointPos::none };
+                m_sketch->clearPreselect();
 
                 const auto now = std::chrono::steady_clock::now();
                 const bool isDoubleClick = m_lastLabelClick == labelHit
@@ -208,32 +200,32 @@ namespace MOON {
         onSketchPosP1 = getMouseHitSketchPlanePoint();
         onSketchPosClicked = onSketchPosP1;
         m_dragSolverInit = false;
-        if (preSelectGeoId.GeoId == NoGeoId) {
+        if (m_sketch->getPreSelectGeoId().GeoId == NoGeoId) {
             pickGeo();
         }
       
         if (!isHaveActiveHandler) {
             if (selectState == Hot) {
-                if (preSelectGeoId.GeoId != NoGeoId) {
+                if (m_sketch->getPreSelectGeoId().GeoId != NoGeoId) {
                     const bool alreadySelected = [this]() {
-                        for (const auto& sel : selectIds) {
-                            if (sel.GeoId == preSelectGeoId.GeoId
-                                && sel.pointPos == preSelectGeoId.pointPos) {
+                        for (const auto& sel : m_sketch->getSelectGeoPosIds()) {
+                            if (sel.GeoId == m_sketch->getPreSelectGeoId().GeoId
+                                && sel.pointPos == m_sketch->getPreSelectGeoId().pointPos) {
                                 return true;
                             }
                         }
                         return false;
                     }();
-                    if (alreadySelected && preSelectGeoId.pointPos != PointPos::none) {
+                    if (alreadySelected && m_sketch->getPreSelectGeoId().pointPos != PointPos::none) {
                         // Several points coincide; clicking the already
                         // selected one cycles to the next unselected point.
                         SelectGeoId next;
-                        if (findNextCoincidentPoint(onSketchPosClicked, preSelectGeoId, next)) {
+                        if (findNextCoincidentPoint(onSketchPosClicked, m_sketch->getPreSelectGeoId(), next)) {
                             if (selectMode == OverrideSelect) {
                                 clearSelect();
                             }
                             addSelect(next);
-                            preSelectGeoId = next;
+                            m_sketch->setPreselect(next);
                             selectState = OperationGeo;
                             return;
                         }
@@ -241,7 +233,7 @@ namespace MOON {
                     if (selectMode == OverrideSelect) {
                         clearSelect();
                     }
-                    addSelect(preSelectGeoId);
+                    addSelect(m_sketch->getPreSelectGeoId());
                     selectState = OperationGeo;
                 }
                 else
@@ -341,12 +333,12 @@ namespace MOON {
     void SketcherObjWidget::onKeyPress(const std::string& key)
     {
         if (key == "DELETE" && !isHaveActiveHandler) {
-            std::vector<int>deletList(selectIds.size());
-            for (int i = 0; i < selectIds.size(); i++) {
-                deletList[i] = selectIds[i].GeoId;
+            std::vector<int>deletList(m_sketch->getSelectGeoPosIds().size());
+            for (int i = 0; i < m_sketch->getSelectGeoPosIds().size(); i++) {
+                deletList[i] = m_sketch->getSelectGeoPosIds()[i].GeoId;
             }
             m_sketch->deleteGeometries(deletList);
-            selectIds.clear();
+            m_sketch->clearSelect();
             m_sketch->solve();
         }
         else if (key == "CONTROL_L") {
@@ -358,193 +350,6 @@ namespace MOON {
         if (key == "CONTROL_L") {
             selectMode = OverrideSelect;
         }
-    }
-    int SketcherObjWidget::getPickGeoIndex(const Base::Vector2d& pos, const Base::Matrix4D& mat)
-    {
-
-        Base::Matrix4D trans = mat * m_sketch->getplaneTransform();
-        Base::Vector3d p1 = trans * Base::Vector3d(pos.x, pos.y, 0);
-
-        int ret = -1;
-        double deltaTole = 15.0;
-        double minDist = 10000.0;
-        // 遍历所有几何图元
-        for (int i = 0; i < m_sketch->geometries().size(); i++) {
-            if (!m_sketch->isGeometryVisible(i)) {
-                continue;  // hidden geometry is not pickable
-            }
-            Part::Geometry* geo = m_sketch->geometries()[i].get();
-            if (geo->isDerivedFrom<Part::GeomCurve>()) {
-                auto& segment = m_sketch->segmentOf(geo);
-                int segCount = segment.point.size();
-                if (segCount < 2)
-                    continue;
-                // 遍历每一段线段 [k] → [k+1]
-                for (int k = 0; k < segCount - 1; k++) {
-                    Base::Vector3d s = segment.point[k];
-                    Base::Vector3d e = segment.point[k + 1];
-                    // ✅ 使用 Lambda 计算真正的点到线段距离
-                    double u;
-                    double dist = pointToSegmentDist(p1, trans * s, trans * e, u);
-
-                    if (dist < deltaTole && dist < minDist) {
-                        minDist = dist;
-                        ret = i;
-                    }
-                }
-            }
-        }
-        return ret;
-    }
-    SketcherObj::SelectGeoId SketcherObjWidget::testSelect(const Base::Vector2d& pos)
-    {
-        Maths::FMatrix4 mat = m_sceneView->GetCamera()->GetViewPortMatrix();
-        Base::Matrix4D viewPortMat(
-            mat.data[0], mat.data[1], mat.data[2], mat.data[3],
-            mat.data[4], mat.data[5], mat.data[6], mat.data[7],
-            mat.data[8], mat.data[9], mat.data[10], mat.data[11],
-            mat.data[12], mat.data[13], mat.data[14], mat.data[15]
-        );
-        Base::Matrix4D trans = viewPortMat * m_sketch->getplaneTransform();
-        Base::Vector3d p1 = trans * Base::Vector3d{ pos.x,pos.y,0.0 };
-       double deltaTole = 5.0;
-       double minDist = 10000.0;
-       SelectGeoId ret = { NoGeoId,PointPos::none };
-       // A hit has to be tracked separately: the first external curve carries the id
-       // -1, so the id cannot double as "nothing was hit".
-       bool hit = false;
-
-        // The sketch origin is a pick target of its own and it is tested first: it is
-        // where both axes start (the root point - GeoEnum gives it the id of the
-        // horizontal axis, the point position start), and it is what a sketch is most
-        // often constrained to. Left to the loops below, the axis lines - which pass
-        // through it - or a curve endpoint sitting on it would take the click. A
-        // coincident element can still be reached by clicking again: the selection
-        // cycles through the points that lie on top of each other.
-        const double originTole = 10.0;
-        if ((p1 - trans * Base::Vector3d(0.0, 0.0, 0.0)).Length() < originTole) {
-            ret.GeoId = Sketcher::GeoEnum::HAxis;
-            ret.pointPos = PointPos::start;
-            return ret;
-        }
-
-        // The candidates are the sketch's own curves plus the external ones (the axes
-        // and the origin among them): an external curve is a reference the user may
-        // constrain to, so it has to be selectable. This used to be skipped while a
-        // draw handler was active, which is exactly when a reference is needed most -
-        // the smart dimension picks the point it measures against through here, and
-        // "constrain this to the origin" is one of those picks. The drawing tools do
-        // not come through this function at all: the sketch only refreshes its hover
-        // pick while no handler runs (see onMouseMove), so nothing is picked here for
-        // them.
-        std::vector<std::pair<int, Part::Geometry*>> candidates;
-        candidates.reserve(m_sketch->geometries().size() + m_sketch->getExternalCurveCount());
-        for (int i = 0; i < static_cast<int>(m_sketch->geometries().size()); ++i) {
-            if (!m_sketch->isGeometryVisible(i)) {
-                continue;
-            }
-            candidates.emplace_back(i, m_sketch->geometries()[i].get());
-        }
-        for (int i = 0; i < m_sketch->getExternalCurveCount(); ++i) {
-            Part::Geometry* geo = const_cast<Part::Geometry*>(
-                m_sketch->getExternalCurve(m_sketch->getExternalGeoId(i)));
-            // Only a curve that has been sampled can be hit; a missing cache entry
-            // must not be turned into an empty one here.
-            if (geo != nullptr && m_sketch->findSegment(geo) != nullptr) {
-                candidates.emplace_back(m_sketch->getExternalGeoId(i), geo);
-            }
-        }
-
-        // The points of every curve first: an endpoint or a centre is what a constraint
-        // usually wants, and it is a smaller target than the curve it belongs to.
-        for (const auto& [geoId, geo] : candidates) {
-            if (m_sketch->isAxisCurve(geoId)) {
-                // The axes are not picked by their points: the only one that is a
-                // feature of its own is the root point, and the origin test above has
-                // already taken it. Their defining segment reaches from the origin to a
-                // far end that means nothing, and offering that end as a pick would
-                // hand the user a point that is not drawn anywhere.
-                continue;
-            }
-            auto& segment = m_sketch->segmentOf(geo);
-            for (int j = 0; j < segment.sepoints.size(); j++) {
-                double dist = (p1 - trans * segment.sepoints[j].coord).Length();
-                if (dist < deltaTole && dist < minDist) {
-                    minDist = dist;
-                    ret.GeoId = geoId;
-                    ret.pointPos = segment.sepoints[j].pointPos;
-                    hit = true;
-                }
-            }
-        }
-        // Endpoints and centers win over the curves themselves; the curves are only
-        // tested when no point was close enough.
-        if (!hit) {
-            for (const auto& [geoId, geo] : candidates) {
-                if (m_sketch->isAxisCurve(geoId)) {
-                    // The axes are tried after every curve, see below.
-                    continue;
-                }
-                auto& segment = m_sketch->segmentOf(geo);
-                if (geo->isDerivedFrom<Part::GeomCurve>()) {
-                    for (int j = 0; j < segment.point.size() - 1; j++) {
-                        double u = 0.0;
-                        double dist = pointToSegmentDist(
-                            p1,
-                            trans * segment.point[j],
-                            trans * segment.point[j + 1],
-                            u);
-
-                        if (dist < deltaTole && dist < minDist) {
-                            minDist = dist;
-                            ret.GeoId = geoId;
-                        }
-                    }
-                }
-                else if (geo->is<Part::GeomPoint>())
-                {
-                    Base::Vector3d pp = static_cast<Part::GeomPoint*>(geo)->getPoint();
-                    double dist = (p1 - trans * pp).Length();
-                    if (dist < deltaTole && dist < minDist) {
-                        minDist = dist;
-                        ret.GeoId = geoId;
-                    }
-                }
-            }
-        }
-        // Last of all, and only when nothing else was close enough: the axes, hit as
-        // the infinite lines they stand for - their geometry only reaches from the
-        // origin outwards (it has to start there, that is the root point) while the
-        // user clicks anywhere along the line that is drawn for them.
-        //
-        // They come last because they are infinite: a click anywhere along one of them
-        // is "on the line", so an axis would take every pick of a curve of the sketch
-        // that happens to lie on it - a line drawn over the y axis could never be
-        // selected again. FreeCAD picks in that order as well (its geometry is tested
-        // before the axis cross).
-        if (!hit) {
-            for (const auto& [geoId, geo] : candidates) {
-                if (!m_sketch->isAxisCurve(geoId)) {
-                    continue;
-                }
-                const Base::Vector3d origin = trans * Base::Vector3d(0.0, 0.0, 0.0);
-                const Base::Vector3d tip = trans * (geoId == Sketcher::GeoEnum::VAxis
-                    ? Base::Vector3d(0.0, 1.0, 0.0)
-                    : Base::Vector3d(1.0, 0.0, 0.0));
-                const Base::Vector3d dir = tip - origin;
-                const double len = dir.Length();
-                if (len > 1e-12) {
-                    const double dist = (p1 - origin).Cross(dir).Length() / len;
-                    if (dist < deltaTole && dist < minDist) {
-                        minDist = dist;
-                        ret.GeoId = geoId;
-                        ret.pointPos = PointPos::none;
-                        hit = true;
-                    }
-                }
-            }
-        }
-        return ret;
     }
     bool SketcherObjWidget::findNextCoincidentPoint(
         const Base::Vector2d& pos,
@@ -564,7 +369,7 @@ namespace MOON {
         constexpr double kTol = 5.0;
 
         const auto isSelected = [this](const SelectGeoId& s) {
-            for (const auto& sel : selectIds) {
+            for (const auto& sel : m_sketch->getSelectGeoPosIds()) {
                 if (sel.GeoId == s.GeoId && sel.pointPos == s.pointPos) {
                     return true;
                 }
@@ -600,198 +405,30 @@ namespace MOON {
     }
     std::vector<int> SketcherObjWidget::getSelectIds() const
     {
-        std::vector<int>selectIdLists(selectIds.size());
-        for (int i = 0; i < selectIds.size(); i++) {
-            selectIdLists[i] = selectIds[i].GeoId;
-        }
-        return selectIdLists;
+        return m_sketch->getSelectIds();
     }
 
     void SketcherObjWidget::addSelect(int id)
     {
-        addSelect({ id,PointPos::none });
+        m_sketch->addSelect(id);
     }
 
     void SketcherObjWidget::removeSelect(const std::vector<int>& idList)
     {
-        int left = 0;
-        for (int right = 0; right < selectIds.size();right++) {
-            bool removeFlag = false;
-            for (int i = 0; i < idList.size(); i++) {
-                if (selectIds[right].GeoId == idList[i]) {
-                    removeFlag = true;
-                    break;
-                }
-            }
-            if (!removeFlag) {
-                selectIds[left++] = selectIds[right];
-            }
-        }
-        selectIds.resize(left);
-    }
-    bool SketcherObjWidget::snapPoint(Base::Vector2d& pos, const std::set<int>& avoid)
-    {
-        Maths::FMatrix4 mat = m_sceneView->GetCamera()->GetViewPortMatrix();
-        Base::Matrix4D pla(
-            mat.data[0], mat.data[1], mat.data[2], mat.data[3],
-            mat.data[4], mat.data[5], mat.data[6], mat.data[7],
-            mat.data[8], mat.data[9], mat.data[10], mat.data[11],
-            mat.data[12], mat.data[13], mat.data[14], mat.data[15]
-        );
-        Base::Matrix4D trans = pla * m_sketch->getplaneTransform();
-        //get the screen pos
-        Base::Vector3d screenpPos = trans * Base::Vector3d{ pos.x,pos.y,0.0 };
-        double deltaTole = 10.0;
-        double minDist = 10000.0;
-        bool ret = false;
-        // Projected external curves are snap targets as well: they are the references
-        // the sketch is drawn against, and a new point usually wants to land on one of
-        // them. They are tested after the sketch's own geometry at the same stage, so
-        // an internal target within range wins.
-        const auto snapToExternalPoints = [&]() {
-            for (int i = 0; i < m_sketch->getExternalCurveCount(); ++i) {
-                const int geoId = m_sketch->getExternalGeoId(i);
-                if (avoid.count(geoId)) {
-                    continue;
-                }
-                Part::Geometry* geo = const_cast<Part::Geometry*>(m_sketch->getExternalCurve(geoId));
-                if (geo == nullptr) {
-                    continue;
-                }
-                const CurveSegment* segment = m_sketch->findSegment(geo);
-                if (segment == nullptr) {
-                    continue;  // not sampled: nothing to snap to yet
-                }
-                for (const SegPoint& segPoint : segment->sepoints) {
-                    const double dist = (screenpPos - trans * segPoint.coord).Length();
-                    if (dist < deltaTole && dist < minDist) {
-                        minDist = dist;
-                        ret = true;
-                        pos = { segPoint.coord.x, segPoint.coord.y };
-                    }
-                }
-            }
-        };
-        // travel all segments
-        for (int i = 0; i < m_sketch->geometries().size(); i++) {
-            if (!avoid.count(i)) {
-                if (m_sketch->isConstructionGeometry(i)) {
-                    continue;  // construction aids are not snap targets
-                }
-                if (!m_sketch->isGeometryVisible(i)) {
-                    continue;  // hidden geometry is not a snap target
-                }
-                Part::Geometry* geo = m_sketch->geometries()[i].get();
-                auto& segment = m_sketch->segmentOf(geo);
-                for (int j = 0;j < segment.sepoints.size();j++) {
-                    double dist = (screenpPos - trans * segment.sepoints[j].coord).Length();
-                    if (dist < deltaTole && dist < minDist) {
-                        minDist = dist;
-                        ret = true;
-                        pos = { segment.sepoints[j].coord.x, segment.sepoints[j].coord.y };
-                    }
-                }
-            }
-
-        }
-        snapToExternalPoints();
-        if (!ret) {
-            //snap to orgin or XAxis or YAxis
-            Base::Vector3d screenOrigin = trans * Base::Vector3d(0, 0, 0);
-            double dist = (screenpPos - screenOrigin).Length();
-            if (dist < deltaTole) {
-                pos = { 0.0, 0.0 };
-                return true;
-            }
-            double deltaX = abs(screenpPos.x - screenOrigin.x);
-            double deltaY = abs(screenpPos.y - screenOrigin.y);
-            if (deltaX < deltaTole && deltaX < deltaY) {
-                pos.x = 0.0;
-                return true;
-            }
-            if (deltaY < deltaTole && deltaY < deltaX) {
-                pos.y = 0.0;
-                return true;
-            }
-            //snap to curve
-            for (int i = 0; i < m_sketch->geometries().size(); i++) {
-                if (!avoid.count(i)) {
-                    if (m_sketch->isConstructionGeometry(i)) {
-                        continue;
-                    }
-                    if (!m_sketch->isGeometryVisible(i)) {
-                        continue;
-                    }
-                    Part::Geometry* geo = m_sketch->geometries()[i].get();
-                    auto& segment = m_sketch->segmentOf(geo);
-                    if (geo->isDerivedFrom<Part::GeomCurve>()) {
-                        for (int j = 0;j < segment.point.size() - 1;j++) {
-                            double u = 0.0;
-                            double dist = pointToSegmentDist(
-                                screenpPos,
-                                trans * segment.point[j],
-                                trans * segment.point[j + 1],
-                                u);
-                            if (dist < deltaTole && dist < minDist) {
-                                minDist = dist;
-                                ret = true;
-                                u = segment.params[j] + u * (segment.params[j + 1] - segment.params[j]);
-                                Base::Vector3d pp = static_cast<Part::GeomCurve*>(geo)->value(u);
-                                pos = { pp.x, pp.y };
-                            }
-                        }
-                    }
-                }
-            }
-            // Same for the curves themselves, again after the sketch's own.
-            for (int i = 0; i < m_sketch->getExternalCurveCount(); ++i) {
-                const int geoId = m_sketch->getExternalGeoId(i);
-                if (avoid.count(geoId)) {
-                    continue;
-                }
-                Part::Geometry* geo = const_cast<Part::Geometry*>(m_sketch->getExternalCurve(geoId));
-                if (geo == nullptr || !geo->isDerivedFrom<Part::GeomCurve>()) {
-                    continue;
-                }
-                const CurveSegment* segment = m_sketch->findSegment(geo);
-                if (segment == nullptr) {
-                    continue;
-                }
-                for (int j = 0; j + 1 < static_cast<int>(segment->point.size()); j++) {
-                    double u = 0.0;
-                    const double dist = pointToSegmentDist(
-                        screenpPos,
-                        trans * segment->point[j],
-                        trans * segment->point[j + 1],
-                        u);
-                    if (dist < deltaTole && dist < minDist) {
-                        minDist = dist;
-                        ret = true;
-                        u = segment->params[j]
-                            + u * (segment->params[j + 1] - segment->params[j]);
-                        const Base::Vector3d pp
-                            = static_cast<Part::GeomCurve*>(geo)->value(u);
-                        pos = { pp.x, pp.y };
-                    }
-                }
-            }
-        }
-        if (!ret) {
-            // Lowest priority: snap onto the background grid intersection.
-            ret = snapToGridPoint(pos);
-        }
-        return ret;
+        m_sketch->removeSelect(idList);
     }
     void SketcherObjWidget::pickGeo()
     {
         onSketchPosMove = getMouseHitSketchPlanePoint();
-        preSelectGeoId = testSelect(onSketchPosMove);
-        std::set<int>avoidList;
-        avoidList.insert(preSelectGeoId.GeoId);
-        snapPoint(onSketchPosMove, avoidList);
+        // Picking and snapping are queries of the view layer: the sketch data and the
+        // camera say what is under the cursor.
+        m_sketch->setPreselect(SketchPicking::testSelect(*m_sketch, *m_sceneView, onSketchPosMove));
+        std::set<int> avoidList;
+        avoidList.insert(m_sketch->getPreSelectGeoId().GeoId);
+        SketchPicking::snapPoint(*m_sketch, *m_sceneView, *renderer, onSketchPosMove, avoidList);
     }
     void SketcherObjWidget::clearSelect() {
-        selectIds.clear();
+        m_sketch->clearSelect();
     }
     void SketcherObjWidget::moveGeo(SelectGeoId Id, float dx, float dy)
     {
@@ -918,16 +555,7 @@ namespace MOON {
     }
     void SketcherObjWidget::addSelect(SelectGeoId geoId)
     {
-        bool existflag = false;
-        for (int i = 0; i < selectIds.size(); i++) {
-            if (selectIds[i].GeoId == geoId.GeoId && selectIds[i].pointPos == geoId.pointPos) {
-                existflag = true;
-                break;
-            }
-        }
-        if (!existflag) {
-            selectIds.push_back(geoId);
-        }
+        m_sketch->addSelect(geoId);
     }
     Base::Vector2d SketcherObjWidget::getMouseHitSketchPlanePoint()
     {
@@ -943,16 +571,24 @@ namespace MOON {
     }
     void SketcherObjWidget::selectGeo(int geoId)
     {
-        clearSelect();
-        if (geoId >= 0 && geoId < static_cast<int>(m_sketch->geometries().size())) {
-            addSelect({ geoId, PointPos::none });
-        }
+        // The pick itself is data of the sketch; this only forwards it.
+        m_sketch->selectGeo(geoId);
     }
     void SketcherObjWidget::setPreselect(int geoId)
     {
-        preSelectGeoId = { geoId, PointPos::none };
+        m_sketch->setPreselect(geoId);
     }
 }
+
+
+
+
+
+
+
+
+
+
 
 
 

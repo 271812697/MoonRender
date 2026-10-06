@@ -53,14 +53,6 @@ namespace MOON {
 		}
 		return nullptr;
 	}
-	SketcherObjWidget* SketcherObjManager::GetCurrentActiveSketcherWidget()
-	{
-		auto feature = GetCurrentActiveSketcherFeature();
-		if (feature) {
-			return feature->getSketcherWidget();
-		}
-		return nullptr;
-	}
 	void SketcherObjManager::setCurrentActiveSketcherFeature(SketcherFeature* obj)
 	{
 		for (int i = 0; i < mInternal->sketchers.size(); i++) {

@@ -1,4 +1,4 @@
-﻿#include "SketchTaskDialog.h"
+#include "SketchTaskDialog.h"
 #include "TaskBox.h"
 #include "editor/UI/PropertyPanel/Collapsiblegroupboxwidget.h"
 #include "Sketcher/SketcherObjManager.h"
@@ -121,9 +121,12 @@ namespace MOON {
             auto f = self->getFeature();
             if (f) {
                 //
-				feature = dynamic_cast<SketcherFeature*>(f);
-                // Opening the sketch for editing: this is where its widget is built.
-                feature->ensureSketcherWidget()->beginEdit();
+                feature = dynamic_cast<SketcherFeature*>(f);
+                // Opening the sketch for editing: this dialog owns the widget that does
+                // it (see ensureWidget).
+                if (SketcherObjWidget* w = ensureWidget()) {
+                    w->beginEdit();
+                }
 
             }
             else
@@ -155,12 +158,14 @@ namespace MOON {
                 // The sketch is created in order to be edited: build its editing widget
                 // now. It is what fits the camera to the plane (set above, or picked
                 // below) and what the drawing tools render into.
-                ///feature->ensureSketcherWidget()->beginEdit();
+                if (SketcherObjWidget* w = ensureWidget()) {
+                    w->beginEdit();
+                }
             }
             SketcherObjManager::instance().setCurrentActiveSketcherFeature(feature);
         }
         ~Internal() {
-            if (SketcherObjWidget* widget = feature->getSketcherWidget()) {
+            if (widget) {
                 widget->setActive(false);
             }
             if (behaviour) {
@@ -172,6 +177,19 @@ namespace MOON {
         SketchTaskDialog* self = nullptr;
         SketcherFeature* feature = nullptr;
         SketchPlane* behaviour = nullptr;
+        /** The widget that edits this sketch: born with the dialog, destroyed with it
+         * (nothing else holds it - the feature and the sketch data do not know it). */
+        std::unique_ptr<SketcherObjWidget> widget;
+        /** Builds the widget that edits the sketch of this dialog. It belongs to this
+         * dialog and nothing else holds it: the tools of a sketch take what they need
+         * from the sketch data and from the picking module, not from here. */
+        SketcherObjWidget* ensureWidget()
+        {
+            if (!widget && feature != nullptr) {
+                widget = std::make_unique<SketcherObjWidget>(feature->getSketcherObj());
+            }
+            return widget.get();
+        }
     };
 
     SketchTaskDialog::SketchTaskDialog(QWidget* parent, Feature* feature)
@@ -265,13 +283,13 @@ namespace MOON {
         connect(mCurveList, &QListWidget::itemClicked, this, [this](QListWidgetItem* item) {
             if (mInternal && mInternal->feature) {
                 const int geoId = item->data(Qt::UserRole).toInt();
-                mInternal->feature->ensureSketcherWidget()->selectGeo(geoId);
+                mInternal->feature->getSketcherObj()->selectGeo(geoId);
             }
         });
         connect(mCurveList, &QListWidget::itemEntered, this, [this](QListWidgetItem* item) {
             if (mInternal && mInternal->feature) {
                 const int geoId = item->data(Qt::UserRole).toInt();
-                mInternal->feature->ensureSketcherWidget()->setPreselect(geoId);
+                mInternal->feature->getSketcherObj()->setPreselect(geoId);
             }
         });
         refreshLists();
@@ -291,7 +309,7 @@ namespace MOON {
             return QVariant::fromValue(mInternal->feature->getSketcherObj()->isSnapToGrid());
         }
         if (mInternal && mInternal->feature) {
-            const auto& opt = mInternal->feature->ensureSketcherWidget()->drawOption();
+            const auto& opt = mInternal->ensureWidget()->drawOption();
             if (propertyName == "Sketch:Point Color") {
                 return QVariant::fromValue(abgrToQColor(opt.pointColor));
             }
@@ -341,7 +359,7 @@ namespace MOON {
             mInternal->feature->getSketcherObj()->setSnapToGrid(value.value<bool>());
         }
         if (mInternal && mInternal->feature) {
-            auto& opt = mInternal->feature->ensureSketcherWidget()->drawOption();
+            auto& opt = mInternal->ensureWidget()->drawOption();
             if (propertyName == "Sketch:Point Color") {
                 opt.pointColor = qColorToAbgr(value.value<QColor>());
             }
@@ -384,7 +402,7 @@ namespace MOON {
     
     void SketchTaskDialog::clickOk()
     {
-        mInternal->feature->ensureSketcherWidget()->finishEdit();
+        mInternal->ensureWidget()->finishEdit();
         mInternal->feature->execute();
         mInternal->feature->makeDone();
     }
@@ -784,12 +802,8 @@ namespace MOON {
         if (!obj) {
             return;
         }
-        SketcherObjWidget* widget = mInternal->feature->getSketcherWidget();
-        if (!widget) {
-            return;
-        }
         std::set<int> selected;
-        for (int geoId : widget->getSelectIds()) {
+        for (int geoId : obj->getSelectIds()) {
             selected.insert(geoId);
         }
         for (int row = 0; row < mCurveList->count(); ++row) {
@@ -822,7 +836,7 @@ namespace MOON {
             mCurveHoverRow = row;
             row->setStyleSheet("background-color: #cfe2f5;");
             if (mInternal && mInternal->feature) {
-                mInternal->feature->ensureSketcherWidget()->setPreselect(geoId);
+                mInternal->feature->getSketcherObj()->setPreselect(geoId);
             }
         }
         else if (mCurveHoverRow == row) {

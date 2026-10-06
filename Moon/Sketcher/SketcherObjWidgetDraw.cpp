@@ -1,4 +1,5 @@
 #include "Sketcher/SketcherObjWidget.h"
+#include "Sketcher/SketchPicking.h"
 #include "Interactive/Widgets/DrawSketchHandler.h"
 #include "Geometry.h"
 #include "renderer/SceneView.h"
@@ -174,6 +175,37 @@ namespace MOON {
             m_seenConstraintRevision = m_sketch->constraintRevision();
             pruneConstraintLayout();
         }
+        applyPendingAnnotationDrops();
+        }
+    /** Puts the annotations a dimension tool dropped where the user pointed: the tool
+    * left the point in the sketch data (it owns no layout), and turning it into the
+    * layout this widget keeps is what this does. */
+    void SketcherObjWidget::applyPendingAnnotationDrops()
+    {
+        const auto& drops = m_sketch->annotationDropPoints();
+        if (drops.empty()) {
+            return;
+        }
+        // Copied first: placing one clears its entry.
+        std::vector<std::pair<const Sketcher::Constraint*, Base::Vector2d>> pending(
+            drops.begin(), drops.end());
+        for (const auto& entry : pending) {
+            const Sketcher::Constraint* c = entry.first;
+            int constrId = -1;
+            for (int i = 0; i < m_sketch->getConstraintCount(); ++i) {
+                if (m_sketch->getConstraint(i) == c) {
+                    constrId = i;
+                    break;
+                }
+            }
+            if (constrId >= 0) {
+                const Eigen::Vector3f world
+                    = m_sketch->plane().valueEigen(entry.second.x, entry.second.y);
+                const Eigen::Vector2f screen = renderer->worldToScreen(world);
+                placeDimensionAnnotation(constrId, screen.x(), screen.y());
+            }
+            m_sketch->clearAnnotationDropPoint(c);
+        }
     }
     /** Drops the annotation layout of constraints that are gone. The maps are keyed
     * by the constraint itself, so an entry a dead constraint left behind would be
@@ -247,94 +279,13 @@ namespace MOON {
             // only ever work on the sketch's own geometry: an external id left over
             // from before the tool was started would be read as a curve of this
             // sketch by them.
-            if (preSelectGeoId.GeoId < 0) {
-            preSelectGeoId = { NoGeoId, PointPos::none };
+            if (m_sketch->getPreSelectGeoId().GeoId < 0) {
+            m_sketch->clearPreselect();
             }
             }
             syncWithSketch();
             draw();
             }
-    bool SketcherObjWidget::gridView(GridView& p_out) const
-    {
-        const auto* camera = m_sceneView ? m_sceneView->GetCamera() : nullptr;
-        if (camera == nullptr) {
-            return false;
-        }
-        const auto& proj = camera->GetProjectionMatrix();
-        const float proj11 = proj(1, 1);
-        const auto& fd = m_sceneView->GetRenderer().GetFrameDescriptor();
-        const float screenH = static_cast<float>(fd.renderHeight);
-        const float screenW = static_cast<float>(fd.renderWidth);
-        if (proj11 <= 0.0f || screenH <= 0.0f || screenW <= 0.0f
-            || camera->GetProjectionMode()
-                != ::Rendering::Settings::EProjectionMode::ORTHOGRAPHIC) {
-            return false;
-        }
-        // The viewport rectangle in view space: an orthographic projection keeps only
-        // x and y, so those two coordinates are all a plane point is judged by.
-        const float halfH = 1.0f / proj11;
-
-        // The sketch plane as the camera sees it: the view-space position of its origin
-        // and the view-space direction its axes run in, so that the plane point (u, v)
-        // sits at
-        //     view(u, v) = (oX + u * uX + v * vX, oY + u * uY + v * vY).
-        const auto& view = camera->GetViewMatrix();
-        const auto viewOf = [&view](const Base::Vector3d& p_world) {
-            return view.MulPoint(Maths::FVector3(
-                static_cast<float>(p_world.x),
-                static_cast<float>(p_world.y),
-                static_cast<float>(p_world.z)));
-            };
-        const Maths::FVector3 viewOrigin = viewOf(m_sketch->plane().origin);
-        const Maths::FVector3 viewX = viewOf(m_sketch->plane().origin + m_sketch->plane().xAxis);
-        const Maths::FVector3 viewY = viewOf(m_sketch->plane().origin + m_sketch->plane().yAxis);
-        const float uX = viewX.x - viewOrigin.x;
-        const float uY = viewX.y - viewOrigin.y;
-        const float vX = viewY.x - viewOrigin.x;
-        const float vY = viewY.y - viewOrigin.y;
-        // Seen along the plane there is nothing to describe: both of the plane's
-        // directions are the view direction then (the plane is a line on screen, and
-        // the visible part of it runs off to infinity).
-        if (std::abs(uX * vY - vX * uY) < 1.0e-9f) {
-            return false;
-        }
-
-        p_out.oX = viewOrigin.x;
-        p_out.oY = viewOrigin.y;
-        p_out.uX = uX;
-        p_out.uY = uY;
-        p_out.vX = vX;
-        p_out.vY = vY;
-        p_out.hx = halfH * screenW / screenH;
-        p_out.hy = halfH;
-
-        // How big one sketch unit is on screen: one unit along an axis covers that
-        // axis' view-space length, and the viewport is 2 * halfH high. Face on both
-        // lengths are 1, which is the plain zoom-based spacing; tilted, the axes are
-        // foreshortened by different amounts, and their geometric mean keeps the step
-        // near the 40 px target in both directions instead of letting one of them pile
-        // its lines up on screen.
-        const float scaleU = std::sqrt(uX * uX + uY * uY);
-        const float scaleV = std::sqrt(vX * vX + vY * vY);
-        const float scale = std::max(std::sqrt(scaleU * scaleV), 1.0e-6f);
-        const float targetStep = 40.0f * 2.0f * halfH / (screenH * scale);
-        const float mag = std::pow(
-            10.0f,
-            std::floor(std::log10(std::max(targetStep, 1.0e-6f)))
-        );
-        float step = mag;
-        if (step < targetStep) {
-            step = 2.0f * mag;
-        }
-        if (step < targetStep) {
-            step = 5.0f * mag;
-        }
-        if (step < targetStep) {
-            step = 10.0f * mag;
-        }
-        p_out.step = step;
-        return true;
-    }
     void SketcherObjWidget::drawBackground()
     {
         if (!InEdit()) return;
@@ -369,8 +320,8 @@ namespace MOON {
                     }
                 };
 
-                GridView grid;
-                if (!gridView(grid)) {
+                SketchPicking::GridView grid;
+                if (!SketchPicking::gridView(*m_sketch, *m_sceneView, grid)) {
                     drawFixedGrid();
                     return;
                 }
@@ -487,7 +438,7 @@ namespace MOON {
             // paint an infinite line as selected. It is the rule the sketch's own geometry
             // follows as well (only a whole-curve pick highlights a curve).
             const bool isLinePicked = [this, geoId]() {
-                for (const SelectGeoId& sel : selectIds) {
+                for (const SelectGeoId& sel : m_sketch->getSelectGeoPosIds()) {
                     if (sel.GeoId == geoId && sel.pointPos == PointPos::none) {
                         return true;
                     }
@@ -495,7 +446,7 @@ namespace MOON {
                 return false;
                 }();
             const bool isOriginPicked = [this, geoId]() {
-                for (const SelectGeoId& sel : selectIds) {
+                for (const SelectGeoId& sel : m_sketch->getSelectGeoPosIds()) {
                     if (sel.GeoId != geoId) {
                         continue;
                     }
@@ -508,13 +459,13 @@ namespace MOON {
                 }
                 return false;
                 }();
-            const bool isLinePreSelected = preSelectGeoId.GeoId == geoId
+            const bool isLinePreSelected = m_sketch->getPreSelectGeoId().GeoId == geoId
                 && selectState != OperationGeo
-                && preSelectGeoId.pointPos == PointPos::none;
-            const bool isOriginPreSelected = preSelectGeoId.GeoId == geoId
+                && m_sketch->getPreSelectGeoId().pointPos == PointPos::none;
+            const bool isOriginPreSelected = m_sketch->getPreSelectGeoId().GeoId == geoId
                 && selectState != OperationGeo
-                && (preSelectGeoId.pointPos == PointPos::none
-                    || preSelectGeoId.pointPos == PointPos::start);
+                && (m_sketch->getPreSelectGeoId().pointPos == PointPos::none
+                    || m_sketch->getPreSelectGeoId().pointPos == PointPos::start);
 
             // The horizontal axis is the x axis and the vertical one the y axis, so each
             // is drawn in the colour its name stands for.
@@ -631,47 +582,6 @@ namespace MOON {
         }
     }
 
-    bool SketcherObjWidget::snapToGridPoint(Base::Vector2d& pos) const
-    {
-        if (!m_sketch->isSnapToGrid() || !m_sketch->isDrawGrid() || !m_sceneView) {
-            return false;
-        }
-        // The very step drawBackground() draws its lattice with: the cursor has to
-        // land on the intersections the user sees, whatever the camera does.
-        GridView grid;
-        if (!gridView(grid)) {
-            return false;
-        }
-        const float step = grid.step;
-        const double gx = std::round(pos.x / step) * step;
-        const double gy = std::round(pos.y / step) * step;
-        const auto worldOf = [this](const Base::Vector2d& sk) {
-            return m_sketch->plane().origin + sk.x * m_sketch->plane().xAxis + sk.y * m_sketch->plane().yAxis;
-        };
-        const auto screenOf = [this, &worldOf](const Base::Vector2d& sk) {
-            const Base::Vector3d w = worldOf(sk);
-            return renderer->worldToScreen(
-                Eigen::Vector3f(
-                    static_cast<float>(w.x),
-                    static_cast<float>(w.y),
-                    static_cast<float>(w.z)
-                )
-            );
-        };
-        const Eigen::Vector2f cursorS = screenOf(pos);
-        const Eigen::Vector2f gridS = screenOf(Base::Vector2d(gx, gy));
-        const float screenDx = cursorS.x() - gridS.x();
-        const float screenDy = cursorS.y() - gridS.y();
-        // Screen-space distance threshold, independent of the grid step.
-        constexpr float kSnapPixels = 10.0f;
-        if (screenDx * screenDx + screenDy * screenDy
-            <= kSnapPixels * kSnapPixels) {
-            pos.x = gx;
-            pos.y = gy;
-            return true;
-        }
-        return false;
-    }
 
     void SketcherObjWidget::draw() {
         if (InEdit()) {
@@ -699,9 +609,9 @@ namespace MOON {
                 continue;
             }
             bool isSelect = false;
-            for (int j = 0;j < selectIds.size();j++) {
-                if (selectIds[j].GeoId == i) {
-                    if (selectIds[j].pointPos == PointPos::none) {
+            for (int j = 0;j < m_sketch->getSelectGeoPosIds().size();j++) {
+                if (m_sketch->getSelectGeoPosIds()[j].GeoId == i) {
+                    if (m_sketch->getSelectGeoPosIds()[j].pointPos == PointPos::none) {
                         isSelect = true;
                     }
                 }
@@ -712,7 +622,7 @@ namespace MOON {
             if (isSelect) {
                 renderer->pushColor(selectColor);
             }
-            else if (i == preSelectGeoId.GeoId && selectState != OperationGeo) {
+            else if (i == m_sketch->getPreSelectGeoId().GeoId && selectState != OperationGeo) {
                 renderer->pushColor(preselectColor);
             }
             else {
@@ -749,14 +659,14 @@ namespace MOON {
                 continue;
             }
             const bool isSelected = [this, geoId]() {
-                for (const SelectGeoId& sel : selectIds) {
+                for (const SelectGeoId& sel : m_sketch->getSelectGeoPosIds()) {
                     if (sel.GeoId == geoId) {
                         return true;
                     }
                 }
                 return false;
                 }();
-            const bool isPreSelected = preSelectGeoId.GeoId == geoId
+            const bool isPreSelected = m_sketch->getPreSelectGeoId().GeoId == geoId
                 && selectState != OperationGeo;
 
             if (m_sketch->isAxisCurve(geoId)) {
@@ -788,7 +698,7 @@ namespace MOON {
             for (int k = 0; k < static_cast<int>(segment.sepoints.size()); ++k) {
                 const PointPos pos = segment.sepoints[k].pointPos;
                 bool pointSelected = false;
-                for (const SelectGeoId& sel : selectIds) {
+                for (const SelectGeoId& sel : m_sketch->getSelectGeoPosIds()) {
                     if (sel.GeoId == geoId
                         && (sel.pointPos == PointPos::none || sel.pointPos == pos)) {
                         pointSelected = true;
@@ -796,7 +706,7 @@ namespace MOON {
                     }
                 }
                 const bool pointPreSelected
-                    = isPreSelected && preSelectGeoId.pointPos == pos;
+                    = isPreSelected && m_sketch->getPreSelectGeoId().pointPos == pos;
                 renderer->drawPoint(
                     m_sketch->plane().valueEigen(segment.sepoints[k].coord.x, segment.sepoints[k].coord.y),
                     pointSize + 1,
@@ -816,7 +726,7 @@ namespace MOON {
             auto& sePoints = m_sketch->segmentOf(m_sketch->geometries()[geoIndex].get()).sepoints;
             for (int k = 0; k < static_cast<int>(sePoints.size()); ++k) {
                 bool pointSelected = false;
-                for (const auto& sel : selectIds) {
+                for (const auto& sel : m_sketch->getSelectGeoPosIds()) {
                     if (sel.GeoId == geoIndex && sel.pointPos == sePoints[k].pointPos) {
                         pointSelected = true;
                         break;
@@ -833,7 +743,7 @@ namespace MOON {
             }
         }
         // Selected points are drawn last so they stay clearly on top.
-        for (const auto& sel : selectIds) {
+        for (const auto& sel : m_sketch->getSelectGeoPosIds()) {
             if (sel.GeoId < 0 || sel.GeoId >= static_cast<int>(m_sketch->geometries().size())) {
                 continue;
             }
@@ -2728,6 +2638,9 @@ namespace MOON {
         }
     }
 }
+
+
+
 
 
 

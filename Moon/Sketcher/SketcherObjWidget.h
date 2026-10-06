@@ -76,7 +76,6 @@ namespace MOON {
 		 * Called before the sketch's own geometry, so a curve drawn on top of an axis
 		 * stays visible instead of being covered by it. */
 		void drawSketchAxes();
-		bool snapToGridPoint(Base::Vector2d& pos) const;
 		// Dimension label overlay: every dimensional constraint gets a draggable text
 		// caption while the sketch is edited. Double-clicking a caption opens an editor
 		// for the datum value.
@@ -112,12 +111,12 @@ namespace MOON {
 		void drawConstraintIcons();
 
 		// --------------------------------------------------------------- selection
-		int getPickGeoIndex(const Base::Vector2d& pos, const Base::Matrix4D& viewPortMat);
-		SelectGeoId testSelect(const Base::Vector2d& pos);
 		std::vector<int> getSelectIds() const;
-		std::vector<SelectGeoId> getSelectGeoPosIds() const { return selectIds; }
-		int getPreselectId() const { return preSelectGeoId.GeoId; }
-		SelectGeoId getPreSelectGeoId() const { return preSelectGeoId; }
+		/** The selection is data of the sketch (see SketcherObj): these read it, so every
+		* widget of the sketch sees the same picks. */
+		std::vector<SelectGeoId> getSelectGeoPosIds() const { return m_sketch->getSelectGeoPosIds(); }
+		int getPreselectId() const { return m_sketch->getPreselectId(); }
+		SelectGeoId getPreSelectGeoId() const { return m_sketch->getPreSelectGeoId(); }
 		void addSelect(int id);
 		/** Adds one element picked in the viewport: a curve, or a marker on one. */
 		void addSelect(SelectGeoId geoId);
@@ -125,9 +124,6 @@ namespace MOON {
 		void clearSelect();
 		void selectGeo(int geoId);
 		void setPreselect(int geoId);
-		/** Snaps a sketch-plane position onto a curve's marker (or the grid), within the
-		 * pixel tolerance the tool wants. */
-		bool snapPoint(Base::Vector2d& pos, const std::set<int>& avoid = {});
 		Base::Vector2d getMouseHitSketchPlanePoint();
 		void moveGeo(SelectGeoId Id, float dx, float dy);
 		bool findNextCoincidentPoint(
@@ -152,6 +148,9 @@ namespace MOON {
 		* keyed by the constraint's address, and a later one allocated at the same
 		* address would inherit an entry that is not its. */
 		void pruneConstraintLayout();
+		/** Takes the annotation drop points a dimension tool left in the sketch data and
+		 * turns them into the layout this widget keeps (see placeDimensionAnnotation). */
+		void applyPendingAnnotationDrops();
 		void pickGeo();
 		void updateConstraintLabelInteraction();
 		bool getConstraintMeasureEndpoints(
@@ -282,35 +281,6 @@ namespace MOON {
 		) const;
 		bool constraintInError(int constrId) const;
 
-		/** How the sketch plane lies in the viewport right now: what the adaptive
-		 * background grid is drawn from, and what the grid snapping has to agree with -
-		 * they share this so the lines the user sees and the places the cursor snaps to
-		 * are one lattice. An orthographic camera projects along its own view direction,
-		 * so the plane is not necessarily face on, and every length here is measured
-		 * through the camera rather than assumed. */
-		struct GridView
-		{
-			/** View-space position of the plane origin. */
-			float oX = 0.0f;
-			float oY = 0.0f;
-			/** View-space direction the plane axes run in, i.e. how far one sketch unit
-			 * along u / v travels across the screen (1 = not foreshortened). */
-			float uX = 0.0f;
-			float uY = 0.0f;
-			float vX = 0.0f;
-			float vY = 0.0f;
-			/** Viewport half extents, in view-space units. */
-			float hx = 0.0f;
-			float hy = 0.0f;
-			/** The adaptive grid step, in sketch units. */
-			float step = 0.0f;
-		};
-		/** Fills in p_out for the current camera.
-		 * @return false when there is nothing to describe: no camera, a perspective one,
-		 *         or an orthographic one seen along the plane (the plane is a line on
-		 *         screen then, and its visible part runs off to infinity). */
-		bool gridView(GridView& p_out) const;
-
 		enum SelectState
 		{
 			Stop,
@@ -333,8 +303,7 @@ namespace MOON {
 		unsigned int m_seenConstraintRevision = 0;
 		DrawOption m_drawOption;
 		bool isInEdit = true;
-		SelectGeoId preSelectGeoId = { NoGeoId, PointPos::none };
-		std::vector<SelectGeoId> selectIds;
+		
 		bool hasClickSelected = false;
 		bool m_dragSolverInit = false;
 		bool sketchDrawRect = false;
@@ -368,7 +337,4 @@ namespace MOON {
 		std::chrono::steady_clock::time_point m_lastLabelClickTime;
 	};
 }
-
-
-
 

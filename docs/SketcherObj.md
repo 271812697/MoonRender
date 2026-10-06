@@ -15,10 +15,18 @@
 | `SketcherObj` | `SketcherObj.h` / `SketcherObj.cpp` | 草图**数据**：几何增删改、外部参考、约束增删改、GCS 求解、采样缓存（`mGeoSegment`）、平面与变换、`toShape()/makeDone()`、网格/吸附/隐藏这些随文档保存的显示数据。**不再是 `EventWidget`**，不依赖渲染器，可以在没有 GUI 的情况下加载/求解/写出。 |
 | `SketcherObjWidget : EventWidget` | `SketcherObjWidget.h` + `SketcherObjWidgetInteraction.cpp`（事件、拾取、吸附、拖拽、选择）+ `SketcherObjWidgetDraw.cpp`（绘制、网格与轴、尺寸标注与命中、约束图标） | 草图**编辑面**：选择/预选、拖拽、拾取、吸附、绘制、标注布局与交互。它持有 `SketcherObj*`（不拥有），所有几何/约束改动都走 `SketcherObj` 的接口。 |
 | 共用类型 | `SketcherTypes.h` | `SelectGeoId` / `NoGeoId` / `DrawOption`（颜色与线宽）。 |
+| 拾取/吸附 | `SketchPicking.h` / `SketchPicking.cpp` | 无状态的视图层查询：`testSelect`（点到元素）、`pickGeoIndex`（点到曲线）、`snapPoint` / `snapToGridPoint` / `gridView`（吸附与自适应网格）。它们只读草图数据 + 相机/渲染器，编辑 widget 和绘制工具都调这一份。 |
 
-所有权：`SketcherFeature` 持有草图数据（`shared_ptr`），编辑 widget 在**第一次打开草图编辑时创建**
-（`SketcherFeature::ensureSketcherWidget()`），在此之前（例如刚读取文档）不存在——所以“没有 widget”
-就是“没在编辑”的正常状态。查找入口：`SketcherObjManager::GetCurrentActiveSketcherWidget()`。
+所有权：
+
+- `SketcherFeature` 只持有草图数据（`shared_ptr<SketcherObj>`），**不认识 widget**；`SketcherObjManager`
+  同样只管理 `SketcherObj`。
+- 编辑 widget（`SketcherObjWidget`）由 **`SketchTaskDialog` 持有**（其 `Internal` 里的 `unique_ptr`），
+  生命周期与对话框一致：打开草图时创建、关闭对话框时销毁。刚读取文档时它不存在——“没有 widget”就是
+  “没在编辑”的常态。
+- 草图的其它工具（`DrawSketchHandler*`、`SmartDimensionWidget`）**不需要 widget**：拾取/吸附调
+  `SketchPicking` 的无状态函数（自己带相机），选中/预选从 `SketcherObj` 查，尺寸工具想放的标注位置写进
+  `SketcherObj` 的 `annotationDropPoints()`，由编辑 widget 取走并转成它自己的标注布局。
 
 依赖方向是单向的（下层不知道上层）：
 
@@ -31,6 +39,10 @@
 - `SketcherObjWidget` 在每帧 `onUpdate()` 里 `syncWithSketch()` 比对自己上次看到的计数：平面变了就
   重新把相机对到平面上，约束集合变了就 `pruneConstraintLayout()` 清掉失效的标注布局。结束编辑也由
   widget 自己发起（`finishEdit()` = `SketcherObj::makeDone()` + `leaveEdit()`），不需要模型回调过来。
+- **拾取（预选与选中）也是草图数据**：`preSelectGeoId` / `selectIds` 存在 `SketcherObj` 里，增删改查
+  都是它的接口（`setPreselect / getPreselectId / clearPreselect / addSelect / removeSelect / clearSelect /
+  selectGeo / getSelectGeoPosIds / getSelectIds / isSelected`）。`SketcherObjWidget` 的交互只是调用这些
+  接口，工具栏、面板、绘制工具也直接查询它们——所以所有 widget 看到的是同一份拾取。
 
 > 下面章节里的 `![...](images/*.svg)` 示意图画的是重构**之前**一个类包办全部职责的样子，尚未重画；
 > 表里标注了每个成员现在归谁。

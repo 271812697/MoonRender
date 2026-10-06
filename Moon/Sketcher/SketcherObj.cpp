@@ -271,6 +271,92 @@ namespace MOON {
         return err;
     }
  
+    // ---------------------------------------------------------------------------
+    // The selection: what the widgets pick, kept with the sketch so every one of
+    // them sees the same thing (see the header).
+    // ---------------------------------------------------------------------------
+    std::vector<int> SketcherObj::getSelectIds() const
+    {
+        std::vector<int> ids;
+        ids.reserve(selectIds.size());
+        for (const SelectGeoId& sel : selectIds) {
+            ids.push_back(sel.GeoId);
+        }
+        return ids;
+    }
+    bool SketcherObj::isSelected(const SelectGeoId& p_geoId) const
+    {
+        for (const SelectGeoId& sel : selectIds) {
+            if (sel.GeoId == p_geoId.GeoId && sel.pointPos == p_geoId.pointPos) {
+                return true;
+            }
+        }
+        return false;
+    }
+    void SketcherObj::addSelect(const SelectGeoId& p_geoId)
+    {
+        if (!isSelected(p_geoId)) {
+            selectIds.push_back(p_geoId);
+        }
+    }
+    void SketcherObj::removeSelect(const std::vector<int>& idList)
+    {
+        // What stays keeps its order; the entries that name a dropped curve go.
+        size_t kept = 0;
+        for (size_t i = 0; i < selectIds.size(); ++i) {
+            bool drop = false;
+            for (int id : idList) {
+                if (selectIds[i].GeoId == id) {
+                    drop = true;
+                    break;
+                }
+            }
+            if (!drop) {
+                selectIds[kept++] = selectIds[i];
+            }
+        }
+        selectIds.resize(kept);
+    }
+    void SketcherObj::selectGeo(int geoId)
+    {
+        clearSelect();
+        if (geoId >= 0 && geoId < static_cast<int>(mGeoList.size())) {
+            addSelect({ geoId, PointPos::none });
+        }
+    }
+    // ---------------------------------------------------------------------------
+    // What a dimension tool hands over to the widget that draws the annotation, and
+    // the flag that says the sketch is being edited (see the header).
+    // ---------------------------------------------------------------------------
+    void SketcherObj::setAnnotationDropPoint(const Sketcher::Constraint* p_constraint, const Base::Vector2d& p_sketchPos)
+    {
+        if (p_constraint != nullptr) {
+            m_annotationDrops[p_constraint] = p_sketchPos;
+        }
+    }
+    void SketcherObj::clearAnnotationDropPoint(const Sketcher::Constraint* p_constraint)
+    {
+        m_annotationDrops.erase(p_constraint);
+    }
+    void SketcherObj::pruneAnnotationDrops()
+    {
+        for (auto it = m_annotationDrops.begin(); it != m_annotationDrops.end();) {
+            const Sketcher::Constraint* c = it->first;
+            bool alive = false;
+            for (int i = 0; i < static_cast<int>(mConstraintList.size()); ++i) {
+                if (mConstraintList[i] == c) {
+                    alive = true;
+                    break;
+                }
+            }
+            if (alive) {
+                ++it;
+            }
+            else {
+                it = m_annotationDrops.erase(it);
+            }
+        }
+    }
     void SketcherObj::takeSolvedGeometry()
     {
         // The solver hands out clones of what it solved and the sketch keeps its own
@@ -1332,6 +1418,7 @@ namespace MOON {
         mConstraintList.swap(kept);
         if (dropped > 0) {
             ++m_constraintRevision;
+            pruneAnnotationDrops();
             CORE_INFO(
                 "[ExternalGeo] {0}: dropped {1} constraint(s) whose reference is gone",
                 getName(),
@@ -1529,6 +1616,7 @@ namespace MOON {
         // Constraints can die with the geometry they named; whoever edits the sketch
         // notices that through the revision rather than being told.
         ++m_constraintRevision;
+        pruneAnnotationDrops();
     }
     void SketcherObj::replaceGeometry(int oldGeoId, std::unique_ptr<Part::Geometry>& newGeo)
     {
@@ -1686,9 +1774,10 @@ namespace MOON {
             return false;
         }
         Sketcher::Constraint* constraint = mConstraintList[p_index];
-        // The annotation layout is keyed by the constraint itself and the hover/drag
-        // state by its index; erasing the entry would leave both pointing at whatever
-        // takes its place, so they go first.
+        // What is keyed by the constraint itself - the annotation layout of the
+        // widget, and where a dimension's annotation was dropped - goes with it, or a
+        // later constraint allocated at the same address would inherit it.
+        m_annotationDrops.erase(constraint);
         delete constraint;
         mConstraintList.erase(mConstraintList.begin() + p_index);
         ++m_constraintRevision;

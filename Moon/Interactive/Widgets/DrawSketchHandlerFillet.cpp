@@ -1,5 +1,5 @@
 #include "Interactive/Widgets/DrawSketchHandlerFillet.h"
-#include "Sketcher/SketcherObjWidget.h"
+
 #include "Interactive/Im3DRenderer.h"
 #include "core/log.h"
 #include "renderer/SceneView.h"
@@ -60,12 +60,11 @@ namespace MOON {
     bool DrawSketchHandlerFillet::canGoToNextMode()
     { 
         SketcherObj* obj = SketcherObjManager::instance().GetCurrentActiveSketcherObj();
-        SketcherObjWidget* widget = SketcherObjManager::instance().GetCurrentActiveSketcherWidget();
         if (state() == SelectMode::SeekFirst) {
             if (geoId1 >= 0) {
                 const Part::Geometry* geo = obj->getGeometry(geoId1);
                 if (geo->isDerivedFrom<Part::GeomBoundedCurve>()) {
-                    widget->addSelect(geoId1);
+                    obj->addSelect(geoId1);
                     return true;
                 }
             }
@@ -75,7 +74,7 @@ namespace MOON {
             if (geoId2 >= 0&&geoId2!=geoId1) {
                 const Part::Geometry* geo = obj->getGeometry(geoId2);
                 if (geo->isDerivedFrom<Part::GeomBoundedCurve>()) {
-                    widget->addSelect(geoId2);
+                    obj->addSelect(geoId2);
                     return true;
                 }
             }
@@ -87,7 +86,6 @@ namespace MOON {
     void DrawSketchHandlerFillet::executeCommands()
 	{    
         SketcherObj* obj = SketcherObjManager::instance().GetCurrentActiveSketcherObj();
-        SketcherObjWidget* widget = SketcherObjManager::instance().GetCurrentActiveSketcherWidget();
 
         bool construction = false;
         bool isChamfer = constructionMethod() == ConstructionMethod::Chamfer;
@@ -122,7 +120,7 @@ namespace MOON {
                     Base::Vector3d(secondPos.x,
                         secondPos.y,0),radius,true,preserveCorner,isChamfer
                     );
-                widget->removeSelect({geoId1,geoId2});
+                obj->removeSelect({geoId1,geoId2});
             }
             catch (const Base::CADKernelError& e) {
                 CORE_ERROR(e.what());
