@@ -7,6 +7,10 @@
 #include "Sketcher/SketcherObj.h"
 #include "Sketcher/SketcherObjManager.h"
 #include "core/log.h"
+#include "feature/Feature.h"
+#include "feature/FeatureBody.h"
+#include <algorithm>
+#include <unordered_set>
 #include <QTimer>
 
 namespace MOON {
@@ -288,17 +292,27 @@ namespace MOON {
 		std::vector<Core::ECS::Actor*> toRemove;
 		std::vector<Core::ECS::Actor*> toModify;
 
-		for (auto& [actor, type] : lastOp) {
-			switch (type) {
-			case PendingOperation::Add:
-				toAdd.push_back(actor);
-				break;
-			case PendingOperation::Remove:
-				toRemove.push_back(actor);
-				break;
-			case PendingOperation::Modify:
-				toModify.push_back(actor);
-				break;
+		// Walked in the order the actors were queued in rather than over the map: the
+		// map only says *what* happened to each actor, and its own order is a hash
+		// order, which is how the features of a document that was just read ended up
+		// in the tree in an order that was not the one they were built in.
+		std::unordered_set<Core::ECS::Actor*> queued;
+		for (const PendingOperation& op : m_pendingOps) {
+			for (Core::ECS::Actor* actor : op.actors) {
+				if (!queued.insert(actor).second) {
+					continue;  // already placed by its first appearance
+				}
+				switch (lastOp[actor]) {
+				case PendingOperation::Add:
+					toAdd.push_back(actor);
+					break;
+				case PendingOperation::Remove:
+					toRemove.push_back(actor);
+					break;
+				case PendingOperation::Modify:
+					toModify.push_back(actor);
+					break;
+				}
 			}
 		}
 
@@ -460,6 +474,81 @@ namespace MOON {
 		// 统计
 		m_stats.totalCreated += actors.size();
 		m_stats.poolHitCount += actors.size();
+		sortFeatureItems();
+	}
+	/** The features at the scene root are listed in the order they are built in, the
+	 * order of the body - which is the chain, and what a document stores. That order
+	 * is not the one the tree is filled in with: a refresh hands every actor over in
+	 * one batch (see processPendingUpdates), so a feature could end up above the one
+	 * it is built on, and reading a document showed the downstream feature first.
+	 *
+	 * Only the feature items are rearranged, and only among themselves: each one is
+	 * put back into a slot that already held a feature, so a light or an imported
+	 * model keeps the place it was created in. */
+	void EntityTreeModel::sortFeatureItems()
+	{
+		if (mInternal == nullptr || mInternal->sceneRoot == nullptr) {
+			return;
+		}
+		QStandardItem* root = mInternal->sceneRoot;
+		if (root->rowCount() < 2) {
+			return;
+		}
+		// Where each feature sits in the chain, by identity: the body is the one list
+		// that has the order right. A feature that is not in it (one that was created
+		// but not committed yet, say) keeps the back.
+		std::unordered_map<const Feature*, int> chainIndex;
+		const std::vector<Feature*>& chain = FeatureBody::instance().getFeatures();
+		for (int i = 0; i < static_cast<int>(chain.size()); ++i) {
+			chainIndex[chain[i]] = i;
+		}
+		// "slots" would be the Qt keyword macro, hence the longer name.
+		std::vector<int> featureSlots;
+		std::vector<std::pair<int, QStandardItem*>> featureItems;
+		for (int row = 0; row < root->rowCount(); ++row) {
+			QStandardItem* item = root->child(row);
+			auto* feature = item != nullptr
+				? dynamic_cast<Feature*>(getActorFromItem(item))
+				: nullptr;
+			if (feature == nullptr) {
+				continue;
+			}
+			const auto found = chainIndex.find(feature);
+			featureItems.emplace_back(
+				// Not in the body: after every feature that is (the size is one past
+				// the last chain index, so it cannot collide with a real one).
+				found != chainIndex.end() ? found->second : static_cast<int>(chain.size()),
+				item);
+			featureSlots.push_back(row);
+		}
+		if (featureItems.size() < 2) {
+			return;
+		}
+		std::stable_sort(
+			featureItems.begin(), featureItems.end(),
+			[](const std::pair<int, QStandardItem*>& a,
+				const std::pair<int, QStandardItem*>& b) {
+				return a.first < b.first;
+			});
+		bool inOrder = true;
+		for (int i = 0; i < static_cast<int>(featureItems.size()); ++i) {
+			if (root->child(featureSlots[i]) != featureItems[i].second) {
+				inOrder = false;
+				break;
+			}
+		}
+		if (inOrder) {
+			return;  // the common case: nothing to touch
+		}
+		// Every feature item is taken out - from the last slot up, so the rows below
+		// keep their numbers on the way - and put back into those same slots in chain
+		// order. takeRow() hands the items over instead of deleting them.
+		for (int i = static_cast<int>(featureSlots.size()) - 1; i >= 0; --i) {
+			root->takeRow(featureSlots[i]);
+		}
+		for (int i = 0; i < static_cast<int>(featureSlots.size()); ++i) {
+			root->insertRow(featureSlots[i], featureItems[i].second);
+		}
 	}
 	void EntityTreeModel::processBatchRemove(const std::vector<Core::ECS::Actor*>& actors)
 	{
