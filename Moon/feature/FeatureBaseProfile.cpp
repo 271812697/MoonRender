@@ -49,6 +49,16 @@ namespace MOON {
 				GetName());
 			return subShape;
 		}
+		// A vertex is a point, so there is nothing to sweep: it can be *referenced*
+		// (that is what the reference is kept for) but it is not a profile, and
+		// saying so beats handing the face maker a point and letting it fail.
+		if (subShape.getShape().ShapeType() == TopAbs_VERTEX) {
+			CORE_ERROR(
+				"{0}: the profile is a vertex; pick a face or a closed edge of the "
+				"shape below",
+				GetName());
+			return Part::TopoShape();
+		}
 		CORE_INFO(
 			"{0}: the profile is the sub-shape '{1}' of the shape below",
 			GetName(),

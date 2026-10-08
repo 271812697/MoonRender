@@ -207,6 +207,36 @@ namespace MOON
 					return p_left.size() > p_right.size();
 				});
 		}
+
+		/** What a "<Type>_<index>" reference names.
+		 *
+		 * The task panels store the name of the leaf actor the user picked, and
+		 * those are "Face_<i>", "Edge_<i>" and "Vertex_<i>": the three kinds of
+		 * element a reference can point at. The offset is where the index starts in
+		 * that name. */
+		struct ShapeReference
+		{
+			const char* typeName = nullptr;
+			TopAbs_ShapeEnum type = TopAbs_SHAPE;
+			size_t indexOffset = 0;
+		};
+
+		bool ParseShapeReference(const std::string& p_reference, ShapeReference& p_out)
+		{
+			if (p_reference.rfind("Face_", 0) == 0) {
+				p_out = { "Face", TopAbs_FACE, 5 };
+				return true;
+			}
+			if (p_reference.rfind("Edge_", 0) == 0) {
+				p_out = { "Edge", TopAbs_EDGE, 5 };
+				return true;
+			}
+			if (p_reference.rfind("Vertex_", 0) == 0) {
+				p_out = { "Vertex", TopAbs_VERTEX, 7 };
+				return true;
+			}
+			return false;
+		}
 	}
 
 	Part::TopoShape ResolveSubShapeRef(
@@ -254,9 +284,15 @@ namespace MOON
 		// The element a reference points at usually outlives the exact spelling of
 		// its name: what changed below it was how many intermediate shapes the
 		// element travelled through, and that only shows up in those levels.
-		const bool isFace = p_reference.rfind("Face", 0) == 0;
-		const char* typeName = isFace ? "Face" : "Edge";
-		const TopAbs_ShapeEnum type = isFace ? TopAbs_FACE : TopAbs_EDGE;
+		ShapeReference reference;
+		if (!ParseShapeReference(p_reference, reference)) {
+			CORE_ERROR(
+				"[TopoRef] {0}: '{1}' does not name an element of the shape below "
+				"(Face_/Edge_/Vertex_)", owner, p_reference);
+			return Part::TopoShape();
+		}
+		const char* typeName = reference.typeName;
+		const TopAbs_ShapeEnum type = reference.type;
 		const int approximated = FindElementByApproximateName(
 			baseShape, typeName, type, p_names, owner, p_reference);
 		if (approximated > 0) {
@@ -272,7 +308,7 @@ namespace MOON
 		// the index inside the shape is 1 based.
 		int index = 0;
 		try {
-			index = std::stoi(p_reference.substr(5));
+			index = std::stoi(p_reference.substr(reference.indexOffset));
 		}
 		catch (const std::exception&) {
 			CORE_ERROR(
@@ -318,15 +354,18 @@ namespace MOON
 		std::vector<std::string>& p_names)
 	{
 		p_names.clear();
-		if (p_source.isNull() || p_reference.size() < 6) {
+		if (p_source.isNull()) {
 			return;
 		}
-		const bool isFace = p_reference.rfind("Face", 0) == 0;
-		const char* typeName = isFace ? "Face" : "Edge";
-		const TopAbs_ShapeEnum type = isFace ? TopAbs_FACE : TopAbs_EDGE;
+		ShapeReference reference;
+		if (!ParseShapeReference(p_reference, reference)) {
+			return;
+		}
+		const char* typeName = reference.typeName;
+		const TopAbs_ShapeEnum type = reference.type;
 		int index = 0;
 		try {
-			index = std::stoi(p_reference.substr(5));
+			index = std::stoi(p_reference.substr(reference.indexOffset));
 		}
 		catch (const std::exception&) {
 			return;

@@ -331,12 +331,20 @@ namespace MOON {
 				CORE_INFO("TopAbs_FACE selected");
 				onSelectFace(shapes);
 			}
+			else if (shapes[1].getShape().ShapeType() == TopAbs_ShapeEnum::TopAbs_VERTEX)
+			{
+				CORE_INFO("TopAbs_VERTEX selected");
+				onSelectVertex(shapes);
+			}
 		}
 	}
 	void ShapeHelper::onSelectEdge(const std::vector<Part::TopoShape>& edge)
 	{
 	}
 	void ShapeHelper::onSelectFace(const std::vector<Part::TopoShape>& face)
+	{
+	}
+	void ShapeHelper::onSelectVertex(const std::vector<Part::TopoShape>& vertex)
 	{
 	}
 	void ShapeHelper::setGenerateShapeName(const char* name)
