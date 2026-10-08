@@ -19,10 +19,13 @@ namespace MOON {
 			auto widget = new IntSliderWidgetQt(parent);
 			mWidget = widget;
 			widget->setProp(this);
-			widget->setValue(owner->getPropertyValue(mName).toInt());
+			// Range before value - see the note in SliderFloatProperty: a number box
+			// clamps to its range as it is given the value, and out-of-range values
+			// were being cut down by Qt's default range.
 			widget->setMinValue(minA);
 			widget->setMaxValue(maxB);
 			widget->setIncrement(increment);
+			widget->setValue(owner->getPropertyValue(mName).toInt());
 		}
 		return mWidget;
 	}

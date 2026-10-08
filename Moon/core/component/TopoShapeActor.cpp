@@ -76,7 +76,7 @@ namespace MOON {
 				faceMat->SetPolygonOffsetFill(true);
 				//tempMat->SetBlendable(true);
 				//tempMat->SetDepthWriting(false);
-				faceMat->SetShader(Core::Global::ServiceLocator::Get<Editor::Core::Context>().shaderManager[":Shaders\\GeomertySurface.ovfx"]);
+				faceMat->SetShader(GetShaderService[":Shaders\\GeomertySurface.ovfx"]);
 				faceMat->SetProperty("u_Albedo",Maths::FVector4(1,1,1,1));
 				faceMat->SetProperty("u_AlphaClippingThreshold", 0.0f);
 				faceMat->SetProperty("u_Roughness", 0.25f);
@@ -84,18 +84,15 @@ namespace MOON {
 				// Emission
 				faceMat->SetProperty("u_EmissiveIntensity", 1.0f);
 				faceMat->SetProperty("u_EmissiveColor", Maths::FVector3{ 0.0f, 0.0f, 0.0f });
-
 				faceMat->TrySetProperty("_IrradianceCube", renderer.GetIrradianceCube());
 				faceMat->TrySetProperty("_PrefilterCube", renderer.GetPrefilterCube());
 				faceMat->TrySetProperty("_BRDFLut", renderer.GetBrdfTexture());
-
-
 				faceTransparentMat->SetBackfaceCulling(false);
 				faceTransparentMat->SetCastShadows(false);
 				faceTransparentMat->SetReceiveShadows(false);
 				//tempMat->SetBlendable(true);
 				//tempMat->SetDepthWriting(false);
-				faceTransparentMat->SetShader(Core::Global::ServiceLocator::Get<Editor::Core::Context>().shaderManager[":Shaders\\GeomertySurface.ovfx"]);
+				faceTransparentMat->SetShader(GetShaderService[":Shaders\\GeomertySurface.ovfx"]);
 				faceTransparentMat->SetProperty("u_Albedo", Maths::FVector4(1, 0, 0, 0.5));
 				faceTransparentMat->SetProperty("u_AlphaClippingThreshold", 0.0f);
 				faceTransparentMat->SetProperty("u_Roughness", 0.25f);
@@ -119,15 +116,12 @@ namespace MOON {
 				// they don't z-fight with the faces (the line pass uses LEQUAL).
 				lineMat->SetDepthWriting(false);
 				lineMat->SetLineWidth(1.5);
-				lineMat->AddFeature("CLIP_PLANE");
-				
+				lineMat->AddFeature("CLIP_PLANE");	
 			}
-
 		}
 		if (addToTree) {
 			GetViewerWidget.addActorToTreeView(this);
 		}
-
 	}
 
 	void TopoActor::ClearModel()
@@ -138,8 +132,7 @@ namespace MOON {
 
 	TopoActor::~TopoActor()
 	{
-		//m_scene->
-
+		//do we need remove ourself from scene?
 	}
 
 	void TopoActor::OnSerialize(tinyxml2::XMLDocument& p_doc, tinyxml2::XMLNode* p_actorsRoot)

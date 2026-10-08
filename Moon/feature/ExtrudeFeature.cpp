@@ -19,6 +19,7 @@
 #include "SketcherFeature.h"
 #include "Sketcher/SketcherObj.h"
 #include "core/log.h"
+#include "feature/SubShapeRef.h"
 #include "App/ExtrusionHelper.h"
 #include <gp_Pln.hxx>
 #include <BRepTools.hxx>
@@ -39,6 +40,28 @@
 #include <BRepClass3d_SolidClassifier.hxx>
 
 namespace MOON {
+    namespace
+    {
+        /** True when the two faces sit in the same place.
+         *
+         * An operation carries the faces of the shape below into its result without
+         * moving them, so a face of the result and that face of the shape below it
+         * are the very same face whenever their centres of gravity agree. That is
+         * what tells a face that can be re-anchored from one that only looks
+         * similar. */
+        bool IsSameFacePlacement(
+            const Part::TopoShape& p_left,
+            const Part::TopoShape& p_right)
+        {
+            Base::Vector3d left;
+            Base::Vector3d right;
+            if (!p_left.getCenterOfGravity(left) || !p_right.getCenterOfGravity(right)) {
+                return false;
+            }
+            return (left - right).Length() <= Precision::Confusion();
+        }
+    }
+
     ExtrudeFeature::ExtrudeFeature(const std::string& p_name, int addSubType) :FeatureBaseProfile(p_name,addSubType==0? "Pad": "Pocket")
 	{
         this->addSubType = addSubType;
@@ -54,13 +77,90 @@ namespace MOON {
 	{
 		return addSubType == 1;
 	}
+	void ExtrudeFeature::setUpToFaceReference(
+		const Part::TopoShape& p_picked,
+		Feature* p_feature,
+		const std::string& p_reference)
+	{
+		upToFace = p_picked;
+		upToFaceFeature = p_feature;
+		upToFaceRef = p_reference;
+		upToFaceNames.clear();
+		if (upToFaceRef.empty()) {
+			upToFaceFeature = nullptr;
+			return;
+		}
+		// The names the picked face is known by: they are what a lookup in another
+		// shape matches, which is what makes it possible to take the same face from
+		// the shape below. A pick that comes from the preview carries no feature of
+		// its own, and the preview is built the same way this feature is, so its own
+		// shape is the next best place to read the names from.
+		Feature* nameSource = p_feature != nullptr ? p_feature : this;
+		CaptureSubShapeNames(
+			nameSource->getWorldTopoShape(), upToFaceRef, upToFaceNames);
+		CORE_INFO(
+			"[UpToFace] {0}: '{1}' picked on '{2}'",
+			GetName(),
+			upToFaceRef,
+			p_feature != nullptr ? p_feature->GetName() : "<preview>");
+
+        if (p_feature != nullptr && p_feature != this) {
+			// Resolving here does two things at once: the preview has a face to
+			// extrude to, and the mapped names of that face are captured, so the
+			// reference can be re-resolved later and written to a document as a name
+			// rather than as a position in an enumeration.
+			Part::TopoShape resolved = ResolveSubShapeRef(
+				*p_feature, upToFaceRef, upToFaceNames, GetName());
+			if (!resolved.isNull()) {
+				upToFace = resolved;
+				return;
+			}
+		}
+
+		// Nothing that can be written down: the face stays for this session only, and
+		// a document says out loud that it cannot be carried.
+		upToFaceFeature = nullptr;
+		upToFaceRef.clear();
+		upToFaceNames.clear();
+		CORE_WARN(
+			"{0}: the face picked for 'up to face' ({1}) cannot be tied to the shape "
+			"this pad is built on - it is not the same face there; pick a face of the "
+			"body below",
+			GetName(),
+			upToFaceRef);
+	}
 	bool ExtrudeFeature::execute()
 	{
 		Part::TopoShape face=getProfileFace();
-        Part::TopoShape baseShape;
-        if (m_baseFeature) {
-            baseShape=getBaseTopoShape();
-        }
+		Part::TopoShape baseShape;
+		if (m_baseFeature) {
+			baseShape=getBaseTopoShape();
+		}
+
+		if (extrudeType == 2 && !upToFaceRef.empty()) {
+			// The stored face is only a snapshot of the shape below: resolve the
+			// reference again, so a recompute (or a document that was just read
+			// back) extrudes to the face at the place it is in now. A reference
+			// that was taken on this feature's own shape - which is what picking a
+			// face of the body while this pad was already built comes down to - can
+			// only mean the matching face of the shape below.
+			Feature* source = upToFaceFeature == this ? m_baseFeature : upToFaceFeature;
+			Part::TopoShape resolved;
+			if (source != nullptr) {
+				resolved = ResolveSubShapeRef(
+					*source, upToFaceRef, upToFaceNames, GetName());
+			}
+			if (!resolved.isNull()) {
+				upToFace = resolved;
+				upToFaceFeature = source;
+			}
+			else {
+				CORE_WARN(
+					"{0}: the face it is padded up to ('{1}') could not be resolved "
+					"any more; the face that was picked is used instead",
+					GetName(), upToFaceRef);
+			}
+		}
        
 		Part::ExtrusionParameters params;
 		params.taperAngleFwd = angleForward * std::numbers::pi / 180.0;
@@ -94,15 +194,62 @@ namespace MOON {
 			// came out as a straight extrusion.
 			params.taperAngleRev = params.taperAngleFwd;
 		}
+        if (extrudeType == 2 && upToFace.isNull()) {
+            // The length is used instead, and that is said out loud: a pad that
+            // cannot reach its face is worth a line in the log, but taking the
+            // whole chain down with it is not - everything built on this feature
+            // would come back without a shape.
+            if (!upToFaceRef.empty()) {
+                CORE_ERROR(
+                    "{0}: pad up to face: the face '{1}' cannot be resolved any more, "
+                    "the length is used instead",
+                    GetName(), upToFaceRef);
+            }
+            else {
+                CORE_WARN(
+                    "{0}: pad up to face: no face was picked, the length is used "
+                    "instead",
+                    GetName());
+            }
+        }
         Part::TopoShape prism;
         if (extrudeType==2 && !upToFace.isNull()) {
             try
             {
-                Part::TopoShape tempShape =face.makeElementFace(nullptr, "Part::FaceMakerBullseye");
+                Part::TopoShape tempShape = face.hasSubShape(TopAbs_FACE)?face: face.makeElementFace(nullptr, "Part::FaceMakerBullseye");
+
+                // The picked face can sit on either side of the sketch: the
+                // direction only says which way the feature is built, not where
+                // the face was picked. Take the sense from the geometry, the same
+                // way FreeCAD flips the direction of an extrusion it cannot reach.
+                gp_Dir prismDir(params.dir);
+                Base::Vector3d profileCog;
+                Base::Vector3d upToCog;
+                if (face.getCenterOfGravity(profileCog)
+                    && upToFace.getCenterOfGravity(upToCog)) {
+                    const gp_Vec toFace(
+                        upToCog.x - profileCog.x,
+                        upToCog.y - profileCog.y,
+                        upToCog.z - profileCog.z);
+                    if (toFace.Dot(gp_Vec(prismDir)) < 0.0) {
+                        prismDir.Reverse();
+                    }
+                }
+
+                // A pad gives the shape below to the algorithm as its base, so the
+                // profile lies on one of its faces - which is the configuration
+                // BRepFeat_MakePrism is written for. A pocket cuts the prism out of
+                // the base afterwards, so it keeps the profile as the base.
+                Part::TopoShape prismBase;
+                if (addSubType == 0) {
+                    prismBase = baseShape;
+                }
+
                 prism = prism.makeElementPrismUntil(
+                    prismBase,
                     tempShape,
                     supportShape,
-                    upToFace, -params.dir, Part::TopoShape::PrismMode::None,
+                    upToFace, prismDir, Part::TopoShape::PrismMode::None,
                     true,
                     Part::OpCodes::Extrude);
                 if (prism.isNull()) {
@@ -115,7 +262,13 @@ namespace MOON {
                 Part::TopoShape resShape;
                 if (!baseShape.isNull()) {
                     if (addSubType == 0) {
-                        resShape = prism.makeElementFuse(baseShape);
+                        // The base goes in first and the prism second, the way
+                        // PartDesign does it (makeElementBoolean(Fuse, {base, prism})).
+                        // The boolean is symmetric as a set operation, but the shape
+                        // it hands back is not: built with the prism first, the fused
+                        // body could no longer be merged by the *next* pad, and that
+                        // one came out as two solids instead of one.
+                        resShape = baseShape.makeElementFuse(prism);
                     }
                     else if (addSubType == 1) {
                         resShape = baseShape.makeElementCut(prism);
@@ -140,8 +293,10 @@ namespace MOON {
                 getPreviewShape() =resShape;
                 return true;
             }
-            catch (const std::exception&)
+            catch (const std::exception& e)
             {
+                CORE_ERROR(
+                    "{0}: up to face: {1}", GetName(), e.what());
                 return false;
             }
         }
@@ -208,7 +363,15 @@ namespace MOON {
                         Part::TopoShape::SingleShapeCompoundCreationPolicy::returnShape
                     );
                 }
-                LogTopoElementNames(face, "profile");
+                // The profile is dumped only when it is a sketch's face: a profile
+                // that came from the body below (a face or an edge picked on it) is a
+                // sub-shape of that shape and keeps its names in the shape it was
+                // taken from instead of carrying a map of its own, so the dump would
+                // only warn about a map it is never supposed to have. What came out of
+                // it is visible in the prism dump right below either way.
+                if (getProfile() != nullptr) {
+                    LogTopoElementNames(face, "profile");
+                }
                 LogTopoElementNames(prism, "prism");
                 getPreviewShape() = prism;
                 // The prism is this feature's own material, whatever it is fused
@@ -217,7 +380,10 @@ namespace MOON {
                 Part::TopoShape resShape;
                 if (!baseShape.isNull()) {
                     if (addSubType == 0) {
-                        resShape = prism.makeElementFuse(baseShape);
+                        // Base first, prism second - see the note in the up-to-face
+                        // branch above: the order decides whether the next pad can
+                        // still merge with this result.
+                        resShape = baseShape.makeElementFuse(prism);
                     }
                     else if (addSubType == 1) {
                         resShape = baseShape.makeElementCut(prism);

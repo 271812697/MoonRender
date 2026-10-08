@@ -14,6 +14,7 @@
 #include "EventWidget.h"
 #include "Interactive/Screen/ScreenOverlayRegistry.h"
 #include "Sketcher/SketcherObj.h"
+#include <algorithm>
 
 #include "editor/View/sceneview/viewerwidget.h"
 #include <Rendering/Data/Material.h>
@@ -4401,8 +4402,21 @@ namespace MOON
 	}
 	void ImRenderer::drawWidgets()
 	{
-		for (const auto& it:mGizmoWidgets) {
-			it.second->update();
+		// Drawn in the order the widgets ask for (see EventWidget::setDrawOrder):
+		// a tool that paints over the sketch it edits has to say so, because the
+		// order the container hands its widgets out in is not one - two primitives
+		// drawn on the same pixels are decided by which of them was pushed last.
+		std::vector<EventWidget*> widgets;
+		widgets.reserve(mGizmoWidgets.size());
+		for (const auto& it : mGizmoWidgets) {
+			widgets.push_back(it.second);
+		}
+		std::stable_sort(widgets.begin(), widgets.end(),
+			[](const EventWidget* a, const EventWidget* b) {
+				return a->getDrawOrder() < b->getDrawOrder();
+			});
+		for (EventWidget* widget : widgets) {
+			widget->update();
 		}
 	}
 	void ImRenderer::placeDrawTask(const std::string& name, std::function<void()> task)

@@ -21,6 +21,13 @@ namespace MOON
 		void setActive(bool flag);
 		void setVisible(bool flag);
 		void setImmediateInvoke(bool flag);
+		/** Widgets are drawn in ascending order of this value. A widget that has to
+		 * cover another one says so here - the drawing tools paint over the sketch
+		 * they are editing - instead of racing it for the last word on a primitive
+		 * both of them draw (the drawing order used to be whatever the widget
+		 * container happened to hand out). Everything else keeps the default. */
+		int getDrawOrder() const { return mDrawOrder; }
+		void setDrawOrder(int order) { mDrawOrder = order; }
 		void update();
 		virtual void onUpdate();
 		virtual void onSetActive(bool flag);
@@ -52,6 +59,7 @@ namespace MOON
 		bool mPreflag = false;
 		bool mCurflag = false;
 		bool mImInvoke = true;
+		int mDrawOrder = 0;
 		ImRenderer* renderer= nullptr;
 		Editor::Panels::SceneView* m_sceneView = nullptr;
 	};

@@ -1,6 +1,7 @@
-﻿#include "Interactive/Widgets/DrawSketchHandlerLineSet.h"
+#include "Interactive/Widgets/DrawSketchHandlerLineSet.h"
 #include "Sketcher/SketcherObjManager.h"
 #include "Sketcher/SketcherObj.h"
+#include "Interactive/SketchPicking.h"
 #include "Maths/FMatrix4.h"
 #include "renderer/SceneView.h"
 #include <numbers>
@@ -157,7 +158,9 @@ namespace MOON {
         if (Mode == STATUS_SEEK_First) {
 
             EditCurve[0] = onSketchPos;  // this may be overwritten if previousCurve is found
-            SketcherObj::SelectGeoId preSelectId= obj->testSelect(onSketchPos);
+            SketcherObj::SelectGeoId preSelectId = (obj != nullptr && m_sceneView != nullptr)
+                ? SketchPicking::testSelect(*obj, *m_sceneView, onSketchPos)
+                : SketcherObj::SelectGeoId{};
             // Only the sketch's own geometry can be continued from: the tool works on
             // this sketch, and an external reference must not become its predecessor.
             if (preSelectId.GeoId >= 0
@@ -780,3 +783,4 @@ namespace MOON {
         }
 	}
 }
+

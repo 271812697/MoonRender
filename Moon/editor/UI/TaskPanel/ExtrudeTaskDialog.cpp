@@ -177,7 +177,7 @@ namespace MOON {
         addParam(dir);
 
         mInternal->extrudeLength1 = new SliderFloatProperty("Length 1", p);
-        mInternal->extrudeLength1->setMinMax(0.1, 1000);
+        mInternal->extrudeLength1->setMinMax(-500, 500);
         mInternal->extrudeLength1->setStep(0.1);
         addParam(mInternal->extrudeLength1);
         mInternal->extrudeAngle1 = new SliderFloatProperty("Angle 1", p);
@@ -186,7 +186,7 @@ namespace MOON {
         addParam(mInternal->extrudeAngle1);
 
         mInternal->extrudeLength2 = new SliderFloatProperty("Length 2", p);
-        mInternal->extrudeLength2->setMinMax(0.1, 1000);
+        mInternal->extrudeLength2->setMinMax(-500, 500);
         mInternal->extrudeLength2->setStep(0.1);
         addParam(mInternal->extrudeLength2);
         mInternal->extrudeAngle2 = new SliderFloatProperty("Angle 2", p);
@@ -300,7 +300,19 @@ namespace MOON {
         ExtrudeFeature* extrudeFeature=
         dynamic_cast<ExtrudeFeature*>(getFeature());
         if (extrudeFeature) {
-            extrudeFeature->upToFace = face[1];
+            // Remember what was picked, not only the shape it was: the reference
+            // is what a recompute and a document resolve again, and a copy of the
+            // face would stay at the place the shape had when it was picked.
+            Feature* owner = nullptr;
+            std::string reference;
+            if (ViewTool::getActorBasedFeature(
+                    ViewTool::getLastestActorSelected(), owner, reference)) {
+                extrudeFeature->setUpToFaceReference(
+                    face.size() >= 2 ? face[1] : Part::TopoShape(), owner, reference);
+            }
+            if (extrudeFeature->upToFace.isNull() && face.size() >= 2) {
+                extrudeFeature->upToFace = face[1];
+            }
             if (mInternal->feature->extrudeType == 2) {
                 previewShape();
             }

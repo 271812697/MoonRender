@@ -1,8 +1,6 @@
-﻿#include "Sketcher/SketcherObjManager.h"
+#include "Sketcher/SketcherObjManager.h"
 #include "Sketcher/SketcherObj.h"
 #include "feature/SketcherFeature.h"
-#include "editor/UI/TreeViewPanel/treeViewpanel.h"
-#include "Core/Global/ServiceLocator.h"
 #include <memory>
 #include <vector>
 namespace MOON {
@@ -59,6 +57,33 @@ namespace MOON {
 			if (mInternal->sketchers[i] == obj) {
 				mInternal->currentSketcher = obj;
 			}
+		}
+	}
+	void SketcherObjManager::addSketcherFeature(SketcherFeature* p_feature)
+	{
+		if (p_feature == nullptr) {
+			return;
+		}
+		for (SketcherFeature* known : mInternal->sketchers) {
+			if (known == p_feature) {
+				return;
+			}
+		}
+		mInternal->sketchers.push_back(p_feature);
+	}
+	void SketcherObjManager::removeSketcherFeature(SketcherFeature* p_feature)
+	{
+		if (p_feature == nullptr) {
+			return;
+		}
+		for (int i = 0; i < static_cast<int>(mInternal->sketchers.size()); ++i) {
+			if (mInternal->sketchers[i] == p_feature) {
+				mInternal->sketchers.erase(mInternal->sketchers.begin() + i);
+				break;
+			}
+		}
+		if (mInternal->currentSketcher == p_feature) {
+			mInternal->currentSketcher = nullptr;
 		}
 	}
 	std::vector<SketcherObj*> SketcherObjManager::GetAllSketcherObjs()

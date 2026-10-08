@@ -14,6 +14,19 @@ namespace MOON {
 		void previewShape();
 		void generateFinalShape();
 		void clearPreviewShape();
+		/** Shows the shape this feature is built on in place of the feature itself
+		 * while its panel is open.
+		 *
+		 * The shape of a feature already contains the shape below - an operation
+		 * carries its faces and edges over, names included - so a face picked for
+		 * "up to face" or an edge picked for a fillet would be taken from the
+		 * feature's own result and end up referencing the feature it is being built
+		 * for. Rolling the tip back to the shape below leaves only what such a
+		 * reference can be taken from on screen, which is what FreeCAD does while a
+		 * feature is edited. Nothing happens for a feature that was never built. */
+		void rollBackToBase();
+		/** Puts the visibility back the way it was before rollBackToBase(). */
+		void restoreFeature();
 		void setFeature(Feature* feature);
 		Feature* getFeature();
 		void setFeatureSubValues(const std::vector<std::string>& subValues);

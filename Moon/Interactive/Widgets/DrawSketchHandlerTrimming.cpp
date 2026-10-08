@@ -1,7 +1,8 @@
-﻿#include "Interactive/Im3DRenderer.h"
+#include "Interactive/Im3DRenderer.h"
 #include "Interactive/Widgets/DrawSketchHandlerTrimming.h"
 #include "Sketcher/SketcherObjManager.h"
 #include "Sketcher/SketcherObj.h"
+#include "Interactive/SketchPicking.h"
 #include "renderer/SceneView.h"
 #include "Qtimgui/imgui/imgui.h"
 #include "core/log.h"
@@ -75,7 +76,7 @@ namespace MOON {
 				mat.data[8], mat.data[9], mat.data[10], mat.data[11],
 				mat.data[12], mat.data[13], mat.data[14], mat.data[15]
 			);
-			int GeoId = sketchObj->getPickGeoIndex(onSketchPos, pla);
+			int GeoId = SketchPicking::pickGeoIndex(*sketchObj, onSketchPos, pla);
 		
 			if (GeoId != -1) {
 				CORE_DEBUG("DrawSketchHandlerTrimming::onMouseMove PickGeo")
@@ -103,3 +104,4 @@ namespace MOON {
 		}
 	}
 }
+

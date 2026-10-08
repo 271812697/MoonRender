@@ -17,7 +17,8 @@ namespace MOON {
 		openfile->setObjectName(QString::fromUtf8("actionFileOpen"));
 		openfile->setText("&Export");
 		openfile->setStatusTip("Export");
-		openfile->setShortcut(QCoreApplication::translate("pqFileMenuBuilder", "Ctrl+S", nullptr));
+		// Ctrl+S belongs to Save (see SaveFileCommand); export is a different action.
+		openfile->setShortcut(QCoreApplication::translate("pqFileMenuBuilder", "Ctrl+E", nullptr));
 		QIcon icon9;
 		icon9.addFile(QString::fromUtf8(":/widgets/icons/pqOpen.svg"), QSize(), QIcon::Normal, QIcon::Off);
 		openfile->setIcon(icon9);

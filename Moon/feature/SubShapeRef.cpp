@@ -311,4 +311,32 @@ namespace MOON
 		}
 		return result;
 	}
+
+	void CaptureSubShapeNames(
+		const Part::TopoShape& p_source,
+		const std::string& p_reference,
+		std::vector<std::string>& p_names)
+	{
+		p_names.clear();
+		if (p_source.isNull() || p_reference.size() < 6) {
+			return;
+		}
+		const bool isFace = p_reference.rfind("Face", 0) == 0;
+		const char* typeName = isFace ? "Face" : "Edge";
+		const TopAbs_ShapeEnum type = isFace ? TopAbs_FACE : TopAbs_EDGE;
+		int index = 0;
+		try {
+			index = std::stoi(p_reference.substr(5));
+		}
+		catch (const std::exception&) {
+			return;
+		}
+		// The shape is free to have lost the element since the reference was taken:
+		// asking it for one of those used to throw.
+		const unsigned long count = p_source.countSubShapes(type);
+		if (index < 0 || static_cast<unsigned long>(index + 1) > count) {
+			return;
+		}
+		CaptureElementNames(p_source, typeName, index + 1, p_names);
+	}
 }

@@ -11,6 +11,8 @@
 #include "Interactive/Interactive/ExecuteCommand.h"
 #include "Interactive/Interactive/EventObject.h"
 #include "feature/Feature.h"
+#include "feature/FeatureBody.h"
+#include <algorithm>
 #include <Core/ECS/Components/CMaterialRenderer.h>
 #include <tracy/Tracy.hpp>
 #include <GProp_GProps.hxx>
@@ -97,14 +99,33 @@ namespace MOON {
 		TopoActor* m_previewActor = nullptr;
 		std::string name="GenerateShape";
 		ExecuteCommandPair selectObserver;
+		/** While a feature is edited its own shape is taken out of the scene and the
+		 * shape below is shown instead; both flags remember what was on so that
+		 * closing or cancelling the panel puts it back. */
+		bool rolledBack = false;
+		bool featureWasActive = false;
+		bool baseWasActive = false;
 	};
 	ShapeHelper::ShapeHelper(Feature* feature):mInternal(new Internal(this))
 	{
 		mInternal->selectObserver = SelectionManager::instance().AddObserver(SelectAny, this, &ShapeHelper::onSelectAny);
-		mInternal->feature = feature;
+		setFeature(feature);
 	}
 	ShapeHelper::~ShapeHelper()
 	{
+		// A panel can also be taken down without its cancel - the task view replaces
+		// it, say - and the feature it rolled back has to go back on screen then too.
+		// The feature is only touched while it is still part of the body: a panel that
+		// was cancelled deletes the feature it created, and that pointer is dangling
+		// by now.
+		Feature* feature = mInternal->feature;
+		if (mInternal->rolledBack && feature != nullptr) {
+			const std::vector<Feature*>& features
+				= FeatureBody::instance().getFeatures();
+			if (std::find(features.begin(), features.end(), feature) != features.end()) {
+				restoreFeature();
+			}
+		}
 		delete mInternal;
 	}
 	void ShapeHelper::previewShape()
@@ -167,16 +188,10 @@ namespace MOON {
 		ZoneScoped;
 		auto feature = getFeature();
 		if (feature) {
-			//makeRefine for TopoShape
-			Part::TopoShape& shape = feature->GetTopoShape();
-			try
-			{
-				shape.setShape(shape.makeElementRefine());
-			}
-			catch (Standard_Failure& err)
-			{
-				CORE_ERROR("Refine generateShape failed:{}", err.GetMessageString());
-			}
+			// The refinement of the result is not done here any more: it belongs to
+			// Feature::makeDone(), the point every committed result goes through, so
+			// that a document that is read back produces the same shape this panel
+			// does. makeDone() below is where it happens.
 			//hide other features
 			auto& view = GetService(Editor::Panels::SceneView);
 			auto scene = view.GetScene();	
@@ -186,6 +201,13 @@ namespace MOON {
 					GetViewerWidget.modifyActorInTreeView(ac);
 				}
 			}
+			// The feature this panel belongs to is the tip again: it was taken out of
+			// the scene while the panel was open (see rollBackToBase).
+			if (!feature->IsActive()) {
+				feature->SetActive(true);
+				GetViewerWidget.modifyActorInTreeView(feature);
+			}
+			mInternal->rolledBack = false;
 			//add to treeview if not exist and discterize shape
 			feature->makeDone();
 			//clear preview
@@ -199,6 +221,22 @@ namespace MOON {
 	}
 	void ShapeHelper::clearPreviewShape()
 	{
+		restoreFeature();
+		// A cancelled panel leaves the feature with the shape its last preview
+		// computed, and that one is the raw result. Refining it here keeps it like
+		// every committed one instead of leaving a seam until the next recompute.
+		Feature* feature = getFeature();
+		if (feature != nullptr) {
+			const std::vector<Feature*>& features
+				= FeatureBody::instance().getFeatures();
+			if (std::find(features.begin(), features.end(), feature) != features.end()) {
+				feature->refineResultShape();
+				// Discretizing again is what puts the merged faces on screen: the
+				// topology tree that is drawn was built from the raw shape.
+				feature->GetComponent<Core::ECS::Components::CTopoShape>()
+					->discretizationShape();
+			}
+		}
 		auto& view = GetService(Editor::Panels::SceneView);
 		auto scene = view.GetScene();
 		auto preActor = scene->FindActorByName("TopoShapePreview");
@@ -208,9 +246,59 @@ namespace MOON {
 			delete preActor;
 		}
 	}
+	void ShapeHelper::rollBackToBase()
+	{
+		Feature* feature = getFeature();
+		if (feature == nullptr || mInternal->rolledBack) {
+			return;
+		}
+		// A feature that was never built has nothing in the scene, so there is nothing
+		// to take out of it - and everything below it is still on screen, which is
+		// exactly what the picks have to land on.
+		if (feature->GetTopoShape().isNull()) {
+			return;
+		}
+		mInternal->featureWasActive = feature->IsActive();
+		if (mInternal->featureWasActive) {
+			feature->SetActive(false);
+			GetViewerWidget.modifyActorInTreeView(feature);
+		}
+		Feature* base = feature->getBaseFeature();
+		mInternal->baseWasActive = base != nullptr && base->IsActive();
+		if (base != nullptr && !mInternal->baseWasActive) {
+			base->SetActive(true);
+			GetViewerWidget.modifyActorInTreeView(base);
+		}
+		mInternal->rolledBack = true;
+		CORE_INFO(
+			"[ShapeHelper] {0}: the tip is rolled back to '{1}' while its panel is open",
+			feature->GetName(),
+			base != nullptr ? base->GetName() : "<nothing>");
+	}
+	void ShapeHelper::restoreFeature()
+	{
+		if (!mInternal->rolledBack) {
+			return;
+		}
+		mInternal->rolledBack = false;
+		Feature* feature = getFeature();
+		if (feature == nullptr) {
+			return;
+		}
+		Feature* base = feature->getBaseFeature();
+		if (base != nullptr && !mInternal->baseWasActive) {
+			base->SetActive(false);
+			GetViewerWidget.modifyActorInTreeView(base);
+		}
+		if (mInternal->featureWasActive && !feature->IsActive()) {
+			feature->SetActive(true);
+			GetViewerWidget.modifyActorInTreeView(feature);
+		}
+	}
 	void ShapeHelper::setFeature(Feature* feature)
 	{
 		mInternal->feature = feature;
+		rollBackToBase();
 	}
 	Feature* ShapeHelper::getFeature()
 	{
@@ -231,14 +319,16 @@ namespace MOON {
 		ZoneScoped;
 		std::vector<Part::TopoShape>shapes;
 		ViewTool::getSelectedTopoShape(shapes);
-		if (shapes.size() > 0) {
+		// getSelectedTopoShape() pushes the whole shape first and the picked
+		// sub-shape second, so both entries are needed here.
+		if (shapes.size() >= 2) {
 			if (shapes[1].getShape().ShapeType() == TopAbs_ShapeEnum::TopAbs_EDGE) {
 				CORE_INFO("TopAbs_EDGE selected");
 				onSelectEdge(shapes);
 			}
 			else if (shapes[1].getShape().ShapeType() == TopAbs_ShapeEnum::TopAbs_FACE)
 			{
-				CORE_INFO("TopAbs_FACE");
+				CORE_INFO("TopAbs_FACE selected");
 				onSelectFace(shapes);
 			}
 		}

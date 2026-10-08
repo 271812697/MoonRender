@@ -1,4 +1,5 @@
-﻿#include "Interactive/Widgets/DrawSketchHandlerFillet.h"
+#include "Interactive/Widgets/DrawSketchHandlerFillet.h"
+
 #include "Interactive/Im3DRenderer.h"
 #include "core/log.h"
 #include "renderer/SceneView.h"

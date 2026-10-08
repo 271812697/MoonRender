@@ -10,6 +10,8 @@ namespace MOON {
 	public:
 		Internal(SketcherFeature* s):self(s) {
 			sketcher = std::make_shared<SketcherObj>();
+			// The sketch writes its own name into the messages it logs.
+			sketcher->setName(s != nullptr ? s->GetName() : std::string("SketcherObj"));
 		}
 		~Internal() {
 		}

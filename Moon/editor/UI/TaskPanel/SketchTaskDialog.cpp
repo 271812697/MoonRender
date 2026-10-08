@@ -3,11 +3,14 @@
 #include "editor/UI/PropertyPanel/Collapsiblegroupboxwidget.h"
 #include "Sketcher/SketcherObjManager.h"
 #include "Sketcher/SketcherObj.h"
+#include "Sketcher/SketcherObjWidget.h"
 #include "feature/SketcherFeature.h"
 #include "Widgets/BoolProperty.h"
 #include "Widgets/ColorPickerProperty.h"
 #include "Widgets/SliderFloatProperty.h"
 #include "core/ViewTool.h"
+#include "core/Global/ServiceLocator.h"
+#include "editor/Toolbar/sketchToolbar.h"
 #include "Interactive/Widgets/SketchPlane.h"
 #include <QLabel>
 #include <QLineEdit>
@@ -25,6 +28,8 @@
 #include <QLabel>
 #include <QEvent>
 #include <QColor>
+#include <QCursor>
+#include <QMenu>
 #include <Eigen/Core>
 #include <cstdio>
 #include <vector>
@@ -118,12 +123,19 @@ namespace MOON {
             auto f = self->getFeature();
             if (f) {
                 //
-				feature = dynamic_cast<SketcherFeature*>(f);
-                feature->getSketcherObj()->beginEdit();
+                feature = dynamic_cast<SketcherFeature*>(f);
+                // Opening the sketch for editing: this dialog owns the widget that does
+                // it (see ensureWidget).
+                if (SketcherObjWidget* w = ensureWidget()) {
+                    w->beginEdit();
+                }
 
             }
             else
             {
+                // A sketch that does not exist yet is created here and belongs to this
+                // dialog until OK hands it to the document (see dropUncommittedFeature).
+                isCreateFeature = true;
                 feature = SketcherObjManager::instance().CreateSketcherFeature();
                 //feature->getSketcherObj()->setActive(true);
 				self->setFeature(feature);
@@ -152,16 +164,84 @@ namespace MOON {
             SketcherObjManager::instance().setCurrentActiveSketcherFeature(feature);
         }
         ~Internal() {
-            feature->getSketcherObj()->setActive(false);
+            if (widget) {
+                widget->setActive(false);
+                widget.reset();
+            }
+            // Closing the sketch leaves its tools: the buttons (external geometry has
+            // one of its own) and the tool widgets they switch on would otherwise stay
+            // pressed into the next session - and they reach the sketch through the
+            // manager, which is about to forget this one. Only while this sketch is
+            // still the one being edited: the panel destroys its dialog with
+            // deleteLater, so by the time this runs the task panel may already have
+            // opened another sketch, whose tools must not be taken down here.
+            if (SketcherObjManager::instance().GetCurrentActiveSketcherFeature() == feature) {
+                GetService(SketchToolbar).disableAllHandlers();
+            }
             if (behaviour) {
                 delete behaviour;
             }
+            // Whatever is left of a sketch this dialog created goes with it: the panel
+            // is also taken down by paths that never call clickCancel (picking another
+            // feature in the tree, for instance), and each of them has to leave the
+            // document exactly like Cancel does.
+            dropUncommittedFeature();
+        }
+        /** Drops the feature, its sketch and its actors when this dialog created them
+         * and OK never committed them.
+         *
+         * A new sketch is registered - it lists itself in the feature body and the
+         * manager hands it to the drawing tools - from the moment it is constructed,
+         * so an abandoned one has to be unregistered again or the whole chain of it
+         * is left behind: the feature, the geometry the user drew into it and the
+         * actors it spawned in the scene. Calling this twice is harmless. */
+        void dropUncommittedFeature()
+        {
+            if (!isCreateFeature || committed || feature == nullptr) {
+                return;
+            }
+            // The widget first: it holds the sketch's pointer and keeps drawing and
+            // editing it every frame until the panel is really gone (the task panel
+            // destroys the dialog with deleteLater), so it must not outlive the data.
+            if (widget) {
+                widget->setActive(false);
+                widget.reset();
+            }
+            // The manager is what the drawing tools ask for the sketch being edited,
+            // and what the modelling panels look the last sketch up in: it has to
+            // forget this one before it is freed.
+            SketcherObjManager::instance().removeSketcherFeature(feature);
+            // The actor and, through the scene, the topology actors hanging under it.
+            // The feature body is handled by the destructor, which unlists the feature.
+            feature->RemoveFromScene();
+            delete feature;
+            feature = nullptr;
+            self->setFeature(nullptr);
         }
     private:
         friend SketchTaskDialog;
         SketchTaskDialog* self = nullptr;
         SketcherFeature* feature = nullptr;
         SketchPlane* behaviour = nullptr;
+        /** True when the feature above was created by this dialog, i.e. when the user
+         * asked for a new sketch rather than opened an existing one. */
+        bool isCreateFeature = false;
+        /** Set by clickOk: from there on the document owns the sketch, so the
+         * destructor leaves it alone. */
+        bool committed = false;
+        /** The widget that edits this sketch: born with the dialog, destroyed with it
+         * (nothing else holds it - the feature and the sketch data do not know it). */
+        std::unique_ptr<SketcherObjWidget> widget;
+        /** Builds the widget that edits the sketch of this dialog. It belongs to this
+         * dialog and nothing else holds it: the tools of a sketch take what they need
+         * from the sketch data and from the picking module, not from here. */
+        SketcherObjWidget* ensureWidget()
+        {
+            if (!widget && feature != nullptr) {
+                widget = std::make_unique<SketcherObjWidget>(feature->getSketcherObj());
+            }
+            return widget.get();
+        }
     };
 
     SketchTaskDialog::SketchTaskDialog(QWidget* parent, Feature* feature)
@@ -194,6 +274,9 @@ namespace MOON {
         auto* curveWidth = new SliderFloatProperty("Curve Line Width", sketchGroup, 0.5f, 10.0f);
         curveWidth->setStep(0.1f);
         addParam(curveWidth);
+        auto* axisWidth = new SliderFloatProperty("Axis Line Width", sketchGroup, 0.5f, 10.0f);
+        axisWidth->setStep(0.1f);
+        addParam(axisWidth);
         auto* pointSize = new SliderFloatProperty("Point Size", sketchGroup, 2.0f, 40.0f);
         pointSize->setStep(0.5f);
         addParam(pointSize);
@@ -278,7 +361,7 @@ namespace MOON {
             return QVariant::fromValue(mInternal->feature->getSketcherObj()->isSnapToGrid());
         }
         if (mInternal && mInternal->feature) {
-            const auto& opt = mInternal->feature->getSketcherObj()->drawOption();
+            const auto& opt = mInternal->ensureWidget()->drawOption();
             if (propertyName == "Sketch:Point Color") {
                 return QVariant::fromValue(abgrToQColor(opt.pointColor));
             }
@@ -309,6 +392,9 @@ namespace MOON {
             if (propertyName == "Sketch:Curve Line Width") {
                 return QVariant::fromValue(opt.curveLineWidth);
             }
+            if (propertyName == "Sketch:Axis Line Width") {
+                return QVariant::fromValue(opt.axisLineWidth);
+            }
             if (propertyName == "Sketch:Point Size") {
                 return QVariant::fromValue(opt.pointSize);
             }
@@ -325,7 +411,7 @@ namespace MOON {
             mInternal->feature->getSketcherObj()->setSnapToGrid(value.value<bool>());
         }
         if (mInternal && mInternal->feature) {
-            auto& opt = mInternal->feature->getSketcherObj()->drawOption();
+            auto& opt = mInternal->ensureWidget()->drawOption();
             if (propertyName == "Sketch:Point Color") {
                 opt.pointColor = qColorToAbgr(value.value<QColor>());
             }
@@ -356,6 +442,9 @@ namespace MOON {
             else if (propertyName == "Sketch:Curve Line Width") {
                 opt.curveLineWidth = value.toFloat();
             }
+            else if (propertyName == "Sketch:Axis Line Width") {
+                opt.axisLineWidth = value.toFloat();
+            }
             else if (propertyName == "Sketch:Point Size") {
                 opt.pointSize = value.toFloat();
             }
@@ -365,15 +454,24 @@ namespace MOON {
     
     void SketchTaskDialog::clickOk()
     {
-        mInternal->feature->getSketcherObj()->makeDone();
+        mInternal->ensureWidget()->finishEdit();
+        // The drawing tools belong to the finished session too.
+        GetService(SketchToolbar).disableAllHandlers();
         mInternal->feature->execute();
         mInternal->feature->makeDone();
+        // The document owns the sketch from here on - it is in the body and in the
+        // tree - so closing the panel must not drop it (see dropUncommittedFeature).
+        mInternal->committed = true;
     }
     void SketchTaskDialog::clickApply()
     {
     }
     void SketchTaskDialog::clickCancel()
     {
+        // The panel itself is destroyed later (deleteLater), so the sketch this dialog
+        // created goes now: everything that holds it - the drawing tools through the
+        // manager, the tree panel rebuilding the chain - has to see it gone.
+        mInternal->dropUncommittedFeature();
     }
     void SketchTaskDialog::onSelectPlane()
     {
@@ -578,6 +676,32 @@ namespace MOON {
                 rowLayout->addWidget(typeLabel);
             }
             rowLayout->addWidget(label, 1);
+            if (list == mConstraintList) {
+                // Right click drops the constraint. The row is the widget the click
+                // lands on (the labels are transparent to the mouse), so it carries the
+                // menu: the list is the only place a constraint can be taken back
+                // without hunting for the geometry it was put on.
+                row->setContextMenuPolicy(Qt::CustomContextMenu);
+                connect(
+                    row,
+                    &QWidget::customContextMenuRequested,
+                    this,
+                    [this, userData](const QPoint&) {
+                        if (!mInternal || !mInternal->feature) {
+                            return;
+                        }
+                        QMenu menu(this);
+                        QAction* remove = menu.addAction("Delete constraint");
+                        // Opened at the cursor: the request position is in the row's own
+                        // coordinates, and the row is rebuilt whenever the list changes.
+                        if (menu.exec(QCursor::pos()) == remove) {
+                            mInternal->feature->getSketcherObj()->removeConstraint(userData);
+                            mListCache.clear();
+                            refreshLists();
+                        }
+                    }
+                );
+            }
             if (list == mCurveList) {
                 const QVariant rowRef = QVariant::fromValue<QWidget*>(row);
                 const auto installHoverFilter = [this, &rowRef](QWidget* w) {
@@ -783,3 +907,4 @@ namespace MOON {
         return QWidget::eventFilter(watched, event);
     }
 }
+

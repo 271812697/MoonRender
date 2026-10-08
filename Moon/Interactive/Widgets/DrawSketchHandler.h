@@ -12,6 +12,10 @@ namespace MOON
 		DrawSketchHandler(const std::string& name)
 			: EventWidget(name)
 		{
+			// A drawing tool paints over the sketch it is working on: its rubber
+			// band runs along the reference curves and the geometry it places, and
+			// those would otherwise hide it (see EventWidget::setDrawOrder).
+			setDrawOrder(1);
 		}
         virtual void quit();
         void clearEdit() ;

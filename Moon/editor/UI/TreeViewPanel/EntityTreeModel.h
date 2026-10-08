@@ -132,6 +132,10 @@ namespace MOON
         void processBatchAdd(const std::vector<Core::ECS::Actor*>& actors);
         void processBatchRemove(const std::vector<Core::ECS::Actor*>& actors);
         void processBatchModify(const std::vector<Core::ECS::Actor*>& actors);
+        /** Puts the items that stand for features in the order the features are built
+         * in - the order of the body, which is the chain - instead of the order they
+         * happened to be added to the tree in (see the definition). */
+        void sortFeatureItems();
 
         QStandardItem* createItemFromActor(Core::ECS::Actor* actor);
         void addActorToTree(Core::ECS::Actor* actor, QStandardItem* parent = nullptr);

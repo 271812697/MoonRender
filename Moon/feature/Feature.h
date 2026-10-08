@@ -13,6 +13,18 @@ namespace MOON {
 		void setSubValues(const std::vector<std::string>& values) {
 			subValues = values;
 		}
+		/** The elements this feature refers to, as the task panels write them:
+		 * "<Type>_<index>". */
+		const std::vector<std::string>& getSubValues() const { return subValues; }
+		/** The mapped names each of those was resolved to (see resolveBaseSubShape).
+		 * A document carries them so a reference keeps working across a save/load just
+		 * as it does across a recompute. */
+		const std::vector<std::vector<std::string>>& getReferenceNames() const {
+			return m_referenceNames;
+		}
+		void setReferenceNames(const std::vector<std::vector<std::string>>& p_names) {
+			m_referenceNames = std::move(p_names);
+		}
 		Feature* getBaseFeature() { return m_baseFeature; }
 		/** The shape another feature should model with: this feature's stored topology
 		 * with its own transform applied.
@@ -50,6 +62,22 @@ namespace MOON {
 		 * of leaving it to be discovered as a reference that points at the wrong
 		 * element months later. */
 		void setResultShape(Part::TopoShape p_shape);
+		/** Whether the shape this feature hands on is refined - the faces and edges
+		 * that share one geometry merged into a single element.
+		 *
+		 * A pad built up to a face, for instance, fuses two coplanar faces and shows
+		 * their seam until the shape is refined. FreeCAD has the same thing as the
+		 * "Refine" property of its features, on by default.
+		 *
+		 * It belongs in setResultShape() rather than in the task panel: a document
+		 * that is read back rebuilds its chain with execute() alone, so a refinement
+		 * left to the panel made the saved model and the loaded one differ. */
+		virtual bool isRefineActive() const { return true; }
+		/** Merges the faces and edges of the shape this feature holds that share one
+		 * geometry into single elements. Called when the result is committed (see
+		 * makeDone), not on every recompute: execute() also runs while a task panel
+		 * is dragged, and the shape it produces there is only displayed. */
+		void refineResultShape();
 		/** The sketch the shape of this feature was built from, if the chain below
 		 * has one.
 		 *

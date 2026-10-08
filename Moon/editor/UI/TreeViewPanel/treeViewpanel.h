@@ -7,6 +7,7 @@ namespace Core::ECS {
 }
 namespace MOON {
 	class TreeViewPanel;
+	class Feature;
 	
 	class TreeViewPanel : public QTreeView
 	{
@@ -50,6 +51,19 @@ namespace MOON {
 		void mouseMoveEvent(QMouseEvent* event) override;
 
 	private:
+		/** The menu an item offers: deleting the actor it stands for. */
+		void onContextMenu(const QPoint& p_pos);
+		/** True when the item may be deleted: a feature, or an actor that belongs to
+		 * no feature. The nodes under a feature - its render anchors, the solid and
+		 * shell groups and the face/edge leaves - are how the feature is displayed,
+		 * and the menu keeps the entry turned off for them. */
+		bool canDeleteActor(Core::ECS::Actor* p_actor) const;
+		void deleteActor(Core::ECS::Actor* p_actor);
+		/** Deletes a feature together with every feature built on top of it. */
+		void deleteFeatureChain(Feature* p_feature);
+		/** Takes what was selected out of the selection and the property panel when
+		 * the actors behind it are gone. */
+		void refreshSelectionAfterRemoval();
 		class TreeViewPanelInternal;
 		TreeViewPanelInternal* mInternal;
 	};
