@@ -498,6 +498,21 @@ void Core::SceneSystem::Scene::BuildSceneBvh()
 		}
 	}
 	// Build BVH
+	//
+	// Every triangle mesh needs a BVH of its own as well, and whether it has one
+	// depends on who made it: the topology batches call
+	// ComputeBoundingSphereAndBox() per mesh while they are built, while a mesh read
+	// from a file only gets the *model's* box. Building the missing ones here is what
+	// keeps the path trace - and the picking that reads the same service - working
+	// for both. A mesh with no triangles cannot have one and is left alone; the
+	// service skips it below.
+	for (::Rendering::Resources::Mesh* mesh : sceneMeshes) {
+		if (mesh != nullptr
+			&& mesh->GetPrimitiveMode() == ::Rendering::Settings::EPrimitiveMode::TRIANGLES
+			&& mesh->GetBvh() == nullptr) {
+			mesh->BuildBvh();
+		}
+	}
 	if (meshInstances.size()>0) {
 		bvhService->Process(bounds,sceneMeshes, meshInstances);	
 	}
@@ -531,7 +546,10 @@ bool Core::SceneSystem::Scene::PointPick(const Maths::FMatrix4& viewPortMatrix, 
 void Core::SceneSystem::Scene::computeBoundingBox()
 {
 	m_sceneBoundingBox = ::Rendering::Geometry::bbox();
-	if (bvhService->m_sceneBvh) {
+	// The BVH is the cheap answer, but only when it holds bounds: a BVH that was built
+	// while the scene had no triangle mesh in it keeps the default (empty) box, and
+	// handing that out as the scene box gives every caller infinities to work with.
+	if (bvhService->m_sceneBvh && bvhService->m_sceneBvh->m_bounds.isValid()) {
 		m_sceneBoundingBox = bvhService->m_sceneBvh->Bounds();
 	}
 	else

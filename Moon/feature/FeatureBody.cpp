@@ -3,6 +3,8 @@
 #include "SketcherFeature.h"
 #include "feature/FeatureBaseProfile.h"
 #include "core/log.h"
+#include "TopoShape.h"
+#include <Standard_Failure.hxx>
 
 namespace MOON {
 	class FeatureBody::Internal {
@@ -77,21 +79,51 @@ namespace MOON {
 		}
 		++mInternal->populateDepth;
 
+		// One feature of the propagation: it is rebuilt and committed, and nothing it
+		// throws may leave this function.
+		//
+		// This is reached from makeDone(), which is reached from execute(), so there is
+		// no caller left to catch anything and an escaping exception ends the
+		// application. Both families have to be named: the kernel reports a null input
+		// as a Base::Exception (Part::NullShapeException, say), which is not a
+		// Standard_Failure - and a feature that is asked to build before its own input
+		// exists runs into one of them while a document is being read.
+		const auto rebuild = [](Feature* p_feature) {
+			try {
+				if (!p_feature->execute()) {
+					CORE_ERROR("[FeatureBody] {0} could not be built", p_feature->GetName());
+				}
+			}
+			catch (const Base::Exception& e) {
+				CORE_ERROR("[FeatureBody] {0}: {1}", p_feature->GetName(), e.what());
+			}
+			catch (Standard_Failure& e) {
+				CORE_ERROR("[FeatureBody] {0}: {1}", p_feature->GetName(), e.GetMessageString());
+			}
+			try {
+				p_feature->makeDone();
+			}
+			catch (const Base::Exception& e) {
+				CORE_ERROR("[FeatureBody] {0}: {1}", p_feature->GetName(), e.what());
+			}
+			catch (Standard_Failure& e) {
+				CORE_ERROR("[FeatureBody] {0}: {1}", p_feature->GetName(), e.GetMessageString());
+			}
+		};
+
 		std::vector<Feature*>stack;
 		stack.push_back(feature);
 		while (!stack.empty()) {
 			Feature* curFeature = stack.back(); stack.pop_back();
 			for (int i = 0; i < mInternal->featureList.size(); i++) {
 				if (mInternal->featureList[i]->getBaseFeature()== curFeature) {
-					mInternal->featureList[i]->execute();
-					mInternal->featureList[i]->makeDone();
+					rebuild(mInternal->featureList[i]);
 				}
 				else {
 					FeatureBaseProfile*  profile=dynamic_cast<FeatureBaseProfile*>(mInternal->featureList[i]);
 					if (profile) {
 						if (profile->getProfile() == curFeature) {
-							mInternal->featureList[i]->execute();
-							mInternal->featureList[i]->makeDone();
+							rebuild(mInternal->featureList[i]);
 						}
 					}
 				}

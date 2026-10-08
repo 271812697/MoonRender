@@ -214,6 +214,18 @@ namespace Core::ECS::Components
         for (int vertexId : mInternal->selectedVertexIds) {
             drawVertexMarker(vertexId, Eigen::Vector4<uint8_t>(255, 0, 130, 255));
         }
+        // A feature whose shape never came out - a thickness the kernel refused, say -
+        // has no topology to build: no face domains, no edges, no vertices. Everything
+        // below here creates actors, batches and BVHs for the shape, and doing that for
+        // a shape that is not there is how an empty one used to take the process down.
+        if (mInternal->mTopoShape.isNull()) {
+            mInternal->updateFace = false;
+            mInternal->updateEdge = false;
+            mInternal->updateVertex = false;
+            mInternal->updateChildMesh = false;
+            return;
+        }
+
         if (mInternal->updateFace|| mInternal->updateEdge) {
             ZoneScoped;
             auto& view = GetService(::Editor::Panels::SceneView);

@@ -10,6 +10,31 @@
 #include <algorithm>
 #include <cmath>
 
+namespace
+{
+	/** Length of the scene bounding box diagonal, or 0.0f when the scene has no
+	 * usable bounds.
+	 *
+	 * A scene BVH that was built while no triangle mesh was in the scene keeps the
+	 * default (empty) box - pmin at +max, pmax at -max - so its extents come out as
+	 * negative infinity and any size taken from it is inf. That is not a size, and
+	 * multiplying it by a zero scroll ("0 * inf") is a NaN, which is how a camera
+	 * that was never touched ends up with a NaN position.
+	 */
+	float SceneExtentLength(::Core::SceneSystem::Scene* p_scene)
+	{
+		if (p_scene == nullptr) {
+			return 0.0f;
+		}
+		auto* bvh = p_scene->GetBvh();
+		if (bvh == nullptr || !bvh->m_bounds.isValid()) {
+			return 0.0f;
+		}
+		const float length = bvh->m_bounds.extents().Length();
+		return std::isfinite(length) ? length : 0.0f;
+	}
+}
+
 
 Editor::Core::MirrorPlane ComputeMirrorPlane(const Maths::FVector3& CameraPos, const Maths::FVector3& CameraForward, const Maths::FVector3& BBoxMin, const Maths::FVector3& BBoxMax)
 {
@@ -175,10 +200,30 @@ void ::Editor::Core::CameraController::HandleInputs(float p_deltaTime)
 
 		if (!std::isfinite(positionGap) || !std::isfinite(rotationGapDegrees))
 		{
-			// A degenerate target must never hold the camera: it is dropped and the
-			// pose the camera already has is kept.
-			CORE_WARN(
-				"[Camera] dropped a camera move whose target is not finite");
+			const bool targetIsUsable =
+				std::isfinite(destPos.x) && std::isfinite(destPos.y) && std::isfinite(destPos.z)
+				&& std::isfinite(destRotation.x) && std::isfinite(destRotation.y)
+				&& std::isfinite(destRotation.z) && std::isfinite(destRotation.w);
+			if (targetIsUsable)
+			{
+				// The pose asked for is good, so it is the *camera* that is broken - a
+				// drag with no rotation axis used to write a NaN pose, and a NaN camera
+				// never comes back on its own. This one known good value is taken
+				// instead of being dropped with it.
+				m_camera.SetPosition(destPos);
+				m_camera.SetRotation(destRotation);
+			}
+			else
+			{
+				// A degenerate target must never hold the camera: it is dropped and the
+				// pose the camera already has is kept.
+				CORE_WARN(
+					"[Camera] dropped a camera move whose target is not finite "
+					"(camera at {0}, {1}, {2} -> {3}, {4}, {5})",
+					m_camera.GetPosition().x, m_camera.GetPosition().y,
+					m_camera.GetPosition().z,
+					destPos.x, destPos.y, destPos.z);
+			}
 			m_cameraDestinations.pop();
 		}
 		else if (positionGap <= 0.03f && rotationGapDegrees <= 0.25f)
@@ -277,14 +322,25 @@ void ::Editor::Core::CameraController::UpdateDepthRange()
 	float sceneRadius = 0.0f;
 	if (auto* bvh = m_view.GetScene()->GetBvh()) {
 		const auto& b = bvh->m_bounds;
-		sceneCenter = (b.pmin + b.pmax) * 0.5f;
-		sceneRadius = Maths::FVector3::Length(b.pmax - b.pmin) * 0.5f;
+		// Only a box that is a box: an empty scene BVH keeps the default box, whose
+		// half diagonal overflows to inf, and a far plane of inf makes the perspective
+		// matrix NaN - a viewport that draws nothing at all and says nothing about it.
+		// Without usable bounds the roater center is used, exactly as when the scene
+		// has no BVH yet.
+		if (b.isValid() && std::isfinite(b.pmin.x) && std::isfinite(b.pmax.z)) {
+			sceneCenter = (b.pmin + b.pmax) * 0.5f;
+			sceneRadius = Maths::FVector3::Length(b.pmax - b.pmin) * 0.5f;
+		}
 	}
 	const float dist = Maths::FVector3::Length(m_camera.GetPosition() - sceneCenter);
 	const float far = std::max(dist + sceneRadius * 2.0f, 1200.0f);
 	const float near = std::max(dist * 0.01f, 0.001f);
-	m_camera.SetNear(near);
-	m_camera.SetFar(far);
+	// Whatever the bounds were, a degenerate plane pair is not something the camera
+	// should be given: the previous values are kept instead.
+	if (std::isfinite(near) && std::isfinite(far) && near < far) {
+		m_camera.SetNear(near);
+		m_camera.SetFar(far);
+	}
 }
 void Editor::Core::CameraController::HandleFirstMouse()
 {
@@ -394,10 +450,7 @@ void Editor::Core::CameraController::HandleCameraPanning(const Maths::FVector2& 
 {
 	// Pass the scene size so the perspective pan scales with the model
 	// (mirrors the zoom behavior which also uses the scene bounds).
-	float sceneSize = 0.0f;
-	if (auto* bvh = m_view.GetScene()->GetBvh()) {
-		sceneSize = bvh->m_bounds.extents().Length();
-	}
+	const float sceneSize = SceneExtentLength(m_view.GetScene());
 	m_camera.HandleCameraPanning(p_mouseOffset, m_cameraDragSpeed, sceneSize);
 }
 
@@ -417,7 +470,16 @@ void Editor::Core::CameraController::HandleCameraOrbit(
 	auto rAxis = yAxis * offsetX + xAxis * offsetY;
 
 	constexpr float kPi = 3.14159265359f;
-	float angleRad = rAxis.Length() / 180.0f * kPi;
+	const float axisLength = rAxis.Length();
+	if (!std::isfinite(axisLength) || axisLength <= 1.0e-6f) {
+		// A press that has not moved yet - or a drag whose two deltas cancel out -
+		// has no rotation axis at all. Normalising that is a division by zero, and
+		// the NaN quaternion it used to produce left the camera unusable for good
+		// (every later move was thrown away as "not finite"). There is nothing to
+		// orbit by, so there is nothing to do.
+		return;
+	}
+	float angleRad = axisLength / 180.0f * kPi;
 	rAxis = rAxis.Normalize();
 
 	auto quat = Maths::FQuaternion(rAxis, angleRad);
@@ -439,13 +501,15 @@ void Editor::Core::CameraController::HandleCameraZoom()
 	auto [x, y] = input.GetMousePosition();
 	if (m_camera.GetProjectionMode() == ::Rendering::Settings::EProjectionMode::PERSPECTIVE)
 	{
-		auto bvh=m_view.GetScene()->GetBvh();;
-		if (bvh) {
-			bvh->m_bounds.extents().Length();
-			m_camera.PersertiveZoom(verticalScroll * 0.1f * bvh->m_bounds.extents().Length());
+		// The step is scaled by the scene size so it stays proportional to the model
+		// instead of to a fixed number of units. Only a real size is used: this runs
+		// every frame, scrolling or not, so an inf size here is inf * 0 = NaN written
+		// straight into the camera position, which blanks the viewport for good.
+		const float sceneSize = SceneExtentLength(m_view.GetScene());
+		if (sceneSize > 0.0f) {
+			m_camera.PersertiveZoom(verticalScroll * 0.1f * sceneSize);
 		}
-		else
-		{
+		else {
 			m_camera.PersertiveZoom(verticalScroll);
 		}
 	}

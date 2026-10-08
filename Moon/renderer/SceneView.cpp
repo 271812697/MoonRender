@@ -5,6 +5,7 @@
 #include "PickingRenderPass.h"
 #include "Core/Global/ServiceLocator.h"
 #include <Core/SceneSystem/SceneManager.h>
+#include <Rendering/Geometry/bvh.h>
 #include "SceneView.h"
 #include "Settings/DebugSetting.h"
 #include "renderer/GizmoRenderPass.h"
@@ -12,6 +13,7 @@
 #include "core/component/CTopoShape.h"
 #include "Interactive/Im3DRenderer.h"
 #include "Interactive/Screen/ScreenOverlayRegistry.h"
+#include "core/log.h"
 #include <iostream>
 #include <algorithm>
 #include <cmath>
@@ -25,6 +27,23 @@ static Maths::FVector3 GetSpherePosition(float a, float b, float radius) {
 }
 namespace
 {
+	/** A sphere that can be framed.
+	 *
+	 * A mesh gets its bounds from whoever built it, and that is not always the same
+	 * frame: the line batch of a topology shape computes them on a job thread, so a
+	 * fit that runs right after a document was read can see a sphere that is not
+	 * filled in yet. Merging that one into the fit produces a camera move whose
+	 * target is not finite - which is dropped, leaving the view where it was - so a
+	 * sphere without a usable radius is left out instead. */
+	bool IsFrameable(const ::Rendering::Geometry::BoundingSphere& p_sphere)
+	{
+		return p_sphere.radius > 0.0f
+			&& std::isfinite(p_sphere.radius)
+			&& std::isfinite(p_sphere.position.x)
+			&& std::isfinite(p_sphere.position.y)
+			&& std::isfinite(p_sphere.position.z);
+	}
+
 	/** Orientation that looks along p_dir with the world up, falling back to +X
 	 * when looking straight up or down, where "up" would be degenerate. This is
 	 * how a direction based fit (a click on a view cube face) gets its roll. */
@@ -251,7 +270,7 @@ bool Editor::Panels::SceneView::GetSelectionSphere(
 		p_outSphere.position);
 	Maths::FVector3 worldScale = transform->GetWorldScale();
 	p_outSphere.radius *= worldScale.Max();
-	return p_outSphere.radius > 0.0f;
+	return IsFrameable(p_outSphere);
 }
 
 bool Editor::Panels::SceneView::GetSceneSphere(
@@ -273,7 +292,7 @@ bool Editor::Panels::SceneView::GetSceneSphere(
 		if (model == nullptr) continue;
 
 		auto modelSphere = model->GetBoundingSphere();
-		if (modelSphere.radius <= 0.0f) continue;
+		if (!IsFrameable(modelSphere)) continue;
 
 		const auto transform = owner.GetComponent<CTransform>();
 		if (transform == nullptr) continue;
@@ -284,6 +303,9 @@ bool Editor::Panels::SceneView::GetSceneSphere(
 		);
 		Maths::FVector3 worldScale = transform->GetWorldScale();
 		modelSphere.radius *= worldScale.Max();
+		// A scale can turn a valid sphere into an unusable one; the merge below must
+		// not see that either.
+		if (!IsFrameable(modelSphere)) continue;
 
 		if (!hasBounds)
 		{
@@ -319,19 +341,49 @@ void Editor::Panels::SceneView::ApplyFitPose(
 
 	const float pi = 3.14159265359f;
 	const float eff = pi / 180.0f;
+	Maths::FVector3 target;
 	if (m_camera.GetProjectionMode() == ::Rendering::Settings::EProjectionMode::ORTHOGRAPHIC)
 	{
-		GetCameraController().MoveToPose(
-			p_sphere.position - p_forward * p_sphere.radius,
-			p_rotation);
+		target = p_sphere.position - p_forward * p_sphere.radius;
 	}
 	else
 	{
 		const float distance = p_sphere.radius / std::sin(eff * m_camera.GetFov() / 2.0f);
-		GetCameraController().MoveToPose(
-			p_sphere.position - p_forward * distance,
-			p_rotation);
+		target = p_sphere.position - p_forward * distance;
 	}
+	// The fit is only as good as the sphere and the direction it was handed, and a
+	// pose that is not finite would be dropped further down with nothing said about
+	// where it came from - so it is reported here, with the values, and not pushed.
+	if (!std::isfinite(target.x) || !std::isfinite(target.y) || !std::isfinite(target.z))
+	{
+		CORE_WARN(
+			"[Camera] fit dropped: sphere center ({0}, {1}, {2}) radius {3}, "
+			"direction ({4}, {5}, {6}), fov {7} give a target that is not finite",
+			p_sphere.position.x, p_sphere.position.y, p_sphere.position.z,
+			p_sphere.radius,
+			p_forward.x, p_forward.y, p_forward.z,
+			m_camera.GetFov());
+		return;
+	}
+	// One line per fit, because this is the only place that knows what was framed:
+	// when the view ends up somewhere useless right after a file was opened, the two
+	// numbers that matter are the sphere that was used and whether the scene query
+	// had bounds at all (a build made before the model existed leaves none).
+	{
+		const auto* sceneBvh = GetScene() != nullptr ? GetScene()->GetBvh() : nullptr;
+		const bool hasQueryBounds = sceneBvh != nullptr && sceneBvh->m_bounds.isValid();
+		CORE_INFO(
+			"[Camera] fit: center ({0}, {1}, {2}) radius {3} -> target ({4}, {5}, {6}), "
+			"fov {7}, near {8} far {9}, scene query {10}",
+			p_sphere.position.x, p_sphere.position.y, p_sphere.position.z,
+			p_sphere.radius,
+			target.x, target.y, target.z,
+			m_camera.GetFov(),
+			m_camera.GetNear(),
+			m_camera.GetFar(),
+			hasQueryBounds ? "has bounds" : "empty");
+	}
+	GetCameraController().MoveToPose(target, p_rotation);
 }
 
 void Editor::Panels::SceneView::FitToFocusWithRotation(const Maths::FQuaternion& p_rotation)
@@ -353,6 +405,15 @@ void Editor::Panels::SceneView::BuildBvh()
 	if (auto* scene = GetScene())
 	{
 		scene->BuildSceneBvh();
+		// The renderer keeps no logger of its own, so whatever it had to leave out while
+		// indexing the scene is reported here, by the side that can say it.
+		if (auto* service = scene->GetBvhService())
+		{
+			for (const std::string& problem : service->buildProblems)
+			{
+				CORE_WARN("[BvhService] {0}", problem);
+			}
+		}
 	}
 }
 

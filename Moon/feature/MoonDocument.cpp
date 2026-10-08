@@ -525,6 +525,14 @@ namespace MOON
 			node->SetAttribute("driving", p_constraint->isDriving ? 1 : 0);
 			node->SetAttribute("visible", p_constraint->isVisible ? 1 : 0);
 			node->SetAttribute("active", p_constraint->isActive ? 1 : 0);
+			if (p_constraint->Type == Sketcher::ConstraintType::InternalAlignment) {
+				// Which internal element of a curve this is: the axes and focuses an
+				// ellipse was exposed with. Without it the constraint would come back
+				// as an alignment of no particular kind and the ellipse would lose the
+				// link to its own internals.
+				node->SetAttribute("alignmentType", static_cast<int>(p_constraint->AlignmentType));
+				node->SetAttribute("alignmentIndex", p_constraint->InternalAlignmentIndex);
+			}
 			p_parent.InsertEndChild(node);
 		}
 
@@ -546,6 +554,11 @@ namespace MOON
 			constraint->isDriving = getFlag(p_node, "driving", true);
 			constraint->isVisible = getFlag(p_node, "visible", true);
 			constraint->isActive = getFlag(p_node, "active", true);
+			if (constraint->Type == Sketcher::ConstraintType::InternalAlignment) {
+				constraint->AlignmentType = static_cast<Sketcher::InternalAlignmentType>(
+					getInt(p_node, "alignmentType", 0));
+				constraint->InternalAlignmentIndex = getInt(p_node, "alignmentIndex", -1);
+			}
 			return constraint;
 		}
 
@@ -624,6 +637,12 @@ namespace MOON
 							getText(*child, "type"));
 						return false;
 					}
+					// The flag is kept in two places: on the curve (which is what the
+					// shape builder reads) and in the sketch's set of construction
+					// curves (what the drawing, the construction toggle and the cleanup
+					// of orphaned aids read). addGeometry() moved the curve in, so the
+					// set is filled from the value read above.
+					p_sketch->setConstruction(geoId, getFlag(*child, "construction"));
 					p_sketch->setGeometryVisible(geoId, getFlag(*child, "visible", true));
 				}
 			}
@@ -985,9 +1004,6 @@ namespace MOON
 			}
 			else if (auto* pipe = dynamic_cast<PipeFeature*>(&p_feature)) {
 				node->SetAttribute("addSubType", pipe->addSubType);
-				// The path lives in another feature: it is stored the way the base and
-				// the profile are, as an index into the chain that is being written.
-				node->SetAttribute("spine", indexOf(all, pipe->spineFeature));
 				setText(*node, "mode", PipeFeature::modeName(pipe->mode));
 				setText(*node, "transition", PipeFeature::transitionName(pipe->transition));
 				setValues(*node, "binormal", {
@@ -1257,6 +1273,14 @@ namespace MOON
 			if (auto* profile = dynamic_cast<FeatureBaseProfile*>(&p_feature)) {
 				node->SetAttribute("profile", indexOf(p_features, profile->getProfile()));
 			}
+			if (auto* pipe = dynamic_cast<PipeFeature*>(&p_feature)) {
+				// The path lives in another feature, so it is a link like the base and
+				// the profile - and it is written where the loader reads it from. It
+				// used to go into <Parameters>, the block of the feature's own values,
+				// while the loader looked for the attribute on the feature element:
+				// a pipe came back without its path.
+				node->SetAttribute("spine", indexOf(p_features, pipe->spineFeature));
+			}
 			// What the tree view's eye switched off is part of the document: a feature is
 			// hidden with its own flag, and everything under it (the render anchors and
 			// the topology actors) by name.
@@ -1396,7 +1420,17 @@ namespace MOON
 			}
 			baseIndices.push_back(getInt(*node, "base", -1));
 			profileIndices.push_back(getInt(*node, "profile", -1));
-			spineIndices.push_back(getInt(*node, "spine", -1));
+			// The path of a pipe is a link, i.e. an index on the feature element - but
+			// a document written before that was so carries it in its <Parameters>
+			// block, and it is read from there rather than losing the path.
+			int spineIndex = getInt(*node, "spine", -1);
+			if (spineIndex < 0) {
+				if (const tinyxml2::XMLElement* parameters
+					= node->FirstChildElement(kParameters)) {
+					spineIndex = getInt(*parameters, "spine", -1);
+				}
+			}
+			spineIndices.push_back(spineIndex);
 			upToFaceRefs.push_back(readUpToFace(*node));
 			activeFlags.push_back(getFlag(*node, "active", true));
 			std::vector<std::string> hidden;
@@ -1481,10 +1515,40 @@ namespace MOON
 			}
 		}
 		for (Feature* feature : features) {
-			if (!feature->execute()) {
+			// A feature that throws must not take the load with it. The chain is
+			// rebuilt by walking the links rather than in this order, so a feature can
+			// be asked to build before the shape it needs exists, and both the kernel
+			// (Standard_Failure) and the reference lookup (Base::Exception, which is
+			// not a Standard_Failure) report that by throwing. The build fails, the
+			// feature is reported, and the rest of the document is still read.
+			bool built = false;
+			try {
+				built = feature->execute();
+			}
+			catch (const Base::Exception& e) {
+				CORE_ERROR("[MoonDocument] {0}: {1}", feature->GetName(), e.what());
+			}
+			catch (Standard_Failure& e) {
+				CORE_ERROR(
+					"[MoonDocument] {0}: {1}",
+					feature->GetName(),
+					e.GetMessageString());
+			}
+			if (!built) {
 				CORE_ERROR("[MoonDocument] {0} could not be built", feature->GetName());
 			}
-			feature->makeDone();
+			try {
+				feature->makeDone();
+			}
+			catch (const Base::Exception& e) {
+				CORE_ERROR("[MoonDocument] {0}: {1}", feature->GetName(), e.what());
+			}
+			catch (Standard_Failure& e) {
+				CORE_ERROR(
+					"[MoonDocument] {0}: {1}",
+					feature->GetName(),
+					e.GetMessageString());
+			}
 		}
 
 		// The visibility comes last: the actors below a feature - the render anchors and

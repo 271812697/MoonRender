@@ -271,10 +271,24 @@ namespace MOON
 			const Part::TopoShape spineShape = resolveSpineWire();
 			if (spineShape.isNull()
 				|| spineShape.getShape().ShapeType() != TopAbs_WIRE) {
-				CORE_ERROR(
-					"{0}: it has no path to sweep along - pick a path sketch, or an "
-					"edge of the body below",
-					GetName());
+				if (spineFeature == nullptr) {
+					CORE_ERROR(
+						"{0}: it has no path to sweep along - pick a path sketch, or an "
+						"edge of the body below",
+						GetName());
+				}
+				else {
+					// The path is configured, but its shape is not there: the chain is
+					// rebuilt by walking the links, and this feature is reached from its
+					// base before the path it was given has been rebuilt. The pass that
+					// follows the document order does the work, so nothing is missing
+					// from the document - saying "pick a path" here was misleading.
+					CORE_WARN(
+						"{0}: the shape of its path ({1}) is not built yet; this pass is "
+						"skipped",
+						GetName(),
+						spineFeature->GetName());
+				}
 				return false;
 			}
 
