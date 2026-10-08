@@ -54,6 +54,9 @@ namespace MOON {
 			mIconMaps["Pocket"] = QIcon(":/widgets/icons/partdesign/PartDesign_Pocket.svg");
 			mIconMaps["Groove"] = QIcon(":/widgets/icons/partdesign/PartDesign_Groove.svg");
 			mIconMaps["DatumLine"] = QIcon(":/widgets/icons/partdesign/PartDesign_Line.svg");
+			mIconMaps["DatumPlane"] = QIcon(":/widgets/icons/partdesign/PartDesign_Plane.svg");
+			mIconMaps["Pipe"] = QIcon(":/widgets/icons/partdesign/PartDesign_AdditivePipe.svg");
+			mIconMaps["PipeCut"] = QIcon(":/widgets/icons/partdesign/PartDesign_SubtractivePipe.svg");
 			// The transform features show the icons their toolbar buttons wear.
 			mIconMaps["PolarPattern"] = QIcon(":/widgets/icons/partdesign/PartDesign_PolarPattern.svg");
 			mIconMaps["Mirror"] = QIcon(":/widgets/icons/partdesign/PartDesign_Mirrored.svg");

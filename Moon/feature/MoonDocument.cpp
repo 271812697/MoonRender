@@ -15,6 +15,8 @@
 #include "core/log.h"
 #include "feature/ChamferFeature.h"
 #include "feature/DatumLineFeature.h"
+#include "feature/DatumPlaneFeature.h"
+#include "feature/PipeFeature.h"
 #include "feature/ExtrudeFeature.h"
 #include "feature/FeatureBaseProfile.h"
 #include "feature/FeatureBody.h"
@@ -675,6 +677,12 @@ namespace MOON
 			if (dynamic_cast<const DatumLineFeature*>(p_feature) != nullptr) {
 				return "DatumLineFeature";
 			}
+			if (dynamic_cast<const DatumPlaneFeature*>(p_feature) != nullptr) {
+				return "DatumPlaneFeature";
+			}
+			if (dynamic_cast<const PipeFeature*>(p_feature) != nullptr) {
+				return "PipeFeature";
+			}
 			if (dynamic_cast<const PolarPatternFeature*>(p_feature) != nullptr) {
 				return "PolarPatternFeature";
 			}
@@ -709,6 +717,12 @@ namespace MOON
 			}
 			if (p_type == "DatumLineFeature") {
 				return new DatumLineFeature(p_name);
+			}
+			if (p_type == "DatumPlaneFeature") {
+				return new DatumPlaneFeature(p_name);
+			}
+			if (p_type == "PipeFeature") {
+				return new PipeFeature(p_name, p_addSubType);
 			}
 			if (p_type == "PolarPatternFeature") {
 				return new PolarPatternFeature(p_name);
@@ -952,6 +966,33 @@ namespace MOON
 					datum->direction.x, datum->direction.y, datum->direction.z });
 				setNumber(*node, "length", datum->length);
 			}
+			else if (auto* plane = dynamic_cast<DatumPlaneFeature*>(&p_feature)) {
+				setText(*node, "mapMode", DatumPlaneFeature::mapModeName(plane->mapMode));
+				node->SetAttribute("automaticSize", plane->automaticSize ? 1 : 0);
+				setValues(*node, "offset", {
+					plane->offset.x, plane->offset.y, plane->offset.z });
+				setNumber(*node, "rotation", plane->rotation);
+				setNumber(*node, "length", plane->length);
+				setNumber(*node, "width", plane->width);
+				// The placement the attachment last produced: it is what the plane
+				// falls back to when a reference cannot be resolved any more.
+				setValues(*node, "origin", {
+					plane->origin.x, plane->origin.y, plane->origin.z });
+				setValues(*node, "normal", {
+					plane->normal.x, plane->normal.y, plane->normal.z });
+				setValues(*node, "xAxis", {
+					plane->xAxis.x, plane->xAxis.y, plane->xAxis.z });
+			}
+			else if (auto* pipe = dynamic_cast<PipeFeature*>(&p_feature)) {
+				node->SetAttribute("addSubType", pipe->addSubType);
+				// The path lives in another feature: it is stored the way the base and
+				// the profile are, as an index into the chain that is being written.
+				node->SetAttribute("spine", indexOf(all, pipe->spineFeature));
+				setText(*node, "mode", PipeFeature::modeName(pipe->mode));
+				setText(*node, "transition", PipeFeature::transitionName(pipe->transition));
+				setValues(*node, "binormal", {
+					pipe->binormal.x, pipe->binormal.y, pipe->binormal.z });
+			}
 			else if (auto* pattern = dynamic_cast<PolarPatternFeature*>(&p_feature)) {
 				const gp_Pnt location = pattern->axis.Location();
 				const gp_Dir direction = pattern->axis.Direction();
@@ -1100,6 +1141,45 @@ namespace MOON
 					datum->direction = Maths::FVector3(direction[0], direction[1], direction[2]);
 				}
 				datum->length = static_cast<float>(getNumber(*node, "length", datum->length));
+				return true;
+			}
+			if (auto* plane = dynamic_cast<DatumPlaneFeature*>(&p_feature)) {
+				// readVector3() is for the plain float[3] members other features use;
+				// these are Maths::FVector3, so they go through the same list the
+				// datum line's origin and direction are read from.
+				const auto readPlaneVector = [&](const char* p_name, Maths::FVector3& p_target) {
+					const std::vector<double> values = getValues(*node, p_name);
+					if (values.size() >= 3) {
+						p_target = Maths::FVector3(values[0], values[1], values[2]);
+					}
+					};
+				plane->mapMode = DatumPlaneFeature::mapModeFromName(
+					getText(*node, "mapMode", DatumPlaneFeature::mapModeName(plane->mapMode)),
+					plane->mapMode);
+				plane->automaticSize = getFlag(*node, "automaticSize", plane->automaticSize);
+				readPlaneVector("offset", plane->offset);
+				plane->rotation
+					= static_cast<float>(getNumber(*node, "rotation", plane->rotation));
+				plane->length = static_cast<float>(getNumber(*node, "length", plane->length));
+				plane->width = static_cast<float>(getNumber(*node, "width", plane->width));
+				readPlaneVector("origin", plane->origin);
+				readPlaneVector("normal", plane->normal);
+				readPlaneVector("xAxis", plane->xAxis);
+				return true;
+			}
+			if (auto* pipe = dynamic_cast<PipeFeature*>(&p_feature)) {
+				pipe->addSubType = getInt(*node, "addSubType", pipe->addSubType);
+				pipe->mode = PipeFeature::modeFromName(
+					getText(*node, "mode", PipeFeature::modeName(pipe->mode)),
+					pipe->mode);
+				pipe->transition = PipeFeature::transitionFromName(
+					getText(*node, "transition", PipeFeature::transitionName(pipe->transition)),
+					pipe->transition);
+				const std::vector<double> binormal = getValues(*node, "binormal");
+				if (binormal.size() >= 3) {
+					pipe->binormal
+						= Maths::FVector3(binormal[0], binormal[1], binormal[2]);
+				}
 				return true;
 			}
 			if (auto* pattern = dynamic_cast<PolarPatternFeature*>(&p_feature)) {
@@ -1282,6 +1362,7 @@ namespace MOON
 		std::vector<Feature*> features;
 		std::vector<int> baseIndices;
 		std::vector<int> profileIndices;
+		std::vector<int> spineIndices;
 		std::vector<std::vector<int>> originalIndices;
 		std::vector<StoredUpToFace> upToFaceRefs;
 		std::vector<bool> activeFlags;
@@ -1315,6 +1396,7 @@ namespace MOON
 			}
 			baseIndices.push_back(getInt(*node, "base", -1));
 			profileIndices.push_back(getInt(*node, "profile", -1));
+			spineIndices.push_back(getInt(*node, "spine", -1));
 			upToFaceRefs.push_back(readUpToFace(*node));
 			activeFlags.push_back(getFlag(*node, "active", true));
 			std::vector<std::string> hidden;
@@ -1337,6 +1419,9 @@ namespace MOON
 			feature->setBaseFeature(at(features, baseIndices[i]));
 			if (auto* profile = dynamic_cast<FeatureBaseProfile*>(feature)) {
 				profile->setProfile(dynamic_cast<SketcherFeature*>(at(features, profileIndices[i])));
+			}
+			if (auto* pipe = dynamic_cast<PipeFeature*>(feature)) {
+				pipe->spineFeature = at(features, spineIndices[i]);
 			}
 			if (auto* extrude = dynamic_cast<ExtrudeFeature*>(feature)) {
 				const StoredUpToFace& upTo = upToFaceRefs[i];
