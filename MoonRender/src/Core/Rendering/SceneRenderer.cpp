@@ -1,6 +1,7 @@
 ﻿#include <ranges>
 #include <tracy/Tracy.hpp>
 #include <algorithm>
+#include <glad/glad.h>
 #include <cstdint>
 #include <cstring>
 #include <Core/ECS/Components/CModelRenderer.h>
@@ -136,6 +137,11 @@ namespace
 			// LEQUAL and skip depth writes: coplanar lines win, and lines never
 			// occlude anything behind them.
 			p_pso.depthFunc = ::Rendering::Settings::EComparaisonAlgorithm::GREATER_EQUAL;
+
+			// Not every drawable of this pass is a line: the topology vertices are
+			// point sprites, and their size comes from the shader (gl_PointSize),
+			// which the driver only honours while this is enabled.
+			glEnable(GL_PROGRAM_POINT_SIZE);
 
 			const auto& drawables = m_renderer.GetDescriptor<SceneRenderer::SceneFilteredDrawablesDescriptor>();
 
@@ -1000,7 +1006,13 @@ SceneRenderer::SceneFilteredDrawablesDescriptor Core::Rendering::SceneRenderer::
 					.distance = distanceToCamera
 			}, std::move(drawableCopy));
 		}
-		else if (drawableCopy.primitiveMode == ::Rendering::Settings::EPrimitiveMode::LINES) {
+		else if (drawableCopy.primitiveMode == ::Rendering::Settings::EPrimitiveMode::LINES
+			|| drawableCopy.primitiveMode == ::Rendering::Settings::EPrimitiveMode::POINTS) {
+			// Edge lines and the vertex dots of a topology shape are the same kind of
+			// thing: both lie on the surface they belong to (a line exactly on the
+			// faces it borders, a vertex dot on the corner where they meet), so both
+			// go through the pass that draws them after the opaque pass and without
+			// depth writes - that is what keeps them from losing to those faces.
 			output.lines.emplace(decltype(decltype(output.lines)::value_type::first){
 				.order = drawOrder,
 					.materialKey = materialKey,

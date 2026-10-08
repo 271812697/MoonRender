@@ -17,6 +17,7 @@ namespace MOON {
 			int childId = -1;
 			bool isFace = false;
 			bool isEdge = false;
+			bool isVertex = false;
 		};
 		TopoSelectionInfo ResolveTopoSelection(::Core::ECS::Actor* actor)
 		{
@@ -31,11 +32,15 @@ namespace MOON {
 			else if (name.rfind("Edge_", 0) == 0) {
 				info.isEdge = true;
 			}
+			else if (name.rfind("Vertex_", 0) == 0) {
+				info.isVertex = true;
+			}
 			else {
 				return info;
 			}
 			try {
-				info.childId = std::stoi(name.substr(5));
+				// "Face_"/"Edge_" carry one digit prefix less than "Vertex_".
+				info.childId = std::stoi(name.substr(info.isVertex ? 7 : 5));
 			}
 			catch (...) {
 				return info;
@@ -70,6 +75,7 @@ namespace MOON {
 		
 			std::unordered_map<::Core::ECS::Components::CTopoShape*, int>selectFaceMap;
 			std::unordered_map<::Core::ECS::Components::CTopoShape*, int>selectEdgeMap;
+			std::unordered_map<::Core::ECS::Components::CTopoShape*, int>selectVertexMap;
 			for (auto& id : clearList) {
 				auto actor = GetMainScene->FindActorByID(id);
 				if (actor) {
@@ -81,6 +87,9 @@ namespace MOON {
 						else if (info.isEdge) {
 							selectEdgeMap[info.topo] = 1;
 						}
+						else if (info.isVertex) {
+							selectVertexMap[info.topo] = 1;
+						}
 					}
 				}
 			}
@@ -89,6 +98,9 @@ namespace MOON {
 			}
 			for (auto& it : selectEdgeMap) {
 				it.first->clearSelectLines();
+			}
+			for (auto& it : selectVertexMap) {
+				it.first->clearSelectVertex();
 			}
 		}
 	private:
@@ -120,6 +132,9 @@ namespace MOON {
 						else if (info.isEdge) {
 							info.topo->hoverChildLine(info.childId);
 						}
+						else if (info.isVertex) {
+							info.topo->hoverChildVertex(info.childId);
+						}
 					}
 				}
 			}
@@ -150,6 +165,7 @@ namespace MOON {
 			mInternal->clearSelectEffect(beforeSelect);
 			std::unordered_map<::Core::ECS::Components::CTopoShape*, std::vector<int>>selectFaceMap;
 			std::unordered_map<::Core::ECS::Components::CTopoShape*, std::vector<int>>selectEdgeMap;
+			std::unordered_map<::Core::ECS::Components::CTopoShape*, std::vector<int>>selectVertexMap;
 			for (auto& id:mInternal->selectIDs) {
 				auto actor = GetMainScene->FindActorByID(id);
 				if (actor) {
@@ -161,6 +177,9 @@ namespace MOON {
 						else if (info.isEdge) {
 							selectEdgeMap[info.topo].push_back(info.childId);
 						}
+						else if (info.isVertex) {
+							selectVertexMap[info.topo].push_back(info.childId);
+						}
 					}
 				}
 			}
@@ -169,6 +188,9 @@ namespace MOON {
 			}
 			for (auto& it : selectEdgeMap) {
 				it.first->selectChildLines(it.second);
+			}
+			for (auto& it : selectVertexMap) {
+				it.first->selectChildVertex(it.second);
 			}
 			InvokeEvent(SelectAny);
 		}
@@ -189,6 +211,9 @@ namespace MOON {
 					}
 					else if (info.isEdge) {
 						info.topo->clearHoverLine();
+					}
+					else if (info.isVertex) {
+						info.topo->clearHoverVertex();
 					}
 				}
 			}

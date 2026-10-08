@@ -33,21 +33,28 @@ namespace Core::ECS::Components
 		Part::TopoShape& GetTopoShape();
 		Part::TopoShape GetTopoFace(int childFaceId);
 		Part::TopoShape GetTopoEdge(int childFaceId);
+		Part::TopoShape GetTopoVertex(int childVertexId);
 		void hoverChild(int childId);
 		void selectChildFaces(const std::vector<int>&childIds);
 		void hoverChildLine(int childId);
 		void selectChildLines(const std::vector<int>& childIds);
+		void hoverChildVertex(int childId);
+		void selectChildVertex(const std::vector<int>& childIds);
 		void clearHover();
 		void clearHoverLine();
 		void clearSelectLines();
+		void clearHoverVertex();
+		void clearSelectVertex();
 		void discretizationFaceShape();
 		void discretizationEdgeShape();
+		void discretizationVertexShape();
 		void discretizationShape();
 		virtual void OnSerialize(tinyxml2::XMLDocument& p_doc, tinyxml2::XMLNode* p_node) override;
 		virtual void OnDeserialize(tinyxml2::XMLDocument& p_doc, tinyxml2::XMLNode* p_node)override;
 	private:
 		void updateChildMesh();
 		void updateEdgeMesh();
+		void updateVertexMesh();
 		void rebuildTopologyTree();
 		Core::ECS::Actor* getOrCreateTopoGroup(int shellIndex, const std::string& fallbackName);
 		class CTopoShapeInternal;

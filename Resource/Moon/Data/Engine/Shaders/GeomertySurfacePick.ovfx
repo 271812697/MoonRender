@@ -4,6 +4,11 @@
 layout (location = 0) in vec3 geo_Pos;
 layout (location = 3) in vec2 geo_DomainID;
 
+// The topology vertices are point sprites, and they are picked through this same
+// material: without a size they would be picked as one pixel dots wherever the
+// driver puts them, instead of where the dot is drawn.
+uniform float u_PointSize = 8.0;
+
 out vec3 VSOUT_World;
 out vec2 VSDomainId;
 
@@ -13,6 +18,7 @@ void main()
     VSOUT_World=worldPos.xyz;
     VSDomainId = geo_DomainID;
     gl_Position = ubo_Projection * ubo_View * worldPos;
+    gl_PointSize = u_PointSize;
 }
 
 #shader fragment

@@ -1,6 +1,7 @@
 ﻿#include <ranges>
 #include <Core/ECS/Components/CMaterialRenderer.h>
 #include <cstring>
+#include <glad/glad.h>
 #include <algorithm>
 #include <cmath>
 #include <Core/Rendering/EngineDrawableDescriptor.h>
@@ -364,6 +365,9 @@ void Editor::Rendering::PickingRenderPass::DrawPickableModels(
 )
 {
 	const auto& filteredDrawables = m_renderer.GetDescriptor<::Core::Rendering::SceneRenderer::SceneFilteredDrawablesDescriptor>();
+	// The vertex dots are drawn into the picking target as point sprites: their
+	// size comes from the shader, which the driver only honours while this is on.
+	glEnable(GL_PROGRAM_POINT_SIZE);
 	auto drawPickableModels = [&](auto drawables) {
 		for (auto& drawable : drawables)
 		{			
@@ -403,6 +407,38 @@ void Editor::Rendering::PickingRenderPass::DrawPickableModels(
 				::Rendering::Entities::Drawable finalDrawable = drawable;
 				finalDrawable.material = m_TopoShapePickingFallbackMaterial;
 				
+				finalDrawable.stateMask = stateMask;
+				finalDrawable.stateMask.frontfaceCulling = false;
+				finalDrawable.stateMask.backfaceCulling = false;
+				finalDrawable.stateMask.depthWriting = false;
+				m_renderer.DrawEntity(p_pso, finalDrawable);
+			}
+			else if (actor.HasComponent("CBatchMeshPoint")) {
+				// The vertex dots are a batch of point sprites, so they are picked
+				// like the lines: their mesh carries the id of the leaf actor the dot
+				// belongs to in the domain id the picking shader writes out, and the
+				// permissive depth test lets a dot win over the faces it touches.
+				p_pso.depthFunc = ::Rendering::Settings::EComparaisonAlgorithm::GREATER_EQUAL;
+
+				// Picked as a dot of the size the body draws it with: the size is a
+				// property of the vertex material (the material panel edits it there),
+				// so it is read from the drawable instead of kept in a second place. A
+				// point sprite of no size is picked nowhere, so the fallback is the
+				// size the vertex material is created with.
+				float pointSize = 8.0f;
+				if (drawable.material.has_value()) {
+					if (auto size = drawable.material.value().GetProperty("u_PointSize")) {
+						if (const float* value = std::get_if<float>(&size.value().value)) {
+							pointSize = *value;
+						}
+					}
+				}
+				m_TopoShapePickingFallbackMaterial.SetProperty("u_PointSize", pointSize);
+
+				auto stateMask = m_TopoShapePickingFallbackMaterial.GenerateStateMask();
+
+				::Rendering::Entities::Drawable finalDrawable = drawable;
+				finalDrawable.material = m_TopoShapePickingFallbackMaterial;
 				finalDrawable.stateMask = stateMask;
 				finalDrawable.stateMask.frontfaceCulling = false;
 				finalDrawable.stateMask.backfaceCulling = false;

@@ -1,0 +1,67 @@
+#feature CLIP_PLANE
+#shader vertex
+#version 450 core
+
+#include ":Shaders/Common/Buffers/EngineUBO.ovfxh"
+#include ":Shaders/Common/Utils.ovfxh"
+
+// The topology vertices are drawn as point sprites, so they share the layout of
+// the line mesh (one point per vertex of the shape, its id in TexCoords.x).
+layout (location = 0) in vec3 geo_Pos;
+layout (location = 1) in vec2 geo_TexCoords;
+layout (location = 2) in vec3 geo_Normal;
+layout (location = 3) in vec2 geo_DomainId;
+
+// Size of the dot in pixels. Without it the driver would use its own default,
+// which is a single pixel.
+uniform float u_PointSize = 8.0;
+
+out VS_OUT
+{
+    vec3 FragPos;
+    vec2 TexCoords;
+} vs_out;
+
+void main()
+{
+    vs_out.FragPos = vec3(ubo_Model * vec4(geo_Pos, 1.0));
+    vs_out.TexCoords = geo_TexCoords;
+    gl_Position = ubo_Projection * ubo_View * vec4(vs_out.FragPos, 1.0);
+    gl_PointSize = u_PointSize;
+}
+
+
+
+#shader fragment
+#version 450 core
+
+#include ":Shaders/Common/Buffers/EngineUBO.ovfxh"
+
+in VS_OUT
+{
+    vec3 FragPos;
+    vec2 TexCoords;
+} fs_in;
+
+out vec4 FRAGMENT_COLOR;
+uniform vec4 color = vec4(1.0, 0.0, 0.0, 1.0);
+
+void main()
+{
+#if defined(CLIP_PLANE)
+    if(ubo_enableClip==1){
+        float offsetw=dot(ubo_plane.xyz,fs_in.FragPos)+ubo_plane.w;
+        if(offsetw>0){
+            discard;
+        }
+    }
+#endif
+    // A round dot, softly cut at the border: the square a point sprite is would
+    // otherwise read as a tiny quad at the corner of the body.
+    float d = length(gl_PointCoord - vec2(0.5));
+    if (d > 0.5) {
+        discard;
+    }
+    float edge = smoothstep(0.5, 0.40, d);
+    FRAGMENT_COLOR = vec4(color.rgb, color.a * edge);
+}

@@ -5,6 +5,7 @@
 #include <Core/ECS/Components/CModelRenderer.h>
 #include "Core/ECS/Components/CBatchMeshTriangle.h"
 #include "Core/ECS/Components/CBatchMeshLine.h"
+#include "Core/ECS/Components/CBatchMeshPoint.h"
 #include "Core/ResourceManagement/ModelManager.h"
 #include "editor/View/sceneview/viewerwidget.h"
 #include "Core/Global/ServiceLocator.h"
@@ -26,14 +27,17 @@ namespace MOON {
 		scene->AddActor(this);
 		Core::ECS::Actor& faceChild=scene->CreateActor("AllFaces");
 		Core::ECS::Actor& edgeChild = scene->CreateActor("AllEdges");
-		// The Face/Edge children are render anchors holding the batched meshes.
-		// They stay visible in the TreeView so the user can select them to hide
-		// or show the whole face/edge layer at once, or fit the camera to them.
-		// The topology actors created by CTopoShape form the per-solid tree.
+		Core::ECS::Actor& vertexChild = scene->CreateActor("AllVertices");
+		// The Face/Edge/Vertex children are render anchors holding the batched
+		// meshes. They stay visible in the TreeView so the user can select them to
+		// hide or show the whole face/edge/vertex layer at once, or fit the camera
+		// to them. The topology actors created by CTopoShape form the per-solid tree.
 		faceChild.SetTag("TopoRender");
 		edgeChild.SetTag("TopoRender");
+		vertexChild.SetTag("TopoRender");
 		faceChild.SetParent(*this);
 		edgeChild.SetParent(*this);
+		vertexChild.SetParent(*this);
 		AddComponent<Core::ECS::Components::CTopoShape>();
 		topoShape = &GetComponent<Core::ECS::Components::CTopoShape>()->GetTopoShape();
 		faceChild.AddComponent<Core::ECS::Components::CModelRenderer>();
@@ -42,6 +46,9 @@ namespace MOON {
 		edgeChild.AddComponent<Core::ECS::Components::CModelRenderer>();
 		edgeChild.AddComponent<Core::ECS::Components::CMaterialRenderer>();
 		edgeChild.AddComponent<Core::ECS::Components::CBatchMeshLine>();
+		vertexChild.AddComponent<Core::ECS::Components::CModelRenderer>();
+		vertexChild.AddComponent<Core::ECS::Components::CMaterialRenderer>();
+		vertexChild.AddComponent<Core::ECS::Components::CBatchMeshPoint>();
 		
 		
 		auto faceModel = new ::Rendering::Resources::Model(p_name + std::string("_faceModel")+std::to_string(this->GetID()));
@@ -50,9 +57,14 @@ namespace MOON {
 		auto edgeModel = new ::Rendering::Resources::Model(p_name + std::string("_edgeModel") + std::to_string(this->GetID()));
 		edgeChild.GetComponent<Core::ECS::Components::CModelRenderer>()->SetModel(edgeModel);
 		GetService(Core::ResourceManagement::ModelManager).RegisterResource(p_name + std::string("_edgeModel") + std::to_string(this->GetID()), edgeModel);
+		auto vertexModel = new ::Rendering::Resources::Model(p_name + std::string("_vertexModel") + std::to_string(this->GetID()));
+		vertexChild.GetComponent<Core::ECS::Components::CModelRenderer>()->SetModel(vertexModel);
+		GetService(Core::ResourceManagement::ModelManager).RegisterResource(p_name + std::string("_vertexModel") + std::to_string(this->GetID()), vertexModel);
 
 		Core::Resources::Material* lineMat = new Core::Resources::Material();
 		Core::Global::ServiceLocator::Get<Core::ResourceManagement::MaterialManager>().RegisterResource(p_name + std::to_string(this->GetID()) + "_linemat",lineMat);
+		Core::Resources::Material* vertexMat = new Core::Resources::Material();
+		Core::Global::ServiceLocator::Get<Core::ResourceManagement::MaterialManager>().RegisterResource(p_name + std::to_string(this->GetID()) + "_vertexmat", vertexMat);
 		Core::Resources::Material* faceMat = new Core::Resources::Material();
 		Core::Global::ServiceLocator::Get<Core::ResourceManagement::MaterialManager>().RegisterResource(p_name + std::to_string(this->GetID()) + "_facemat", faceMat);
 		Core::Resources::Material* faceTransparentMat = new Core::Resources::Material();
@@ -60,8 +72,10 @@ namespace MOON {
 		faceChild.GetComponent<Core::ECS::Components::CMaterialRenderer>()->SetMaterialAtIndex(0, *faceMat);
 		faceChild.GetComponent<Core::ECS::Components::CMaterialRenderer>()->SetMaterialAtIndex(1, *faceTransparentMat);		
 		edgeChild.GetComponent<Core::ECS::Components::CMaterialRenderer>()->SetMaterialAtIndex(0, *lineMat);
+		vertexChild.GetComponent<Core::ECS::Components::CMaterialRenderer>()->SetMaterialAtIndex(0, *vertexMat);
 		faceChild.GetComponent<Core::ECS::Components::CMaterialRenderer>()->UpdateMaterialList();
 		edgeChild.GetComponent<Core::ECS::Components::CMaterialRenderer>()->UpdateMaterialList();
+		vertexChild.GetComponent<Core::ECS::Components::CMaterialRenderer>()->UpdateMaterialList();
 		{
 			auto& renderer=GetSceneView.GetRenderer();;
 			{
@@ -118,6 +132,21 @@ namespace MOON {
 				lineMat->SetLineWidth(1.5);
 				lineMat->AddFeature("CLIP_PLANE");	
 			}
+			{
+				// The vertices are point sprites: one dot per corner of the shape,
+				// drawn with the edges (same pass, same depth handling) so a dot sits
+				// on the corner it belongs to instead of z-fighting with the faces
+				// that meet there. Both the colour and the size are material
+				// properties: they are what the material panel of this actor edits.
+				vertexMat->SetShader(Core::Global::ServiceLocator::Get<Editor::Core::Context>().shaderManager[":Shaders\\GeomertyPoint.ovfx"]);
+				vertexMat->SetBackfaceCulling(false);
+				vertexMat->SetCastShadows(false);
+				vertexMat->SetReceiveShadows(false);
+				vertexMat->SetDepthWriting(false);
+				vertexMat->AddFeature("CLIP_PLANE");
+				vertexMat->SetProperty("color", Maths::FVector4(1, 0, 0, 1));
+				vertexMat->SetProperty("u_PointSize", 8.0f);
+			}
 		}
 		if (addToTree) {
 			GetViewerWidget.addActorToTreeView(this);
@@ -128,6 +157,7 @@ namespace MOON {
 	{
 		GetChild("AllFaces")->GetComponent<Core::ECS::Components::CModelRenderer>()->GetModel()->ClearMeshes();
 		GetChild("AllEdges")->GetComponent<Core::ECS::Components::CModelRenderer>()->GetModel()->ClearMeshes();
+		GetChild("AllVertices")->GetComponent<Core::ECS::Components::CModelRenderer>()->GetModel()->ClearMeshes();
 	}
 
 	TopoActor::~TopoActor()

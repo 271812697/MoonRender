@@ -38,6 +38,7 @@ namespace MOON {
 			mIconMaps["TopoGroup"] = QIcon(":/widgets/icons/Model.png");
 			mIconMaps["TopoFace"] = QIcon(":/widgets/icons/Geomerty.png");
 			mIconMaps["TopoEdge"] = QIcon(":/widgets/icons/Geomerty.png");
+			mIconMaps["TopoVertex"] = QIcon(":/widgets/icons/Geomerty.png");
 			mIconMaps["PointLight"] = QIcon(":/widgets/icons/PointLight.png");
 			mIconMaps["DirectionalLight"] = QIcon(":/widgets/icons/DirectionalLight.png");
 			mIconMaps["SkyBox"] = QIcon(":/widgets/icons/awesomeface.png");
