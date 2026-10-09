@@ -1,4 +1,4 @@
-﻿#include "editor/UI/TaskPanel/ExtrudeTaskDialog.h"
+#include "editor/UI/TaskPanel/ExtrudeTaskDialog.h"
 #include "Sketcher/SketcherObjManager.h"
 #include "Sketcher/SketcherObj.h"
 #include "core/component/TopoShapeActor.h"
@@ -59,7 +59,7 @@ namespace MOON {
                     auto* sketchFeature = SketcherObjManager::instance().GetLastSketcherFeature();
                     if (sketchFeature) {
                         //2.设置基于最后一个feature
-                        FeatureBody::instance().setBaseFeatureFor(extrudeFeature);
+                        FeatureBody::Active()->setBaseFeatureFor(extrudeFeature);
                         extrudeFeature->setProfile(sketchFeature);
                         // Through the feature, so the pose of the sketch is taken into
                         // account here exactly like it is where the pad is built.

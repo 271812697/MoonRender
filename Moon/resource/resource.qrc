@@ -120,6 +120,7 @@
 		    <file>icons/partdesign/PartDesign_Mirrored.svg</file>
 		    <file>icons/partdesign/PartDesign_LinearPattern.svg</file>
 		    <file>icons/partdesign/PartDesign_Plane.svg</file>
+            <file>icons/partdesign/PartDesign_Body.svg</file>
 		    <file>icons/partdesign/PartDesign_AdditivePipe.svg</file>
 		    <file>icons/partdesign/PartDesign_SubtractivePipe.svg</file>
 

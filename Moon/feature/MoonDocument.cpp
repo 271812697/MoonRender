@@ -874,7 +874,7 @@ namespace MOON
 		void writeParameters(tinyxml2::XMLElement& p_parent, Feature& p_feature)
 		{
 			tinyxml2::XMLElement* node = p_parent.GetDocument()->NewElement(kParameters);
-			const std::vector<Feature*>& all = FeatureBody::instance().getFeatures();
+			const std::vector<Feature*>& all = FeatureBody::Active()->getFeatures();
 			if (auto* sketch = dynamic_cast<SketcherFeature*>(&p_feature)) {
 				writeSketch(*node, sketch->getSketcherObj());
 			}
@@ -1304,83 +1304,13 @@ namespace MOON
 		}
 	}
 
-	bool MoonDocument::save(const std::string& p_path)
+	/** Builds one body from its <Body> element: the features, the links between them and
+	 * their visibility. The body it fills has to be the active one - a feature lists
+	 * itself in the body that is active when it was made.
+	 * @return false when the element names a feature this build does not know, or one
+	 * whose parameters cannot be read: the caller takes the body back out then. */
+	bool readBody(const tinyxml2::XMLElement& p_node)
 	{
-		const std::vector<Feature*>& features = FeatureBody::instance().getFeatures();
-		tinyxml2::XMLDocument doc;
-		tinyxml2::XMLElement* root = doc.NewElement(kRoot);
-		root->SetAttribute("version", kVersion);
-		tinyxml2::XMLElement* body = doc.NewElement(kBody);
-		body->SetAttribute("name", "Body");
-		for (Feature* feature : features) {
-			if (feature != nullptr) {
-				writeFeature(*body, *feature, features);
-			}
-		}
-		root->InsertEndChild(body);
-		doc.InsertEndChild(root);
-		FILE* stream = openStream(p_path, /*p_write=*/true);
-		if (stream == nullptr) {
-			CORE_ERROR("[MoonDocument] {0} could not be opened for writing", p_path);
-			return false;
-		}
-		const tinyxml2::XMLError error = doc.SaveFile(stream);
-		std::fclose(stream);
-		if (error != tinyxml2::XML_SUCCESS) {
-			CORE_ERROR(
-				"[MoonDocument] {0} could not be written (tinyxml2 error {1})",
-				p_path,
-				static_cast<int>(error));
-			return false;
-		}
-		CORE_INFO("[MoonDocument] wrote {0} feature(s) to {1}", features.size(), p_path);
-		return true;
-	}
-
-	bool MoonDocument::open(const std::string& p_path)
-	{
-		tinyxml2::XMLDocument doc;
-		{
-			FILE* stream = openStream(p_path, /*p_write=*/false);
-			if (stream == nullptr) {
-				CORE_ERROR("[MoonDocument] {0} could not be opened", p_path);
-				return false;
-			}
-			const tinyxml2::XMLError error = doc.LoadFile(stream);
-			std::fclose(stream);
-			if (error != tinyxml2::XML_SUCCESS) {
-				CORE_ERROR("[MoonDocument] {0} could not be read", p_path);
-				return false;
-			}
-		}
-		const tinyxml2::XMLElement* root = doc.FirstChildElement(kRoot);
-		if (root == nullptr) {
-			CORE_ERROR("[MoonDocument] {0} is not a Moon document", p_path);
-			return false;
-		}
-		const int version = getInt(*root, "version", 0);
-		if (version > kVersion) {
-			CORE_ERROR(
-				"[MoonDocument] {0} was written by a newer version ({1} > {2})",
-				p_path,
-				version,
-				kVersion);
-			return false;
-		}
-		const tinyxml2::XMLElement* body = root->FirstChildElement(kBody);
-		if (body == nullptr) {
-			CORE_ERROR("[MoonDocument] {0} has no body", p_path);
-			return false;
-		}
-
-		// The chain that is loaded now is put aside, and the body is emptied for the
-		// time being: a feature lists itself in the body as soon as it is constructed, so
-		// what is built here would otherwise end up mixed with what is already there -
-		// and a file that cannot be built has to leave the loaded chain untouched, which
-		// only works while the old one is still in one piece.
-		const std::vector<Feature*> previous = FeatureBody::instance().getFeatures();
-		FeatureBody::instance().setFeatures({});
-
 		// First pass: build every feature with its own parameters. Nothing is executed
 		// yet, because a feature's links may name features that appear later in the list.
 		std::vector<Feature*> features;
@@ -1391,14 +1321,7 @@ namespace MOON
 		std::vector<StoredUpToFace> upToFaceRefs;
 		std::vector<bool> activeFlags;
 		std::vector<std::vector<std::string>> hiddenNames;
-		const auto dropBuilt = [&features, &previous]() {
-			for (Feature* feature : features) {
-				feature->RemoveFromScene();
-				delete feature;
-			}
-			FeatureBody::instance().setFeatures(previous);
-			};
-		for (const tinyxml2::XMLElement* node = body->FirstChildElement(kFeature);
+		for (const tinyxml2::XMLElement* node = p_node.FirstChildElement(kFeature);
 			node != nullptr;
 			node = node->NextSiblingElement(kFeature)) {
 			const std::string type = getText(*node, "type");
@@ -1406,7 +1329,6 @@ namespace MOON
 			Feature* feature = createFeature(type, name, getInt(*node, "addSubType", 0));
 			if (feature == nullptr) {
 				CORE_ERROR("[MoonDocument] a '{0}' feature is not known to this build", type);
-				dropBuilt();
 				return false;
 			}
 			features.push_back(feature);  // from here on it is dropped with the rest
@@ -1415,7 +1337,6 @@ namespace MOON
 			readPose(*node, *feature);
 			readReferences(*node, *feature);
 			if (!readParameters(*node, *feature)) {
-				dropBuilt();
 				return false;
 			}
 			baseIndices.push_back(getInt(*node, "base", -1));
@@ -1493,22 +1414,10 @@ namespace MOON
 			}
 		}
 
-		// Only now is the chain that was there before taken apart, and the actors leave
-		// the scene with it: everything the file asked for exists, so nothing can fail
-		// half way and leave the body without either chain.
-		for (Feature* feature : previous) {
-			feature->RemoveFromScene();
-			delete feature;
-		}
-		// The sketch manager hands the current sketch to the drawing tools: the chain
-		// that just went has to leave it (a stale pointer there is a crash the next time
-		// a tool asks), and the one that was read has to be in it, or entering one of the
-		// loaded sketches would find nothing.
-		for (Feature* feature : previous) {
-			if (auto* sketch = dynamic_cast<SketcherFeature*>(feature)) {
-				SketcherObjManager::instance().removeSketcherFeature(sketch);
-			}
-		}
+		// The sketches of this body go into the manager before its chain is built: the
+		// drawing tools reach a sketch through it, and a tool that asks while the chain is
+		// being built would otherwise find nothing. The sketches of the bodies that were
+		// up before leave the manager once the whole document has been read.
 		for (Feature* feature : features) {
 			if (auto* sketch = dynamic_cast<SketcherFeature*>(feature)) {
 				SketcherObjManager::instance().addSketcherFeature(sketch);
@@ -1563,17 +1472,231 @@ namespace MOON
 				}
 			}
 		}
+		return true;
+	}
+
+	void MoonDocument::writeBody(tinyxml2::XMLElement& p_parent, FeatureBody* p_body)
+	{
+		if (p_body == nullptr) {
+			return;
+		}
+		const std::vector<Feature*>& features = p_body->getFeatures();
+		tinyxml2::XMLElement* body = p_parent.GetDocument()->NewElement(kBody);
+		body->SetAttribute("name", p_body->GetName().c_str());
+		for (Feature* feature : features) {
+			if (feature != nullptr) {
+				writeFeature(*body, *feature, features);
+			}
+		}
+		p_parent.InsertEndChild(body);
+	}
+
+	bool MoonDocument::copyBody(FeatureBody* p_body, std::string& p_out)
+	{
+		if (p_body == nullptr) {
+			return false;
+		}
+		tinyxml2::XMLDocument doc;
+		tinyxml2::XMLElement* root = doc.NewElement(kRoot);
+		root->SetAttribute("version", kVersion);
+		writeBody(*root, p_body);
+		doc.InsertEndChild(root);
+		tinyxml2::XMLPrinter printer;
+		doc.Print(&printer);
+		p_out = printer.CStr();
+		return !p_out.empty();
+	}
+
+	FeatureBody* MoonDocument::pasteBody(const std::string& p_text)
+	{
+		if (p_text.empty()) {
+			return nullptr;
+		}
+		tinyxml2::XMLDocument doc;
+		if (doc.Parse(p_text.c_str(), p_text.size()) != tinyxml2::XML_SUCCESS) {
+			CORE_ERROR("[MoonDocument] a copied body could not be read back");
+			return nullptr;
+		}
+		const tinyxml2::XMLElement* root = doc.FirstChildElement(kRoot);
+		const tinyxml2::XMLElement* bodyNode = root != nullptr
+			? root->FirstChildElement(kBody)
+			: nullptr;
+		if (bodyNode == nullptr) {
+			CORE_ERROR("[MoonDocument] a copied body carries no <Body> node");
+			return nullptr;
+		}
+
+		// The copy is a body of its own: named after the one it came from (made unique) and
+		// the active one from here on, so the next feature the user makes lands in it.
+		FeatureBody* previousActive = FeatureBody::Active();
+		FeatureBody* newBody = FeatureBody::Create(
+			FeatureBody::UniqueName(getText(*bodyNode, "name", "Body")));
+		if (newBody == nullptr) {
+			return nullptr;
+		}
+		if (!readBody(*bodyNode)) {
+			// Nothing of the copy survives when it cannot be built: the features it made go
+			// away with it and the body is taken out of the scene again.
+			newBody->clear();
+			std::vector<std::unique_ptr<FeatureBody>> bodies = FeatureBody::TakeAll();
+			const auto isTheCopy = [newBody](const std::unique_ptr<FeatureBody>& p_body) {
+				return p_body.get() == newBody;
+				};
+			bodies.erase(
+				std::remove_if(bodies.begin(), bodies.end(), isTheCopy),
+				bodies.end());
+			FeatureBody::Adopt(std::move(bodies));
+			FeatureBody::SetActive(previousActive);
+			return nullptr;
+		}
+		CORE_INFO(
+			"[MoonDocument] '{0}' was pasted as '{1}' ({2} feature(s))",
+			getText(*bodyNode, "name", "Body"),
+			newBody->GetName(),
+			newBody->getFeatures().size());
+		return newBody;
+	}
+
+	bool MoonDocument::save(const std::string& p_path)
+	{
+		tinyxml2::XMLDocument doc;
+		tinyxml2::XMLElement* root = doc.NewElement(kRoot);
+		root->SetAttribute("version", kVersion);
+		// One node per body of the scene: the features of a body are a chain of their
+		// own, so their links are indices into that body's list and the file has to keep
+		// them apart. A scene with a single body writes exactly what it always did.
+		int writtenFeatures = 0;
+		for (FeatureBody* featureBody : FeatureBody::All()) {
+			if (featureBody == nullptr) {
+				continue;
+			}
+			const std::vector<Feature*>& features = featureBody->getFeatures();
+			writeBody(*root, featureBody);
+			writtenFeatures += static_cast<int>(features.size());
+		}
+		doc.InsertEndChild(root);
+		FILE* stream = openStream(p_path, /*p_write=*/true);
+		if (stream == nullptr) {
+			CORE_ERROR("[MoonDocument] {0} could not be opened for writing", p_path);
+			return false;
+		}
+		const tinyxml2::XMLError error = doc.SaveFile(stream);
+		std::fclose(stream);
+		if (error != tinyxml2::XML_SUCCESS) {
+			CORE_ERROR(
+				"[MoonDocument] {0} could not be written (tinyxml2 error {1})",
+				p_path,
+				static_cast<int>(error));
+			return false;
+		}
+		CORE_INFO("[MoonDocument] wrote {0} feature(s) to {1}", writtenFeatures, p_path);
+		return true;
+	}
+
+	bool MoonDocument::open(const std::string& p_path)
+	{
+		tinyxml2::XMLDocument doc;
+		{
+			FILE* stream = openStream(p_path, /*p_write=*/false);
+			if (stream == nullptr) {
+				CORE_ERROR("[MoonDocument] {0} could not be opened", p_path);
+				return false;
+			}
+			const tinyxml2::XMLError error = doc.LoadFile(stream);
+			std::fclose(stream);
+			if (error != tinyxml2::XML_SUCCESS) {
+				CORE_ERROR("[MoonDocument] {0} could not be read", p_path);
+				return false;
+			}
+		}
+		const tinyxml2::XMLElement* root = doc.FirstChildElement(kRoot);
+		if (root == nullptr) {
+			CORE_ERROR("[MoonDocument] {0} is not a Moon document", p_path);
+			return false;
+		}
+		const int version = getInt(*root, "version", 0);
+		if (version > kVersion) {
+			CORE_ERROR(
+				"[MoonDocument] {0} was written by a newer version ({1} > {2})",
+				p_path,
+				version,
+				kVersion);
+			return false;
+		}
+		const tinyxml2::XMLElement* body = root->FirstChildElement(kBody);
+		if (body == nullptr) {
+			CORE_ERROR("[MoonDocument] {0} has no body", p_path);
+			return false;
+		}
+
+		// The bodies that are up now are put aside in one piece, and they stay alive: a
+		// feature lists itself in the body it joins as soon as it is constructed, so what
+		// is built here would otherwise be mixed with what is already there - and a file
+		// that cannot be built has to leave the loaded scene untouched, which only works
+		// while the bodies that are there are still in one piece.
+		std::vector<std::unique_ptr<FeatureBody>> previousBodies = FeatureBody::TakeAll();
+		std::vector<Feature*> previousFeatures;
+		for (const std::unique_ptr<FeatureBody>& oldBody : previousBodies) {
+			const std::vector<Feature*>& chain = oldBody->getFeatures();
+			previousFeatures.insert(previousFeatures.end(), chain.begin(), chain.end());
+		}
+		// What this read has made so far, so a failure half way can take it all back out
+		// again and leave the bodies that were there before in place.
+		std::vector<FeatureBody*> createdBodies;
+		std::vector<Feature*> allFeatures;
+		const auto rollback = [&previousBodies, &createdBodies]() {
+			for (FeatureBody* body : createdBodies) {
+				if (body != nullptr) {
+					body->clear();
+				}
+			}
+			FeatureBody::TakeAll();  // the bodies that were just made
+			FeatureBody::Adopt(std::move(previousBodies));
+			};
+
+		// Every body of the document, in the order it was written.
+		for (const tinyxml2::XMLElement* bodyNode = root->FirstChildElement(kBody);
+			bodyNode != nullptr;
+			bodyNode = bodyNode->NextSiblingElement(kBody)) {
+			FeatureBody* newBody = FeatureBody::Create(getText(*bodyNode, "name", "Body"));
+			createdBodies.push_back(newBody);
+
+			if (!readBody(*bodyNode)) {
+				rollback();
+				return false;
+			}
+			const std::vector<Feature*>& loaded = newBody->getFeatures();
+			allFeatures.insert(allFeatures.end(), loaded.begin(), loaded.end());
+		}
+
+		// Everything the file asked for exists, so the bodies that were up before are
+		// taken apart now: their features leave the scene with their actors, and their
+		// sketches leave the sketch manager - a stale pointer there is a crash the next
+		// time a drawing tool asks about it.
+		for (Feature* feature : previousFeatures) {
+			if (auto* sketch = dynamic_cast<SketcherFeature*>(feature)) {
+				SketcherObjManager::instance().removeSketcherFeature(sketch);
+			}
+		}
+		for (const std::unique_ptr<FeatureBody>& oldBody : previousBodies) {
+			oldBody->clear();
+		}
+		previousBodies.clear();
 
 		// A feature the file described but that came out without a shape is worth saying
 		// out loud: the model would otherwise just be missing a part of itself.
-		for (Feature* feature : features) {
+		for (Feature* feature : allFeatures) {
 			if (feature->GetTopoShape().isNull()) {
 				CORE_WARN(
 					"[MoonDocument] {0} came back without a shape",
 					feature->GetName());
 			}
 		}
-		CORE_INFO("[MoonDocument] read {0} feature(s) from {1}", features.size(), p_path);
+		CORE_INFO(
+			"[MoonDocument] read {0} feature(s) in {1} body(ies) from {2}",
+			allFeatures.size(),
+			createdBodies.size(),
+			p_path);
 		return true;
 	}
 }

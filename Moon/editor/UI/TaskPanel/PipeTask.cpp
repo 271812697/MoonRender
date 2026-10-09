@@ -49,7 +49,7 @@ namespace MOON
 				isCreatedFeature = true;
 				// The body below becomes the shape the sweep is fused into (or cut
 				// from), the way the modelling panels take it.
-				FeatureBody::instance().setBaseFeatureFor(pipe);
+				FeatureBody::Active()->setBaseFeatureFor(pipe);
 				// The profile is a sketch: the one selected, or the sketch the user
 				// built last. The path is picked in the panel (or was selected before
 				// opening it).

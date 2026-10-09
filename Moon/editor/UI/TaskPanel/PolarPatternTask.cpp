@@ -56,7 +56,7 @@ namespace MOON {
                 feature->setSubValues(subValues);
             }
             else {
-                FeatureBody::instance().setBaseFeatureFor(feature);
+                FeatureBody::Active()->setBaseFeatureFor(feature);
             }
 
             // A circular pattern normally turns inside the plane of the sketch the

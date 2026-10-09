@@ -2,6 +2,7 @@
 #include "core/component/TopoShapeActor.h"
 namespace MOON { 
 	class SketcherObj;
+	class FeatureBody;
 	class Feature :public TopoActor {
 	public:
 		Feature(const std::string& p_name,const std::string& tag);
@@ -26,6 +27,11 @@ namespace MOON {
 			m_referenceNames = std::move(p_names);
 		}
 		Feature* getBaseFeature() { return m_baseFeature; }
+		/** The body this feature belongs to: the chain it is part of, and the one that
+		 * rebuilds it. It is the body that was active when the feature was made, which is
+		 * how a feature lands in the body the user is working in. */
+		FeatureBody* getBody() { return m_body; }
+		const FeatureBody* getBody() const { return m_body; }
 		/** The shape another feature should model with: this feature's stored topology
 		 * with its own transform applied.
 		 *
@@ -115,6 +121,8 @@ namespace MOON {
 		 */
 		Part::TopoShape resolveBaseSubShape(int p_index);
 		Feature* m_baseFeature = nullptr;
+		/** The body whose chain this feature is part of (see getBody). */
+		FeatureBody* m_body = nullptr;
 		std::vector<std::string> subValues;
 		/** Every mapped name each entry of subValues is known by, filled in on the
 		 * first use. One element can carry several names (the one it got from its
