@@ -1,4 +1,4 @@
-﻿#include "editor/UI/TaskPanel/ShapeHelper.h"
+#include "editor/UI/TaskPanel/ShapeHelper.h"
 #include "editor/View/sceneview/viewerwidget.h"
 #include "TopoShape.h"
 #include "core/component/TopoShapeActor.h"
@@ -121,7 +121,7 @@ namespace MOON {
 		Feature* feature = mInternal->feature;
 		if (mInternal->rolledBack && feature != nullptr) {
 			const std::vector<Feature*>& features
-				= FeatureBody::instance().getFeatures();
+				= FeatureBody::Active()->getFeatures();
 			if (std::find(features.begin(), features.end(), feature) != features.end()) {
 				restoreFeature();
 			}
@@ -228,7 +228,7 @@ namespace MOON {
 		Feature* feature = getFeature();
 		if (feature != nullptr) {
 			const std::vector<Feature*>& features
-				= FeatureBody::instance().getFeatures();
+				= FeatureBody::Active()->getFeatures();
 			if (std::find(features.begin(), features.end(), feature) != features.end()) {
 				feature->refineResultShape();
 				// Discretizing again is what puts the merged faces on screen: the
@@ -331,12 +331,20 @@ namespace MOON {
 				CORE_INFO("TopAbs_FACE selected");
 				onSelectFace(shapes);
 			}
+			else if (shapes[1].getShape().ShapeType() == TopAbs_ShapeEnum::TopAbs_VERTEX)
+			{
+				CORE_INFO("TopAbs_VERTEX selected");
+				onSelectVertex(shapes);
+			}
 		}
 	}
 	void ShapeHelper::onSelectEdge(const std::vector<Part::TopoShape>& edge)
 	{
 	}
 	void ShapeHelper::onSelectFace(const std::vector<Part::TopoShape>& face)
+	{
+	}
+	void ShapeHelper::onSelectVertex(const std::vector<Part::TopoShape>& vertex)
 	{
 	}
 	void ShapeHelper::setGenerateShapeName(const char* name)

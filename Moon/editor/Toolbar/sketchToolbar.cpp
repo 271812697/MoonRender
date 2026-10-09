@@ -196,6 +196,17 @@ namespace MOON {
 				return;
 			}
 			for (int geoId : geoIds) {
+				if (sketch->isInternalGeometry(geoId)) {
+					// The axes and the focuses of an ellipse are construction geometry for
+					// a reason: they are drawn and can be constrained against, but they are
+					// not part of the sketch's shape. FreeCAD refuses the same switch.
+					CORE_WARN(
+						"[ToggleConstruction] curve {0} is the internal geometry of curve {1}; "
+						"it stays construction",
+						geoId,
+						sketch->internalGeometryOwner(geoId));
+					continue;
+				}
 				sketch->setConstruction(geoId, !sketch->isConstructionGeometry(geoId));
 			}
 		}

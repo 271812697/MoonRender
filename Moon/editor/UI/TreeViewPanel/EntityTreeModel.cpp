@@ -1,4 +1,4 @@
-﻿#include "EntityTreeModel.h"
+#include "EntityTreeModel.h"
 #include "Core/Global/ServiceLocator.h"
 #include "core/component/CTopoShape.h"
 #include "Core/SceneSystem/Scene.h"
@@ -10,6 +10,7 @@
 #include "feature/Feature.h"
 #include "feature/FeatureBody.h"
 #include <algorithm>
+#include <functional>
 #include <unordered_set>
 #include <QTimer>
 
@@ -38,6 +39,7 @@ namespace MOON {
 			mIconMaps["TopoGroup"] = QIcon(":/widgets/icons/Model.png");
 			mIconMaps["TopoFace"] = QIcon(":/widgets/icons/Geomerty.png");
 			mIconMaps["TopoEdge"] = QIcon(":/widgets/icons/Geomerty.png");
+			mIconMaps["TopoVertex"] = QIcon(":/widgets/icons/Geomerty.png");
 			mIconMaps["PointLight"] = QIcon(":/widgets/icons/PointLight.png");
 			mIconMaps["DirectionalLight"] = QIcon(":/widgets/icons/DirectionalLight.png");
 			mIconMaps["SkyBox"] = QIcon(":/widgets/icons/awesomeface.png");
@@ -53,6 +55,11 @@ namespace MOON {
 			mIconMaps["Pocket"] = QIcon(":/widgets/icons/partdesign/PartDesign_Pocket.svg");
 			mIconMaps["Groove"] = QIcon(":/widgets/icons/partdesign/PartDesign_Groove.svg");
 			mIconMaps["DatumLine"] = QIcon(":/widgets/icons/partdesign/PartDesign_Line.svg");
+			mIconMaps["DatumPlane"] = QIcon(":/widgets/icons/partdesign/PartDesign_Plane.svg");
+			// A body is the node its features hang under, and it wears FreeCAD's body icon.
+			mIconMaps["Body"] = QIcon(":/widgets/icons/partdesign/PartDesign_Body.svg");
+			mIconMaps["Pipe"] = QIcon(":/widgets/icons/partdesign/PartDesign_AdditivePipe.svg");
+			mIconMaps["PipeCut"] = QIcon(":/widgets/icons/partdesign/PartDesign_SubtractivePipe.svg");
 			// The transform features show the icons their toolbar buttons wear.
 			mIconMaps["PolarPattern"] = QIcon(":/widgets/icons/partdesign/PartDesign_PolarPattern.svg");
 			mIconMaps["Mirror"] = QIcon(":/widgets/icons/partdesign/PartDesign_Mirrored.svg");
@@ -490,17 +497,25 @@ namespace MOON {
 		if (mInternal == nullptr || mInternal->sceneRoot == nullptr) {
 			return;
 		}
-		QStandardItem* root = mInternal->sceneRoot;
-		if (root->rowCount() < 2) {
+		// Where a feature sits in the chain of its own body, by identity: a body is the
+		// one list that has the order right, and every body's features hang under that
+		// body's node - so this runs for the scene root and for each body node under it.
+		const auto chainIndexOf = [](const Feature* p_feature) {
+			const FeatureBody* body = p_feature != nullptr ? p_feature->getBody() : nullptr;
+			if (body == nullptr) {
+				return -1;
+			}
+			const std::vector<Feature*>& chain = body->getFeatures();
+			for (int i = 0; i < static_cast<int>(chain.size()); ++i) {
+				if (chain[i] == p_feature) {
+					return i;
+				}
+			}
+			return -1;
+			};
+		const std::function<void(QStandardItem*)> sortUnder = [&](QStandardItem* root) {
+		if (root == nullptr || root->rowCount() < 2) {
 			return;
-		}
-		// Where each feature sits in the chain, by identity: the body is the one list
-		// that has the order right. A feature that is not in it (one that was created
-		// but not committed yet, say) keeps the back.
-		std::unordered_map<const Feature*, int> chainIndex;
-		const std::vector<Feature*>& chain = FeatureBody::instance().getFeatures();
-		for (int i = 0; i < static_cast<int>(chain.size()); ++i) {
-			chainIndex[chain[i]] = i;
 		}
 		// "slots" would be the Qt keyword macro, hence the longer name.
 		std::vector<int> featureSlots;
@@ -513,11 +528,10 @@ namespace MOON {
 			if (feature == nullptr) {
 				continue;
 			}
-			const auto found = chainIndex.find(feature);
 			featureItems.emplace_back(
-				// Not in the body: after every feature that is (the size is one past
-				// the last chain index, so it cannot collide with a real one).
-				found != chainIndex.end() ? found->second : static_cast<int>(chain.size()),
+				// Not in a body's chain (one that was created but not committed yet,
+				// say): after every feature that is.
+				chainIndexOf(feature) >= 0 ? chainIndexOf(feature) : 1000000,
 				item);
 			featureSlots.push_back(row);
 		}
@@ -549,6 +563,13 @@ namespace MOON {
 		for (int i = 0; i < static_cast<int>(featureSlots.size()); ++i) {
 			root->insertRow(featureSlots[i], featureItems[i].second);
 		}
+		// The features of each body hang under that body's node, so the same ordering is
+		// applied one level down.
+		for (int row = 0; row < root->rowCount(); ++row) {
+			sortUnder(root->child(row));
+		}
+		};
+		sortUnder(mInternal->sceneRoot);
 	}
 	void EntityTreeModel::processBatchRemove(const std::vector<Core::ECS::Actor*>& actors)
 	{
@@ -644,7 +665,13 @@ namespace MOON {
 		item->setCheckable(true);
 		item->setCheckState(actor->IsActive() ? Qt::Checked : Qt::Unchecked);
 		item->setData(QVariant::fromValue((void*)actor), Qt::UserRole);
-
+		// Whether this row carries a name of its own (see flags()): the actor is alive
+		// here, and the answer is kept on the item so that painting a row never has to
+		// follow the pointer again - a row can outlive the actor it stands for.
+		item->setData(
+			dynamic_cast<Feature*>(actor) != nullptr || actor->GetTag() == "Body",
+			kRenamableRole
+		);
 		return item;
 	}
 	void EntityTreeModel::addActorToTree(Core::ECS::Actor* actor, QStandardItem* parent)
@@ -732,6 +759,122 @@ namespace MOON {
 	{
 		if (!item) return nullptr;
 		return static_cast<Core::ECS::Actor*>(item->data(Qt::UserRole).value<void*>());
+	}
+	void EntityTreeModel::updateActorName(Core::ECS::Actor* p_actor)
+	{
+		if (mInternal == nullptr || p_actor == nullptr) {
+			return;
+		}
+		const auto found = mInternal->actorToItem.find(p_actor);
+		if (found == mInternal->actorToItem.end() || found->second == nullptr) {
+			return;
+		}
+		// The name an item was made with is its text; renaming an actor does not tell the
+		// item, so it is written over here.
+		found->second->setText(QString::fromStdString(p_actor->GetName()));
+	}
+
+	void EntityTreeModel::startRename(Core::ECS::Actor* p_actor)
+	{
+		if (mInternal == nullptr || p_actor == nullptr || mInternal->mTreeView == nullptr) {
+			CORE_WARN(
+				"[TreeView] cannot rename: model {0}, actor {1}, view {2}",
+				mInternal != nullptr,
+				p_actor != nullptr,
+				mInternal != nullptr && mInternal->mTreeView != nullptr);
+			return;
+		}
+		QStandardItem* item = actorItem(p_actor);
+		if (item == nullptr) {
+			CORE_WARN(
+				"[TreeView] cannot rename '{0}': it has no row in the tree",
+				p_actor->GetName());
+			return;
+		}
+		const QModelIndex index = indexFromItem(item);
+		if (!index.isValid()) {
+			CORE_WARN(
+				"[TreeView] cannot rename '{0}': its row is not an index",
+				p_actor->GetName());
+			return;
+		}
+		CORE_INFO(
+			"[TreeView] renaming '{0}': editable {1}, triggers {2}",
+			p_actor->GetName(),
+			(item->flags() & Qt::ItemIsEditable) != 0,
+			static_cast<int>(mInternal->mTreeView->editTriggers()));
+		// The editor is put on the row itself: what is typed there arrives in setData().
+		mInternal->mTreeView->setCurrentIndex(index);
+		mInternal->mTreeView->edit(index);
+	}
+
+	Qt::ItemFlags EntityTreeModel::flags(const QModelIndex& index) const
+	{
+		Qt::ItemFlags flags = QStandardItemModel::flags(index);
+		if (!index.isValid()) {
+			return flags;
+		}
+		const QStandardItem* item = itemFromIndex(index);
+		// Whether the row can be edited in place is read off the item, where it was put
+		// while the actor was alive (see createItemFromActor). Qt asks this for every row
+		// it paints, hovers or selects, and a row can outlive the actor it stands for - so
+		// the actor is never looked at from here.
+		if (item != nullptr && item->data(kRenamableRole).toBool()) {
+			flags |= Qt::ItemIsEditable;
+		}
+		else {
+			flags &= ~Qt::ItemIsEditable;
+		}
+		return flags;
+	}
+
+	bool EntityTreeModel::setData(const QModelIndex& index, const QVariant& value, int role)
+	{
+		if (role == Qt::EditRole && index.isValid()) {
+			Core::ECS::Actor* actor = getActorFromItem(itemFromIndex(index));
+			if (actor != nullptr) {
+				const std::string wanted = value.toString().trimmed().toStdString();
+				if (wanted.empty() || wanted == actor->GetName()) {
+					return false;  // nothing to change: the row keeps its text
+				}
+				if (FeatureBody* body = FeatureBody::Of(actor)) {
+					// A body's name is what the tree shows it as and what a document
+					// writes into its <Body> node, and it has to tell the bodies apart.
+					for (FeatureBody* other : FeatureBody::All()) {
+						if (other != nullptr && other != body && other->GetName() == wanted) {
+							CORE_WARN(
+								"[TreeView] '{0}' is already the name of another body; the "
+								"name was not changed",
+								wanted);
+							return false;
+						}
+					}
+					body->SetName(wanted);
+				}
+				else if (Feature* feature = dynamic_cast<Feature*>(actor)) {
+					// The name has to stay unique inside the body: the tree shows it, and a
+					// document finds an actor by name when it puts back what the eye
+					// switched off.
+					if (FeatureBody* body = feature->getBody()) {
+						for (Feature* other : body->getFeatures()) {
+							if (other != nullptr && other != feature
+								&& other->GetName() == wanted) {
+								CORE_WARN(
+									"[TreeView] '{0}' is already the name of another feature "
+									"of this body; the name was not changed",
+									wanted);
+								return false;
+							}
+						}
+					}
+					feature->SetName(wanted);
+				}
+				else {
+					return false;  // a row that has no name of its own
+				}
+			}
+		}
+		return QStandardItemModel::setData(index, value, role);
 	}
 	void EntityTreeModel::updateTopoShapeRecursive(Core::ECS::Actor* actor)
 	{

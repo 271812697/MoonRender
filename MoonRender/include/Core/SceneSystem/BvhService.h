@@ -284,6 +284,12 @@ namespace Core::SceneSystem
 		const ::Rendering::Geometry::Bvh* topLevelBvh;
 		std::vector<MeshInstance> mSceneMeshInstances;
 		std::vector<::Rendering::Resources::Mesh*> mSceneMeshes;
+		/** What the last Process() could not index, one line each: an instance that
+		 * names a mesh that is not in the scene, or a mesh whose index/vertex arrays
+		 * disagree with the triangles its BVH holds. They are collected here instead of
+		 * being logged, because the renderer has no logger of its own - the side that
+		 * calls Process() reads them and says them (see SceneView::BuildBvh). */
+		std::vector<std::string> buildProblems;
 		// Scene Mesh Data 
 		std::vector<Indices> vertIndices;
 		std::vector<Maths::FVector4> verticesUVX; // Vertex + texture Coord (u/s)

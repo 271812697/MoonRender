@@ -1,7 +1,11 @@
 #pragma once
 #include <string>
 
+namespace tinyxml2 {
+	class XMLElement;
+}
 namespace MOON {
+	class FeatureBody;
 	/** The .moon document: the feature chain of the body, written to a file and read
 	 * back.
 	 *
@@ -32,6 +36,18 @@ namespace MOON {
 		 *
 		 * @return false when the document could not be opened. */
 		static bool open(const std::string& p_path);
+
+		/** Writes one body the way a document writes it: its features, the links between
+		 * them (indices into this body's own chain) and their poses. */
+		static void writeBody(tinyxml2::XMLElement& p_parent, FeatureBody* p_body);
+		/** Copies a body into a text of that same form. A copy is kept as text so that
+		 * it cannot dangle when the body it was taken from is deleted. */
+		static bool copyBody(FeatureBody* p_body, std::string& p_out);
+		/** Makes a body out of such a text: a deep copy - every feature is built again
+		 * from what was written, and the links between them land on the copies. The new
+		 * body is named after the one it came from, made unique, and becomes the active
+		 * body. @return the new body, or null when the text cannot be read. */
+		static FeatureBody* pasteBody(const std::string& p_text);
 
 		/** The extension of a document, without the dot. */
 		static const char* extension() { return "moon"; }

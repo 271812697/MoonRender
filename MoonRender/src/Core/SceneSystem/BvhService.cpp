@@ -264,6 +264,12 @@ namespace Core::SceneSystem
 
 		}
 	void BvhService::ProcessTLAS() {
+		// Nothing to walk when the top level has no root, which is what an empty
+		// triangle set leaves behind (see Process). Walking it anyway is a null
+		// dereference rather than an empty scene.
+		if (topLevelBvh == nullptr || topLevelBvh->m_root == nullptr) {
+			return;
+		}
 		curNode = topLevelIndex;
 		ProcessTLASNodes(topLevelBvh->m_root);
 	}
@@ -335,30 +341,61 @@ namespace Core::SceneSystem
 
 		triMeshes.clear();
 		triMeshInstances.clear();
+		buildProblems.clear();
 		std::vector<::Rendering::Geometry::bbox> triBoxs;
 		std::unordered_map<::Rendering::Resources::Mesh*, int>triMeshIndex;
 		for (int i = 0;i < sceneMeshes.size();i++) {
-			if (sceneMeshes[i]->GetPrimitiveMode() == ::Rendering::Settings::EPrimitiveMode::TRIANGLES) {
+			// A mesh without a BVH has no triangles to index - an empty topology batch
+			// (a sketch whose profile did not come out as a face, say) is the usual
+			// one. It stays out of the traced set, and its instances are skipped below
+			// with it so the mesh indices stay in step.
+			if (sceneMeshes[i]->GetPrimitiveMode() == ::Rendering::Settings::EPrimitiveMode::TRIANGLES
+				&& sceneMeshes[i]->GetBvh() != nullptr) {
 				triMeshIndex[sceneMeshes[i]] = triMeshes.size();
 				triMeshes.push_back(sceneMeshes[i]);
 			}
 		}
 		for (int i = 0;i < instances.size();i++) {
 			int meshId = instances[i].meshID;
+			// An instance names its mesh by index, and a mismatch is not something to
+			// read past the end of the array for: it is reported and left out.
+			if (meshId < 0 || meshId >= static_cast<int>(sceneMeshes.size())) {
+				buildProblems.push_back(
+					"instance " + std::to_string(i) + " names mesh " + std::to_string(meshId)
+					+ ", but the scene holds " + std::to_string(sceneMeshes.size())
+					+ " mesh(es); it is left out"
+				);
+				continue;
+			}
 			auto& mesh = sceneMeshes[meshId];
 			if (mesh->GetPrimitiveMode() != ::Rendering::Settings::EPrimitiveMode::TRIANGLES) {
 				continue;
 			}
+			const auto triIndex = triMeshIndex.find(mesh);
+			if (triIndex == triMeshIndex.end()) {
+				continue;  // no BVH: nothing of it to trace
+			}
 			auto triMeshInstance = instances[i];
-			triMeshInstance.meshID = triMeshIndex[mesh];
+			triMeshInstance.meshID = triIndex->second;
 			triMeshInstances.push_back(triMeshInstance);
 			triBoxs.push_back(boxs[i]);
 		}
 
 		m_sceneTriBvh->Build(triBoxs.data(),triBoxs.size());
 		this->topLevelBvh = m_sceneTriBvh;
-		ProcessBLAS();
-		ProcessTLAS();
+		// A scene whose meshes all fell out of the traced set - no triangle batch among
+		// them, or a hidden body whose only visible feature is a sketch wire - leaves an
+		// empty triangle BVH. There is no top level to walk then, and walking the null
+		// root it holds used to end the process (see ProcessTLAS).
+		if (triMeshInstances.empty() || m_sceneTriBvh->m_root == nullptr) {
+			topLevelIndex = 0;
+			bvhRootStartIndices.clear();
+			nodes.clear();
+		}
+		else {
+			ProcessBLAS();
+			ProcessTLAS();
+		}
 			
 		//Copy Mesh vertex data to a batch buffer
 		vertIndices.clear();
@@ -414,14 +451,53 @@ namespace Core::SceneSystem
 				}
 				glBindTexture(GL_TEXTURE_BUFFER, 0);
 			}
+			if (triMeshes[i]->GetBvh() == nullptr) {
+				continue;
+			}
 			int numIndices = triMeshes[i]->GetBvh()->GetNumIndices();
 			const int* triIndices = triMeshes[i]->GetBvh()->GetIndices();
 			auto& indexArr = triMeshes[i]->GetIndices();
 			bool isIndexMesh = indexArr.size() > 0;
 			auto& vertexData = triMeshes[i]->GetVerticesBVH();
+			// The three arrays have to agree with each other: the BVH counts the
+			// triangles of the mesh, and every triangle reads three entries out of the
+			// index array - or, for a mesh without one, out of the vertices. A mesh that
+			// was built half way (or whose indices were never uploaded) would be read
+			// past its end below, which is a crash rather than a missing triangle.
+			const int indexCount = static_cast<int>(indexArr.size());
+			const int vertexCount = static_cast<int>(vertexData.size());
+			if (triIndices == nullptr) {
+				numIndices = 0;
+			}
+			else if (isIndexMesh && indexCount < numIndices * 3) {
+				buildProblems.push_back(
+					"mesh " + std::to_string(i) + " is indexed by " + std::to_string(numIndices)
+					+ " triangle(s) but holds only " + std::to_string(indexCount)
+					+ " index(es); the copy stops where they end"
+				);
+				numIndices = indexCount / 3;
+			}
+			else if (!isIndexMesh && vertexCount < numIndices * 3) {
+				buildProblems.push_back(
+					"mesh " + std::to_string(i) + " is indexed by " + std::to_string(numIndices)
+					+ " triangle(s) but holds only " + std::to_string(vertexCount)
+					+ " vertex(es); the copy stops where they end"
+				);
+				numIndices = vertexCount / 3;
+			}
 			for (int j = 0; j < numIndices; j++)
 			{
 				int index = triIndices[j];
+				if (index < 0
+					|| (isIndexMesh ? (index * 3 + 2) >= indexCount
+						: (index * 3 + 2) >= vertexCount)) {
+					buildProblems.push_back(
+						"mesh " + std::to_string(i) + " indexes triangle " + std::to_string(index)
+						+ " outside its " + std::to_string(isIndexMesh ? indexCount : vertexCount)
+						+ (isIndexMesh ? " index(es)" : " vertex(es)") + "; it is left out"
+					);
+					continue;
+				}
 				if (isIndexMesh) {
 					int v1 = indexArr[(index * 3 + 0)] + verticesCnt;
 					int v2 = indexArr[(index * 3 + 1)] + verticesCnt;
@@ -438,7 +514,17 @@ namespace Core::SceneSystem
 				// Per-triangle domain color (parallel to vertIndices): the three
 				// vertices of a triangle always share the same domain.
 				int localV0 = isIndexMesh ? indexArr[(index * 3 + 0)] : (index * 3 + 0);
-				float domainIdxF = vertexData[localV0].domainId.x;
+				float domainIdxF = 0.0f;
+				if (localV0 >= 0 && localV0 < vertexCount) {
+					domainIdxF = vertexData[localV0].domainId.x;
+				}
+				else {
+					buildProblems.push_back(
+						"mesh " + std::to_string(i) + " points at vertex "
+						+ std::to_string(localV0) + ", which its " + std::to_string(vertexCount)
+						+ " vertex(es) do not contain; the triangle keeps the default colour"
+					);
+				}
 				if (domainIdxF != domainIdxF) domainIdxF = 0.0f; // NaN guard
 				int domainIdx = static_cast<int>(domainIdxF);
 				triangleDomainColors.push_back(

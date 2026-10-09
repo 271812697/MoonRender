@@ -6,6 +6,8 @@
 #include "editor/UI/TaskPanel/FilletTask.h"
 #include "editor/UI/TaskPanel/RevolutionTask.h"
 #include "editor/UI/TaskPanel/DatumLineTask.h"
+#include "editor/UI/TaskPanel/DatumPlaneTask.h"
+#include "editor/UI/TaskPanel/PipeTask.h"
 #include "TopoShape.h"
 #include "feature/SketcherFeature.h"
 #include "feature/ExtrudeFeature.h"
@@ -13,6 +15,8 @@
 #include "feature/FilletFeature.h"
 #include "feature/RevolveFeature.h"
 #include "feature/DatumLineFeature.h"
+#include "feature/DatumPlaneFeature.h"
+#include "feature/PipeFeature.h"
 #include "feature/PolarPatternFeature.h"
 #include "feature/MirrorFeature.h"
 #include "feature/LinearPatternFeature.h"
@@ -54,6 +58,16 @@ namespace MOON {
         DatumLineFeature* datumLine = dynamic_cast<DatumLineFeature*>(feature);
         if (datumLine) {
             DatumLineTask* dialog = new DatumLineTask(nullptr, datumLine);
+            return dialog;
+        }
+        DatumPlaneFeature* datumPlane = dynamic_cast<DatumPlaneFeature*>(feature);
+        if (datumPlane) {
+            DatumPlaneTask* dialog = new DatumPlaneTask(nullptr, datumPlane);
+            return dialog;
+        }
+        PipeFeature* pipe = dynamic_cast<PipeFeature*>(feature);
+        if (pipe) {
+            PipeTask* dialog = new PipeTask(nullptr, pipe->addSubType, pipe);
             return dialog;
         }
         PolarPatternFeature* polarPattern = dynamic_cast<PolarPatternFeature*>(feature);

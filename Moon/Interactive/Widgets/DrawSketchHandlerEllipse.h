@@ -6,6 +6,7 @@ namespace MOON
 {
 	class DrawSketchHandlerEllipse : public DrawSketchDefaultHandler<DrawSketchHandlerEllipse, StateMachines::ThreeSeekEnd, 3, CircleEllipseConstructionMethod>
 	{
+		using SupperClass = DrawSketchDefaultHandler<DrawSketchHandlerEllipse, StateMachines::ThreeSeekEnd, 3, CircleEllipseConstructionMethod>;
 	public:
 		DrawSketchHandlerEllipse(const std::string& name);
 		virtual ~DrawSketchHandlerEllipse();
@@ -13,6 +14,7 @@ namespace MOON
 		virtual void onSetActive(bool flag)override;
 
 		virtual void updateDataAndDrawToPosition(Base::Vector2d onSketchPos)override;
+		void executeCommands() override;
 		bool canGoToNextMode() override;
 		void createShape(bool onlyeditoutline) override;
 		void onReset() override;

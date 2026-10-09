@@ -1755,6 +1755,136 @@ namespace MOON {
             mConstructionGeoIds.erase(geoId);
         }
     }
+    // ---------------------------------------------------------------------------
+    // The internal geometry of a curve: its axes and focuses, as curves of their
+    // own. This is FreeCAD's SketchObject::exposeInternalGeometry() (the ellipse
+    // branch of it, which is the only kind of internal geometry a tool creates
+    // here) together with the addAndCleanup() that commits the new elements.
+    // ---------------------------------------------------------------------------
+    bool SketcherObj::isInternalGeometry(int p_geoId) const
+    {
+        return internalGeometryOwner(p_geoId) != NoGeoId;
+    }
+    int SketcherObj::internalGeometryOwner(int p_geoId) const
+    {
+        if (p_geoId < 0) {
+            return NoGeoId;
+        }
+        for (const Sketcher::Constraint* constraint : mConstraintList) {
+            if (constraint->Type == Sketcher::ConstraintType::InternalAlignment
+                && constraint->First == p_geoId) {
+                // The Second element is the curve the internal element belongs to.
+                return constraint->Second;
+            }
+        }
+        return NoGeoId;
+    }
+    int SketcherObj::exposeInternalGeometry(int p_geoId)
+    {
+        Part::Geometry* geo = getGeometry(p_geoId);
+        if (geo == nullptr || !geo->is<Part::GeomEllipse>()) {
+            // Only the full ellipse: an arc of an ellipse exposes the same four
+            // elements from its own parameters, but no tool here creates one yet.
+            return -1;
+        }
+
+        // What the curve already holds of its internals - exposing is idempotent, so
+        // only the missing ones are added and a second call does nothing.
+        bool hasMajor = false;
+        bool hasMinor = false;
+        bool hasFocus1 = false;
+        bool hasFocus2 = false;
+        for (const Sketcher::Constraint* constraint : mConstraintList) {
+            if (constraint->Type != Sketcher::ConstraintType::InternalAlignment
+                || constraint->Second != p_geoId) {
+                continue;
+            }
+            switch (constraint->AlignmentType) {
+            case Sketcher::EllipseMajorDiameter:
+                hasMajor = true;
+                break;
+            case Sketcher::EllipseMinorDiameter:
+                hasMinor = true;
+                break;
+            case Sketcher::EllipseFocus1:
+                hasFocus1 = true;
+                break;
+            case Sketcher::EllipseFocus2:
+                hasFocus2 = true;
+                break;
+            default:
+                break;
+            }
+        }
+
+        const auto* ellipse = static_cast<const Part::GeomEllipse*>(geo);
+        const Base::Vector3d center = ellipse->getCenter();
+        const double majorRadius = ellipse->getMajorRadius();
+        const double minorRadius = ellipse->getMinorRadius();
+        const Base::Vector3d majorDir = ellipse->getMajorAxisDir();
+        const Base::Vector3d minorDir = ellipse->getMinorAxisDir();
+        // The focuses sit on the major axis, at the focal distance from the centre.
+        // A circle keeps them both at the centre (the ellipse tool creates a circle
+        // instead when the two radii are equal, so this is only a guard).
+        const double focalDistance = std::sqrt(std::max(
+            0.0, majorRadius * majorRadius - minorRadius * minorRadius));
+
+        int added = 0;
+        // Commits one element: it is added as construction geometry - drawn, part of
+        // the solver, never part of the wire - and the constraint that says what it
+        // is ties it to the ellipse.
+        auto addElement = [&](std::unique_ptr<Part::Geometry> p_element,
+                              Sketcher::InternalAlignmentType p_alignment,
+                              PointPos p_pos) {
+            if (!p_element) {
+                return;
+            }
+            const int elementId = addGeometry(p_element);
+            if (elementId < 0) {
+                return;
+            }
+            setConstruction(elementId, true);
+            auto constraint = std::make_unique<Sketcher::Constraint>();
+            constraint->Type = Sketcher::ConstraintType::InternalAlignment;
+            constraint->AlignmentType = p_alignment;
+            constraint->First = elementId;
+            constraint->FirstPos = p_pos;
+            constraint->Second = p_geoId;
+            if (addConstraint(std::move(constraint)) < 0) {
+                CORE_WARN(
+                    "[SketcherObj] {0}: the internal alignment of element {1} was refused",
+                    getName(),
+                    elementId);
+                return;
+            }
+            ++added;
+        };
+
+        // The two axes, as the diameters they are.
+        if (!hasMajor && majorRadius > Precision::Confusion()) {
+            auto line = std::make_unique<Part::GeomLineSegment>();
+            line->setPoints(center + majorDir * majorRadius, center - majorDir * majorRadius);
+            addElement(std::move(line), Sketcher::EllipseMajorDiameter, PointPos::none);
+        }
+        if (!hasMinor && minorRadius > Precision::Confusion()) {
+            auto line = std::make_unique<Part::GeomLineSegment>();
+            line->setPoints(center + minorDir * minorRadius, center - minorDir * minorRadius);
+            addElement(std::move(line), Sketcher::EllipseMinorDiameter, PointPos::none);
+        }
+        // The two focuses: the points an ellipse is defined by, and the only way to
+        // constrain something to them.
+        if (!hasFocus1) {
+            auto point = std::make_unique<Part::GeomPoint>();
+            point->setPoint(center + majorDir * focalDistance);
+            addElement(std::move(point), Sketcher::EllipseFocus1, PointPos::start);
+        }
+        if (!hasFocus2) {
+            auto point = std::make_unique<Part::GeomPoint>();
+            point->setPoint(center - majorDir * focalDistance);
+            addElement(std::move(point), Sketcher::EllipseFocus2, PointPos::start);
+        }
+        return added;
+    }
     void SketcherObj::setConstraintVisible(int constrId, bool visible)
     {
         if (constrId >= 0 && constrId < static_cast<int>(mConstraintList.size())) {

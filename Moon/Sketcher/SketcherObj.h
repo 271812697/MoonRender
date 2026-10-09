@@ -201,6 +201,30 @@ namespace MOON {
 		 * corner points of a rounded rectangle). */
 		void setConstruction(int geoId, bool construction);
 
+		/** --- the internal geometry of a curve -------------------------------------
+		 * An ellipse the user drew carries its parameters - centre, radii, axis
+		 * direction - inside itself, and there is no element the rest of the sketch
+		 * could be constrained against. FreeCAD exposes them: the major axis, the
+		 * minor axis and the two focuses are added as construction curves of their
+		 * own, each tied to the ellipse by an InternalAlignment constraint. They
+		 * follow the ellipse, they are what a length on an axis or a point on one of
+		 * them is constrained to, and being construction they are never part of the
+		 * wire the features above build on. Drawing them is what shows the dashed
+		 * axes (and the two focus dots) of an ellipse.
+		 *
+		 * This is FreeCAD's SketchObject::exposeInternalGeometry(): it adds only the
+		 * elements that are missing, so calling it again changes nothing.
+		 * @return how many internal elements were added, or -1 when p_geoId does not
+		 * name a curve that carries internal geometry. */
+		int exposeInternalGeometry(int p_geoId);
+		/** True when p_geoId is one of those elements: it is the First element of an
+		 * InternalAlignment constraint, which is what ties it to its curve. Such an
+		 * element cannot be turned into normal geometry - it would then be part of the
+		 * sketch's shape - so the construction toggle leaves it alone. */
+		bool isInternalGeometry(int p_geoId) const;
+		/** The curve an internal element belongs to, or NoGeoId. */
+		int internalGeometryOwner(int p_geoId) const;
+
 		/** --- external geometry: geometry of another feature, into this sketch ----
 		 *
 		 * The curves are computed outside the sketch (the tool widget

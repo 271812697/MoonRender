@@ -29,6 +29,28 @@ namespace MOON
 		// 🔥 增量更新（单个）
 		void notifyActorCreated(Core::ECS::Actor* actor);
 		void notifyActorRemoved(Core::ECS::Actor* actor);
+		/** Shows a new name for an actor that was renamed: the item of the tree keeps the
+		 * name it was made with, so it is written over here. */
+		void updateActorName(Core::ECS::Actor* p_actor);
+		/** Puts the row of an actor into edit mode, so its name is typed where it is shown
+		 * instead of in a dialog (the model applies it in setData). */
+		void startRename(Core::ECS::Actor* p_actor);
+		/** Applies a name typed on a row: the rows that stand for a feature or a body
+		 * carry a name of their own, and that name goes to the actor (or the body).
+		 * A name that is empty or already taken is refused, and the row keeps its text. */
+		bool setData(
+			const QModelIndex& index,
+			const QVariant& value,
+			int role = Qt::EditRole) override;
+		/** Whether a row can be edited in place. It is asked on every edit instead of
+		 * being written on the item when it is made: a body's row is created by the scene
+		 * (which tells the tree about the actor right away) before the body itself is
+		 * registered, so at that moment it could not know it is editable. */
+		Qt::ItemFlags flags(const QModelIndex& index) const override;
+		/** Where a row keeps "this one can be renamed". It is written when the row is made
+		 * - from the actor, which is alive there - and read back while the tree paints:
+		 * asking the actor then is not safe, because a row can outlive it. */
+		static constexpr int kRenamableRole = Qt::UserRole + 5;
 		QStandardItem* sceneRoot();
 		QStandardItem* actorItem(Core::ECS::Actor* actor);
 	
@@ -60,6 +82,7 @@ namespace MOON
                 item->setIcon(QIcon());
                 item->setData(QVariant(), Qt::UserRole);
                 item->setData(QVariant(), Qt::UserRole + 1);
+               item->setData(QVariant(), EntityTreeModel::kRenamableRole);
                 item->setCheckState(Qt::Unchecked);
                 item->setCheckable(false);
                 item->setEditable(false);
@@ -136,7 +159,6 @@ namespace MOON
          * in - the order of the body, which is the chain - instead of the order they
          * happened to be added to the tree in (see the definition). */
         void sortFeatureItems();
-
         QStandardItem* createItemFromActor(Core::ECS::Actor* actor);
         void addActorToTree(Core::ECS::Actor* actor, QStandardItem* parent = nullptr);
         void removeActorFromTree(Core::ECS::Actor* actor);

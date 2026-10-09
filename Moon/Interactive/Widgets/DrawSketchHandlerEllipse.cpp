@@ -162,6 +162,44 @@ namespace MOON {
 		return true;
 	}
 
+	void DrawSketchHandlerEllipse::executeCommands()
+	{
+		SketcherObj* sketch = SketcherObjManager::instance().GetCurrentActiveSketcherObj();
+		if (!sketch) {
+			return;
+		}
+		// The ellipse goes in right after the sketch's current content, and the final
+		// build (not the preview one) is the geometry that is committed.
+		const int firstCurve = sketch->getHighestCurveIndex() + 1;
+		createShape(false);
+		if (ShapeGeometry.empty()) {
+			return;
+		}
+		SupperClass::executeCommands();
+
+		// FreeCAD exposes the internal geometry of a curve as soon as the tool that
+		// drew it commits (its DrawSketchHandlerEllipse calls
+		// SketchObject::exposeInternalGeometry). That is what adds the major axis,
+		// the minor axis and the two focuses to the sketch: they can be constrained
+		// against - a length on the major axis, a point on the minor one, anything on
+		// the focuses - they follow the ellipse, and as construction geometry they are
+		// drawn dashed and never become part of the sketch's wire.
+		//
+		// Equal radii degenerate into a circle, which has no internals to expose.
+		//
+		// The check looks at what the sketch holds, not at ShapeGeometry: the base
+		// class hands those entries over to the sketch and leaves them empty, so they
+		// cannot be dereferenced after the call above.
+		const Part::Geometry* committed = sketch->getGeometry(firstCurve);
+		if (committed != nullptr && committed->is<Part::GeomEllipse>()) {
+			if (sketch->exposeInternalGeometry(firstCurve) > 0) {
+				// The new elements and their alignment constraints are part of the
+				// sketch now, so the solver and the drawing have to see them.
+				sketch->solve();
+			}
+		}
+	}
+
 	void DrawSketchHandlerEllipse::createShape(bool onlyeditoutline)
 	{
 		Q_UNUSED(onlyeditoutline);

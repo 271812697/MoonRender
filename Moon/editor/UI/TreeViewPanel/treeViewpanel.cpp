@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include "treeViewpanel.h"
 #include "editor/UI/TreeViewPanel/EntityTreeModel.h"
 #include "editor/UI/TreeViewPanel/EntityTreeStyle.h"
@@ -10,11 +10,13 @@
 #include "renderer/Context.h"
 #include "feature/Feature.h"
 #include "feature/FeatureBody.h"
+#include "feature/MoonDocument.h"
 #include "feature/SketcherFeature.h"
 #include "editor/UI/TaskPanel/TaskViewWidget.h"
 #include "editor/View/sceneview/viewerwidget.h"
 #include "core/SelectionManager.h"
 #include "core/JobSystem.h"
+#include "core/log.h"
 #include "renderer/SceneView.h"
 #include <Core/SceneSystem/Scene.h>
 #include <Core/ECS/Components/CLight.h>
@@ -26,11 +28,20 @@
 #include <QHeaderView>
 #include <QMouseEvent>
 #include <QMenu>
+#include <QInputDialog>
+#include <QLineEdit>
 #include <algorithm>
 #include <string>
 #include <vector>
 
 namespace MOON {
+	namespace
+	{
+		/** The body that was copied last, as the text a document would write: it is kept
+		 * as text so that a copy cannot dangle when the body it came from is deleted. */
+		std::string g_copiedBody;
+	}
+
 	static bool isEntityCheckAble(const std::string& name) {
 		if (name == "HeadLight" || name == "PointLight1" || name == "PointLight2" || name == "PointLight3" || name == "PointLight4") {
 			return false;
@@ -129,7 +140,12 @@ namespace MOON {
 		setSelectionMode(QAbstractItemView::SingleSelection);
 
 		// 👇 这一句是关键！禁止点行触发勾选
-		setEditTriggers(QAbstractItemView::NoEditTriggers);
+			// Editing is not started by the view's own triggers: a double click on a
+			// feature is how its task panel is opened again, and a click must stay a
+			// click. The rename in the menu opens the editor on the row itself
+			// programmatically (see EntityTreeModel::startRename), which the triggers do
+			// not take part in.
+			setEditTriggers(QAbstractItemView::NoEditTriggers);
 
 		setContextMenuPolicy(Qt::CustomContextMenu);
 		connect(this, &QTreeView::customContextMenuRequested, this, &TreeViewPanel::onContextMenu);
@@ -304,11 +320,118 @@ namespace MOON {
 		Core::ECS::Actor* actor = static_cast<Core::ECS::Actor*>(
 			index.data(Qt::UserRole).value<void*>());
 
+		// The feature the clicked row belongs to: a feature's own row carries it, and a
+		// row below it (a face, an edge, a render anchor) reaches it through its parents.
+		// Renaming from any of them renames that feature, which is what is meant by it.
+		Feature* named = dynamic_cast<Feature*>(actor);
+		for (Core::ECS::Actor* parent = actor != nullptr ? actor->GetParent() : nullptr;
+			parent != nullptr && named == nullptr;
+			parent = parent->GetParent()) {
+			named = dynamic_cast<Feature*>(parent);
+		}
+		FeatureBody* clickedBody = FeatureBody::Of(actor);
 		QMenu menu(this);
 		QAction* remove = menu.addAction(QString::fromUtf8("Delete"));
 		remove->setEnabled(canDeleteActor(actor));
-		if (menu.exec(viewport()->mapToGlobal(p_pos)) == remove && actor != nullptr) {
+		// A feature and a body both carry a name of their own - it is what the tree shows
+		// and what a document writes down - so either can be renamed here.
+		QAction* rename = menu.addAction(QString::fromUtf8("Rename"));
+		rename->setEnabled(named != nullptr || clickedBody != nullptr);
+		// A body can be copied and pasted: the copy is a body of its own, with every
+		// feature of the one it came from built again and its links landing on the copies
+		// (see MoonDocument::copyBody / pasteBody).
+		QAction* copyBody = menu.addAction(QString::fromUtf8("Copy"));
+		copyBody->setEnabled(clickedBody != nullptr);
+		QAction* pasteBody = menu.addAction(QString::fromUtf8("Paste"));
+		pasteBody->setEnabled(!g_copiedBody.empty());
+		// A body node gets the one thing a body has that the tree can switch: whether new
+		// features are made into it. The entry is a check box, so the menu says which body
+		// is active and one click makes another one active (FreeCAD's "active body").
+		QAction* makeActive = nullptr;
+		if (clickedBody != nullptr) {
+			makeActive = menu.addAction(QString::fromUtf8("Active Body"));
+			makeActive->setCheckable(true);
+			makeActive->setChecked(clickedBody == FeatureBody::Active());
+			menu.addSeparator();
+		}
+		// The order of the chain is what a feature is stacked on, so a feature that was
+		// appended after something it should have come before is moved up or down here
+		// (see FeatureBody::moveFeature - a move that would put a feature above what it
+		// is built from is refused, and says why).
+		Feature* feature = dynamic_cast<Feature*>(actor);
+		// The chain a feature is moved in is the one of its own body, not of whatever
+		// body happens to be active.
+		FeatureBody* body = feature != nullptr && feature->getBody() != nullptr
+			? feature->getBody()
+			: FeatureBody::Active();
+		const std::vector<Feature*>& chain = body->getFeatures();
+		int chainIndex = -1;
+		for (int i = 0; i < static_cast<int>(chain.size()); ++i) {
+			if (chain[i] == feature) {
+				chainIndex = i;
+				break;
+			}
+		}
+		QAction* moveUp = menu.addAction(QString::fromUtf8("Move Up"));
+		QAction* moveDown = menu.addAction(QString::fromUtf8("Move Down"));
+		moveUp->setEnabled(chainIndex > 0);
+		moveDown->setEnabled(chainIndex >= 0
+			&& chainIndex + 1 < static_cast<int>(chain.size()));
+
+		QAction* chosen = menu.exec(viewport()->mapToGlobal(p_pos));
+		if (chosen == nullptr) {
+			return;
+		}
+		if (chosen == makeActive && clickedBody != nullptr) {
+			FeatureBody::SetActive(clickedBody);
+			CORE_INFO(
+				"[Body] '{0}' is the body new features go into now",
+				clickedBody->GetName());
+			return;
+		}
+		if (chosen == rename) {
+			// The name is typed on the row itself rather than in a dialog: the row turns
+			// into an editor and what is written there is applied by the model (see
+			// EntityTreeModel::startRename and setData). A row below a feature renames
+			// that feature, a body row renames the body.
+			Core::ECS::Actor* renameTarget = named != nullptr
+				? static_cast<Core::ECS::Actor*>(named)
+				: (clickedBody != nullptr ? clickedBody->GetAnchor() : nullptr);
+			if (renameTarget != nullptr && mInternal->mModel != nullptr) {
+				mInternal->mModel->startRename(renameTarget);
+			}
+			return;
+		}
+		if (chosen == copyBody && clickedBody != nullptr) {
+			g_copiedBody.clear();
+			if (MoonDocument::copyBody(clickedBody, g_copiedBody)) {
+				CORE_INFO(
+					"[Body] '{0}' is copied: paste it to make a body of its own",
+					clickedBody->GetName());
+			}
+			else {
+				CORE_WARN("[Body] '{0}' could not be copied", clickedBody->GetName());
+			}
+			return;
+		}
+		if (chosen == pasteBody && !g_copiedBody.empty()) {
+			if (MoonDocument::pasteBody(g_copiedBody) != nullptr) {
+				GetViewerWidget.refreshTreeView();
+			}
+			return;
+		}
+		if (chosen == remove && actor != nullptr) {
 			deleteActor(actor);
+			return;
+		}
+		if (feature == nullptr || chainIndex < 0) {
+			return;
+		}
+		if (chosen == moveUp) {
+			body->moveFeature(feature, chainIndex - 1);
+		}
+		else if (chosen == moveDown) {
+			body->moveFeature(feature, chainIndex + 1);
 		}
 	}
 	bool TreeViewPanel::canDeleteActor(Core::ECS::Actor* p_actor) const
@@ -316,6 +439,12 @@ namespace MOON {
 		if (p_actor == nullptr) {
 			// The items of a sketch - its curves and its constraints - stand for the
 			// sketch object rather than for an actor.
+			return false;
+		}
+		if (FeatureBody::Of(p_actor) != nullptr) {
+			// A body is the chain itself: deleting the node would leave its features
+			// without the body that rebuilds them, so it is not something this menu
+			// removes (its features can be deleted one by one instead).
 			return false;
 		}
 		if (dynamic_cast<Feature*>(p_actor) != nullptr) {
@@ -366,12 +495,18 @@ namespace MOON {
 	}
 	void TreeViewPanel::deleteFeatureChain(Feature* p_feature)
 	{
+		// The body this chain belongs to, taken before anything is deleted: the features
+		// of the chain go away below, and a feature that is gone cannot be asked for its
+		// body any more.
+		FeatureBody* body = p_feature != nullptr && p_feature->getBody() != nullptr
+			? p_feature->getBody()
+			: FeatureBody::Active();
 		// The body is a chain: every feature listed after this one was built on it,
 		// directly or through the ones in between, so it goes with it.
-		const auto fromFeatureOnwards = [p_feature]() {
+		const auto fromFeatureOnwards = [p_feature, body]() {
 			std::vector<Feature*> chain;
 			bool reached = false;
-			for (Feature* feature : FeatureBody::instance().getFeatures()) {
+			for (Feature* feature : body->getFeatures()) {
 				if (feature == p_feature) {
 					reached = true;
 				}
@@ -418,7 +553,7 @@ namespace MOON {
 		// What is left below was hidden when the features above it were built, so the
 		// new top of the chain takes their place: without this the body would simply
 		// disappear from the viewport with the features that just went.
-		const std::vector<Feature*>& remaining = FeatureBody::instance().getFeatures();
+		const std::vector<Feature*>& remaining = body->getFeatures();
 		if (!remaining.empty()) {
 			Feature* tip = remaining.back();
 			for (Feature* feature : remaining) {

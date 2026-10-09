@@ -172,8 +172,15 @@ void Editor::Rendering::GridRenderPass::Draw(::Rendering::Data::PipelineState p_
 		const auto& sceneDescriptor = m_renderer.GetDescriptor<::Core::Rendering::SceneRenderer::SceneDescriptor>();
 		if (auto* bvh = sceneDescriptor.scene.GetBvh()) {
 			const auto& b = bvh->m_bounds;
-			const float sceneExtent = Maths::FVector3::Length(b.pmax - b.pmin);
-			gridSize = std::max(gridSize, sceneExtent * 0.6f);
+			// Only bounds that are bounds: an empty scene BVH keeps the default box,
+			// whose extent overflows to inf and would scale the plane to a size that
+			// has no meaning (its vertices become NaN and the plane disappears).
+			if (b.isValid()) {
+				const float sceneExtent = Maths::FVector3::Length(b.pmax - b.pmin);
+				if (std::isfinite(sceneExtent)) {
+					gridSize = std::max(gridSize, sceneExtent * 0.6f);
+				}
+			}
 		}
 	}
 	const float camDist = Maths::FVector3::Length(

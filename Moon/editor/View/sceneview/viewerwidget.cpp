@@ -10,6 +10,8 @@
 #include <Core/ECS/Components/CModelRenderer.h>
 #include <Core/SceneSystem/Scene.h>
 #include "Core/ECS/Components/CMaterialRenderer.h"
+#include "Rendering/Resources/Mesh.h"
+#include "Rendering/Geometry/bbox.h"
 #include "editor/parsescene.h"
 #include "feature/MoonDocument.h"
 #include "editor/UI/TreeViewPanel/treeViewpanel.h"
@@ -140,6 +142,11 @@ namespace MOON {
 			}
 			ImRenderer::instance().newImgui();
 			Render2D::Im2DRender::instance().newFrame();
+			// The frames that follow a document read are traced step by step: they
+			// build the scene query, frame the view, refresh the tree and draw, and a
+			// crash in one of those steps is otherwise impossible to place. Nothing is
+			// logged once the read is done.
+			bool openFrame = false;
 			if (mSceneView->GetRenderer().GetPass<Editor::Rendering::GizmoRenderPass>("ImRenderer").IsEnabled()) {
 				ImRenderer::instance().newFrame(mSceneView);
 			}
@@ -159,6 +166,7 @@ namespace MOON {
 				else {
 					parser->ParseFile(path);
 				}
+				openFrame = true;
 				mSceneView->UnselectActor();
 				// A file that was just read - an imported model or a rebuilt feature
 				// chain - arrives without scene query structures and with the camera
@@ -176,11 +184,29 @@ namespace MOON {
 			{
 				if (hasModelToFrame())
 				{
-					mPendingViewFit = false;
-					// Still inside the render loop, which is what BuildBvh needs:
-					// it copies the mesh domain palettes through the GL context.
-					mSceneView->BuildBvh();
-					mSceneView->FitToFocus(mSceneView->GetCamera()->GetTransform().GetWorldForward());
+					// The triangles of the read come first: a scene query build that
+					// runs before them comes back empty, and an empty scene BVH is
+					// worse than none - the camera controller reads the scene bounds
+					// to scale its zoom and pan, and the default (empty) box gives it
+					// infinities to scale by. Once there is something to index - or
+					// once the wait has run out, so a triangle-free document is still
+					// framed - the build and the fit happen in the same frame, still
+					// inside the render loop, which is what BuildBvh needs: it copies
+					// the mesh domain palettes through the GL context.
+					if (hasTrianglesToQuery() || mPendingViewFitFrames <= 1)
+					{
+						mPendingViewFit = false;
+						openFrame = true;
+						CORE_INFO("[Viewer] the document was read; building the scene query");
+						mSceneView->BuildBvh();
+						CORE_INFO("[Viewer] scene query built; framing the view");
+						mSceneView->FitToFocus(mSceneView->GetCamera()->GetTransform().GetWorldForward());
+						CORE_INFO("[Viewer] view framed");
+					}
+					else
+					{
+						--mPendingViewFitFrames;
+					}
 				}
 				else if (--mPendingViewFitFrames <= 0)
 				{
@@ -207,10 +233,26 @@ namespace MOON {
 				// (Solid/Shell/Face_*/Edge_*), so refresh the tree to reflect
 				// the new hierarchy. Runs after the queued adds so a freshly
 				// loaded topo actor is not added twice.
+				openFrame = true;
+				CORE_INFO("[Viewer] refreshing the tree view of the read document");
 				GetTreeView.updateTreeViewSceneRoot();
+				CORE_INFO("[Viewer] tree view refreshed");
 			}
 
+			// The first frames of a read are traced as well: a crash a few frames later
+			// says the scene or the topology actors are not ready for what was read, and
+			// the counter shows which frame it happened on.
+			const bool traceFrame = openFrame
+				|| (mPendingViewFit && mPendingViewFitFrames > kViewFitTimeoutFrames - 8);
+			if (traceFrame) {
+				CORE_INFO(
+					"[Viewer] drawing a frame ({0} fit frame(s) left)",
+					mPendingViewFit ? mPendingViewFitFrames : 0);
+			}
 			mSceneView->Render();
+			if (traceFrame) {
+				CORE_INFO("[Viewer] frame drawn");
+			}
 			mSelf->glBindFramebuffer(GL_FRAMEBUFFER, mSelf->defaultFramebufferObject());
 			mSceneView->Present();
 			debugImgui();
@@ -255,6 +297,38 @@ namespace MOON {
 				auto* model = modelRenderer->GetModel();
 				if (model != nullptr && model->GetBoundingSphere().radius > 0.0f)
 					return true;
+			}
+			return false;
+		}
+		/** True when some model in the scene holds a triangle mesh with bounds, i.e.
+		 * when a scene query build would have something to index.
+		 *
+		 * A build that runs before the read's topology meshes exist comes out empty,
+		 * and an empty scene BVH keeps the default (empty) bounding box - whose
+		 * extents are infinite and which every reader of the scene bounds has to
+		 * defend against. Waiting for one triangle means the build is worth doing and
+		 * the fit frames the geometry that was read. */
+		bool hasTrianglesToQuery()
+		{
+			auto* scene = mSceneView->GetScene();
+			if (scene == nullptr)
+				return false;
+			for (auto* modelRenderer : scene->GetFastAccessComponents().modelRenderers)
+			{
+				if (modelRenderer == nullptr || !modelRenderer->owner.IsActive())
+					continue;
+				auto* model = modelRenderer->GetModel();
+				if (model == nullptr)
+					continue;
+				for (auto* mesh : model->GetMeshes())
+				{
+					if (mesh == nullptr)
+						continue;
+					if (mesh->GetPrimitiveMode() != ::Rendering::Settings::EPrimitiveMode::TRIANGLES)
+						continue;
+					if (mesh->GetBoundingBox().isValid())
+						return true;
+				}
 			}
 			return false;
 		}

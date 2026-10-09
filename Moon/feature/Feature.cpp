@@ -30,11 +30,27 @@ namespace MOON {
 	};
 	Feature::Feature(const std::string& p_name,  const std::string& tag) :TopoActor( p_name, tag, true, false),mInternal(new Internal(this))
 	{
-		FeatureBody::instance().addFeature(this);
+		// A feature is made into the body that is active, and hangs under that body's
+		// node in the scene: that is what lets a scene hold several bodies without every
+		// panel having to be told which one it is editing.
+		m_body = FeatureBody::Active();
+		if (m_body != nullptr) {
+			m_body->addFeature(this);
+			if (Core::ECS::Actor* anchor = m_body->GetAnchor()) {
+				SetParent(*anchor);
+			}
+		}
+		else {
+			CORE_WARN(
+				"[Feature] {0} was made without a body, so it belongs to no chain", p_name);
+		}
 	}
 	Feature::~Feature()
 	{
-		FeatureBody::instance().removeFeature(this);
+		if (m_body != nullptr) {
+			m_body->removeFeature(this);
+			m_body = nullptr;
+		}
 		delete mInternal;
 	}
 	bool Feature::execute()
@@ -215,7 +231,9 @@ namespace MOON {
 		refineResultShape();
 		auto comp =GetComponent<Core::ECS::Components::CTopoShape>();
 		comp->discretizationShape();
-		FeatureBody::instance().populateFeature(this);
+		if (m_body != nullptr) {
+			m_body->populateFeature(this);
+		}
 	}
 	Part::TopoShape Feature3D::getToolShape() {
 		return GetTopoShape();

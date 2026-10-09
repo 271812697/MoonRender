@@ -7,6 +7,8 @@
 #include "editor/UI/TaskPanel/ChamferTask.h"
 #include "editor/UI/TaskPanel/RevolutionTask.h"
 #include "editor/UI/TaskPanel/DatumLineTask.h"
+#include "editor/UI/TaskPanel/DatumPlaneTask.h"
+#include "editor/UI/TaskPanel/PipeTask.h"
 #include "editor/UI/TaskPanel/PolarPatternTask.h"
 #include "editor/UI/TaskPanel/MirrorTask.h"
 #include "editor/UI/TaskPanel/LinearPatternTask.h"
@@ -44,6 +46,15 @@ namespace MOON {
 		}
 		if (name == "DatumLine") {
 			return new DatumLineTask();
+		}
+		if (name == "DatumPlane") {
+			return new DatumPlaneTask();
+		}
+		if (name == "Pipe") {
+			return new PipeTask(nullptr, /*addSubType*/ 0);
+		}
+		if (name == "PipeCut") {
+			return new PipeTask(nullptr, /*addSubType*/ 1);
 		}
 		if (name == "PolarPattern") {
 			return new PolarPatternTask();
@@ -96,8 +107,14 @@ namespace MOON {
 			pocketCommand->setIcon(":/widgets/icons/partdesign/PartDesign_Pocket.svg");
 			grooveCommand = new DesignModelCommand(self,"Groove");
 			grooveCommand->setIcon(":/widgets/icons/partdesign/PartDesign_Groove.svg");
+			additivePipeCommand = new DesignModelCommand(self, "Pipe");
+			additivePipeCommand->setIcon(":/widgets/icons/partdesign/PartDesign_AdditivePipe.svg");
+			subtractivePipeCommand = new DesignModelCommand(self, "PipeCut");
+			subtractivePipeCommand->setIcon(":/widgets/icons/partdesign/PartDesign_SubtractivePipe.svg");
 			datumLineCommand = new DesignModelCommand(self, "DatumLine");
 			datumLineCommand->setIcon(":/widgets/icons/partdesign/PartDesign_Line.svg");
+			datumPlaneCommand = new DesignModelCommand(self, "DatumPlane");
+			datumPlaneCommand->setIcon(":/widgets/icons/partdesign/PartDesign_Plane.svg");
 			polarPatternCommand = new DesignModelCommand(self, "PolarPattern");
 			polarPatternCommand->setIcon(
 				":/widgets/icons/partdesign/PartDesign_PolarPattern.svg");
@@ -114,7 +131,10 @@ namespace MOON {
 			self->addAction(chamferCommand->action());
 			self->addAction(pocketCommand->action());
 			self->addAction(grooveCommand->action());
+			self->addAction(additivePipeCommand->action());
+			self->addAction(subtractivePipeCommand->action());
 			self->addAction(datumLineCommand->action());
+			self->addAction(datumPlaneCommand->action());
 			self->addAction(polarPatternCommand->action());
 			self->addAction(mirrorCommand->action());
 			self->addAction(linearPatternCommand->action());
@@ -129,7 +149,10 @@ namespace MOON {
 			pocketCommand->action()->setText(QCoreApplication::translate("DesignModelingToolbar", "Pocket", nullptr));
 			revolveCommand->action()->setText(QCoreApplication::translate("DesignModelingToolbar", "Revolve", nullptr));
 			grooveCommand->action()->setText(QCoreApplication::translate("DesignModelingToolbar", "Groove", nullptr));
+			additivePipeCommand->action()->setText(QCoreApplication::translate("DesignModelingToolbar", "Additive Pipe", nullptr));
+			subtractivePipeCommand->action()->setText(QCoreApplication::translate("DesignModelingToolbar", "Subtractive Pipe", nullptr));
 			datumLineCommand->action()->setText(QCoreApplication::translate("DesignModelingToolbar", "Datum Line", nullptr));
+			datumPlaneCommand->action()->setText(QCoreApplication::translate("DesignModelingToolbar", "Datum Plane", nullptr));
 			polarPatternCommand->action()->setText(QCoreApplication::translate("DesignModelingToolbar", "Polar Pattern", nullptr));
 			mirrorCommand->action()->setText(QCoreApplication::translate("DesignModelingToolbar", "Mirror", nullptr));
 			linearPatternCommand->action()->setText(QCoreApplication::translate("DesignModelingToolbar", "Linear Pattern", nullptr));
@@ -144,7 +167,10 @@ namespace MOON {
 		DesignModelCommand* pocketCommand = nullptr;
 		DesignModelCommand* revolveCommand = nullptr;
 		DesignModelCommand* grooveCommand = nullptr;
+		DesignModelCommand* additivePipeCommand = nullptr;
+		DesignModelCommand* subtractivePipeCommand = nullptr;
 		DesignModelCommand* datumLineCommand = nullptr;
+		DesignModelCommand* datumPlaneCommand = nullptr;
 		DesignModelCommand* polarPatternCommand = nullptr;
 		DesignModelCommand* mirrorCommand = nullptr;
 		DesignModelCommand* linearPatternCommand = nullptr;

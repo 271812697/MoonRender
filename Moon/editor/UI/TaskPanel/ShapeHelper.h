@@ -37,6 +37,9 @@ namespace MOON {
 		void onSelectAny();
 		virtual void onSelectEdge(const std::vector<Part::TopoShape>& edge);
 		virtual void onSelectFace(const std::vector<Part::TopoShape>& face);
+		/** A picked vertex: a point of the shape below, which is what a task that
+		 * places something at an exact corner of it needs. */
+		virtual void onSelectVertex(const std::vector<Part::TopoShape>& vertex);
 		void setGenerateShapeName(const char* name);
 		struct PreviewOption {
 			bool isTransparent = true;

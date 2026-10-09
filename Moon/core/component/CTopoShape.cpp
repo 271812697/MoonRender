@@ -20,6 +20,7 @@
 #include "core/JobSystem.h"
 #include "Tools.h"
 #include <TopoDS.hxx>
+#include <BRep_Tool.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <TopExp_Explorer.hxx>
 
@@ -86,12 +87,23 @@ namespace Core::ECS::Components
         */
         std::vector<Core::ECS::Actor*> faceActors;
         std::vector<Core::ECS::Actor*> edgeActors;
+        std::vector<Core::ECS::Actor*> vertexActors;
         std::vector<std::pair<int, int>>faceSolidShell;
         std::vector<int>shellSolid;
         // All ancestor shells per global edge index. An edge shared by several
         // shells (e.g. the boundary between two solids) gets one leaf actor per
         // shell so the TreeView shows the real topology.
         std::vector<std::vector<int>>edgeShells;
+        // The same for vertices: one leaf actor per owning shell, and the range of
+        // the point mesh each vertex occupies (a vertex is one point, so the range
+        // is one index - kept as a range so the visibility filtering reads like the
+        // edge one).
+        std::vector<std::vector<Core::ECS::Actor*>> vertexLeafActors;
+        std::vector<std::pair<int, int>> vertexIndexRanges;
+        std::vector<std::vector<int>> vertexShells;
+        /** Where each vertex sits, in the shape's own coordinates: what the hover
+         * and the selection of a vertex draw their marker at. */
+        std::vector<Maths::FVector3> vertexPositions;
         std::map<int, Core::ECS::Actor*>shellGroups;
         std::map<int, Core::ECS::Actor*>solidGroups;
         std::map<std::string, Core::ECS::Actor*>fallbackGroups;
@@ -100,6 +112,9 @@ namespace Core::ECS::Components
         // updateEdgeMesh re-uploads only the indices of edges whose leaf actors
         // are active (IsActive already accounts for inactive ancestors).
         ::Rendering::Resources::Mesh* lineMesh = nullptr;
+        /** The batched vertices of the shape: one point per topological vertex, on
+         * the "AllVertices" render child of the actor (see updateVertex below). */
+        ::Rendering::Resources::Mesh* vertexMesh = nullptr;
         std::vector<std::pair<int, int>>edgeIndexRanges;
         std::vector<std::vector<Core::ECS::Actor*>>edgeLeafActors;
         /*
@@ -110,8 +125,12 @@ namespace Core::ECS::Components
         //std::vector<int>domainIndexToEdgeChildIndex;
         bool updateFace = false;
         bool updateEdge = false;
+        bool updateVertex = false;
         bool updateChildMesh = false;
         bool hoverLine = false;
+        bool hoverVertex = false;
+        int hoverVertexId = -1;
+        std::vector<int> selectedVertexIds;
 		std::vector<int>curOpaqueChildMeshIndex;
         std::vector<int>curTransparentChildMeshIndex;
         std::vector<std::pair<int, int>> curTransparentChildMesh;
@@ -152,12 +171,61 @@ namespace Core::ECS::Components
 	void CTopoShape::OnUpdate(float p_deltaTime)
 	{
         auto& instance=MOON::ImRenderer::instance();
+        // What the overlays below draw is stored in the shape's own space, the way
+        // the batched meshes are: those are drawn with the actor's matrix, so the
+        // markers have to follow it too or a moved body would show them where the
+        // shape was built.
+        const Maths::FMatrix4 world = owner.transform.GetWorldMatrix();
+        const auto toWorld = [&world](const Maths::FVector3& p) {
+            const Maths::FVector3 w = Maths::FMatrix4::MulPoint(world, p);
+            return Eigen::Vector3f(w.x, w.y, w.z);
+            };
         if (mInternal->hoverLine) {
-            instance.drawLineList(mInternal->hoverLineSeg, 3.0f, Eigen::Vector4<uint8_t>(255, 0, 180, 255));
+            std::vector<Eigen::Vector3f> segments;
+            segments.reserve(mInternal->hoverLineSeg.size());
+            for (const auto& p : mInternal->hoverLineSeg) {
+                segments.push_back(toWorld({ p.x(), p.y(), p.z() }));
+            }
+            instance.drawLineList(segments, 3.0f, Eigen::Vector4<uint8_t>(255, 0, 180, 255));
         }
         for (int i = 0;i < mInternal->selectLineSeg.size();i++) {
-            instance.drawLineList(mInternal->selectLineSeg[i], 3.0f, Eigen::Vector4<uint8_t>(255, 0, 130, 255));
+            std::vector<Eigen::Vector3f> segments;
+            segments.reserve(mInternal->selectLineSeg[i].size());
+            for (const auto& p : mInternal->selectLineSeg[i]) {
+                segments.push_back(toWorld({ p.x(), p.y(), p.z() }));
+            }
+            instance.drawLineList(segments, 3.0f, Eigen::Vector4<uint8_t>(255, 0, 130, 255));
         }
+        // The vertex dot itself is drawn by its batch; this is the marker that says
+        // which dot is hovered or picked - the same two colors the edges use.
+        const auto drawVertexMarker =
+            [&](int vertexId, const Eigen::Vector4<uint8_t>& color) {
+                if (vertexId < 0
+                    || vertexId >= static_cast<int>(mInternal->vertexPositions.size())) {
+                    return;
+                }
+                instance.drawPoint(
+                    toWorld(mInternal->vertexPositions[vertexId]), 14.0f, color);
+            };
+        if (mInternal->hoverVertex) {
+            drawVertexMarker(
+                mInternal->hoverVertexId, Eigen::Vector4<uint8_t>(255, 0, 180, 255));
+        }
+        for (int vertexId : mInternal->selectedVertexIds) {
+            drawVertexMarker(vertexId, Eigen::Vector4<uint8_t>(255, 0, 130, 255));
+        }
+        // A feature whose shape never came out - a thickness the kernel refused, say -
+        // has no topology to build: no face domains, no edges, no vertices. Everything
+        // below here creates actors, batches and BVHs for the shape, and doing that for
+        // a shape that is not there is how an empty one used to take the process down.
+        if (mInternal->mTopoShape.isNull()) {
+            mInternal->updateFace = false;
+            mInternal->updateEdge = false;
+            mInternal->updateVertex = false;
+            mInternal->updateChildMesh = false;
+            return;
+        }
+
         if (mInternal->updateFace|| mInternal->updateEdge) {
             ZoneScoped;
             auto& view = GetService(::Editor::Panels::SceneView);
@@ -534,10 +602,100 @@ namespace Core::ECS::Components
                 auto& lineBacthMesh =*edgeChild->GetComponent<Core::ECS::Components::CBatchMeshLine>();
                 lineBacthMesh.BuildBvh(lineSegmentOffsets);
                 updateEdgeMesh();
-            }        
+            }
             // The topology actors (Solid/Shell/Face_*/Edge_*) were rebuilt;
             // ask the TreeView to refresh so the new hierarchy is visible.
             GetViewerWidget.refreshTreeView();
+        }
+        // The vertices are a batch of their own, on the "AllVertices" render child:
+        // none of the topology tree is rebuilt for them, which is why they are not
+        // part of the block above - that one drops and rebuilds the leaves.
+        if (mInternal->updateVertex)
+        {
+            ZoneScopedN("updateVertex");
+            mInternal->updateVertex = false;
+            // One point per vertex of the shape, in the shape's own coordinates.
+            // These are the topology vertices - the corners, and the points where a
+            // curve closes or a cone comes to a tip - taken from the shape rather
+            // than from the tessellation of the faces, so a dot sits exactly where a
+            // reference would name the vertex.
+            std::vector<::Rendering::Geometry::VertexBVH> p_vertices;
+            std::vector<uint32_t> pointIndices;
+            mInternal->vertexPositions.clear();
+            mInternal->vertexLeafActors.clear();
+            mInternal->vertexIndexRanges.clear();
+            auto& scene = *GetService(::Editor::Panels::SceneView).GetScene();
+            const TopoDS_Shape shape = mInternal->mTopoShape.getShape();
+            if (!shape.IsNull()) {
+                TopTools_IndexedMapOfShape vertexMap;
+                TopExp::MapShapes(shape, TopAbs_VERTEX, vertexMap);
+                p_vertices.reserve(vertexMap.Extent());
+                pointIndices.reserve(vertexMap.Extent());
+                mInternal->vertexPositions.reserve(vertexMap.Extent());
+                mInternal->vertexLeafActors.resize(vertexMap.Extent());
+                mInternal->vertexIndexRanges.reserve(vertexMap.Extent());
+                for (int i = 1; i <= vertexMap.Extent(); ++i) {
+                    const gp_Pnt p = BRep_Tool::Pnt(TopoDS::Vertex(vertexMap(i)));
+                    const Maths::FVector3 position = {
+                        static_cast<float>(p.X()),
+                        static_cast<float>(p.Y()),
+                        static_cast<float>(p.Z()) };
+                    // A vertex sits under the shells of the edges that meet there. A
+                    // vertex shared by two solids gets one leaf per shell, and the
+                    // first one carries the id a pick reports - the way an edge does
+                    // it (see the edge block above).
+                    std::vector<int> shells;
+                    if (i - 1 < static_cast<int>(mInternal->vertexShells.size())) {
+                        shells = mInternal->vertexShells[i - 1];
+                    }
+                    if (shells.empty()) {
+                        shells.push_back(-1);
+                    }
+                    float subVertexId = 0.0f;
+                    for (size_t s = 0; s < shells.size(); ++s) {
+                        auto& actor = scene.CreateActor(
+                            "Vertex_" + std::to_string(i - 1), "TopoVertex");
+                        actor.SetParent(*getOrCreateTopoGroup(shells[s], "Vertices"));
+                        mInternal->vertexActors.push_back(&actor);
+                        mInternal->vertexLeafActors[i - 1].push_back(&actor);
+                        if (s == 0) {
+                            subVertexId = actor.GetID() * 1.0f;
+                        }
+                    }
+                    ::Rendering::Geometry::VertexBVH v;
+                    v.position = position;
+                    // domainId.x is the vertex's own index, domainId.y the leaf actor
+                    // a pick of this dot resolves to (that is the field the picking
+                    // shader writes out, the same way the lines use it). texCoords.x
+                    // carries the index for anything that reads the mesh instead.
+                    v.texCoords = { static_cast<float>(i - 1), 0.0f };
+                    v.domainId = { static_cast<float>(i - 1), subVertexId };
+                    p_vertices.emplace_back(v);
+                    const int pointIndex = static_cast<int>(pointIndices.size());
+                    pointIndices.push_back(static_cast<uint32_t>(pointIndex));
+                    mInternal->vertexPositions.push_back(position);
+                    mInternal->vertexIndexRanges.emplace_back(pointIndex, 1);
+                }
+            }
+            auto* vertexChild = owner.GetChild("AllVertices");
+            if (vertexChild != nullptr) {
+                auto* vertexMesh = new ::Rendering::Resources::Mesh(
+                    p_vertices,
+                    pointIndices,
+                    0,
+                    ::Rendering::Settings::EPrimitiveMode::POINTS);
+                mInternal->vertexMesh = vertexMesh;
+                auto* vertexModel = vertexChild
+                    ->GetComponent<Core::ECS::Components::CModelRenderer>()->GetModel();
+                vertexModel->GetMaterialNames().emplace_back("Point");
+                vertexModel->ClearMeshes();
+                vertexModel->AddMesh(vertexMesh);
+                // The points are few, so the box is taken here like the faces do it
+                // rather than on a job thread like the (often long) line mesh.
+                vertexMesh->ComputeBoundingSphereAndBox();
+                vertexModel->computeBoxAndShpere();
+                updateVertexMesh();
+            }
         }
         if (mInternal->updateChildMesh) {
             mInternal->updateChildMesh = false;
@@ -597,6 +755,7 @@ namespace Core::ECS::Components
         std::vector<Core::ECS::Actor*> toDestroy;
         toDestroy.insert(toDestroy.end(), mInternal->faceActors.begin(), mInternal->faceActors.end());
         toDestroy.insert(toDestroy.end(), mInternal->edgeActors.begin(), mInternal->edgeActors.end());
+        toDestroy.insert(toDestroy.end(), mInternal->vertexActors.begin(), mInternal->vertexActors.end());
         std::vector<Core::ECS::Actor*> shells;
         std::vector<Core::ECS::Actor*> solids;
         std::vector<Core::ECS::Actor*> fallbacks;
@@ -617,16 +776,21 @@ namespace Core::ECS::Components
         scene.DelayDestroyActor(toDestroy);
         mInternal->faceActors.clear();
         mInternal->edgeActors.clear();
+        mInternal->vertexActors.clear();
         mInternal->topoGroupList.clear();
         mInternal->shellGroups.clear();
         mInternal->solidGroups.clear();
         mInternal->fallbackGroups.clear();
         mInternal->lineMesh = nullptr;
+        mInternal->vertexMesh = nullptr;
         mInternal->edgeIndexRanges.clear();
         mInternal->edgeLeafActors.clear();
+        mInternal->vertexIndexRanges.clear();
+        mInternal->vertexLeafActors.clear();
         mInternal->faceSolidShell.clear();
         mInternal->shellSolid.clear();
         mInternal->edgeShells.clear();
+        mInternal->vertexShells.clear();
 
         const TopoDS_Shape shape = mInternal->mTopoShape.getShape();
         if (shape.IsNull()) {
@@ -706,6 +870,31 @@ namespace Core::ECS::Components
                 }
             }
             mInternal->edgeShells.push_back(std::move(shells));
+        }
+
+        // The same for the vertices, in the order the vertex mesh is built in (both
+        // use TopExp::MapShapes, so index i is the same vertex): a vertex belongs to
+        // the shells of the edges that meet there, which is what puts its dot under
+        // the same Solid/Shell group as the edges and faces around it.
+        TopTools_IndexedMapOfShape vertexMap;
+        TopExp::MapShapes(shape, TopAbs_VERTEX, vertexMap);
+        TopTools_IndexedDataMapOfShapeListOfShape vertex2Shell;
+        TopExp::MapShapesAndAncestors(shape, TopAbs_VERTEX, TopAbs_SHELL, vertex2Shell);
+        for (int i = 1; i <= vertexMap.Extent(); ++i) {
+            const TopoDS_Shape& vertex = vertexMap(i);
+            std::vector<int> shells;
+            if (vertex2Shell.Contains(vertex)) {
+                const auto& shellsOfVertex = vertex2Shell.FindFromKey(vertex);
+                for (TopTools_ListIteratorOfListOfShape it(shellsOfVertex); it.More(); it.Next()) {
+                    // One ancestor shell is listed per path through the shape, so
+                    // deduplicate like the edges do.
+                    const int shellIdx = shellMap.FindIndex(it.Value()) - 1;
+                    if (std::find(shells.begin(), shells.end(), shellIdx) == shells.end()) {
+                        shells.push_back(shellIdx);
+                    }
+                }
+            }
+            mInternal->vertexShells.push_back(std::move(shells));
         }
     }
 
@@ -787,6 +976,13 @@ namespace Core::ECS::Components
     Part::TopoShape CTopoShape::GetTopoEdge(int childFaceId)
     {
         return mInternal->mTopoShape.getSubTopoShape(TopAbs_EDGE, childFaceId + 1);
+    }
+
+    Part::TopoShape CTopoShape::GetTopoVertex(int childVertexId)
+    {
+        // Same enumeration the vertex batch is built with (TopExp::MapShapes), so
+        // the index of a "Vertex_<i>" leaf is the index used here.
+        return mInternal->mTopoShape.getSubTopoShape(TopAbs_VERTEX, childVertexId + 1);
     }
 
     void CTopoShape::hoverChild(int childId)
@@ -875,6 +1071,28 @@ namespace Core::ECS::Components
         mInternal->selectLineSeg.clear();
     }
 
+    void CTopoShape::hoverChildVertex(int childId)
+    {
+        mInternal->hoverVertex = true;
+        mInternal->hoverVertexId = childId;
+    }
+
+    void CTopoShape::selectChildVertex(const std::vector<int>& childIds)
+    {
+        mInternal->selectedVertexIds = childIds;
+    }
+
+    void CTopoShape::clearHoverVertex()
+    {
+        mInternal->hoverVertex = false;
+        mInternal->hoverVertexId = -1;
+    }
+
+    void CTopoShape::clearSelectVertex()
+    {
+        mInternal->selectedVertexIds.clear();
+    }
+
     void CTopoShape::discretizationFaceShape()
     {
         mInternal->updateFace = true;
@@ -885,10 +1103,16 @@ namespace Core::ECS::Components
 		mInternal->updateEdge = true;
     }
 
+    void CTopoShape::discretizationVertexShape()
+    {
+        mInternal->updateVertex = true;
+    }
+
 	void CTopoShape::discretizationShape()
 	{
         discretizationFaceShape();
         discretizationEdgeShape();
+        discretizationVertexShape();
 	}
 
 	void CTopoShape::OnSerialize(tinyxml2::XMLDocument& p_doc, tinyxml2::XMLNode* p_node)
@@ -919,6 +1143,7 @@ namespace Core::ECS::Components
         mesh->UploadIndices(mInternal->curOpaqueChildMesh, 0);
         mesh->UploadIndices(mInternal->curTransparentChildMesh, 1);
         updateEdgeMesh();
+        updateVertexMesh();
     }
 
     void CTopoShape::updateEdgeMesh()
@@ -953,5 +1178,40 @@ namespace Core::ECS::Components
             }
         }
         mInternal->lineMesh->UploadIndices(visibleIndices, 0);
+    }
+
+    void CTopoShape::updateVertexMesh()
+    {
+        if (!mInternal->vertexMesh) {
+            return;
+        }
+        const size_t vertexCount = mInternal->vertexIndexRanges.size();
+        if (vertexCount != mInternal->vertexLeafActors.size()) {
+            return;
+        }
+
+        // A vertex is drawn while at least one of its leaf actors is active;
+        // IsActive walks up the ancestors, so unchecking a "Vertices" group, a
+        // Shell or a Solid hides the dots below it - the way it hides its edges.
+        const auto& allIndices = mInternal->vertexMesh->GetIndices();
+        std::vector<uint32_t> visibleIndices;
+        visibleIndices.reserve(allIndices.size());
+        for (size_t i = 0; i < vertexCount; ++i) {
+            bool visible = false;
+            for (auto* actor : mInternal->vertexLeafActors[i]) {
+                if (actor->IsActive()) {
+                    visible = true;
+                    break;
+                }
+            }
+            if (!visible) {
+                continue;
+            }
+            const auto& range = mInternal->vertexIndexRanges[i];
+            for (int k = 0; k < range.second; ++k) {
+                visibleIndices.push_back(allIndices[range.first + k]);
+            }
+        }
+        mInternal->vertexMesh->UploadIndices(visibleIndices, 0);
     }
 }

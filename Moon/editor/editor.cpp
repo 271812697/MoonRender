@@ -23,6 +23,7 @@
 #include "Command/menubar/fpsStat.h"
 #include "Command/menubar/visibleview.h"
 #include "Command/menubar/sketch.h"
+#include "Command/menubar/bodyCommand.h"
 #include "core/Global/ServiceLocator.h"
 #include "editor/UI/TreeViewPanel/treeViewpanel.h"
 #include "editor/UI/TaskPanel/TaskViewWidget.h"
@@ -91,11 +92,14 @@ namespace MOON {
 			auto saveFileCommand = new SaveFileCommand(self, false);
 			auto saveAsFileCommand = new SaveFileCommand(self, true);
 			auto exportFileCommand = new ExportFileCommand(self);
+			auto newBodyCommand = new NewBodyCommand(self);
 			
 			menu_File->addAction(openFileCommand->action());
 			menu_File->addAction(saveFileCommand->action());
 			menu_File->addAction(saveAsFileCommand->action());
 			menu_File->addAction(exportFileCommand->action());
+			menu_File->addSeparator();
+			menu_File->addAction(newBodyCommand->action());
 		}
 		void buildDisplayMenu() {
 			auto cameraModeCommand = new CameraModeComand(self);

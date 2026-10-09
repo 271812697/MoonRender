@@ -1,4 +1,4 @@
-﻿#include <tracy/Tracy.hpp>
+#include <tracy/Tracy.hpp>
 #include "editor/UI/TaskPanel/RevolutionTask.h"
 #include "Widgets/SliderFloatProperty.h"
 #include "Widgets/EnumProperty.h"
@@ -50,7 +50,7 @@ namespace MOON {
                     auto* sketchFeature = SketcherObjManager::instance().GetLastSketcherFeature();
                     if (sketchFeature) {
                         //2.设置基于最后一个feature
-                        FeatureBody::instance().setBaseFeatureFor(feature);
+                        FeatureBody::Active()->setBaseFeatureFor(feature);
                         feature->setProfile(sketchFeature);
                         // Through the feature, so the pose of the sketch is taken into
                         // account here exactly like it is where the solid is built.

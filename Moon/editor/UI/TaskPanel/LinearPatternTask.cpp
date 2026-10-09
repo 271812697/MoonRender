@@ -55,7 +55,7 @@ namespace MOON {
                 feature->setSubValues(subValues);
             }
             else {
-                FeatureBody::instance().setBaseFeatureFor(feature);
+                FeatureBody::Active()->setBaseFeatureFor(feature);
             }
 
             // Moving along the axes of the sketch the body was built from is the

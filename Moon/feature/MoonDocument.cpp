@@ -15,6 +15,8 @@
 #include "core/log.h"
 #include "feature/ChamferFeature.h"
 #include "feature/DatumLineFeature.h"
+#include "feature/DatumPlaneFeature.h"
+#include "feature/PipeFeature.h"
 #include "feature/ExtrudeFeature.h"
 #include "feature/FeatureBaseProfile.h"
 #include "feature/FeatureBody.h"
@@ -523,6 +525,14 @@ namespace MOON
 			node->SetAttribute("driving", p_constraint->isDriving ? 1 : 0);
 			node->SetAttribute("visible", p_constraint->isVisible ? 1 : 0);
 			node->SetAttribute("active", p_constraint->isActive ? 1 : 0);
+			if (p_constraint->Type == Sketcher::ConstraintType::InternalAlignment) {
+				// Which internal element of a curve this is: the axes and focuses an
+				// ellipse was exposed with. Without it the constraint would come back
+				// as an alignment of no particular kind and the ellipse would lose the
+				// link to its own internals.
+				node->SetAttribute("alignmentType", static_cast<int>(p_constraint->AlignmentType));
+				node->SetAttribute("alignmentIndex", p_constraint->InternalAlignmentIndex);
+			}
 			p_parent.InsertEndChild(node);
 		}
 
@@ -544,6 +554,11 @@ namespace MOON
 			constraint->isDriving = getFlag(p_node, "driving", true);
 			constraint->isVisible = getFlag(p_node, "visible", true);
 			constraint->isActive = getFlag(p_node, "active", true);
+			if (constraint->Type == Sketcher::ConstraintType::InternalAlignment) {
+				constraint->AlignmentType = static_cast<Sketcher::InternalAlignmentType>(
+					getInt(p_node, "alignmentType", 0));
+				constraint->InternalAlignmentIndex = getInt(p_node, "alignmentIndex", -1);
+			}
 			return constraint;
 		}
 
@@ -622,6 +637,12 @@ namespace MOON
 							getText(*child, "type"));
 						return false;
 					}
+					// The flag is kept in two places: on the curve (which is what the
+					// shape builder reads) and in the sketch's set of construction
+					// curves (what the drawing, the construction toggle and the cleanup
+					// of orphaned aids read). addGeometry() moved the curve in, so the
+					// set is filled from the value read above.
+					p_sketch->setConstruction(geoId, getFlag(*child, "construction"));
 					p_sketch->setGeometryVisible(geoId, getFlag(*child, "visible", true));
 				}
 			}
@@ -675,6 +696,12 @@ namespace MOON
 			if (dynamic_cast<const DatumLineFeature*>(p_feature) != nullptr) {
 				return "DatumLineFeature";
 			}
+			if (dynamic_cast<const DatumPlaneFeature*>(p_feature) != nullptr) {
+				return "DatumPlaneFeature";
+			}
+			if (dynamic_cast<const PipeFeature*>(p_feature) != nullptr) {
+				return "PipeFeature";
+			}
 			if (dynamic_cast<const PolarPatternFeature*>(p_feature) != nullptr) {
 				return "PolarPatternFeature";
 			}
@@ -709,6 +736,12 @@ namespace MOON
 			}
 			if (p_type == "DatumLineFeature") {
 				return new DatumLineFeature(p_name);
+			}
+			if (p_type == "DatumPlaneFeature") {
+				return new DatumPlaneFeature(p_name);
+			}
+			if (p_type == "PipeFeature") {
+				return new PipeFeature(p_name, p_addSubType);
 			}
 			if (p_type == "PolarPatternFeature") {
 				return new PolarPatternFeature(p_name);
@@ -841,7 +874,7 @@ namespace MOON
 		void writeParameters(tinyxml2::XMLElement& p_parent, Feature& p_feature)
 		{
 			tinyxml2::XMLElement* node = p_parent.GetDocument()->NewElement(kParameters);
-			const std::vector<Feature*>& all = FeatureBody::instance().getFeatures();
+			const std::vector<Feature*>& all = FeatureBody::Active()->getFeatures();
 			if (auto* sketch = dynamic_cast<SketcherFeature*>(&p_feature)) {
 				writeSketch(*node, sketch->getSketcherObj());
 			}
@@ -951,6 +984,30 @@ namespace MOON
 				setValues(*node, "direction", {
 					datum->direction.x, datum->direction.y, datum->direction.z });
 				setNumber(*node, "length", datum->length);
+			}
+			else if (auto* plane = dynamic_cast<DatumPlaneFeature*>(&p_feature)) {
+				setText(*node, "mapMode", DatumPlaneFeature::mapModeName(plane->mapMode));
+				node->SetAttribute("automaticSize", plane->automaticSize ? 1 : 0);
+				setValues(*node, "offset", {
+					plane->offset.x, plane->offset.y, plane->offset.z });
+				setNumber(*node, "rotation", plane->rotation);
+				setNumber(*node, "length", plane->length);
+				setNumber(*node, "width", plane->width);
+				// The placement the attachment last produced: it is what the plane
+				// falls back to when a reference cannot be resolved any more.
+				setValues(*node, "origin", {
+					plane->origin.x, plane->origin.y, plane->origin.z });
+				setValues(*node, "normal", {
+					plane->normal.x, plane->normal.y, plane->normal.z });
+				setValues(*node, "xAxis", {
+					plane->xAxis.x, plane->xAxis.y, plane->xAxis.z });
+			}
+			else if (auto* pipe = dynamic_cast<PipeFeature*>(&p_feature)) {
+				node->SetAttribute("addSubType", pipe->addSubType);
+				setText(*node, "mode", PipeFeature::modeName(pipe->mode));
+				setText(*node, "transition", PipeFeature::transitionName(pipe->transition));
+				setValues(*node, "binormal", {
+					pipe->binormal.x, pipe->binormal.y, pipe->binormal.z });
 			}
 			else if (auto* pattern = dynamic_cast<PolarPatternFeature*>(&p_feature)) {
 				const gp_Pnt location = pattern->axis.Location();
@@ -1102,6 +1159,45 @@ namespace MOON
 				datum->length = static_cast<float>(getNumber(*node, "length", datum->length));
 				return true;
 			}
+			if (auto* plane = dynamic_cast<DatumPlaneFeature*>(&p_feature)) {
+				// readVector3() is for the plain float[3] members other features use;
+				// these are Maths::FVector3, so they go through the same list the
+				// datum line's origin and direction are read from.
+				const auto readPlaneVector = [&](const char* p_name, Maths::FVector3& p_target) {
+					const std::vector<double> values = getValues(*node, p_name);
+					if (values.size() >= 3) {
+						p_target = Maths::FVector3(values[0], values[1], values[2]);
+					}
+					};
+				plane->mapMode = DatumPlaneFeature::mapModeFromName(
+					getText(*node, "mapMode", DatumPlaneFeature::mapModeName(plane->mapMode)),
+					plane->mapMode);
+				plane->automaticSize = getFlag(*node, "automaticSize", plane->automaticSize);
+				readPlaneVector("offset", plane->offset);
+				plane->rotation
+					= static_cast<float>(getNumber(*node, "rotation", plane->rotation));
+				plane->length = static_cast<float>(getNumber(*node, "length", plane->length));
+				plane->width = static_cast<float>(getNumber(*node, "width", plane->width));
+				readPlaneVector("origin", plane->origin);
+				readPlaneVector("normal", plane->normal);
+				readPlaneVector("xAxis", plane->xAxis);
+				return true;
+			}
+			if (auto* pipe = dynamic_cast<PipeFeature*>(&p_feature)) {
+				pipe->addSubType = getInt(*node, "addSubType", pipe->addSubType);
+				pipe->mode = PipeFeature::modeFromName(
+					getText(*node, "mode", PipeFeature::modeName(pipe->mode)),
+					pipe->mode);
+				pipe->transition = PipeFeature::transitionFromName(
+					getText(*node, "transition", PipeFeature::transitionName(pipe->transition)),
+					pipe->transition);
+				const std::vector<double> binormal = getValues(*node, "binormal");
+				if (binormal.size() >= 3) {
+					pipe->binormal
+						= Maths::FVector3(binormal[0], binormal[1], binormal[2]);
+				}
+				return true;
+			}
 			if (auto* pattern = dynamic_cast<PolarPatternFeature*>(&p_feature)) {
 				pattern->mode = getInt(*node, "mode", pattern->mode);
 				pattern->axisType = getInt(*node, "axisType", pattern->axisType);
@@ -1177,6 +1273,14 @@ namespace MOON
 			if (auto* profile = dynamic_cast<FeatureBaseProfile*>(&p_feature)) {
 				node->SetAttribute("profile", indexOf(p_features, profile->getProfile()));
 			}
+			if (auto* pipe = dynamic_cast<PipeFeature*>(&p_feature)) {
+				// The path lives in another feature, so it is a link like the base and
+				// the profile - and it is written where the loader reads it from. It
+				// used to go into <Parameters>, the block of the feature's own values,
+				// while the loader looked for the attribute on the feature element:
+				// a pipe came back without its path.
+				node->SetAttribute("spine", indexOf(p_features, pipe->spineFeature));
+			}
 			// What the tree view's eye switched off is part of the document: a feature is
 			// hidden with its own flag, and everything under it (the render anchors and
 			// the topology actors) by name.
@@ -1200,20 +1304,276 @@ namespace MOON
 		}
 	}
 
-	bool MoonDocument::save(const std::string& p_path)
+	/** Builds one body from its <Body> element: the features, the links between them and
+	 * their visibility. The body it fills has to be the active one - a feature lists
+	 * itself in the body that is active when it was made.
+	 * @return false when the element names a feature this build does not know, or one
+	 * whose parameters cannot be read: the caller takes the body back out then. */
+	bool readBody(const tinyxml2::XMLElement& p_node)
 	{
-		const std::vector<Feature*>& features = FeatureBody::instance().getFeatures();
-		tinyxml2::XMLDocument doc;
-		tinyxml2::XMLElement* root = doc.NewElement(kRoot);
-		root->SetAttribute("version", kVersion);
-		tinyxml2::XMLElement* body = doc.NewElement(kBody);
-		body->SetAttribute("name", "Body");
+		// First pass: build every feature with its own parameters. Nothing is executed
+		// yet, because a feature's links may name features that appear later in the list.
+		std::vector<Feature*> features;
+		std::vector<int> baseIndices;
+		std::vector<int> profileIndices;
+		std::vector<int> spineIndices;
+		std::vector<std::vector<int>> originalIndices;
+		std::vector<StoredUpToFace> upToFaceRefs;
+		std::vector<bool> activeFlags;
+		std::vector<std::vector<std::string>> hiddenNames;
+		for (const tinyxml2::XMLElement* node = p_node.FirstChildElement(kFeature);
+			node != nullptr;
+			node = node->NextSiblingElement(kFeature)) {
+			const std::string type = getText(*node, "type");
+			const std::string name = getText(*node, "name", "feature");
+			Feature* feature = createFeature(type, name, getInt(*node, "addSubType", 0));
+			if (feature == nullptr) {
+				CORE_ERROR("[MoonDocument] a '{0}' feature is not known to this build", type);
+				return false;
+			}
+			features.push_back(feature);  // from here on it is dropped with the rest
+			feature->SetName(name);
+			feature->SetTag(getText(*node, "tag", feature->GetTag().c_str()));
+			readPose(*node, *feature);
+			readReferences(*node, *feature);
+			if (!readParameters(*node, *feature)) {
+				return false;
+			}
+			baseIndices.push_back(getInt(*node, "base", -1));
+			profileIndices.push_back(getInt(*node, "profile", -1));
+			// The path of a pipe is a link, i.e. an index on the feature element - but
+			// a document written before that was so carries it in its <Parameters>
+			// block, and it is read from there rather than losing the path.
+			int spineIndex = getInt(*node, "spine", -1);
+			if (spineIndex < 0) {
+				if (const tinyxml2::XMLElement* parameters
+					= node->FirstChildElement(kParameters)) {
+					spineIndex = getInt(*parameters, "spine", -1);
+				}
+			}
+			spineIndices.push_back(spineIndex);
+			upToFaceRefs.push_back(readUpToFace(*node));
+			activeFlags.push_back(getFlag(*node, "active", true));
+			std::vector<std::string> hidden;
+			if (const tinyxml2::XMLElement* hosts = node->FirstChildElement(kHidden)) {
+				for (const tinyxml2::XMLElement* actor = hosts->FirstChildElement(kActor);
+					actor != nullptr;
+					actor = actor->NextSiblingElement(kActor)) {
+					hidden.push_back(getText(*actor, "name"));
+				}
+			}
+			hiddenNames.push_back(std::move(hidden));
+			const tinyxml2::XMLElement* parameters = node->FirstChildElement(kParameters);
+			originalIndices.push_back(
+				parameters != nullptr ? getIndices(*parameters, "originals") : std::vector<int>());
+		}
+
+		// Second pass: the links, now that every feature exists.
+		for (int i = 0; i < static_cast<int>(features.size()); ++i) {
+			Feature* feature = features[i];
+			feature->setBaseFeature(at(features, baseIndices[i]));
+			if (auto* profile = dynamic_cast<FeatureBaseProfile*>(feature)) {
+				profile->setProfile(dynamic_cast<SketcherFeature*>(at(features, profileIndices[i])));
+			}
+			if (auto* pipe = dynamic_cast<PipeFeature*>(feature)) {
+				pipe->spineFeature = at(features, spineIndices[i]);
+			}
+			if (auto* extrude = dynamic_cast<ExtrudeFeature*>(feature)) {
+				const StoredUpToFace& upTo = upToFaceRefs[i];
+				if (Feature* target = at(features, upTo.feature)) {
+					if (target == feature) {
+						// A face picked on the feature itself (which is what a pad
+						// that was already built and edited offers to the pick) is
+						// only meaningful as the matching face of the shape below;
+						// execute() takes it there.
+						CORE_INFO(
+							"[MoonDocument] {0}: the face '{1}' was picked on the "
+							"feature itself, it is taken from the shape below",
+							feature->GetName(),
+							upTo.value);
+					}
+					extrude->upToFaceFeature = target;
+					extrude->upToFaceRef = upTo.value;
+					extrude->upToFaceNames = upTo.names;
+				}
+			}
+			std::vector<Feature*> originals;
+			for (const int index : originalIndices[i]) {
+				if (Feature* original = at(features, index)) {
+					originals.push_back(original);
+				}
+			}
+			if (auto* pattern = dynamic_cast<PolarPatternFeature*>(feature)) {
+				pattern->originals = originals;
+			}
+			else if (auto* pattern = dynamic_cast<LinearPatternFeature*>(feature)) {
+				pattern->originals = originals;
+			}
+			else if (auto* mirror = dynamic_cast<MirrorFeature*>(feature)) {
+				mirror->originals = originals;
+			}
+		}
+
+		// The sketches of this body go into the manager before its chain is built: the
+		// drawing tools reach a sketch through it, and a tool that asks while the chain is
+		// being built would otherwise find nothing. The sketches of the bodies that were
+		// up before leave the manager once the whole document has been read.
+		for (Feature* feature : features) {
+			if (auto* sketch = dynamic_cast<SketcherFeature*>(feature)) {
+				SketcherObjManager::instance().addSketcherFeature(sketch);
+			}
+		}
+		for (Feature* feature : features) {
+			// A feature that throws must not take the load with it. The chain is
+			// rebuilt by walking the links rather than in this order, so a feature can
+			// be asked to build before the shape it needs exists, and both the kernel
+			// (Standard_Failure) and the reference lookup (Base::Exception, which is
+			// not a Standard_Failure) report that by throwing. The build fails, the
+			// feature is reported, and the rest of the document is still read.
+			bool built = false;
+			try {
+				built = feature->execute();
+			}
+			catch (const Base::Exception& e) {
+				CORE_ERROR("[MoonDocument] {0}: {1}", feature->GetName(), e.what());
+			}
+			catch (Standard_Failure& e) {
+				CORE_ERROR(
+					"[MoonDocument] {0}: {1}",
+					feature->GetName(),
+					e.GetMessageString());
+			}
+			if (!built) {
+				CORE_ERROR("[MoonDocument] {0} could not be built", feature->GetName());
+			}
+			try {
+				feature->makeDone();
+			}
+			catch (const Base::Exception& e) {
+				CORE_ERROR("[MoonDocument] {0}: {1}", feature->GetName(), e.what());
+			}
+			catch (Standard_Failure& e) {
+				CORE_ERROR(
+					"[MoonDocument] {0}: {1}",
+					feature->GetName(),
+					e.GetMessageString());
+			}
+		}
+
+		// The visibility comes last: the actors below a feature - the render anchors and
+		// the topology ones - are only there once the feature was discretized, and it is
+		// those the eye switches off.
+		for (int i = 0; i < static_cast<int>(features.size()); ++i) {
+			Feature* feature = features[i];
+			feature->SetActive(activeFlags[i]);
+			for (const std::string& name : hiddenNames[i]) {
+				if (Core::ECS::Actor* actor = findActor(*feature, name)) {
+					actor->SetActive(false);
+				}
+			}
+		}
+		return true;
+	}
+
+	void MoonDocument::writeBody(tinyxml2::XMLElement& p_parent, FeatureBody* p_body)
+	{
+		if (p_body == nullptr) {
+			return;
+		}
+		const std::vector<Feature*>& features = p_body->getFeatures();
+		tinyxml2::XMLElement* body = p_parent.GetDocument()->NewElement(kBody);
+		body->SetAttribute("name", p_body->GetName().c_str());
 		for (Feature* feature : features) {
 			if (feature != nullptr) {
 				writeFeature(*body, *feature, features);
 			}
 		}
-		root->InsertEndChild(body);
+		p_parent.InsertEndChild(body);
+	}
+
+	bool MoonDocument::copyBody(FeatureBody* p_body, std::string& p_out)
+	{
+		if (p_body == nullptr) {
+			return false;
+		}
+		tinyxml2::XMLDocument doc;
+		tinyxml2::XMLElement* root = doc.NewElement(kRoot);
+		root->SetAttribute("version", kVersion);
+		writeBody(*root, p_body);
+		doc.InsertEndChild(root);
+		tinyxml2::XMLPrinter printer;
+		doc.Print(&printer);
+		p_out = printer.CStr();
+		return !p_out.empty();
+	}
+
+	FeatureBody* MoonDocument::pasteBody(const std::string& p_text)
+	{
+		if (p_text.empty()) {
+			return nullptr;
+		}
+		tinyxml2::XMLDocument doc;
+		if (doc.Parse(p_text.c_str(), p_text.size()) != tinyxml2::XML_SUCCESS) {
+			CORE_ERROR("[MoonDocument] a copied body could not be read back");
+			return nullptr;
+		}
+		const tinyxml2::XMLElement* root = doc.FirstChildElement(kRoot);
+		const tinyxml2::XMLElement* bodyNode = root != nullptr
+			? root->FirstChildElement(kBody)
+			: nullptr;
+		if (bodyNode == nullptr) {
+			CORE_ERROR("[MoonDocument] a copied body carries no <Body> node");
+			return nullptr;
+		}
+
+		// The copy is a body of its own: named after the one it came from (made unique) and
+		// the active one from here on, so the next feature the user makes lands in it.
+		FeatureBody* previousActive = FeatureBody::Active();
+		FeatureBody* newBody = FeatureBody::Create(
+			FeatureBody::UniqueName(getText(*bodyNode, "name", "Body")));
+		if (newBody == nullptr) {
+			return nullptr;
+		}
+		if (!readBody(*bodyNode)) {
+			// Nothing of the copy survives when it cannot be built: the features it made go
+			// away with it and the body is taken out of the scene again.
+			newBody->clear();
+			std::vector<std::unique_ptr<FeatureBody>> bodies = FeatureBody::TakeAll();
+			const auto isTheCopy = [newBody](const std::unique_ptr<FeatureBody>& p_body) {
+				return p_body.get() == newBody;
+				};
+			bodies.erase(
+				std::remove_if(bodies.begin(), bodies.end(), isTheCopy),
+				bodies.end());
+			FeatureBody::Adopt(std::move(bodies));
+			FeatureBody::SetActive(previousActive);
+			return nullptr;
+		}
+		CORE_INFO(
+			"[MoonDocument] '{0}' was pasted as '{1}' ({2} feature(s))",
+			getText(*bodyNode, "name", "Body"),
+			newBody->GetName(),
+			newBody->getFeatures().size());
+		return newBody;
+	}
+
+	bool MoonDocument::save(const std::string& p_path)
+	{
+		tinyxml2::XMLDocument doc;
+		tinyxml2::XMLElement* root = doc.NewElement(kRoot);
+		root->SetAttribute("version", kVersion);
+		// One node per body of the scene: the features of a body are a chain of their
+		// own, so their links are indices into that body's list and the file has to keep
+		// them apart. A scene with a single body writes exactly what it always did.
+		int writtenFeatures = 0;
+		for (FeatureBody* featureBody : FeatureBody::All()) {
+			if (featureBody == nullptr) {
+				continue;
+			}
+			const std::vector<Feature*>& features = featureBody->getFeatures();
+			writeBody(*root, featureBody);
+			writtenFeatures += static_cast<int>(features.size());
+		}
 		doc.InsertEndChild(root);
 		FILE* stream = openStream(p_path, /*p_write=*/true);
 		if (stream == nullptr) {
@@ -1229,7 +1589,7 @@ namespace MOON
 				static_cast<int>(error));
 			return false;
 		}
-		CORE_INFO("[MoonDocument] wrote {0} feature(s) to {1}", features.size(), p_path);
+		CORE_INFO("[MoonDocument] wrote {0} feature(s) to {1}", writtenFeatures, p_path);
 		return true;
 	}
 
@@ -1269,162 +1629,74 @@ namespace MOON
 			return false;
 		}
 
-		// The chain that is loaded now is put aside, and the body is emptied for the
-		// time being: a feature lists itself in the body as soon as it is constructed, so
-		// what is built here would otherwise end up mixed with what is already there -
-		// and a file that cannot be built has to leave the loaded chain untouched, which
-		// only works while the old one is still in one piece.
-		const std::vector<Feature*> previous = FeatureBody::instance().getFeatures();
-		FeatureBody::instance().setFeatures({});
-
-		// First pass: build every feature with its own parameters. Nothing is executed
-		// yet, because a feature's links may name features that appear later in the list.
-		std::vector<Feature*> features;
-		std::vector<int> baseIndices;
-		std::vector<int> profileIndices;
-		std::vector<std::vector<int>> originalIndices;
-		std::vector<StoredUpToFace> upToFaceRefs;
-		std::vector<bool> activeFlags;
-		std::vector<std::vector<std::string>> hiddenNames;
-		const auto dropBuilt = [&features, &previous]() {
-			for (Feature* feature : features) {
-				feature->RemoveFromScene();
-				delete feature;
+		// The bodies that are up now are put aside in one piece, and they stay alive: a
+		// feature lists itself in the body it joins as soon as it is constructed, so what
+		// is built here would otherwise be mixed with what is already there - and a file
+		// that cannot be built has to leave the loaded scene untouched, which only works
+		// while the bodies that are there are still in one piece.
+		std::vector<std::unique_ptr<FeatureBody>> previousBodies = FeatureBody::TakeAll();
+		std::vector<Feature*> previousFeatures;
+		for (const std::unique_ptr<FeatureBody>& oldBody : previousBodies) {
+			const std::vector<Feature*>& chain = oldBody->getFeatures();
+			previousFeatures.insert(previousFeatures.end(), chain.begin(), chain.end());
+		}
+		// What this read has made so far, so a failure half way can take it all back out
+		// again and leave the bodies that were there before in place.
+		std::vector<FeatureBody*> createdBodies;
+		std::vector<Feature*> allFeatures;
+		const auto rollback = [&previousBodies, &createdBodies]() {
+			for (FeatureBody* body : createdBodies) {
+				if (body != nullptr) {
+					body->clear();
+				}
 			}
-			FeatureBody::instance().setFeatures(previous);
+			FeatureBody::TakeAll();  // the bodies that were just made
+			FeatureBody::Adopt(std::move(previousBodies));
 			};
-		for (const tinyxml2::XMLElement* node = body->FirstChildElement(kFeature);
-			node != nullptr;
-			node = node->NextSiblingElement(kFeature)) {
-			const std::string type = getText(*node, "type");
-			const std::string name = getText(*node, "name", "feature");
-			Feature* feature = createFeature(type, name, getInt(*node, "addSubType", 0));
-			if (feature == nullptr) {
-				CORE_ERROR("[MoonDocument] a '{0}' feature is not known to this build", type);
-				dropBuilt();
+
+		// Every body of the document, in the order it was written.
+		for (const tinyxml2::XMLElement* bodyNode = root->FirstChildElement(kBody);
+			bodyNode != nullptr;
+			bodyNode = bodyNode->NextSiblingElement(kBody)) {
+			FeatureBody* newBody = FeatureBody::Create(getText(*bodyNode, "name", "Body"));
+			createdBodies.push_back(newBody);
+
+			if (!readBody(*bodyNode)) {
+				rollback();
 				return false;
 			}
-			features.push_back(feature);  // from here on it is dropped with the rest
-			feature->SetName(name);
-			feature->SetTag(getText(*node, "tag", feature->GetTag().c_str()));
-			readPose(*node, *feature);
-			readReferences(*node, *feature);
-			if (!readParameters(*node, *feature)) {
-				dropBuilt();
-				return false;
-			}
-			baseIndices.push_back(getInt(*node, "base", -1));
-			profileIndices.push_back(getInt(*node, "profile", -1));
-			upToFaceRefs.push_back(readUpToFace(*node));
-			activeFlags.push_back(getFlag(*node, "active", true));
-			std::vector<std::string> hidden;
-			if (const tinyxml2::XMLElement* hosts = node->FirstChildElement(kHidden)) {
-				for (const tinyxml2::XMLElement* actor = hosts->FirstChildElement(kActor);
-					actor != nullptr;
-					actor = actor->NextSiblingElement(kActor)) {
-					hidden.push_back(getText(*actor, "name"));
-				}
-			}
-			hiddenNames.push_back(std::move(hidden));
-			const tinyxml2::XMLElement* parameters = node->FirstChildElement(kParameters);
-			originalIndices.push_back(
-				parameters != nullptr ? getIndices(*parameters, "originals") : std::vector<int>());
+			const std::vector<Feature*>& loaded = newBody->getFeatures();
+			allFeatures.insert(allFeatures.end(), loaded.begin(), loaded.end());
 		}
 
-		// Second pass: the links, now that every feature exists.
-		for (int i = 0; i < static_cast<int>(features.size()); ++i) {
-			Feature* feature = features[i];
-			feature->setBaseFeature(at(features, baseIndices[i]));
-			if (auto* profile = dynamic_cast<FeatureBaseProfile*>(feature)) {
-				profile->setProfile(dynamic_cast<SketcherFeature*>(at(features, profileIndices[i])));
-			}
-			if (auto* extrude = dynamic_cast<ExtrudeFeature*>(feature)) {
-				const StoredUpToFace& upTo = upToFaceRefs[i];
-				if (Feature* target = at(features, upTo.feature)) {
-					if (target == feature) {
-						// A face picked on the feature itself (which is what a pad
-						// that was already built and edited offers to the pick) is
-						// only meaningful as the matching face of the shape below;
-						// execute() takes it there.
-						CORE_INFO(
-							"[MoonDocument] {0}: the face '{1}' was picked on the "
-							"feature itself, it is taken from the shape below",
-							feature->GetName(),
-							upTo.value);
-					}
-					extrude->upToFaceFeature = target;
-					extrude->upToFaceRef = upTo.value;
-					extrude->upToFaceNames = upTo.names;
-				}
-			}
-			std::vector<Feature*> originals;
-			for (const int index : originalIndices[i]) {
-				if (Feature* original = at(features, index)) {
-					originals.push_back(original);
-				}
-			}
-			if (auto* pattern = dynamic_cast<PolarPatternFeature*>(feature)) {
-				pattern->originals = originals;
-			}
-			else if (auto* pattern = dynamic_cast<LinearPatternFeature*>(feature)) {
-				pattern->originals = originals;
-			}
-			else if (auto* mirror = dynamic_cast<MirrorFeature*>(feature)) {
-				mirror->originals = originals;
-			}
-		}
-
-		// Only now is the chain that was there before taken apart, and the actors leave
-		// the scene with it: everything the file asked for exists, so nothing can fail
-		// half way and leave the body without either chain.
-		for (Feature* feature : previous) {
-			feature->RemoveFromScene();
-			delete feature;
-		}
-		// The sketch manager hands the current sketch to the drawing tools: the chain
-		// that just went has to leave it (a stale pointer there is a crash the next time
-		// a tool asks), and the one that was read has to be in it, or entering one of the
-		// loaded sketches would find nothing.
-		for (Feature* feature : previous) {
+		// Everything the file asked for exists, so the bodies that were up before are
+		// taken apart now: their features leave the scene with their actors, and their
+		// sketches leave the sketch manager - a stale pointer there is a crash the next
+		// time a drawing tool asks about it.
+		for (Feature* feature : previousFeatures) {
 			if (auto* sketch = dynamic_cast<SketcherFeature*>(feature)) {
 				SketcherObjManager::instance().removeSketcherFeature(sketch);
 			}
 		}
-		for (Feature* feature : features) {
-			if (auto* sketch = dynamic_cast<SketcherFeature*>(feature)) {
-				SketcherObjManager::instance().addSketcherFeature(sketch);
-			}
+		for (const std::unique_ptr<FeatureBody>& oldBody : previousBodies) {
+			oldBody->clear();
 		}
-		for (Feature* feature : features) {
-			if (!feature->execute()) {
-				CORE_ERROR("[MoonDocument] {0} could not be built", feature->GetName());
-			}
-			feature->makeDone();
-		}
-
-		// The visibility comes last: the actors below a feature - the render anchors and
-		// the topology ones - are only there once the feature was discretized, and it is
-		// those the eye switches off.
-		for (int i = 0; i < static_cast<int>(features.size()); ++i) {
-			Feature* feature = features[i];
-			feature->SetActive(activeFlags[i]);
-			for (const std::string& name : hiddenNames[i]) {
-				if (Core::ECS::Actor* actor = findActor(*feature, name)) {
-					actor->SetActive(false);
-				}
-			}
-		}
+		previousBodies.clear();
 
 		// A feature the file described but that came out without a shape is worth saying
 		// out loud: the model would otherwise just be missing a part of itself.
-		for (Feature* feature : features) {
+		for (Feature* feature : allFeatures) {
 			if (feature->GetTopoShape().isNull()) {
 				CORE_WARN(
 					"[MoonDocument] {0} came back without a shape",
 					feature->GetName());
 			}
 		}
-		CORE_INFO("[MoonDocument] read {0} feature(s) from {1}", features.size(), p_path);
+		CORE_INFO(
+			"[MoonDocument] read {0} feature(s) in {1} body(ies) from {2}",
+			allFeatures.size(),
+			createdBodies.size(),
+			p_path);
 		return true;
 	}
 }

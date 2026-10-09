@@ -257,6 +257,13 @@ void Rendering::Entities::Camera::ProjectionFitToSphere(Rendering::Geometry::Bou
 
 void Rendering::Entities::Camera::PersertiveZoom(float delta)
 {
+	// A step that is not a number would be added to the position and stay there: the
+	// camera would be unusable for the rest of the session and the viewport empty with
+	// nothing said about it. Callers scale this by the scene size, which is inf when
+	// the scene bounds are the default (empty) box, so the check belongs here too.
+	if (!std::isfinite(delta)) {
+		return;
+	}
 	constexpr float kUnitsPerScroll = 1.0f;
 	SetPosition(GetPosition() + transform->GetWorldForward() * kUnitsPerScroll * delta
 	);
@@ -290,6 +297,11 @@ void Rendering::Entities::Camera::HandleCameraPanning(const Maths::FVector2& p_m
 	}
 	else
 	{
+		// The window size is what turns the mouse offset into world units, and it is
+		// zero until the view has been resized once.
+		if (m_windowWidth <= 0 || m_windowHeight <= 0) {
+			return;
+		}
 		float dx=2 * m_ratio * m_size * p_mouseOffset.x / m_windowWidth;
 		float dy=2* m_size*p_mouseOffset.y / m_windowHeight;
 		SetPosition(GetPosition() + transform->GetWorldRight() * dx - transform->GetWorldUp() * dy);

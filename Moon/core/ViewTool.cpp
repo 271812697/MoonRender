@@ -24,18 +24,21 @@ namespace MOON {
 		if (!actor) {
 			return false;
 		}
-		// The leaf actors are named "Face_<index>" / "Edge_<index>". Anything
-		// else (the topo actor itself, a Solid_/Shell_ group, the AllFaces /
-		// AllEdges render anchors) has no single sub-shape to resolve.
+		// The leaf actors are named "Face_<index>" / "Edge_<index>" /
+		// "Vertex_<index>". Anything else (the topo actor itself, a Solid_/Shell_
+		// group, the AllFaces / AllEdges / AllVertices render anchors) has no single
+		// sub-shape to resolve.
 		const std::string& name = actor->GetName();
 		bool isFace = name.rfind("Face_", 0) == 0;
 		bool isEdge = name.rfind("Edge_", 0) == 0;
-		if (!isFace && !isEdge) {
+		bool isVertex = name.rfind("Vertex_", 0) == 0;
+		if (!isFace && !isEdge && !isVertex) {
 			return false;
 		}
 		int childId = -1;
 		try {
-			childId = std::stoi(name.substr(5));
+			// "Vertex_" carries one character more than "Face_"/"Edge_".
+			childId = std::stoi(name.substr(isVertex ? 7 : 5));
 		}
 		catch (...) {
 			return false;
@@ -46,7 +49,15 @@ namespace MOON {
 			if (cur->HasComponent("CTopoShape")) {
 				auto topoComp = cur->GetComponent<::Core::ECS::Components::CTopoShape>();
 				topo.push_back(topoComp->GetTopoShape());
-				topo.push_back(isFace ? topoComp->GetTopoFace(childId) : topoComp->GetTopoEdge(childId));
+				if (isFace) {
+					topo.push_back(topoComp->GetTopoFace(childId));
+				}
+				else if (isEdge) {
+					topo.push_back(topoComp->GetTopoEdge(childId));
+				}
+				else {
+					topo.push_back(topoComp->GetTopoVertex(childId));
+				}
 				return true;
 			}
 

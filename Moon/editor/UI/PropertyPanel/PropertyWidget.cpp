@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include "PropertyWidget.h"
 #include "core/ECS/Actor.h"
 #include "core/ECS/Components/CMaterialRenderer.h"
@@ -225,7 +225,7 @@ namespace MOON {
 				CORE_INFO(
 					"[Feature] {0}: transform changed, rebuilding the features on top of it",
 					feature->GetName());
-				FeatureBody::instance().populateFeature(feature);
+				FeatureBody::Active()->populateFeature(feature);
 			}
 		}
 	};

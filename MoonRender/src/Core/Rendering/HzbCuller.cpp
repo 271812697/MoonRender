@@ -104,6 +104,18 @@ namespace Core::Rendering
 		const auto& meshes = p_bvhService.mSceneMeshes;
 		m_stats.bvhInstances = static_cast<uint32_t>(instances.size());
 
+		// A projection that is not finite cannot be tested against anything: the corner
+		// transforms come out NaN, every comparison against them is false, and the tile
+		// scan below reads that as "behind the occluder" for the whole scene. Nothing is
+		// marked occluded instead, so a frame with a broken camera still draws.
+		for (const float value : p_viewProjection.data)
+		{
+			if (!std::isfinite(value))
+			{
+				return;
+			}
+		}
+
 		m_viewProjection = p_viewProjection;
 		m_viewportWidth = std::max(1u, p_viewportWidth);
 		m_viewportHeight = std::max(1u, p_viewportHeight);

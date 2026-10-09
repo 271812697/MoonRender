@@ -107,44 +107,19 @@ Build\bin\Release\Moon.exe
 
 ![image-20261007111021867](README.assets/image-20261007111021867.png)
 
-![image-20261007111127704](README.assets/image-20261007111127704.png)
+![](README.assets/image-20261007111127704.png)
 
-![image-20260903150404609](README.assets/image-20260903150404609.png)
+![image-20261009013359829](README.assets/image-20261009013359829.png)
 
-![image-20260902011211045](README.assets/image-20260902011211045.png)
+![image-20261009013458046](README.assets/image-20261009013458046.png)
 
-![image-20260902011259652](README.assets/image-20260902011259652.png)
+![image-20261009013537803](README.assets/image-20261009013537803.png)
 
-![image-20260902002025784](README.assets/image-20260902002025784.png)
+![image-20261009220144640](README.assets/image-20261009220144640.png)
 
-![image-20260902001925245](README.assets/image-20260902001925245.png)
-
-![image-20260902001844531](README.assets/image-20260902001844531.png)
-
-![几何建模示例 1](README.assets/image-20260829160311142.png)
-*草图绘制与 3D 特征建模效果*
-
-![几何建模示例 2](README.assets/image-20260821131205204.png)
-*特征建模：基于草图生成实体*
-
-![几何建模示例 3](README.assets/image-20260521203930108.png)
-*特征建模结果*
-
-![几何建模示例 4](README.assets/image-20260822220525316.png)
-
-### 透明（depth peel）
-
-![透明渲染](README.assets/image-20260325225058918.png)
-*深度剥离透明*
-
-
+![image-20261010001302981](README.assets/image-20261010001302981.png)
 
 ### 交互 Widget 架构
 
 ![交互 Widget 架构图](README.assets/image-20260819112630072.png)
-*交互 Widget 体系架构*
 
-需要补充：
-
-1. 约束求解后，如何更新原来的几何的细节
-2. 原来的几何和GCS对象，以及映射成参数的
