@@ -665,6 +665,13 @@ namespace MOON {
 		item->setCheckable(true);
 		item->setCheckState(actor->IsActive() ? Qt::Checked : Qt::Unchecked);
 		item->setData(QVariant::fromValue((void*)actor), Qt::UserRole);
+		// Whether this row carries a name of its own (see flags()): the actor is alive
+		// here, and the answer is kept on the item so that painting a row never has to
+		// follow the pointer again - a row can outlive the actor it stands for.
+		item->setData(
+			dynamic_cast<Feature*>(actor) != nullptr || actor->GetTag() == "Body",
+			kRenamableRole
+		);
 		return item;
 	}
 	void EntityTreeModel::addActorToTree(Core::ECS::Actor* actor, QStandardItem* parent)
@@ -807,14 +814,12 @@ namespace MOON {
 		if (!index.isValid()) {
 			return flags;
 		}
-		QStandardItem* item = itemFromIndex(index);
-		Core::ECS::Actor* actor = item != nullptr
-			? static_cast<Core::ECS::Actor*>(item->data(Qt::UserRole).value<void*>())
-			: nullptr;
-		// Only the rows that stand for something with a name of its own are edited in
-		// place: a feature and a body (see setData, which applies what was typed).
-		if (actor != nullptr
-			&& (dynamic_cast<Feature*>(actor) != nullptr || FeatureBody::Of(actor) != nullptr)) {
+		const QStandardItem* item = itemFromIndex(index);
+		// Whether the row can be edited in place is read off the item, where it was put
+		// while the actor was alive (see createItemFromActor). Qt asks this for every row
+		// it paints, hovers or selects, and a row can outlive the actor it stands for - so
+		// the actor is never looked at from here.
+		if (item != nullptr && item->data(kRenamableRole).toBool()) {
 			flags |= Qt::ItemIsEditable;
 		}
 		else {

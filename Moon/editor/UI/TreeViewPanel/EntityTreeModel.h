@@ -47,6 +47,10 @@ namespace MOON
 		 * (which tells the tree about the actor right away) before the body itself is
 		 * registered, so at that moment it could not know it is editable. */
 		Qt::ItemFlags flags(const QModelIndex& index) const override;
+		/** Where a row keeps "this one can be renamed". It is written when the row is made
+		 * - from the actor, which is alive there - and read back while the tree paints:
+		 * asking the actor then is not safe, because a row can outlive it. */
+		static constexpr int kRenamableRole = Qt::UserRole + 5;
 		QStandardItem* sceneRoot();
 		QStandardItem* actorItem(Core::ECS::Actor* actor);
 	
@@ -78,6 +82,7 @@ namespace MOON
                 item->setIcon(QIcon());
                 item->setData(QVariant(), Qt::UserRole);
                 item->setData(QVariant(), Qt::UserRole + 1);
+               item->setData(QVariant(), EntityTreeModel::kRenamableRole);
                 item->setCheckState(Qt::Unchecked);
                 item->setCheckable(false);
                 item->setEditable(false);

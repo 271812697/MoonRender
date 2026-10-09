@@ -177,6 +177,10 @@ namespace MOON {
 
 	void TopoActor::RemoveFromScene()
 	{
+		// The row the tree shows this actor as goes with it: a row outlives its actor
+		// otherwise, and whoever reads the actor off such a row - renaming it, moving it,
+		// deleting the chain it belongs to - would be reading freed memory.
+		GetViewerWidget.removeActorFromTreeView(this);
 		if (m_scene) {
 			m_scene->RemoveActor(this);
 		}		
