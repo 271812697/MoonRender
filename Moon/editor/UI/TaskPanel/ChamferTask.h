@@ -14,6 +14,15 @@ namespace MOON {
 	private:
 		void onWidgetLengthInvoke1();
 		void onWidgetLengthInvoke2();
+		/** Lists the edges this chamfer is applied to (the References group of the panel). */
+		void refreshReferenceRows();
+		/** Takes the edges the viewport has selected and adds them to the chamfer. */
+		void applyPickedEdges();
+		/** Drops the rows that are selected in the list from the chamfer. */
+		void removeSelectedEdges();
+		/** An edge picked while the panel is open is added to the chamfer - the same
+		 * gesture as pressing "Add from Selection", without the click. */
+		virtual void onSelectEdge(const std::vector<Part::TopoShape>& edge) override;
 		class Internal;
 		Internal* mInternal = nullptr;
 	};

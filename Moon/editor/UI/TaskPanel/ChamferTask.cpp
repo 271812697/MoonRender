@@ -1,5 +1,6 @@
 #include "editor/UI/TaskPanel/ChamferTask.h"
 #include "TaskBox.h"
+#include "editor/UI/PropertyPanel/Collapsiblegroupboxwidget.h"
 #include "Widgets/SliderFloatProperty.h"
 #include "Widgets/BoolProperty.h"
 #include "Widgets/EnumProperty.h"
@@ -12,6 +13,15 @@
 #include "App/GizmoHelper.h"
 
 #include <QStringList>
+#include <QListWidget>
+#include <QToolButton>
+#include <QLabel>
+#include <QVBoxLayout>
+#include <QHBoxLayout>
+#include <algorithm>
+#include <set>
+#include <string>
+#include <vector>
 
 namespace MOON {
 
@@ -80,6 +90,10 @@ namespace MOON {
 		}
 	private:
 		SliderFloatProperty* sizeProp;
+		/** The edge list of the panel (see refreshReferenceRows). */
+		QListWidget* edgeList = nullptr;
+		QLabel* edgeLabel = nullptr;
+		QLabel* edgeHint = nullptr;
 		friend ChamferTask;
 		ChamferTask* self = nullptr;
 		ChamferFeature* feature = nullptr;
@@ -110,6 +124,70 @@ namespace MOON {
 		addParam(new BoolProperty("Flip Direction", p));
 		addParam(new BoolProperty("Use ALL Edges", p));
 		buildUi();
+
+		if (mInternal->feature == nullptr) {
+			return;
+		}
+		// The edges the chamfer is applied to, listed with the buttons that take them
+		// from the selection - the same shape the sweep's path list and the fillet's
+		// edge list have. An edge picked while the panel is open lands here as well
+		// (see onSelectEdge).
+		auto* references = new QWidget(this);
+		auto* referencesLayout = new QVBoxLayout(references);
+		referencesLayout->setContentsMargins(0, 0, 0, 0);
+		referencesLayout->setSpacing(2);
+
+		auto* edgeRow = new QHBoxLayout();
+		edgeRow->setContentsMargins(0, 0, 0, 0);
+		auto* addEdges = new QToolButton(references);
+		addEdges->setText(tr("Add from Selection"));
+		auto* removeEdges = new QToolButton(references);
+		removeEdges->setText(tr("Remove"));
+		auto* clearEdges = new QToolButton(references);
+		clearEdges->setText(tr("Clear"));
+		edgeRow->addWidget(addEdges);
+		edgeRow->addWidget(removeEdges);
+		edgeRow->addWidget(clearEdges);
+		edgeRow->addStretch();
+		referencesLayout->addLayout(edgeRow);
+
+		mInternal->edgeLabel = new QLabel(references);
+		mInternal->edgeLabel->setStyleSheet("color: #c8ccd0;");
+		referencesLayout->addWidget(mInternal->edgeLabel);
+		mInternal->edgeList = new QListWidget(references);
+		mInternal->edgeList->setMinimumHeight(50);
+		mInternal->edgeList->setSelectionMode(QAbstractItemView::ExtendedSelection);
+		mInternal->edgeList->setStyleSheet(
+			"QListWidget { background: transparent; border: none; outline: 0; }"
+			"QListWidget::item { height: 20px; padding-left: 2px; }"
+		);
+		referencesLayout->addWidget(mInternal->edgeList);
+		mInternal->edgeHint = new QLabel(references);
+		mInternal->edgeHint->setWordWrap(true);
+		mInternal->edgeHint->setStyleSheet("color: #a8a8a8;");
+		mInternal->edgeHint->setText(tr(
+			"Select edges of the shape below - in the viewport or in the tree - and press "
+			"Add from Selection; an edge picked while this panel is open is added as well. "
+			"Remove drops the rows that are selected in the list."));
+		referencesLayout->addWidget(mInternal->edgeHint);
+
+		const auto groupIndex = groupToIndex.find("Chamfer");
+		if (groupIndex != groupToIndex.end()) {
+			m_comps[groupIndex->second].first->addSubWidget(references);
+		}
+
+		connect(addEdges, &QToolButton::clicked, this, [this]() { applyPickedEdges(); });
+		connect(removeEdges, &QToolButton::clicked, this, [this]() { removeSelectedEdges(); });
+		connect(clearEdges, &QToolButton::clicked, this, [this]() {
+			if (mInternal->feature == nullptr) {
+				return;
+			}
+			mInternal->feature->setSubValues({});
+			mInternal->feature->setReferenceNames({});
+			refreshReferenceRows();
+			previewShape();
+		});
+		refreshReferenceRows();
 	}
 
 	ChamferTask::~ChamferTask() {
@@ -197,6 +275,121 @@ namespace MOON {
 	void ChamferTask::onWidgetLengthInvoke2() {
 		mInternal->feature->size = mInternal->axisBehaviour2->getLength();
 		mInternal->sizeProp->updateWidgetValue(mInternal->feature->size);
+	}
+
+	void ChamferTask::refreshReferenceRows()
+	{
+		if (mInternal->feature == nullptr) {
+			return;
+		}
+		const std::vector<std::string>& references = mInternal->feature->getSubValues();
+		if (mInternal->edgeLabel != nullptr) {
+			if (mInternal->feature->useAllEdges) {
+				mInternal->edgeLabel->setText(tr("Edges: every edge of the shape below"));
+			}
+			else {
+				mInternal->edgeLabel->setText(
+					tr("Edges: %1 selected").arg(static_cast<int>(references.size())));
+			}
+		}
+		if (mInternal->edgeList != nullptr) {
+			mInternal->edgeList->clear();
+			for (int i = 0; i < static_cast<int>(references.size()); ++i) {
+				mInternal->edgeList->addItem(
+					QString("%1  %2").arg(i).arg(QString::fromStdString(references[i])));
+			}
+			// With "Use ALL Edges" the list is not what the chamfer works from, so it
+			// is shown but not something to add to or take from.
+			mInternal->edgeList->setEnabled(!mInternal->feature->useAllEdges
+				&& !references.empty());
+		}
+	}
+
+	void ChamferTask::applyPickedEdges()
+	{
+		if (mInternal->feature == nullptr) {
+			return;
+		}
+		ChamferFeature& feature = *mInternal->feature;
+		Feature* base = nullptr;
+		std::vector<std::string> picked;
+		if (!ViewTool::getSelectedBasedFeature(base, picked) || base == nullptr) {
+			CORE_WARN(
+				"[Chamfer] {0}: select the edge(s) in the viewport or in the tree first",
+				feature.GetName());
+			return;
+		}
+		if (base != feature.getBaseFeature()) {
+			// A chamfer runs along edges of the one shape it is built on: an edge of
+			// another feature is not something it could carry.
+			CORE_WARN(
+				"[Chamfer] {0}: the edges have to come from '{1}', the shape the chamfer "
+				"is built on",
+				feature.GetName(),
+				feature.getBaseFeature() != nullptr
+					? feature.getBaseFeature()->GetName()
+					: "the shape below");
+			return;
+		}
+		std::vector<std::string> references = feature.getSubValues();
+		for (const std::string& reference : picked) {
+			if (reference.rfind("Edge_", 0) != 0) {
+				continue;  // a chamfer runs along edges; a face or a whole object is not one
+			}
+			if (std::find(references.begin(), references.end(), reference) == references.end()) {
+				references.push_back(reference);
+			}
+		}
+		if (references.size() == feature.getSubValues().size()) {
+			return;  // nothing new was selected
+		}
+		// The mapped names stay with their reference: the ones already there are kept,
+		// the new edges start without any and are resolved - and named - on the next build.
+		std::vector<std::vector<std::string>> names = feature.getReferenceNames();
+		names.resize(references.size());
+		feature.setSubValues(references);
+		feature.setReferenceNames(names);
+		refreshReferenceRows();
+		previewShape();
+	}
+
+	void ChamferTask::removeSelectedEdges()
+	{
+		if (mInternal->feature == nullptr || mInternal->edgeList == nullptr) {
+			return;
+		}
+		std::set<int> dropped;
+		for (QListWidgetItem* item : mInternal->edgeList->selectedItems()) {
+			dropped.insert(mInternal->edgeList->row(item));
+		}
+		if (dropped.empty()) {
+			CORE_WARN(
+				"[Chamfer] {0}: select the rows to remove in the list first",
+				mInternal->feature->GetName());
+			return;
+		}
+		std::vector<std::vector<std::string>> names = mInternal->feature->getReferenceNames();
+		names.resize(mInternal->feature->getSubValues().size());
+		std::vector<std::string> references;
+		std::vector<std::vector<std::string>> keptNames;
+		for (int i = 0; i < static_cast<int>(mInternal->feature->getSubValues().size()); ++i) {
+			if (dropped.count(i) != 0) {
+				continue;  // this edge is what is being taken out
+			}
+			references.push_back(mInternal->feature->getSubValues()[i]);
+			keptNames.push_back(names[i]);
+		}
+		mInternal->feature->setSubValues(references);
+		mInternal->feature->setReferenceNames(keptNames);
+		refreshReferenceRows();
+		previewShape();
+	}
+
+	void ChamferTask::onSelectEdge(const std::vector<Part::TopoShape>& edge)
+	{
+		// Picking an edge while the panel is open adds it, which is the same thing the
+		// button does - a picked edge is what the user means by it.
+		applyPickedEdges();
 	}
 
 }
