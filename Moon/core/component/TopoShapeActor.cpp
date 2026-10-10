@@ -148,6 +148,12 @@ namespace MOON {
 				vertexMat->SetProperty("u_PointSize", 8.0f);
 			}
 		}
+		// The colour the shape carries goes on the material now that there is one: the
+		// component is made before these render anchors are, so a colour that arrived
+		// earlier (a feature read out of a document) had nowhere to go until here.
+		if (auto* topoShape = GetComponent<Core::ECS::Components::CTopoShape>()) {
+			topoShape->ApplyColor();
+		}
 		if (addToTree) {
 			GetViewerWidget.addActorToTreeView(this);
 		}

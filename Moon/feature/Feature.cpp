@@ -73,21 +73,31 @@ namespace MOON {
 		}
 		// Nothing to do while the feature sits where it was built, which is the common
 		// case: only a pose the user gave it changes what a consumer has to see.
-		const Maths::FMatrix4& world = p_feature.transform.GetWorldMatrix();
+		//
+		// What is applied is the pose the feature has *inside its body* - its own
+		// transform, the node of the body being the frame the chain lives in - and not
+		// its full world matrix. The placement of the body belongs to the body as a
+		// whole: the features hang under that node, so drawing, picking and the camera
+		// follow it by themselves. A chain that baked it into the shapes it hands on
+		// would see it twice - once in the shape every feature passes up, once again
+		// when that shape is drawn through the actor matrices - and a feature that had
+		// been rotated or moved as a whole would tear the chain apart. For a body left
+		// at the origin (the common case) the two matrices are one and the same.
+		const Maths::FMatrix4& local = p_feature.transform.GetLocalMatrix();
 		bool identity = true;
 		for (int i = 0; i < 16 && identity; ++i) {
 			const float expected = (i % 5 == 0) ? 1.0f : 0.0f;
-			identity = std::abs(world.data[i] - expected) < 1.0e-6f;
+			identity = std::abs(local.data[i] - expected) < 1.0e-6f;
 		}
 		if (identity) {
 			return;
 		}
 
 		const Base::Matrix4D matrix(
-			world.data[0], world.data[1], world.data[2], world.data[3],
-			world.data[4], world.data[5], world.data[6], world.data[7],
-			world.data[8], world.data[9], world.data[10], world.data[11],
-			world.data[12], world.data[13], world.data[14], world.data[15]
+			local.data[0], local.data[1], local.data[2], local.data[3],
+			local.data[4], local.data[5], local.data[6], local.data[7],
+			local.data[8], local.data[9], local.data[10], local.data[11],
+			local.data[12], local.data[13], local.data[14], local.data[15]
 		);
 		// A rigid motion only adds a location, which keeps the mapped names of the shape
 		// alive - the references downstream (and the sketch that projects them) rely on

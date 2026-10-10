@@ -26,6 +26,26 @@ namespace Core::ECS::Components
 		std::string GetName() override;
 		HighLightOption& getHightLightOption();
 		void switchHighLightMode(HighLightOption::Mode mode);
+		/** The colour the faces of this shape are drawn with.
+		 *
+		 * A shape's colour is part of the shape, not of the renderer: it is what a
+		 * feature carries around and what a document writes into the file. It is put
+		 * on the u_Albedo uniform of the face material of the render anchor below the
+		 * actor ("AllFaces") - the very uniform the material panel of that actor
+		 * edits, and the very material TopoActor() makes for the actor. There is one
+		 * material, so nothing here makes a second one.
+		 *
+		 * Reading gives back what the material holds when there is a material, so a
+		 * colour edited in the material panel is seen here too. */
+		Maths::FVector4 GetColor() const;
+		/** Sets that colour. The material is updated right away unless the render
+		 * anchors are not there yet (see ApplyColor). */
+		void SetColor(const Maths::FVector4& p_color);
+		/** Puts the colour back onto the material. The component is made before the
+		 * render anchors of its actor are, so a colour that arrives earlier has
+		 * nowhere to go until this runs - TopoActor() calls it once the material
+		 * exists. */
+		void ApplyColor();
 		virtual void OnUpdate(float p_deltaTime) override;
 		void updateChildBuffer();
 		std::vector<std::pair<int, int>>GetChildMeshInfo();

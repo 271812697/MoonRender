@@ -46,6 +46,10 @@ namespace MOON {
 	{
 	public:
 		TopoShapePropertyComponent(Core::ECS::Components::CTopoShape* comp) :ActorPropertyComponent(comp) {
+			// The colour of the shape itself - the u_Albedo of the AllFaces material of
+			// this actor (see CTopoShape::SetColor) - which is what a feature is told
+			// apart by. The material panel below an anchor edits the same uniform.
+			mProperties.push_back(new ColorPickerProperty("Color", this));
 			mProperties.push_back(new EnumProperty("HighLight Mode", this));
 			mProperties.push_back(new ColorPickerProperty("HoverColor", this));
 			mProperties.push_back(new ColorPickerProperty("SeletedColor", this));
@@ -56,6 +60,11 @@ namespace MOON {
 		virtual QVariant getPropertyValue(const QString& propertyName)override {
 			auto comp = dynamic_cast<Core::ECS::Components::CTopoShape*>(component);
 			auto& highLightOption = comp->getHightLightOption();
+			if (propertyName == "Color") {
+				const Maths::FVector4 color = comp->GetColor();
+				return QVariant::fromValue(QColor(
+					color.x * 255, color.y * 255, color.z * 255, color.w * 255));
+			}
 			if (propertyName == "HighLight Mode") {
 				QList<QString>list = { "Color","Transparent" };
 				return QVariant::fromValue(list);
@@ -72,7 +81,15 @@ namespace MOON {
 		virtual void setPropertyValue(const QString& propertyName, const QVariant& value)override {
 			auto comp = dynamic_cast<Core::ECS::Components::CTopoShape*>(component);
 			auto& highLightOption = comp->getHightLightOption();
-			if (propertyName == "HighLight Mode") {
+			if (propertyName == "Color") {
+				const auto color = value.value<QColor>();
+				comp->SetColor(Maths::FVector4(
+					color.red() / 255.0f,
+					color.green() / 255.0f,
+					color.blue() / 255.0f,
+					color.alpha() / 255.0f));
+			}
+			else if (propertyName == "HighLight Mode") {
 				comp->switchHighLightMode(static_cast<Core::ECS::Components::HighLightOption::Mode>(value.value<int>()));
 			}
 			else if (propertyName == "HoverColor") {

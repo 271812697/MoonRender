@@ -17,8 +17,10 @@ namespace MOON {
 	 * a recompute (they are stored with the mapped names they resolved to, see
 	 * Feature::getReferenceNames).
 	 *
-	 * Scope of this first version: one body - FeatureBody is a singleton - and the
-	 * model only. No camera, no materials and no other view state is written yet.
+	 * What a feature carries of the scene - its pose, the elements it refers to and
+	 * the eye that was switched off on it - goes with it, and so does the placement
+	 * of the body the features hang under. No camera, no materials and no other view
+	 * state is written yet.
 	 */
 	class MoonDocument
 	{
@@ -37,8 +39,9 @@ namespace MOON {
 		 * @return false when the document could not be opened. */
 		static bool open(const std::string& p_path);
 
-		/** Writes one body the way a document writes it: its features, the links between
-		 * them (indices into this body's own chain) and their poses. */
+		/** Writes one body the way a document writes it: the placement of its node, its
+		 * features, the links between them (indices into this body's own chain) and
+		 * their poses - the features are relative to that node. */
 		static void writeBody(tinyxml2::XMLElement& p_parent, FeatureBody* p_body);
 		/** Copies a body into a text of that same form. A copy is kept as text so that
 		 * it cannot dangle when the body it was taken from is deleted. */
