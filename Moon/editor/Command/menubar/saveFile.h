@@ -16,6 +16,10 @@ namespace MOON {
 	public:
 		SaveFileCommand(QObject* parent, bool p_saveAs);
 		virtual void execute() override;
+		/** Where the document was written last, empty while it was never written: the
+		 * start page remembers it, and closing a project forgets it. */
+		static const QString& CurrentPath() { return s_path; }
+		static void ResetPath() { s_path.clear(); }
 
 	private:
 		bool m_saveAs = false;

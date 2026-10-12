@@ -39,6 +39,13 @@ namespace MOON {
 		 * @return false when the document could not be opened. */
 		static bool open(const std::string& p_path);
 
+		/** Takes the scene apart: every body goes, with its features and the actors
+		 * they spawned, and the sketches leave the sketch manager with them.
+		 *
+		 * That is what closing a document means. What it leaves behind is what a
+		 * document is opened onto - the state the start page is shown over. */
+		static void close();
+
 		/** Writes one body the way a document writes it: the placement of its node, its
 		 * features, the links between them (indices into this body's own chain) and
 		 * their poses - the features are relative to that node. */

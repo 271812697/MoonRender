@@ -1,6 +1,7 @@
 #include "editor/Command/menubar/saveFile.h"
 
 #include "feature/MoonDocument.h"
+#include "editor/UI/HomePanel/RecentProjects.h"
 #include "core/log.h"
 
 #include <QCoreApplication>
@@ -47,6 +48,9 @@ namespace MOON {
 		// The document reads the path as UTF-8, which is what Qt works in.
 		if (MoonDocument::save(path.toUtf8().toStdString())) {
 			s_path = path;
+			// A project that was just written is one of the recent ones, with a picture
+			// of the view as it is now: that is what the start page shows as its card.
+			RecentProjects::Remember(path, RecentProjects::GrabViewportPreview());
 		}
 	}
 }

@@ -1576,6 +1576,33 @@ namespace MOON
 		p_parent.InsertEndChild(body);
 	}
 
+	void MoonDocument::close()
+	{
+		// The bodies are taken out of the list in one piece, and the sketches leave the
+		// sketch manager before the bodies go: a stale pointer there is a crash the next
+		// time a drawing tool asks about it. This is the order open() takes the bodies
+		// that were up before apart in - closing a document leaves the same scene behind
+		// as starting the application does.
+		std::vector<std::unique_ptr<FeatureBody>> bodies = FeatureBody::TakeAll();
+		for (const std::unique_ptr<FeatureBody>& body : bodies) {
+			if (body == nullptr) {
+				continue;
+			}
+			for (Feature* feature : body->getFeatures()) {
+				if (auto* sketch = dynamic_cast<SketcherFeature*>(feature)) {
+					SketcherObjManager::instance().removeSketcherFeature(sketch);
+				}
+			}
+		}
+		for (const std::unique_ptr<FeatureBody>& body : bodies) {
+			if (body != nullptr) {
+				body->clear();
+			}
+		}
+		// The bodies are destroyed as the list goes out of scope here, which takes the
+		// nodes they were shown as with them.
+	}
+
 	bool MoonDocument::copyBody(FeatureBody* p_body, std::string& p_out)
 	{
 		if (p_body == nullptr) {
