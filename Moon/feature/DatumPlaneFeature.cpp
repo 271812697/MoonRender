@@ -185,8 +185,10 @@ namespace MOON
 		if (m_baseFeature != nullptr) {
 			// The pose of the shape below: the global-parallel modes go through the
 			// origin of the body they are attached to, the way FreeCAD's ObjectXY/
-			// XZ/YZ do, rather than through the world origin.
-			return m_baseFeature->transform.GetWorldPosition();
+			// XZ/YZ do, rather than through the world origin. It is read inside the
+			// body - the placement of the body node is not part of the chain the
+			// plane is attached to (see Feature::applyWorldTransform).
+			return m_baseFeature->transform.GetLocalPosition();
 		}
 		return Maths::FVector3(0.0f, 0.0f, 0.0f);
 	}

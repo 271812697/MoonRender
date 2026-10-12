@@ -32,16 +32,29 @@ namespace MOON {
 		 * how a feature lands in the body the user is working in. */
 		FeatureBody* getBody() { return m_body; }
 		const FeatureBody* getBody() const { return m_body; }
+		/** The body this feature is in is going away, so the feature forgets it: it is
+		 * not part of a chain from here on, and - what matters - it will not reach for a
+		 * body that is no longer there when it goes itself (see Feature::~Feature).
+		 *
+		 * A body is dropped before the features it holds: the application lets the
+		 * bodies go while its scene is still up, and the features are actors of that
+		 * scene, so they go with it, after. Whoever drops a body tells its features
+		 * with this. */
+		void forgetBody();
 		/** The shape another feature should model with: this feature's stored topology
-		 * with its own transform applied.
+		 * with its own pose applied.
 		 *
 		 * The stored shape already carries the placement of the operation - a sketch
 		 * carries the placement of its plane, for instance - while the transform of the
 		 * actor is the pose the feature was given from the outside (the property panel,
-		 * the primitive dragger, ...). Drawing applies that pose through the actor
-		 * matrices, so modeling has to apply it here too: otherwise moving a feature
-		 * would move only what is drawn, and everything built on top of it would stay
-		 * where it was.
+		 * the primitive dragger, ...) *inside the frame of its body*. Drawing applies
+		 * that pose through the actor matrices, so modeling has to apply it here too:
+		 * otherwise moving a feature would move only what is drawn, and everything
+		 * built on top of it would stay where it was.
+		 *
+		 * What is applied is the pose inside the body, not the full world matrix: the
+		 * placement of the body node moves the body as a whole (see
+		 * applyWorldTransform), it is not part of what the features hand to each other.
 		 *
 		 * Every consumer of a feature goes through this - getBaseTopoShape(),
 		 * resolveBaseSubShape() and ResolveSubShapeRef() - so a reference always lands on
@@ -49,8 +62,9 @@ namespace MOON {
 		Part::TopoShape getWorldTopoShape();
 		/** The same, for the consumers that hold a shape of their own rather than the
 		 * actor's: a sketch keeps the face it produced on the sketch object, not on the
-		 * feature, and the profile of a pad is taken from there. Does nothing while the
-		 * feature sits at the origin with no scale. */
+		 * feature, and the profile of a pad is taken from there. Applies the pose the
+		 * feature has inside its body, the body's own placement left out; does nothing
+		 * while the feature sits at the origin of that frame with no scale. */
 		static void applyWorldTransform(Feature& p_feature, Part::TopoShape& p_shape);
 		Part::TopoShape getBaseTopoShape();
 		Part::TopoShape getBaseTopoFaceShape();
@@ -146,6 +160,18 @@ namespace MOON {
 		}
 		virtual Part::TopoShape getToolShape()override;
 		virtual bool isToolSubtractive() const override { return false; }
+		/** The file the shape was read from, empty for a shape that was made here: what a
+		 * shape on its own is shown by. A document cannot write a shape, so it writes
+		 * where the shape came from and the feature reads it again when the document is
+		 * opened (see execute). */
+		void SetSourcePath(const std::string& p_path) { m_sourcePath = p_path; }
+		const std::string& GetSourcePath() const { return m_sourcePath; }
+		/** Reads the file again when there is no shape - which is what an opened document
+		 * finds, its imported shapes not being in the document at all - and leaves a
+		 * shape that is already there alone, so a recompute does not read the file again. */
+		virtual bool execute() override;
+	private:
+		std::string m_sourcePath;
 	};
 	class DatumFeature :public Feature
 	{

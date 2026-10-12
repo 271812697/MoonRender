@@ -16,6 +16,15 @@ namespace MOON {
 	private:
 		void onWidgetLengthInvoke1();
 		void onWidgetLengthInvoke2();
+		/** Lists the edges this fillet is applied to (the References group of the panel). */
+		void refreshReferenceRows();
+		/** Takes the edges the viewport has selected and adds them to the fillet. */
+		void applyPickedEdges();
+		/** Drops the rows that are selected in the list from the fillet. */
+		void removeSelectedEdges();
+		/** An edge picked while the panel is open is added to the fillet - the same
+		 * gesture as pressing "Add from Selection", without the click. */
+		virtual void onSelectEdge(const std::vector<Part::TopoShape>& edge) override;
 		class Internal;
 		Internal* mInternal = nullptr;
 	};

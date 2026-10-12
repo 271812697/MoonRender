@@ -316,6 +316,12 @@ namespace MOON {
 			auto* poll = new QTimer(this);
 			poll->setInterval(250);
 			QObject::connect(poll, &QTimer::timeout, this, [this]() {
+				// The tool lives on the viewport's renderer, and the viewport is only
+				// there once the workspace is: while the start page is up there is
+				// nothing to ask, and the tool cannot have been turned on either.
+				if (!Core::Global::ServiceLocator::IsProvided<Editor::Panels::SceneView>()) {
+					return;
+				}
 				auto& view = GetService(Editor::Panels::SceneView);
 				auto& gizmoPass = view.GetRenderer()
 					.GetPass<Editor::Rendering::GizmoRenderPass>("ImRenderer");

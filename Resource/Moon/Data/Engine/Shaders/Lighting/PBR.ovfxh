@@ -4,6 +4,37 @@
 #include ":Shaders/Lighting/Light.ovfxh"
 #include ":Shaders/Lighting/IBL.ovfxh"
 
+// The fill light (see CalculateFillLight below). The defaults are what a material that
+// never sets them gets, so this reaches every material without touching any of them.
+uniform vec3 u_FillSkyColor = vec3(0.55);
+uniform vec3 u_FillGroundColor = vec3(0.22);
+uniform float u_FillStrength = 0.18;
+
+// Whether this material takes part in shadowing. The engine only hands a shadow map
+// to a material that receives shadows; one that never gets a map would otherwise read
+// whatever texture unit 0 happens to hold and turn up with patches that have nothing
+// to do with the geometry in front of it. Off unless the engine turns it on.
+uniform bool u_ReceiveShadows = false;
+
+/** The fill light: a light with no direction of its own, bright from above and dim
+ * from below. Every direct term below is a cosine, so the faces no light points at
+ * receive nothing at all - and a model is looked at from every side. This keeps each
+ * direction readable instead of black. It is tinted by the material's own colour so
+ * it never washes the shape out, and it is ambient, so occlusion applies to it. */
+vec3 CalculateFillLight(vec3 N, vec3 albedo)
+{
+    const float sky = N.y * 0.5 + 0.5;
+    return albedo * mix(u_FillGroundColor, u_FillSkyColor, sky) * u_FillStrength;
+}
+
+/** A directional light that carries a shadow only casts it on a material the engine
+ * handed a shadow map to; for any other material the lookup has nothing to read. */
+DirectionalLight GateShadowOnReceiver(DirectionalLight light)
+{
+    light.hasShadow = light.hasShadow && u_ReceiveShadows;
+    return light;
+}
+
 float DistributionGGX(vec3 N, vec3 H, float roughness)
 {
     const float a = roughness * roughness;
@@ -69,7 +100,14 @@ vec3 CalculateBRDF(LightContribution lightContrib, vec3 V, vec3 N, vec3 albedo, 
     const vec3 specular = numerator / max(denominator, 0.001);
     
     const float NdotL = max(dot(N, L), 0.0);
-    return (kD * albedo / PI + specular) * radiance * NdotL;
+    // The diffuse term is wrapped: a face that turns away from a light keeps a part of
+    // it instead of dropping to black, which is what a hard cosine looks like from the
+    // wrong side. The highlight keeps the hard term - one that never ends reads as a
+    // mistake.
+    const float kWrap = 0.6;
+    const float NdotLdiffuse
+        = clamp((dot(N, L) + kWrap) / (1.0 + kWrap), 0.0, 1.0);
+    return (kD * albedo / PI * NdotLdiffuse + specular * NdotL) * radiance;
 }
 
 vec3 PBRLightingModel(
@@ -122,7 +160,7 @@ vec3 PBRLightingModel(
             case 1: // Directional Light
             {
                 const DirectionalLight dirLight = ExtractDirectionalLight(light);
-                const LightContribution contrib = CalculateDirectionalLightContribution(dirLight, fragPos, N, shadowMap, lightSpaceMatrix);
+                const LightContribution contrib = CalculateDirectionalLightContribution(GateShadowOnReceiver(dirLight), fragPos, N, shadowMap, lightSpaceMatrix);
                 Lo += CalculateBRDF(contrib, V, N, albedo, metallic, roughness, F0);
                 break;
             }
@@ -167,6 +205,7 @@ vec3 PBRLightingModel(
     );
 #endif
 
+    ambient += CalculateFillLight(N, albedo);
     ambient *= ao;
     
     return ambient + Lo;
@@ -220,7 +259,7 @@ vec3 PBRLighting(
             case 1: // Directional Light
             {
                 const DirectionalLight dirLight = ExtractDirectionalLight(light);
-                const LightContribution contrib = CalculateDirectionalLightContribution(dirLight, fragPos, N, shadowMap, lightSpaceMatrix);
+                const LightContribution contrib = CalculateDirectionalLightContribution(GateShadowOnReceiver(dirLight), fragPos, N, shadowMap, lightSpaceMatrix);
                 Lo += CalculateBRDF(contrib, V, N, albedo, metallic, roughness, F0);
                 break;
             }
@@ -250,6 +289,7 @@ vec3 PBRLighting(
     }
 
 
+    ambient += CalculateFillLight(N, albedo);
     ambient *= ao;
     
     return ambient + Lo;

@@ -12,6 +12,7 @@
 #include "Sketcher/SketcherObj.h"
 #include "Sketcher/SketcherObjManager.h"
 #include "core/component/TopoShapeActor.h"
+#include "core/component/CTopoShape.h"
 #include "core/log.h"
 #include "feature/ChamferFeature.h"
 #include "feature/DatumLineFeature.h"
@@ -312,6 +313,52 @@ namespace MOON
 				}
 			}
 			return nullptr;
+		}
+
+		// ------------------------------------------------------------------- colour
+		/** Reads the colour a feature's faces are drawn with.
+		 *
+		 * It is the shape's own appearance (CTopoShape::GetColor), which is what a
+		 * feature is told apart by - not a material: the colour is applied to the
+		 * material the feature already has, and a document never carries materials
+		 * (they belong to the renderer). White and opaque is what every shape is made
+		 * with, so that one is not written at all. */
+		bool isDefaultColor(const Maths::FVector4& p_color)
+		{
+			return std::abs(p_color.x - 1.0f) < 1.0e-4f
+				&& std::abs(p_color.y - 1.0f) < 1.0e-4f
+				&& std::abs(p_color.z - 1.0f) < 1.0e-4f
+				&& std::abs(p_color.w - 1.0f) < 1.0e-4f;
+		}
+
+		void writeColor(tinyxml2::XMLElement& p_node, Feature& p_feature)
+		{
+			auto* shape = p_feature.GetComponent<Core::ECS::Components::CTopoShape>();
+			if (shape == nullptr) {
+				return;
+			}
+			const Maths::FVector4 color = shape->GetColor();
+			if (isDefaultColor(color)) {
+				return;
+			}
+			setValues(p_node, "color", { color.x, color.y, color.z, color.w });
+		}
+
+		void readColor(const tinyxml2::XMLElement& p_node, Feature& p_feature)
+		{
+			const std::vector<double> values = getValues(p_node, "color");
+			if (values.size() < 3) {
+				return;
+			}
+			auto* shape = p_feature.GetComponent<Core::ECS::Components::CTopoShape>();
+			if (shape == nullptr) {
+				return;
+			}
+			shape->SetColor(Maths::FVector4(
+				static_cast<float>(values[0]),
+				static_cast<float>(values[1]),
+				static_cast<float>(values[2]),
+				values.size() >= 4 ? static_cast<float>(values[3]) : 1.0f));
 		}
 
 		// ----------------------------------------------------------------- geometry
@@ -711,10 +758,25 @@ namespace MOON
 			if (dynamic_cast<const MirrorFeature*>(p_feature) != nullptr) {
 				return "MirrorFeature";
 			}
+			// A shape on its own - an imported one, or a primitive - is what is left when
+			// nothing more specific matched: every feature that produces a solid derives
+			// from this, so the check has to come after all of them. What a document
+			// writes for one is where its shape came from (see writeFeature): without a
+			// type of its own an imported shape was left out of the file, and every
+			// feature built on it - a pad on one of its faces - came back pointing at the
+			// wrong place in the chain.
+			if (dynamic_cast<const Feature3D*>(p_feature) != nullptr) {
+				return "Feature3D";
+			}
 			return nullptr;
 		}
 
-		Feature* createFeature(const std::string& p_type, const std::string& p_name, int p_addSubType)
+		Feature* createFeature(
+			const std::string& p_type,
+			const std::string& p_name,
+			const std::string& p_tag,
+			int p_addSubType
+		)
 		{
 			if (p_type == "SketcherFeature") {
 				return new SketcherFeature(p_name);
@@ -752,22 +814,44 @@ namespace MOON
 			if (p_type == "MirrorFeature") {
 				return new MirrorFeature(p_name);
 			}
+			if (p_type == "Feature3D") {
+				return new Feature3D(p_name, p_tag);
+			}
 			return nullptr;
 		}
 
-		void writePose(tinyxml2::XMLElement& p_parent, const Feature& p_feature)
+		/** Writes a placement - the position, rotation and scale a node carries, which
+		 * is what the property panel's position/rotation/scale fields edit.
+		 *
+		 * It is written for a feature (its <Pose> element) and for the node of a body.
+		 * The features of a body hang under that node, so what they carry is relative
+		 * to it: a body whose node was moved would come back at the origin - and take
+		 * everything below it along - without the node's own placement in the file. */
+		void writePose(
+			tinyxml2::XMLElement& p_parent,
+			const Core::ECS::Components::CTransform& p_transform
+		)
 		{
 			tinyxml2::XMLElement* node = p_parent.GetDocument()->NewElement(kPose);
-			const Maths::FVector3& position = p_feature.transform.GetLocalPosition();
-			const Maths::FQuaternion& rotation = p_feature.transform.GetLocalRotation();
-			const Maths::FVector3& scale = p_feature.transform.GetLocalScale();
+			const Maths::FVector3& position = p_transform.GetLocalPosition();
+			const Maths::FQuaternion& rotation = p_transform.GetLocalRotation();
+			const Maths::FVector3& scale = p_transform.GetLocalScale();
 			setValues(*node, "pos", { position.x, position.y, position.z });
 			setValues(*node, "rot", { rotation.x, rotation.y, rotation.z, rotation.w });
 			setValues(*node, "scale", { scale.x, scale.y, scale.z });
 			p_parent.InsertEndChild(node);
 		}
 
-		void readPose(const tinyxml2::XMLElement& p_node, Feature& p_feature)
+		/** The same, for a feature: it is where it was put with its own pose. */
+		void writePose(tinyxml2::XMLElement& p_parent, const Feature& p_feature)
+		{
+			writePose(p_parent, p_feature.transform);
+		}
+
+		void readPose(
+			const tinyxml2::XMLElement& p_node,
+			Core::ECS::Components::CTransform& p_transform
+		)
 		{
 			const tinyxml2::XMLElement* pose = p_node.FirstChildElement(kPose);
 			if (pose == nullptr) {
@@ -777,17 +861,23 @@ namespace MOON
 			const std::vector<double> rotation = getValues(*pose, "rot");
 			const std::vector<double> scale = getValues(*pose, "scale");
 			if (position.size() >= 3) {
-				p_feature.transform.SetLocalPosition(
+				p_transform.SetLocalPosition(
 					Maths::FVector3(position[0], position[1], position[2]));
 			}
 			if (rotation.size() >= 4) {
-				p_feature.transform.SetLocalRotation(
+				p_transform.SetLocalRotation(
 					Maths::FQuaternion(rotation[0], rotation[1], rotation[2], rotation[3]));
 			}
 			if (scale.size() >= 3) {
-				p_feature.transform.SetLocalScale(
+				p_transform.SetLocalScale(
 					Maths::FVector3(scale[0], scale[1], scale[2]));
 			}
+		}
+
+		/** The same, for a feature. */
+		void readPose(const tinyxml2::XMLElement& p_node, Feature& p_feature)
+		{
+			readPose(p_node, p_feature.transform);
 		}
 
 		void writeReferences(tinyxml2::XMLElement& p_parent, const Feature& p_feature)
@@ -1281,6 +1371,14 @@ namespace MOON
 				// a pipe came back without its path.
 				node->SetAttribute("spine", indexOf(p_features, pipe->spineFeature));
 			}
+			if (auto* shape = dynamic_cast<Feature3D*>(&p_feature)) {
+				// The shape of a shape feature is not something a document can write: what
+				// is written for one is where the shape was read from, and the feature
+				// reads that file again when the document is opened (see Feature3D::execute).
+				if (!shape->GetSourcePath().empty()) {
+					node->SetAttribute("source", shape->GetSourcePath().c_str());
+				}
+			}
 			// What the tree view's eye switched off is part of the document: a feature is
 			// hidden with its own flag, and everything under it (the render anchors and
 			// the topology actors) by name.
@@ -1300,6 +1398,10 @@ namespace MOON
 			writePose(*node, p_feature);
 			writeReferences(*node, p_feature);
 			writeParameters(*node, p_feature);
+			// The colour the shape is drawn with: part of the feature, so it goes into
+			// the document, and it is left out while the shape wears the white every
+			// shape is made with (see writeColor).
+			writeColor(*node, p_feature);
 			p_parent.InsertEndChild(node);
 		}
 	}
@@ -1326,7 +1428,8 @@ namespace MOON
 			node = node->NextSiblingElement(kFeature)) {
 			const std::string type = getText(*node, "type");
 			const std::string name = getText(*node, "name", "feature");
-			Feature* feature = createFeature(type, name, getInt(*node, "addSubType", 0));
+			Feature* feature = createFeature(
+				type, name, getText(*node, "tag", "Feature"), getInt(*node, "addSubType", 0));
 			if (feature == nullptr) {
 				CORE_ERROR("[MoonDocument] a '{0}' feature is not known to this build", type);
 				return false;
@@ -1334,11 +1437,19 @@ namespace MOON
 			features.push_back(feature);  // from here on it is dropped with the rest
 			feature->SetName(name);
 			feature->SetTag(getText(*node, "tag", feature->GetTag().c_str()));
+			// A shape on its own carries the file it was read from - the file is all the
+			// document has of its shape, and the feature reads it again when it is built.
+			if (auto* shape = dynamic_cast<Feature3D*>(feature)) {
+				shape->SetSourcePath(getText(*node, "source", ""));
+			}
 			readPose(*node, *feature);
 			readReferences(*node, *feature);
 			if (!readParameters(*node, *feature)) {
 				return false;
 			}
+			// A colour the file carries is put back on the shape, which lands it on the
+			// material the feature was made with (see CTopoShape::SetColor).
+			readColor(*node, *feature);
 			baseIndices.push_back(getInt(*node, "base", -1));
 			profileIndices.push_back(getInt(*node, "profile", -1));
 			// The path of a pipe is a link, i.e. an index on the feature element - but
@@ -1483,12 +1594,45 @@ namespace MOON
 		const std::vector<Feature*>& features = p_body->getFeatures();
 		tinyxml2::XMLElement* body = p_parent.GetDocument()->NewElement(kBody);
 		body->SetAttribute("name", p_body->GetName().c_str());
+		// The node the features hang under comes before them: their own pose is
+		// relative to it, so it has to be in the file for a moved body to keep the
+		// place it was put in.
+		if (Core::ECS::Actor* anchor = p_body->GetAnchor()) {
+			writePose(*body, anchor->transform);
+		}
 		for (Feature* feature : features) {
 			if (feature != nullptr) {
 				writeFeature(*body, *feature, features);
 			}
 		}
 		p_parent.InsertEndChild(body);
+	}
+
+	void MoonDocument::close()
+	{
+		// The bodies are taken out of the list in one piece, and the sketches leave the
+		// sketch manager before the bodies go: a stale pointer there is a crash the next
+		// time a drawing tool asks about it. This is the order open() takes the bodies
+		// that were up before apart in - closing a document leaves the same scene behind
+		// as starting the application does.
+		std::vector<std::unique_ptr<FeatureBody>> bodies = FeatureBody::TakeAll();
+		for (const std::unique_ptr<FeatureBody>& body : bodies) {
+			if (body == nullptr) {
+				continue;
+			}
+			for (Feature* feature : body->getFeatures()) {
+				if (auto* sketch = dynamic_cast<SketcherFeature*>(feature)) {
+					SketcherObjManager::instance().removeSketcherFeature(sketch);
+				}
+			}
+		}
+		for (const std::unique_ptr<FeatureBody>& body : bodies) {
+			if (body != nullptr) {
+				body->clear();
+			}
+		}
+		// The bodies are destroyed as the list goes out of scope here, which takes the
+		// nodes they were shown as with them.
 	}
 
 	bool MoonDocument::copyBody(FeatureBody* p_body, std::string& p_out)
@@ -1533,6 +1677,11 @@ namespace MOON
 			FeatureBody::UniqueName(getText(*bodyNode, "name", "Body")));
 		if (newBody == nullptr) {
 			return nullptr;
+		}
+		// The copy is put where the body it came from sits, before its features are
+		// built: they hang under this node, so the node has to have its place first.
+		if (Core::ECS::Actor* anchor = newBody->GetAnchor()) {
+			readPose(*bodyNode, anchor->transform);
 		}
 		if (!readBody(*bodyNode)) {
 			// Nothing of the copy survives when it cannot be built: the features it made go
@@ -1661,6 +1810,14 @@ namespace MOON
 			FeatureBody* newBody = FeatureBody::Create(getText(*bodyNode, "name", "Body"));
 			createdBodies.push_back(newBody);
 
+			// Where this body sat when it was saved, put back before its features are
+			// built: they hang under the body's node, so its placement is what they
+			// are relative to and what has to be in place for them to come back where
+			// they were.
+			if (Core::ECS::Actor* anchor
+				= newBody != nullptr ? newBody->GetAnchor() : nullptr) {
+				readPose(*bodyNode, anchor->transform);
+			}
 			if (!readBody(*bodyNode)) {
 				rollback();
 				return false;

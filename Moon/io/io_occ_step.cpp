@@ -134,6 +134,10 @@ namespace MOON {
 
         void ReadSTEP(const char* filePath, Core::SceneSystem::Scene* scene) {
             auto topoActor = new Feature3D("Feature", "Feature");
+            // Where the shape came from is what a document writes for it: a shape on its
+            // own is not something a document can hold, so the file is kept on the
+            // feature and it is read again when the document is opened.
+            topoActor->SetSourcePath(filePath);
             Core::ECS::Components::CTopoShape* topoComp=topoActor->GetComponent<Core::ECS::Components::CTopoShape>();
             static MOON::System::JobSystem::Context ctx;
             static std::string path;

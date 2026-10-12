@@ -27,6 +27,12 @@ namespace MOON {
 		void keyPressEvent(QKeyEvent* event) override;
 		void keyReleaseEvent(QKeyEvent* event) override;
 		::Editor::Panels::AView* getView();
+		/** The file the scene was last read from, empty while nothing was opened: the
+		 * project the start page shows a card for. */
+		QString getDocumentPath() const;
+		/** Forgets that file: the document that was open is closed, and what it was read
+		 * from is not what is open any more. */
+		void clearDocumentPath();
 		void addActorToTreeView(Core::ECS::Actor* actor);
 		void removeActorFromTreeView(Core::ECS::Actor* actor);
 		void modifyActorInTreeView(Core::ECS::Actor* actor);
@@ -36,6 +42,12 @@ namespace MOON {
 		void onActorHoverLeaved(Core::ECS::Actor* actor);
 		void onReadFile(const QString& path);
 		void refreshTreeView();
+	signals:
+		/** A document was read into the scene - a .moon document rebuilt, or a model
+		 * imported. p_path is the file it came from: what keeps the project in the
+		 * recent list is told here, in the render loop, where the read actually
+		 * happens (asking for one only leaves the request behind). */
+		void documentOpened(const QString& p_path);
 	private:
 		class ViewerWindowInternal;
 		ViewerWindowInternal* mInternal = nullptr;

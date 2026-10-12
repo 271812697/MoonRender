@@ -13,6 +13,7 @@
 #include "Rendering/Resources/Mesh.h"
 #include "Rendering/Geometry/bbox.h"
 #include "editor/parsescene.h"
+#include "editor/UI/HomePanel/HomePanel.h"
 #include "feature/MoonDocument.h"
 #include "editor/UI/TreeViewPanel/treeViewpanel.h"
 #include "editor/UI/SettingPanel/PassSettingWidget.h"
@@ -151,20 +152,29 @@ namespace MOON {
 				ImRenderer::instance().newFrame(mSceneView);
 			}
 			mSceneView->Update(0.01);
-			if (mDoReadFile) {
+			// The read waits for the viewport to be up: the start page is the page that
+			// is shown first, and the viewport behind it is only initialized the moment
+			// it comes to the front.
+			if (mDoReadFile && mSceneView != nullptr) {
 				mDoReadFile = false;
 				const std::string path = mReadFilePath.toUtf8().toStdString();
 				// A .moon file is a feature chain, not a mesh: it is read by rebuilding
 				// the body instead of by the scene parser. Everything here runs in the
 				// render loop because building features touches the scene and the
 				// viewer.
+				bool read = false;
 				if (mReadFilePath.endsWith(QString(".") + MoonDocument::extension(), Qt::CaseInsensitive)) {
-					if (MoonDocument::open(path)) {
-						mRefreshTreeView = true;
-					}
+					read = MoonDocument::open(path);
+					mRefreshTreeView = read;
 				}
 				else {
 					parser->ParseFile(path);
+					read = true;
+				}
+				if (read) {
+					// The document is up: whoever keeps the recent projects hears about
+					// it here, where the read really happened.
+					emit mSelf->documentOpened(mReadFilePath);
 				}
 				openFrame = true;
 				mSceneView->UnselectActor();
@@ -278,6 +288,10 @@ namespace MOON {
 		}
 		void onReadFile(const QString& path)
 		{
+			// The workspace comes first: the read is carried out in the render loop, and
+			// the render loop only runs while the viewport is the page that is up - a
+			// document opened from the start page has to bring the workspace with it.
+			GetService(::MOON::HomePanel).ShowWorkspace();
 			mReadFilePath = path;
 			mDoReadFile = true;
 		}
@@ -443,6 +457,19 @@ namespace MOON {
 	::Editor::Panels::AView* ViewerWidget::getView()
 	{
 		return mInternal->mSceneView;
+	}
+
+	QString ViewerWidget::getDocumentPath() const
+	{
+		return mInternal->mReadFilePath;
+	}
+
+	void ViewerWidget::clearDocumentPath()
+	{
+		// What was read is what is open, so closing the document is what makes this stale:
+		// it is how the picture of the project is kept from being taken again for a
+		// document that is no longer there.
+		mInternal->mReadFilePath.clear();
 	}
 
 	void ViewerWidget::addActorToTreeView(Core::ECS::Actor* actor)

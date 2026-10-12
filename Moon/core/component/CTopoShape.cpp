@@ -73,6 +73,9 @@ namespace Core::ECS::Components
 	private:
 		friend class CTopoShape;
         HighLightOption highOption;
+		/** What GetColor() answers while there is no material to read the colour
+		 * back from; SetColor() keeps it up to date (see ApplyColor). */
+		Maths::FVector4 color{ 1.0f, 1.0f, 1.0f, 1.0f };
 		CTopoShape* mSelf = nullptr;
 		Part::TopoShape mTopoShape;
         std::vector<std::pair<int, int>>childMeshInfos;
@@ -157,6 +160,53 @@ namespace Core::ECS::Components
     {
         return mInternal->highOption;
     }
+
+	namespace
+	{
+		/** The material the faces of an actor's shape are drawn with: the one TopoActor()
+		 * makes for its "AllFaces" render anchor, or null while the actor has none. */
+		Core::Resources::Material* FaceMaterialOf(Core::ECS::Actor& p_owner)
+		{
+			Core::ECS::Actor* faces = p_owner.GetChild("AllFaces");
+			if (faces == nullptr) {
+				return nullptr;
+			}
+			auto* renderer = faces->GetComponent<Core::ECS::Components::CMaterialRenderer>();
+			return renderer != nullptr ? renderer->GetMaterialAtIndex(0) : nullptr;
+		}
+	}
+
+	Maths::FVector4 CTopoShape::GetColor() const
+	{
+		// What is drawn is the material, and the material panel edits that material
+		// directly, so the colour is read back from it when there is one: what a panel
+		// shows and what the shape carries stay one and the same value.
+		if (Core::Resources::Material* material = FaceMaterialOf(owner)) {
+			if (auto property = material->GetProperty("u_Albedo"); property.has_value()) {
+				if (std::holds_alternative<Maths::FVector4>(property.value().value)) {
+					return std::get<Maths::FVector4>(property.value().value);
+				}
+			}
+		}
+		return mInternal->color;
+	}
+
+	void CTopoShape::SetColor(const Maths::FVector4& p_color)
+	{
+		mInternal->color = p_color;
+		ApplyColor();
+	}
+
+	void CTopoShape::ApplyColor()
+	{
+		Core::Resources::Material* material = FaceMaterialOf(owner);
+		if (material == nullptr) {
+			// The render anchors are not up yet; TopoActor() calls this again once
+			// they are, and the colour is kept until then.
+			return;
+		}
+		material->SetProperty("u_Albedo", mInternal->color);
+	}
 
     void CTopoShape::switchHighLightMode(HighLightOption::Mode mode)
     {
