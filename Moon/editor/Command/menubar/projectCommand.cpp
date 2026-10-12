@@ -59,6 +59,10 @@ namespace MOON
 		}
 		MoonDocument::close();
 		SaveFileCommand::ResetPath();
+		// The document that was open goes with it, so the file the viewport was read from
+		// is forgotten here too: whoever looks at it next - the picture taken on the way
+		// out, for one - has to be able to tell that nothing is open right now.
+		GetViewerWidget.clearDocumentPath();
 		GetViewerWidget.refreshTreeView();
 		GetService(HomePanel).ShowStartPage();
 		CORE_INFO(

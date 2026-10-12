@@ -61,15 +61,25 @@ namespace
 
 		~FlowLayout() override
 		{
-			while (QLayoutItem* item = takeAt(0)) {
-				delete item;
+			// Drain the list itself: takeAt() on an empty list is out of range, which is
+			// undefined for a QList and reads past the end of it - and this runs while
+			// the application is going down, with a window that has no items left.
+			while (!m_items.isEmpty()) {
+				delete m_items.takeFirst();
 			}
 		}
 
 		void addItem(QLayoutItem* p_item) override { m_items.append(p_item); }
 		int count() const override { return m_items.size(); }
 		QLayoutItem* itemAt(int p_index) const override { return m_items.value(p_index); }
-		QLayoutItem* takeAt(int p_index) override { return m_items.takeAt(p_index); }
+		QLayoutItem* takeAt(int p_index) override
+		{
+			// What a layout is expected to answer when the index is not in the list.
+			if (p_index < 0 || p_index >= m_items.size()) {
+				return nullptr;
+			}
+			return m_items.takeAt(p_index);
+		}
 		Qt::Orientations expandingDirections() const override { return {}; }
 		bool hasHeightForWidth() const override { return true; }
 		int heightForWidth(int p_width) const override

@@ -758,10 +758,25 @@ namespace MOON
 			if (dynamic_cast<const MirrorFeature*>(p_feature) != nullptr) {
 				return "MirrorFeature";
 			}
+			// A shape on its own - an imported one, or a primitive - is what is left when
+			// nothing more specific matched: every feature that produces a solid derives
+			// from this, so the check has to come after all of them. What a document
+			// writes for one is where its shape came from (see writeFeature): without a
+			// type of its own an imported shape was left out of the file, and every
+			// feature built on it - a pad on one of its faces - came back pointing at the
+			// wrong place in the chain.
+			if (dynamic_cast<const Feature3D*>(p_feature) != nullptr) {
+				return "Feature3D";
+			}
 			return nullptr;
 		}
 
-		Feature* createFeature(const std::string& p_type, const std::string& p_name, int p_addSubType)
+		Feature* createFeature(
+			const std::string& p_type,
+			const std::string& p_name,
+			const std::string& p_tag,
+			int p_addSubType
+		)
 		{
 			if (p_type == "SketcherFeature") {
 				return new SketcherFeature(p_name);
@@ -798,6 +813,9 @@ namespace MOON
 			}
 			if (p_type == "MirrorFeature") {
 				return new MirrorFeature(p_name);
+			}
+			if (p_type == "Feature3D") {
+				return new Feature3D(p_name, p_tag);
 			}
 			return nullptr;
 		}
@@ -1353,6 +1371,14 @@ namespace MOON
 				// a pipe came back without its path.
 				node->SetAttribute("spine", indexOf(p_features, pipe->spineFeature));
 			}
+			if (auto* shape = dynamic_cast<Feature3D*>(&p_feature)) {
+				// The shape of a shape feature is not something a document can write: what
+				// is written for one is where the shape was read from, and the feature
+				// reads that file again when the document is opened (see Feature3D::execute).
+				if (!shape->GetSourcePath().empty()) {
+					node->SetAttribute("source", shape->GetSourcePath().c_str());
+				}
+			}
 			// What the tree view's eye switched off is part of the document: a feature is
 			// hidden with its own flag, and everything under it (the render anchors and
 			// the topology actors) by name.
@@ -1402,7 +1428,8 @@ namespace MOON
 			node = node->NextSiblingElement(kFeature)) {
 			const std::string type = getText(*node, "type");
 			const std::string name = getText(*node, "name", "feature");
-			Feature* feature = createFeature(type, name, getInt(*node, "addSubType", 0));
+			Feature* feature = createFeature(
+				type, name, getText(*node, "tag", "Feature"), getInt(*node, "addSubType", 0));
 			if (feature == nullptr) {
 				CORE_ERROR("[MoonDocument] a '{0}' feature is not known to this build", type);
 				return false;
@@ -1410,6 +1437,11 @@ namespace MOON
 			features.push_back(feature);  // from here on it is dropped with the rest
 			feature->SetName(name);
 			feature->SetTag(getText(*node, "tag", feature->GetTag().c_str()));
+			// A shape on its own carries the file it was read from - the file is all the
+			// document has of its shape, and the feature reads it again when it is built.
+			if (auto* shape = dynamic_cast<Feature3D*>(feature)) {
+				shape->SetSourcePath(getText(*node, "source", ""));
+			}
 			readPose(*node, *feature);
 			readReferences(*node, *feature);
 			if (!readParameters(*node, *feature)) {

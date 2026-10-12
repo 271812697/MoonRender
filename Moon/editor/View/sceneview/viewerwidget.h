@@ -27,6 +27,12 @@ namespace MOON {
 		void keyPressEvent(QKeyEvent* event) override;
 		void keyReleaseEvent(QKeyEvent* event) override;
 		::Editor::Panels::AView* getView();
+		/** The file the scene was last read from, empty while nothing was opened: the
+		 * project the start page shows a card for. */
+		QString getDocumentPath() const;
+		/** Forgets that file: the document that was open is closed, and what it was read
+		 * from is not what is open any more. */
+		void clearDocumentPath();
 		void addActorToTreeView(Core::ECS::Actor* actor);
 		void removeActorFromTreeView(Core::ECS::Actor* actor);
 		void modifyActorInTreeView(Core::ECS::Actor* actor);

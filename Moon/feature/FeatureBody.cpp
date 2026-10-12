@@ -105,6 +105,21 @@ namespace MOON {
 	}
 	FeatureBody::~FeatureBody()
 	{
+		// The features should be gone by now: a body is taken apart by the document
+		// (MoonDocument::close, and open when it replaces one), and that takes every
+		// feature out of the scene with it. This is the net under a body that is dropped
+		// while it still lists features: they are actors of the scene and would go on
+		// living in it, and a feature left pointing at a body that is gone takes the
+		// process down when it goes itself (see Feature::~Feature). The list is walked
+		// rather than modified: forgetting is only about the feature's own pointer.
+		for (Feature* feature : mInternal->featureList) {
+			if (feature != nullptr) {
+				feature->forgetBody();
+			}
+		}
+		// A body is destroyed while its scene is still up: that is how the document takes
+		// its bodies apart, closing one and replacing one alike. So the scene is there to
+		// be asked, and the node it made for this body is taken out of it.
 		if (m_anchor != nullptr) {
 			if (auto* scene = GetService(Editor::Core::Context).sceneManager.GetCurrentScene()) {
 				scene->DelayDestroyActor({ m_anchor });
@@ -210,6 +225,7 @@ namespace MOON {
 		Bodies() = std::move(p_bodies);
 		ActiveBody() = Bodies().empty() ? nullptr : Bodies().back().get();
 	}
+
 	void FeatureBody::addFeature(Feature* feature)
 	{
 		if (feature) {

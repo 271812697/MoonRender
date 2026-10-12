@@ -55,6 +55,10 @@ void Core::Rendering::ShadowRenderFeature::OnBeforeDraw(::Rendering::Data::Pipel
 
 			material.SetProperty("_ShadowMap", &shadowTex.value(), true);
 			material.SetProperty("_LightSpaceMatrix", light.lightSpaceMatrix.value(), true);
+			// Tell the shader that this material is the one the map belongs to. A
+			// material that is left without one must not look the shadow up at all -
+			// the sampler would read whatever texture unit happens to be bound.
+			material.SetProperty("u_ReceiveShadows", true, true);
 
 			++lightIndex;
 		}

@@ -14,6 +14,7 @@
 #include "MappedName.h"
 #include "IndexedName.h"
 #include "core/log.h"
+#include <Standard_Failure.hxx>
 #include <algorithm>
 
 namespace MOON {
@@ -52,6 +53,12 @@ namespace MOON {
 			m_body = nullptr;
 		}
 		delete mInternal;
+	}
+	void Feature::forgetBody()
+	{
+		// The body is the one going away here, not this feature: there is nothing of the
+		// body left to unlist from, and nothing of it is touched.
+		m_body = nullptr;
 	}
 	bool Feature::execute()
 	{
@@ -247,5 +254,30 @@ namespace MOON {
 	}
 	Part::TopoShape Feature3D::getToolShape() {
 		return GetTopoShape();
+	}
+	bool Feature3D::execute()
+	{
+		// A shape of its own is not in the document - the file it was read from is - so a
+		// feature that has a file and no shape reads it again: that is what an opened
+		// document finds. A shape that is already there is left alone, because reading a
+		// STEP file is far too expensive to do on every recompute.
+		if (m_sourcePath.empty() || !GetTopoShape().isNull()) {
+			return true;
+		}
+		try
+		{
+			GetTopoShape().importStep(m_sourcePath.c_str());
+		}
+		catch (Base::Exception& e)
+		{
+			CORE_ERROR("[Import] {0} could not be read from {1}: {2}", GetName(), m_sourcePath, e.what());
+			return false;
+		}
+		catch (Standard_Failure& e)
+		{
+			CORE_ERROR("[Import] {0} could not be read from {1}: {2}", GetName(), m_sourcePath, e.GetMessageString());
+			return false;
+		}
+		return true;
 	}
 }

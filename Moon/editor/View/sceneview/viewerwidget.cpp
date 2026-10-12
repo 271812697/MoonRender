@@ -459,6 +459,19 @@ namespace MOON {
 		return mInternal->mSceneView;
 	}
 
+	QString ViewerWidget::getDocumentPath() const
+	{
+		return mInternal->mReadFilePath;
+	}
+
+	void ViewerWidget::clearDocumentPath()
+	{
+		// What was read is what is open, so closing the document is what makes this stale:
+		// it is how the picture of the project is kept from being taken again for a
+		// document that is no longer there.
+		mInternal->mReadFilePath.clear();
+	}
+
 	void ViewerWidget::addActorToTreeView(Core::ECS::Actor* actor)
 	{
 		mInternal->mAddActors.push_back(actor);

@@ -43,7 +43,11 @@ namespace MOON {
 		auto& ac1 = scene->CreateActor("PointLight1");
 		ac1.SetTag("PointLight");
 		auto& pointLight1 = ac1.AddComponent<Core::ECS::Components::CPointLight>();
-		float kI = 0.10;
+		// The camera carries these lights with it (see SceneView::Update), so they are
+		// what keeps what is on screen lit from whatever direction it is looked at. They
+		// have to out-weigh the sky the material reflects, or the shading stays pinned to
+		// the world instead of turning with the camera.
+		float kI = 0.25;
 		float kB = kI / 1.5;
 		float kC = kI / 3.5;
 

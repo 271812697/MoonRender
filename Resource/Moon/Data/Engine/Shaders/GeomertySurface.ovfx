@@ -218,7 +218,11 @@ uniform mat4 _LightSpaceMatrix;
 uniform samplerCube _IrradianceCube;
 uniform samplerCube _PrefilterCube;
 uniform sampler2D _BRDFLut;
-uniform float u_environmentIntensity=0.5f;
+// The sky is a world-fixed light: it lights the same faces whatever direction the camera
+// is on, which is what leaves one side of a shape bright and the other dark however it is
+// looked at. It stays a reflection here, not the main light - the camera-following rig
+// does the lighting.
+uniform float u_environmentIntensity=0.2f;
 uniform sampler2D occlusionTex;
 uniform float u_AoStrength = 3.0;
 

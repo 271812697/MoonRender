@@ -106,32 +106,49 @@ void Editor::Panels::SceneView::Update(float p_deltaTime)
 	headLight->transform.SetWorldPosition(m_camera.GetPosition());
 	if (IsSelectActor()) {
 		auto ac = GetSelectedActor();
-		auto name=ac->GetName();
-		if (name== "PointLight1"|| name == "PointLight2"|| name == "PointLight3"|| name == "PointLight4") {
+		auto name = ac->GetName();
+		if (name == "PointLight1" || name == "PointLight2" || name == "PointLight3" || name == "PointLight4") {
 			return;
 		}
-		float pi = 3.14159265359f;
-		auto target = ac->transform.GetWorldPosition();
-		auto cp = m_camera.GetPosition();
-		float radius = Maths::FVector3::Length(target - cp) ;
-		Maths::FMatrix4 transMat = Maths::FMatrix4::Translation(target - cp);
-		Maths::FVector3 forward = Maths::FVector3::Normalize(cp - target);
-		float angle = Maths::FVector3::AngleBetween(forward, { 0,1,0 });
-		Maths::FVector3 worldUp = (angle < FLT_EPSILON || abs(angle - pi) < FLT_EPSILON) ? Maths::FVector3(1, 0, 0) : Maths::FVector3(0, 1, 0);
-		Maths::FMatrix4 view = Maths::FMatrix4::CreateCameraView(cp, target, worldUp);
-		view = Maths::FMatrix4::Inverse(view);
-
-		Maths::FMatrix4 mat = transMat * view;
-
-		auto p1 = Maths::FMatrix4::MulPoint(mat, GetSpherePosition(50, 10, radius));
-		auto p2 = Maths::FMatrix4::MulPoint(mat, GetSpherePosition(-75, 10, radius));
-		auto p3 = Maths::FMatrix4::MulPoint(mat, GetSpherePosition(0, 110, radius));
-		auto p4 = Maths::FMatrix4::MulPoint(mat, GetSpherePosition(0, -110, radius));
-		GetScene()->FindActorByName("PointLight1")->transform.SetWorldPosition(p1);
-		GetScene()->FindActorByName("PointLight2")->transform.SetWorldPosition(p2);
-		GetScene()->FindActorByName("PointLight3")->transform.SetWorldPosition(p3);
-		GetScene()->FindActorByName("PointLight4")->transform.SetWorldPosition(p4);
 	}
+
+	// The rig turns with the camera, so whatever is on screen keeps a key light and a
+	// fill on it whatever direction the camera is on. It is laid out around what the
+	// view is looking at - the selection when there is one, the whole scene otherwise
+	// - and it is laid out on every frame, not only while something is picked: a rig
+	// left where it stood lights one side of the shape and leaves the other in the
+	// dark, and turning the camera is exactly what walks into that dark side.
+	::Rendering::Geometry::BoundingSphere focus;
+	const bool hasFocus = GetFocusSphere(focus);
+
+	auto cp = m_camera.GetPosition();
+	auto target = hasFocus
+		? focus.position
+		: cp + m_camera.GetTransform().GetWorldForward() * 10.0f;
+
+	// The lights carry no attenuation, so only the direction from them counts; the
+	// radius is what keeps a light outside the shape it is lighting instead of
+	// inside it, where it would only reach the faces that happen to look outward.
+	const float radius = std::max(Maths::FVector3::Length(target - cp), hasFocus ? focus.radius : 0.0f);
+
+	Maths::FMatrix4 transMat = Maths::FMatrix4::Translation(target - cp);
+	Maths::FVector3 forward = Maths::FVector3::Normalize(cp - target);
+	const float pi = 3.14159265359f;
+	float angle = Maths::FVector3::AngleBetween(forward, { 0,1,0 });
+	Maths::FVector3 worldUp = (angle < FLT_EPSILON || abs(angle - pi) < FLT_EPSILON) ? Maths::FVector3(1, 0, 0) : Maths::FVector3(0, 1, 0);
+	Maths::FMatrix4 view = Maths::FMatrix4::CreateCameraView(cp, target, worldUp);
+	view = Maths::FMatrix4::Inverse(view);
+
+	Maths::FMatrix4 mat = transMat * view;
+
+	auto p1 = Maths::FMatrix4::MulPoint(mat, GetSpherePosition(50, 10, radius));
+	auto p2 = Maths::FMatrix4::MulPoint(mat, GetSpherePosition(-75, 10, radius));
+	auto p3 = Maths::FMatrix4::MulPoint(mat, GetSpherePosition(0, 110, radius));
+	auto p4 = Maths::FMatrix4::MulPoint(mat, GetSpherePosition(0, -110, radius));
+	GetScene()->FindActorByName("PointLight1")->transform.SetWorldPosition(p1);
+	GetScene()->FindActorByName("PointLight2")->transform.SetWorldPosition(p2);
+	GetScene()->FindActorByName("PointLight3")->transform.SetWorldPosition(p3);
+	GetScene()->FindActorByName("PointLight4")->transform.SetWorldPosition(p4);
 }
 
 void Editor::Panels::SceneView::InitFrame()

@@ -32,6 +32,15 @@ namespace MOON {
 		 * how a feature lands in the body the user is working in. */
 		FeatureBody* getBody() { return m_body; }
 		const FeatureBody* getBody() const { return m_body; }
+		/** The body this feature is in is going away, so the feature forgets it: it is
+		 * not part of a chain from here on, and - what matters - it will not reach for a
+		 * body that is no longer there when it goes itself (see Feature::~Feature).
+		 *
+		 * A body is dropped before the features it holds: the application lets the
+		 * bodies go while its scene is still up, and the features are actors of that
+		 * scene, so they go with it, after. Whoever drops a body tells its features
+		 * with this. */
+		void forgetBody();
 		/** The shape another feature should model with: this feature's stored topology
 		 * with its own pose applied.
 		 *
@@ -151,6 +160,18 @@ namespace MOON {
 		}
 		virtual Part::TopoShape getToolShape()override;
 		virtual bool isToolSubtractive() const override { return false; }
+		/** The file the shape was read from, empty for a shape that was made here: what a
+		 * shape on its own is shown by. A document cannot write a shape, so it writes
+		 * where the shape came from and the feature reads it again when the document is
+		 * opened (see execute). */
+		void SetSourcePath(const std::string& p_path) { m_sourcePath = p_path; }
+		const std::string& GetSourcePath() const { return m_sourcePath; }
+		/** Reads the file again when there is no shape - which is what an opened document
+		 * finds, its imported shapes not being in the document at all - and leaves a
+		 * shape that is already there alone, so a recompute does not read the file again. */
+		virtual bool execute() override;
+	private:
+		std::string m_sourcePath;
 	};
 	class DatumFeature :public Feature
 	{
