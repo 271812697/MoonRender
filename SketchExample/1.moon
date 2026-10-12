@@ -1,22 +1,11 @@
 <MoonDocument version="1">
     <Body name="Body">
+        <Pose pos="0 0 0" rot="0 0 0 1" scale="1 1 1"/>
         <Feature type="SketcherFeature" name="sketcher" tag="Sketcher" base="-1" active="0">
             <Hidden>
                 <Actor name="AllFaces"/>
                 <Actor name="AllEdges"/>
-                <Actor name="Edges"/>
-                <Actor name="Edge_0"/>
-                <Actor name="Edge_1"/>
-                <Actor name="Edge_2"/>
-                <Actor name="Edge_3"/>
-                <Actor name="Edge_4"/>
-                <Actor name="Edge_5"/>
-                <Actor name="Edge_6"/>
-                <Actor name="Edge_7"/>
-                <Actor name="Edge_8"/>
-                <Actor name="Edge_9"/>
-                <Actor name="Edge_10"/>
-                <Actor name="Edge_11"/>
+                <Actor name="AllVertices"/>
             </Hidden>
             <Pose pos="0 0 0" rot="0 0 0 1" scale="1 1 1"/>
             <References/>
@@ -68,6 +57,7 @@
             <Hidden>
                 <Actor name="AllFaces"/>
                 <Actor name="AllEdges"/>
+                <Actor name="AllVertices"/>
             </Hidden>
             <Pose pos="0 0 0" rot="0 0 0 1" scale="1 1 1"/>
             <References/>
@@ -77,8 +67,7 @@
             <Hidden>
                 <Actor name="AllFaces"/>
                 <Actor name="AllEdges"/>
-                <Actor name="Edges"/>
-                <Actor name="Edge_0"/>
+                <Actor name="AllVertices"/>
             </Hidden>
             <Pose pos="0 0 0" rot="0 0 0 1" scale="1 1 1"/>
             <References/>
@@ -96,6 +85,7 @@
             <Hidden>
                 <Actor name="AllFaces"/>
                 <Actor name="AllEdges"/>
+                <Actor name="AllVertices"/>
             </Hidden>
             <Pose pos="0 0 0" rot="0 0 0 1" scale="1 1 1"/>
             <References/>
@@ -109,12 +99,7 @@
             <Hidden>
                 <Actor name="AllFaces"/>
                 <Actor name="AllEdges"/>
-                <Actor name="Edges"/>
-                <Actor name="Edge_0"/>
-                <Actor name="Edge_1"/>
-                <Actor name="Edge_2"/>
-                <Actor name="Edge_3"/>
-                <Actor name="Edge_4"/>
+                <Actor name="AllVertices"/>
             </Hidden>
             <Pose pos="0 0 0" rot="0 0 0 1" scale="1 1 1"/>
             <References/>
@@ -147,6 +132,7 @@
             <Hidden>
                 <Actor name="AllFaces"/>
                 <Actor name="AllEdges"/>
+                <Actor name="AllVertices"/>
             </Hidden>
             <Pose pos="0 0 0" rot="0 0 0 1" scale="1 1 1"/>
             <References/>
@@ -156,6 +142,7 @@
             <Hidden>
                 <Actor name="AllFaces"/>
                 <Actor name="AllEdges"/>
+                <Actor name="AllVertices"/>
             </Hidden>
             <Pose pos="0 0 0" rot="0 0 0 1" scale="1 1 1"/>
             <References>
@@ -169,11 +156,7 @@
             <Hidden>
                 <Actor name="AllFaces"/>
                 <Actor name="AllEdges"/>
-                <Actor name="Edges"/>
-                <Actor name="Edge_0"/>
-                <Actor name="Edge_1"/>
-                <Actor name="Edge_2"/>
-                <Actor name="Edge_3"/>
+                <Actor name="AllVertices"/>
             </Hidden>
             <Pose pos="0 0 0" rot="0 0 0 1" scale="1 1 1"/>
             <References/>
@@ -203,6 +186,7 @@
             <Hidden>
                 <Actor name="AllFaces"/>
                 <Actor name="AllEdges"/>
+                <Actor name="AllVertices"/>
             </Hidden>
             <Pose pos="0 0 0" rot="0 0 0 1" scale="1 1 1"/>
             <References/>
@@ -212,6 +196,7 @@
             <Hidden>
                 <Actor name="AllFaces"/>
                 <Actor name="AllEdges"/>
+                <Actor name="AllVertices"/>
             </Hidden>
             <Pose pos="0 0 0" rot="0 0 0 1" scale="1 1 1"/>
             <References/>
@@ -246,6 +231,7 @@
             <Hidden>
                 <Actor name="AllFaces"/>
                 <Actor name="AllEdges"/>
+                <Actor name="AllVertices"/>
             </Hidden>
             <Pose pos="0 0 0" rot="0 0 0 1" scale="1 1 1"/>
             <References/>
@@ -255,8 +241,7 @@
             <Hidden>
                 <Actor name="AllFaces"/>
                 <Actor name="AllEdges"/>
-                <Actor name="Edges"/>
-                <Actor name="Edge_0"/>
+                <Actor name="AllVertices"/>
             </Hidden>
             <Pose pos="0 0 0" rot="0 0 0 1" scale="1 1 1"/>
             <References>
@@ -277,6 +262,7 @@
             <Hidden>
                 <Actor name="AllFaces"/>
                 <Actor name="AllEdges"/>
+                <Actor name="AllVertices"/>
             </Hidden>
             <Pose pos="0 0 0" rot="0 0 0 1" scale="1 1 1"/>
             <References/>
@@ -286,6 +272,7 @@
             <Hidden>
                 <Actor name="AllFaces"/>
                 <Actor name="AllEdges"/>
+                <Actor name="AllVertices"/>
             </Hidden>
             <Pose pos="0 0 0" rot="0 0 0 1" scale="1 1 1"/>
             <References>
@@ -299,6 +286,7 @@
             <Hidden>
                 <Actor name="AllFaces"/>
                 <Actor name="AllEdges"/>
+                <Actor name="AllVertices"/>
             </Hidden>
             <Pose pos="0 0 0" rot="0 0 0 1" scale="1 1 1"/>
             <References>
@@ -312,10 +300,7 @@
             <Hidden>
                 <Actor name="AllFaces"/>
                 <Actor name="AllEdges"/>
-                <Actor name="Edges"/>
-                <Actor name="Edge_0"/>
-                <Actor name="Edge_1"/>
-                <Actor name="Edge_2"/>
+                <Actor name="AllVertices"/>
             </Hidden>
             <Pose pos="12.5 0 0" rot="0 0 0.16504761576652527 0.9862855076789856" scale="1 1 1"/>
             <References/>

@@ -1,5 +1,6 @@
 <MoonDocument version="1">
     <Body name="Body">
+        <Pose pos="0 0 0" rot="0 0 0 1" scale="1 1 1"/>
         <Feature type="SketcherFeature" name="sketcher" tag="Sketcher" base="-1" active="0">
             <Hidden>
                 <Actor name="AllFaces"/>
@@ -63,10 +64,10 @@
                 <Sketch origin="0 0 0" xAxis="1 0 0" yAxis="0 0 -1" normal="0 1 0" drawGrid="1" snapGrid="0">
                     <Geometry type="GeomArcOfCircle" construction="1" visible="1" center="-112.98295136707841 47.208080243036569 0" radius="143" first="5.9670986286051608" last="6.2677435729332904"/>
                     <Geometry type="GeomArcOfCircle" construction="0" visible="1" center="33 28.000000000000014 0" radius="12" first="4.9948431657856052" last="8.1228023751603295"/>
-                    <Geometry type="GeomLineSegment" construction="0" visible="1" p1="36.344561066093036 16.475508198832614 0" p2="31.819298667383709 15.162216758853905 0"/>
+                    <Geometry type="GeomLineSegment" construction="0" visible="1" p1="36.344561066093029 16.475508198832614 0" p2="31.819298667383709 15.162216758853905 0"/>
                     <Geometry type="GeomArcOfCircle" construction="0" visible="1" center="36 0.75660200739465422 0" radius="15" first="1.8532505121958123" last="2.3488297802316143"/>
                     <Geometry type="GeomLineSegment" construction="0" visible="1" p1="25.471799765567287 11.441029920188628 0" p2="25.115652168474156 11.0900899123742 0"/>
-                    <Geometry type="GeomLineSegment" construction="0" visible="1" p1="29.812863406047665 39.569017258673718 0" p2="28.655961680180273 39.25030359927856 0"/>
+                    <Geometry type="GeomLineSegment" construction="0" visible="1" p1="29.812863406047686 39.569017258673718 0" p2="28.655961680180273 39.25030359927856 0"/>
                     <Geometry type="GeomArcOfCircle" construction="0" visible="1" external="1" center="112.98295136707841 47.208080243036214 0" radius="143" first="3.1570343878360867" last="3.4576793321642163"/>
                     <Geometry type="GeomLineSegment" construction="0" visible="1" external="1" p1="-22.932706607513637 2.7566020073946547 0" p2="22.932706607513524 2.7566020073946542 0"/>
                     <Geometry type="GeomLineSegment" construction="0" visible="1" external="1" p1="-30 45.000000000000014 0" p2="30 45.000000000000014 0"/>
@@ -151,52 +152,6 @@
                 <Actor name="AllFaces"/>
                 <Actor name="AllEdges"/>
                 <Actor name="AllVertices"/>
-                <Actor name="Solid_0"/>
-                <Actor name="Shell_0"/>
-                <Actor name="Faces"/>
-                <Actor name="Face_0"/>
-                <Actor name="Face_1"/>
-                <Actor name="Face_2"/>
-                <Actor name="Face_3"/>
-                <Actor name="Face_4"/>
-                <Actor name="Face_5"/>
-                <Actor name="Face_6"/>
-                <Actor name="Face_7"/>
-                <Actor name="Face_8"/>
-                <Actor name="Face_9"/>
-                <Actor name="Face_10"/>
-                <Actor name="Edges"/>
-                <Actor name="Edge_0"/>
-                <Actor name="Edge_1"/>
-                <Actor name="Edge_2"/>
-                <Actor name="Edge_3"/>
-                <Actor name="Edge_4"/>
-                <Actor name="Edge_5"/>
-                <Actor name="Edge_6"/>
-                <Actor name="Edge_7"/>
-                <Actor name="Edge_8"/>
-                <Actor name="Edge_9"/>
-                <Actor name="Edge_10"/>
-                <Actor name="Edge_11"/>
-                <Actor name="Edge_12"/>
-                <Actor name="Edge_13"/>
-                <Actor name="Edge_14"/>
-                <Actor name="Edge_15"/>
-                <Actor name="Edge_16"/>
-                <Actor name="Edge_17"/>
-                <Actor name="Edge_18"/>
-                <Actor name="Vertices"/>
-                <Actor name="Vertex_0"/>
-                <Actor name="Vertex_1"/>
-                <Actor name="Vertex_2"/>
-                <Actor name="Vertex_3"/>
-                <Actor name="Vertex_4"/>
-                <Actor name="Vertex_5"/>
-                <Actor name="Vertex_6"/>
-                <Actor name="Vertex_7"/>
-                <Actor name="Vertex_8"/>
-                <Actor name="Vertex_9"/>
-                <Actor name="Vertex_10"/>
             </Hidden>
             <Pose pos="0 0 0" rot="0 0 0 1" scale="1 1 1"/>
             <References>

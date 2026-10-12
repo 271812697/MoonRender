@@ -296,7 +296,7 @@
                     <Geometry type="GeomLineSegment" construction="0" visible="1" p1="-15.742836402134046 -8 0" p2="-57 -8 0"/>
                     <Geometry type="GeomLineSegment" construction="0" visible="1" p1="-7.2504621074557098 3.38094649888887 0" p2="-11.211297681398335 -5.1130915618055433 0"/>
                     <Geometry type="GeomArcOfCircle" construction="0" visible="1" center="-15.742836498558153 -3.0000000000000004 0" radius="5" first="4.7123889996695114" last="5.8468529383275616"/>
-                    <Geometry type="GeomLineSegment" construction="0" visible="1" p1="3.9999994952643378 -6.9282035216847566 0" p2="-4.1961544325898563 -11.660254402105949 0"/>
+                    <Geometry type="GeomLineSegment" construction="0" visible="1" p1="3.9999994952643378 -6.9282035216847548 0" p2="-4.1961544325898563 -11.660254402105949 0"/>
                     <Geometry type="GeomArcOfCircle" construction="0" visible="1" center="-9.1961538016702722 -2.9999999999999996 0" radius="10" first="4.7123889803846897" last="5.2359876831306718"/>
                     <Constraint type="1" first="0" firstPos="3" second="-1" secondPos="1" third="-2000" thirdPos="0" value="0" driving="1" visible="1" active="1"/>
                     <Constraint type="18" first="0" firstPos="0" second="-2000" secondPos="0" third="-2000" thirdPos="0" value="10" driving="1" visible="1" active="1"/>
