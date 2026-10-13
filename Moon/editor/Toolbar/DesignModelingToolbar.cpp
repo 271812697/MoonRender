@@ -9,6 +9,8 @@
 #include "editor/UI/TaskPanel/DatumLineTask.h"
 #include "editor/UI/TaskPanel/DatumPlaneTask.h"
 #include "editor/UI/TaskPanel/PipeTask.h"
+#include "editor/UI/TaskPanel/LoftTask.h"
+#include "editor/UI/TaskPanel/HelixTask.h"
 #include "editor/UI/TaskPanel/PolarPatternTask.h"
 #include "editor/UI/TaskPanel/MirrorTask.h"
 #include "editor/UI/TaskPanel/LinearPatternTask.h"
@@ -55,6 +57,18 @@ namespace MOON {
 		}
 		if (name == "PipeCut") {
 			return new PipeTask(nullptr, /*addSubType*/ 1);
+		}
+		if (name == "Loft") {
+			return new LoftTask(nullptr, /*addSubType*/ 0);
+		}
+		if (name == "LoftCut") {
+			return new LoftTask(nullptr, /*addSubType*/ 1);
+		}
+		if (name == "Helix") {
+			return new HelixTask(nullptr, /*addSubType*/ 0);
+		}
+		if (name == "HelixCut") {
+			return new HelixTask(nullptr, /*addSubType*/ 1);
 		}
 		if (name == "PolarPattern") {
 			return new PolarPatternTask();
@@ -111,6 +125,18 @@ namespace MOON {
 			additivePipeCommand->setIcon(":/widgets/icons/partdesign/PartDesign_AdditivePipe.svg");
 			subtractivePipeCommand = new DesignModelCommand(self, "PipeCut");
 			subtractivePipeCommand->setIcon(":/widgets/icons/partdesign/PartDesign_SubtractivePipe.svg");
+			additiveLoftCommand = new DesignModelCommand(self, "Loft");
+			additiveLoftCommand->setIcon(
+				":/widgets/icons/partdesign/PartDesign_AdditiveLoft.svg");
+			subtractiveLoftCommand = new DesignModelCommand(self, "LoftCut");
+			subtractiveLoftCommand->setIcon(
+				":/widgets/icons/partdesign/PartDesign_SubtractiveLoft.svg");
+			additiveHelixCommand = new DesignModelCommand(self, "Helix");
+			additiveHelixCommand->setIcon(
+				":/widgets/icons/partdesign/PartDesign_AdditiveHelix.svg");
+			subtractiveHelixCommand = new DesignModelCommand(self, "HelixCut");
+			subtractiveHelixCommand->setIcon(
+				":/widgets/icons/partdesign/PartDesign_SubtractiveHelix.svg");
 			datumLineCommand = new DesignModelCommand(self, "DatumLine");
 			datumLineCommand->setIcon(":/widgets/icons/partdesign/PartDesign_Line.svg");
 			datumPlaneCommand = new DesignModelCommand(self, "DatumPlane");
@@ -133,6 +159,10 @@ namespace MOON {
 			self->addAction(grooveCommand->action());
 			self->addAction(additivePipeCommand->action());
 			self->addAction(subtractivePipeCommand->action());
+			self->addAction(additiveLoftCommand->action());
+			self->addAction(subtractiveLoftCommand->action());
+			self->addAction(additiveHelixCommand->action());
+			self->addAction(subtractiveHelixCommand->action());
 			self->addAction(datumLineCommand->action());
 			self->addAction(datumPlaneCommand->action());
 			self->addAction(polarPatternCommand->action());
@@ -151,6 +181,10 @@ namespace MOON {
 			grooveCommand->action()->setText(QCoreApplication::translate("DesignModelingToolbar", "Groove", nullptr));
 			additivePipeCommand->action()->setText(QCoreApplication::translate("DesignModelingToolbar", "Additive Pipe", nullptr));
 			subtractivePipeCommand->action()->setText(QCoreApplication::translate("DesignModelingToolbar", "Subtractive Pipe", nullptr));
+			additiveLoftCommand->action()->setText(QCoreApplication::translate("DesignModelingToolbar", "Additive Loft", nullptr));
+			subtractiveLoftCommand->action()->setText(QCoreApplication::translate("DesignModelingToolbar", "Subtractive Loft", nullptr));
+			additiveHelixCommand->action()->setText(QCoreApplication::translate("DesignModelingToolbar", "Additive Helix", nullptr));
+			subtractiveHelixCommand->action()->setText(QCoreApplication::translate("DesignModelingToolbar", "Subtractive Helix", nullptr));
 			datumLineCommand->action()->setText(QCoreApplication::translate("DesignModelingToolbar", "Datum Line", nullptr));
 			datumPlaneCommand->action()->setText(QCoreApplication::translate("DesignModelingToolbar", "Datum Plane", nullptr));
 			polarPatternCommand->action()->setText(QCoreApplication::translate("DesignModelingToolbar", "Polar Pattern", nullptr));
@@ -169,6 +203,10 @@ namespace MOON {
 		DesignModelCommand* grooveCommand = nullptr;
 		DesignModelCommand* additivePipeCommand = nullptr;
 		DesignModelCommand* subtractivePipeCommand = nullptr;
+		DesignModelCommand* additiveLoftCommand = nullptr;
+		DesignModelCommand* subtractiveLoftCommand = nullptr;
+		DesignModelCommand* additiveHelixCommand = nullptr;
+		DesignModelCommand* subtractiveHelixCommand = nullptr;
 		DesignModelCommand* datumLineCommand = nullptr;
 		DesignModelCommand* datumPlaneCommand = nullptr;
 		DesignModelCommand* polarPatternCommand = nullptr;

@@ -24,6 +24,8 @@
 #include "feature/FilletFeature.h"
 #include "feature/LinearPatternFeature.h"
 #include "feature/MirrorFeature.h"
+#include "feature/HelixFeature.h"
+#include "feature/LoftFeature.h"
 #include "feature/PolarPatternFeature.h"
 #include "feature/RevolveFeature.h"
 #include "feature/SketcherFeature.h"
@@ -758,6 +760,12 @@ namespace MOON
 			if (dynamic_cast<const MirrorFeature*>(p_feature) != nullptr) {
 				return "MirrorFeature";
 			}
+			if (dynamic_cast<const LoftFeature*>(p_feature) != nullptr) {
+				return "LoftFeature";
+			}
+			if (dynamic_cast<const HelixFeature*>(p_feature) != nullptr) {
+				return "HelixFeature";
+			}
 			// A shape on its own - an imported one, or a primitive - is what is left when
 			// nothing more specific matched: every feature that produces a solid derives
 			// from this, so the check has to come after all of them. What a document
@@ -813,6 +821,12 @@ namespace MOON
 			}
 			if (p_type == "MirrorFeature") {
 				return new MirrorFeature(p_name);
+			}
+			if (p_type == "LoftFeature") {
+				return new LoftFeature(p_name, p_addSubType);
+			}
+			if (p_type == "HelixFeature") {
+				return new HelixFeature(p_name, p_addSubType);
 			}
 			if (p_type == "Feature3D") {
 				return new Feature3D(p_name, p_tag);
@@ -1142,6 +1156,38 @@ namespace MOON
 					direction.X(), direction.Y(), direction.Z() });
 				setIndices(*node, "originals", indicesOf(all, mirror->originals));
 			}
+			else if (auto* loft = dynamic_cast<LoftFeature*>(&p_feature)) {
+				node->SetAttribute("addSubType", loft->addSubType);
+				node->SetAttribute("ruled", loft->ruled ? 1 : 0);
+				node->SetAttribute("closed", loft->closed ? 1 : 0);
+				// The sections are links like a pattern's instances: the indices they
+				// have in the chain of this body. Their references - a section picked as
+				// a face or an edge of its shape - travel in the feature's own reference
+				// block, the way a pipe's path does.
+				setIndices(*node, "sections", indicesOf(all, loft->sections));
+			}
+			else if (auto* helix = dynamic_cast<HelixFeature*>(&p_feature)) {
+				node->SetAttribute("addSubType", helix->addSubType);
+				setText(*node, "axisMode", HelixFeature::axisModeName(helix->axisMode));
+				setText(*node, "mode", HelixFeature::modeName(helix->mode));
+				setNumber(*node, "pitch", helix->pitch);
+				setNumber(*node, "height", helix->height);
+				setNumber(*node, "turns", helix->turns);
+				setNumber(*node, "angle", helix->angle);
+				setNumber(*node, "growth", helix->growth);
+				node->SetAttribute("leftHanded", helix->leftHanded ? 1 : 0);
+				node->SetAttribute("reversed", helix->reversed ? 1 : 0);
+				// The axis is a link while a datum line was given for it - and the place
+				// it ended up on is written either way, so a helix whose axis was taken
+				// from its own profile comes back on the same one.
+				node->SetAttribute("axis", indexOf(all, helix->axisFeature));
+				setValues(*node, "axisBase", {
+					helix->axisBase.x, helix->axisBase.y, helix->axisBase.z });
+				setValues(*node, "axisDir", {
+					helix->axisDirection.x,
+					helix->axisDirection.y,
+					helix->axisDirection.z });
+			}
 			p_parent.InsertEndChild(node);
 		}
 
@@ -1150,6 +1196,46 @@ namespace MOON
 			const tinyxml2::XMLElement* node = p_node.FirstChildElement(kParameters);
 			if (node == nullptr) {
 				return true;  // nothing stored: the feature keeps its defaults
+			}
+			if (auto* loft = dynamic_cast<LoftFeature*>(&p_feature)) {
+				loft->addSubType = getInt(*node, "addSubType", loft->addSubType);
+				loft->ruled = getFlag(*node, "ruled", loft->ruled);
+				loft->closed = getFlag(*node, "closed", loft->closed);
+				// The sections themselves are links: they are put in place by the second
+				// pass of the body, where the base, the profile and a pipe's path are
+				// linked up as well.
+				return true;
+			}
+			if (auto* helix = dynamic_cast<HelixFeature*>(&p_feature)) {
+				helix->addSubType = getInt(*node, "addSubType", helix->addSubType);
+				helix->axisMode = HelixFeature::axisModeFromName(
+					getText(*node, "axisMode", HelixFeature::axisModeName(helix->axisMode)),
+					helix->axisMode);
+				helix->mode = HelixFeature::modeFromName(
+					getText(*node, "mode", HelixFeature::modeName(helix->mode)),
+					helix->mode);
+				helix->pitch = getNumber(*node, "pitch", helix->pitch);
+				helix->height = getNumber(*node, "height", helix->height);
+				helix->turns = getNumber(*node, "turns", helix->turns);
+				helix->angle = getNumber(*node, "angle", helix->angle);
+				helix->growth = getNumber(*node, "growth", helix->growth);
+				helix->leftHanded = getFlag(*node, "leftHanded", helix->leftHanded);
+				helix->reversed = getFlag(*node, "reversed", helix->reversed);
+				const std::vector<double> base = getValues(*node, "axisBase");
+				if (base.size() >= 3) {
+					helix->axisBase = Maths::FVector3(
+						static_cast<float>(base[0]),
+						static_cast<float>(base[1]),
+						static_cast<float>(base[2]));
+				}
+				const std::vector<double> direction = getValues(*node, "axisDir");
+				if (direction.size() >= 3) {
+					helix->axisDirection = Maths::FVector3(
+						static_cast<float>(direction[0]),
+						static_cast<float>(direction[1]),
+						static_cast<float>(direction[2]));
+				}
+				return true;
 			}
 			if (auto* sketch = dynamic_cast<SketcherFeature*>(&p_feature)) {
 				// The curves and constraints live inside the <Sketch> node, one level
@@ -1420,6 +1506,8 @@ namespace MOON
 		std::vector<int> profileIndices;
 		std::vector<int> spineIndices;
 		std::vector<std::vector<int>> originalIndices;
+		std::vector<std::vector<int>> sectionIndices;
+		std::vector<int> axisIndices;
 		std::vector<StoredUpToFace> upToFaceRefs;
 		std::vector<bool> activeFlags;
 		std::vector<std::vector<std::string>> hiddenNames;
@@ -1477,6 +1565,11 @@ namespace MOON
 			const tinyxml2::XMLElement* parameters = node->FirstChildElement(kParameters);
 			originalIndices.push_back(
 				parameters != nullptr ? getIndices(*parameters, "originals") : std::vector<int>());
+			// A loft's sections are links of their own (the profile is one of them and
+			// travels as the profile), and a helix may name the datum line its axis is.
+			sectionIndices.push_back(
+				parameters != nullptr ? getIndices(*parameters, "sections") : std::vector<int>());
+			axisIndices.push_back(parameters != nullptr ? getInt(*parameters, "axis", -1) : -1);
 		}
 
 		// Second pass: the links, now that every feature exists.
@@ -1488,6 +1581,18 @@ namespace MOON
 			}
 			if (auto* pipe = dynamic_cast<PipeFeature*>(feature)) {
 				pipe->spineFeature = at(features, spineIndices[i]);
+			}
+			if (auto* loft = dynamic_cast<LoftFeature*>(feature)) {
+				std::vector<Feature*> sections;
+				for (const int index : sectionIndices[i]) {
+					if (Feature* section = at(features, index)) {
+						sections.push_back(section);
+					}
+				}
+				loft->sections = sections;
+			}
+			if (auto* helix = dynamic_cast<HelixFeature*>(feature)) {
+				helix->axisFeature = at(features, axisIndices[i]);
 			}
 			if (auto* extrude = dynamic_cast<ExtrudeFeature*>(feature)) {
 				const StoredUpToFace& upTo = upToFaceRefs[i];

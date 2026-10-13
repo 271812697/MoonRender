@@ -4,10 +4,13 @@
 #include "feature/FeatureBaseProfile.h"
 #include "feature/ExtrudeFeature.h"
 #include "feature/LinearPatternFeature.h"
+#include "feature/LoftFeature.h"
+#include "feature/HelixFeature.h"
 #include "feature/MirrorFeature.h"
 #include "feature/PipeFeature.h"
 #include "feature/PolarPatternFeature.h"
 #include "core/log.h"
+#include "core/callbackManager.h"
 #include "TopoShape.h"
 #include "Core/Global/ServiceLocator.h"
 #include "editor/View/sceneview/viewerwidget.h"
@@ -60,6 +63,18 @@ namespace
 				add(original);
 			}
 		}
+		// A loft is built through every section it was given, not only through the profile
+		// it takes as the first one: editing one of those sketches has to reach it.
+		if (auto* loft = dynamic_cast<MOON::LoftFeature*>(p_feature)) {
+			for (MOON::Feature* section : loft->sections) {
+				add(section);
+			}
+		}
+		// A helix winds around its axis, so a datum line that moves it is a dependency as
+		// well.
+		if (auto* helix = dynamic_cast<MOON::HelixFeature*>(p_feature)) {
+			add(helix->axisFeature);
+		}
 		return dependencies;
 	}
 }
@@ -99,9 +114,39 @@ namespace MOON {
 		// The anchor is the body's node in the scene: the tree shows the body by it, and
 		// the features of the body hang under it. A body made before there is a scene
 		// simply has none yet.
-		if (auto* scene = GetService(Editor::Core::Context).sceneManager.GetCurrentScene()) {
-			m_anchor = &scene->CreateActor(p_name, "Body");
+		//
+		// "New Project" is the case that matters here: it makes the first body the moment
+		// the workspace is asked for, which is before the viewport that owns the scene has
+		// come up - and asking for the service the scene lives in by then throws (that is
+		// what used to take the application down on the way into a new project). The node
+		// is made from the queue the viewport drains on its first frame instead, so the
+		// body is there at once and its node joins the tree a frame later.
+		if (Core::Global::ServiceLocator::IsProvided<Editor::Core::Context>()) {
+			if (auto* scene = GetService(Editor::Core::Context).sceneManager.GetCurrentScene()) {
+				m_anchor = &scene->CreateActor(p_name, "Body");
+				return;
+			}
 		}
+		const FeatureBody* self = this;
+		createCallBack(CallBackManager::instance(), [self]() {
+			// Only a body that is still there gets a node: this runs a frame later, and a
+			// document that was closed in between took its bodies with it.
+			for (const std::unique_ptr<FeatureBody>& body : Bodies()) {
+				if (body.get() != self) {
+					continue;
+				}
+				if (body->m_anchor == nullptr) {
+					if (auto* scene
+						= GetService(Editor::Core::Context).sceneManager.GetCurrentScene()) {
+						body->m_anchor = &scene->CreateActor(body->m_name, "Body");
+						// It joins the tree here rather than where the body was made: the
+						// tree shows a body by its node, and until now there was none.
+						GetViewerWidget.refreshTreeView();
+					}
+				}
+				break;
+			}
+			});
 	}
 	FeatureBody::~FeatureBody()
 	{
@@ -277,16 +322,16 @@ namespace MOON {
 		while (!stack.empty()) {
 			Feature* curFeature = stack.back(); stack.pop_back();
 			for (int i = 0; i < mInternal->featureList.size(); i++) {
-				if (mInternal->featureList[i]->getBaseFeature()== curFeature) {
+				// What a feature is built from is what DependenciesOf() knows - the shape
+				// below, the profile, a pipe's path, a loft's sections, the axis of a
+				// helix, the faces and instances the other features link. A rebuild of
+				// one of those reaches the feature here; anything that is not in that
+				// list is left alone.
+				const std::vector<Feature*> dependencies
+					= DependenciesOf(mInternal->featureList[i]);
+				if (std::find(dependencies.begin(), dependencies.end(), curFeature)
+					!= dependencies.end()) {
 					rebuildFeature(mInternal->featureList[i]);
-				}
-				else {
-					FeatureBaseProfile*  profile=dynamic_cast<FeatureBaseProfile*>(mInternal->featureList[i]);
-					if (profile) {
-						if (profile->getProfile() == curFeature) {
-							rebuildFeature(mInternal->featureList[i]);
-						}
-					}
 				}
 			}
 		}

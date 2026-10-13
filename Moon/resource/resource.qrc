@@ -123,6 +123,10 @@
             <file>icons/partdesign/PartDesign_Body.svg</file>
 		    <file>icons/partdesign/PartDesign_AdditivePipe.svg</file>
 		    <file>icons/partdesign/PartDesign_SubtractivePipe.svg</file>
+		    <file>icons/partdesign/PartDesign_AdditiveLoft.svg</file>
+		    <file>icons/partdesign/PartDesign_SubtractiveLoft.svg</file>
+		    <file>icons/partdesign/PartDesign_AdditiveHelix.svg</file>
+		    <file>icons/partdesign/PartDesign_SubtractiveHelix.svg</file>
 
 
 

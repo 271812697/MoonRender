@@ -3,6 +3,7 @@
 #include <QAction>
 
 #include "Core/Global/ServiceLocator.h"
+#include "core/callbackManager.h"
 #include "core/log.h"
 #include "editor/Command/menubar/saveFile.h"
 #include "editor/UI/HomePanel/HomePanel.h"
@@ -30,12 +31,21 @@ namespace MOON
 		// edited in is the one that is open.
 		MoonDocument::close();
 		SaveFileCommand::ResetPath();
-		// One body to start from: a feature has to belong to a body, and the body is
-		// what the first one joins.
-		FeatureBody::Create(FeatureBody::UniqueName("Body"));
-		GetViewerWidget.refreshTreeView();
+		// The workspace comes up first, and the body is made after that, once the viewport
+		// that owns the scene is there: the scene of a project belongs to the viewport,
+		// and it is only registered with the service locator once that viewport has come
+		// up. A body made before that has no scene to be shown in - and asking for the
+		// service the scene lives in by then throws, which is what used to take the
+		// application down on the way into a new project. The queue below is drained on
+		// the viewport's first frame (see CallBackManager).
 		GetService(HomePanel).ShowWorkspace();
-		CORE_INFO("[Project] a new project was started");
+		createCallBack(CallBackManager::instance(), []() {
+			// One body to start from: a feature has to belong to a body, and the body is
+			// what the first one joins.
+			FeatureBody::Create(FeatureBody::UniqueName("Body"));
+			GetViewerWidget.refreshTreeView();
+			CORE_INFO("[Project] a new project was started");
+			});
 	}
 
 	CloseProjectCommand::CloseProjectCommand(QObject* parentObject)
