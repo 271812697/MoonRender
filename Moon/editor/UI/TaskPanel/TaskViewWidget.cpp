@@ -8,6 +8,10 @@
 #include "editor/UI/TaskPanel/DatumLineTask.h"
 #include "editor/UI/TaskPanel/DatumPlaneTask.h"
 #include "editor/UI/TaskPanel/PipeTask.h"
+#include "editor/UI/TaskPanel/LoftTask.h"
+#include "editor/UI/TaskPanel/HelixTask.h"
+#include "feature/LoftFeature.h"
+#include "feature/HelixFeature.h"
 #include "TopoShape.h"
 #include "feature/SketcherFeature.h"
 #include "feature/ExtrudeFeature.h"
@@ -69,6 +73,17 @@ namespace MOON {
         if (pipe) {
             PipeTask* dialog = new PipeTask(nullptr, pipe->addSubType, pipe);
             return dialog;
+        }
+        // The loft and the helix are edited in their own panels, the same way every other
+        // feature is: without a case here, double clicking one of their rows in the tree
+        // found nothing to open.
+        LoftFeature* loft = dynamic_cast<LoftFeature*>(feature);
+        if (loft) {
+            return new LoftTask(nullptr, loft->addSubType, loft);
+        }
+        HelixFeature* helix = dynamic_cast<HelixFeature*>(feature);
+        if (helix) {
+            return new HelixTask(nullptr, helix->addSubType, helix);
         }
         PolarPatternFeature* polarPattern = dynamic_cast<PolarPatternFeature*>(feature);
         if (polarPattern) {
