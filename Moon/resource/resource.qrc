@@ -78,6 +78,7 @@
         <file>icons/Sketcher_CreateLine.svg</file>
         <file>icons/Sketcher_CreatePolyline.svg</file>
         <file>icons/Sketcher_Rotate.svg</file>
+        <file>icons/Sketcher_Translate.svg</file>
 		    <file>icons/Sketcher_Symmetry.svg</file>
 		    <file>icons/Sketcher_CreateFillet.svg</file>
 		    <file>icons/Sketcher_Offset.svg</file>
