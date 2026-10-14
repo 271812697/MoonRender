@@ -1,5 +1,6 @@
 ﻿#pragma once
 #include "Interactive/Widgets/DrawSketchHandler.h"
+#include "Interactive/Widgets/OnViewParameters.h"
 #include "Interactive/Interactive/RenderWindowInteractor.h"
 #include "Interactive/Interactive/Event.h"
 #include "Interactive/Interactive/ExecuteCommand.h"
@@ -332,6 +333,12 @@ namespace MOON
             ShapeGeometry.clear();
             //ShapeConstraints.clear();
 
+            // The numbers the tool was given were for the run that just ended: the next
+            // one is driven by the mouse until the user types in a box again.
+            for (int i = 0; i < onViewParameters.size(); i++) {
+                onViewParameters.at(i)->release();
+            }
+
             onReset();
 
             ModeStateMachine::reset();
@@ -454,20 +461,167 @@ namespace MOON
         }
         virtual void mouseMove(Base::Vector2d pos)
         {
+            // The order is FreeCAD's: the values typed in the boxes get their say first,
+            // then the geometry is built from the position that comes out of that, and
+            // finally the live values go back into the boxes.
+            enforceControlParameters(pos);
             updateDataAndDrawToPosition(pos);
+            adaptParameters(pos);
         }
         virtual void onButtonPressed(Base::Vector2d pos)
         {
+            enforceControlParameters(pos);
             this->updateDataAndDrawToPosition(pos);
+            adaptParameters(pos);
             if (canGoToNextMode()) {
                 this->moveToNextMode();
             }
         }
         virtual void onKeyPress(const std::string& key) {
+            if (isEditingOnViewParameter()) {
+                // The keyboard is inside one of the boxes: the tool must not take the
+                // keys for its shortcuts (typing "m" into a box is not a shortcut). A
+                // handler that overrides onKeyPress without calling this one has to
+                // check isEditingOnViewParameter() itself.
+                return;
+            }
+            if (key == "TAB") {
+                // Tab moves on to the next box that is still waiting for a number (the
+                // keyboard has to go back to the viewport for this to be seen, which is
+                // what clicking in it does).
+                onViewParameters.focusNextUnfinished();
+                return;
+            }
             if (key=="M" && !this->isLastState()) {
                 this->iterateToNextConstructionMethod();
             }
         }
+
+        /** @name on-view parameters -------------------------------------------------
+         *
+         * The boxes drawn over the viewport that a tool can be given numbers in, instead
+         * of positions with the mouse (FreeCAD's on-view parameters). A tool adds the
+         * ones it wants while it is activated, says which step of the machine each of
+         * them belongs to, and calls drawOnViewParameters() from its per-frame update.
+         */
+        //@{
+
+        /** The values typed in take the mouse position over: a parameter that has been
+         * typed in wins over where the cursor is. This is where a tool maps its
+         * parameters onto the position it is about to build geometry from. */
+        virtual void enforceControlParameters(Base::Vector2d& /*p_onSketchPos*/)
+        {
+        }
+
+        /** The other way round: what the mouse decided is written into the boxes of the
+         * step the machine is in, so that they show the live value (and the tool puts
+         * each box where the geometry it belongs to is). */
+        virtual void adaptParameters(Base::Vector2d /*p_onSketchPos*/)
+        {
+        }
+
+        /** Which step of the machine a parameter is the input of. Only the parameters of
+         * the current step are shown, and only those count as "what this step asks
+         * for" when the tool decides whether it can go on. */
+        virtual SelectModeT stateOfOnViewParameter(int /*p_index*/) const
+        {
+            return this->getFirstState();
+        }
+
+        /** True when the step the machine is in is the last one that asks for numbers,
+         * even if the machine has steps after it. A tool that is finished before its last
+         * seek state overrides this (the circle is: a centre and a radius is a circle). */
+        virtual bool isLastControlStep() const
+        {
+            return false;
+        }
+
+        /** Draws the boxes of the current step. Call it from the tool's per-frame
+         * update - that is inside the ImGui frame, where the boxes are drawn. */
+        void drawOnViewParameters()
+        {
+            if (onViewParameters.size() == 0) {
+                // A tool that has no boxes up (it is not running, or it has just been
+                // activated and not configured itself yet): the next set it puts up is
+                // one the user is shown for the first time.
+                m_onViewParametersShown = false;
+                m_lastOnViewState = -1;
+                return;
+            }
+
+            for (int i = 0; i < onViewParameters.size(); i++) {
+                OnViewParameter* parameter = onViewParameters.at(i);
+                parameter->setVisible(stateOfOnViewParameter(i) == this->state());
+            }
+
+            if (!m_onViewParametersShown || m_lastOnViewState != static_cast<int>(this->state())) {
+                // A step that has just been entered is the one the user is being asked
+                // about: its first box that is still unanswered takes the keyboard by
+                // itself, so that a number can be typed straight away without pointing at
+                // the box (this is what FreeCAD's controller does when it activates the
+                // parameters of a mode: the spin box comes up focused, with the number in
+                // it selected).
+                onViewParameters.focusFirstUnfinished();
+                m_onViewParametersShown = true;
+                m_lastOnViewState = static_cast<int>(this->state());
+            }
+
+            onViewParameters.update();
+        }
+
+        /** True while the keyboard is inside one of the boxes. */
+        bool isEditingOnViewParameter() const
+        {
+            return onViewParameters.isEditing();
+        }
+
+        /** Goes on to the next step when every box of the current one has been confirmed:
+         * this is what lets a tool that was given all its numbers place the geometry by
+         * itself, without a click. On the last step that means the geometry is committed
+         * here and the tool starts over (or ends, when it is not continuous). */
+        /** @return true when the machine really moved on. */
+        bool advanceOnViewParametersIfComplete()
+        {
+            bool anythingTyped = false;
+            for (int i = 0; i < onViewParameters.size(); i++) {
+                const OnViewParameter* parameter = onViewParameters.at(i);
+                if (stateOfOnViewParameter(i) != this->state() || !parameter->isVisible()) {
+                    continue;
+                }
+                if (!parameter->hasFinishedEditing()) {
+                    return false;  // this step is still waiting for one of its numbers
+                }
+                anythingTyped = true;
+            }
+            if (!anythingTyped || this->state() == SelectMode::End) {
+                return false;
+            }
+            if (this->isLastControlStep()) {
+                this->setState(SelectMode::End);
+                finish();
+                return true;
+            }
+            this->moveToNextMode();
+            if (this->state() == SelectMode::End) {
+                // Nothing left to ask: the geometry is what the numbers say, and the tool
+                // is not waiting for a click to place it.
+                finish();
+            }
+            return true;
+        }
+
+        /** A box was confirmed. The tool's own reaction (rebuilding the geometry) has
+         * happened already; this is the machine's part of it: the step goes on when it has
+         * all the numbers it asks for, and until then the keyboard moves to the next box
+         * that is still waiting, so that the numbers of one step can be typed one after the
+         * other without pointing at each box. */
+        void finishOnViewParameterStep(int p_index, double p_value)
+        {
+            if (!advanceOnViewParametersIfComplete()) {
+                onViewParameters.focusNextUnfinished();
+            }
+        }
+        //@}
         virtual bool releaseButton(Base::Vector2d onSketchPos)
         {
             if (finish()) {
@@ -552,6 +706,12 @@ namespace MOON
         using ConstructionMachine = ConstructionMethodMachine<ConstructionMethodT>;
 
         std::vector<std::unique_ptr<Part::Geometry>> ShapeGeometry;
+        /** The boxes the tool can be given numbers in (see above). */
+        OnViewParameters onViewParameters;
+        /** The step the boxes were last drawn for, and whether they have been drawn at
+         * all: entering a step is what puts the keyboard in its first box. */
+        int m_lastOnViewState = -1;
+        bool m_onViewParametersShown = false;
         bool continuousMode;
     };
 }
