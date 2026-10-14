@@ -11,6 +11,7 @@
 #include "Sketcher/SketcheTool2D.h"
 #include <QInputDialog>
 #include <limits>
+#include <cmath>
 namespace MOON {
     // Constraint types that get a numeric viewport label.
     static bool isDimensionLabelType(Sketcher::ConstraintType type)
@@ -127,13 +128,106 @@ namespace MOON {
         }
         return false;
     }
+    namespace
+    {
+        /** The sketch backdrop - the grid and the axes - drawn at one depth.
+         *
+         * A sketch plane seen at a glancing angle runs along the view direction for
+         * thousands of units, and the grid and the axes lie on it: the part of them
+         * nearer than the near plane and the part beyond the far plane used to be clipped
+         * away, which leaves the backdrop as a band in the middle of the screen instead
+         * of covering it. Where a point of the plane lands on screen does not depend on
+         * how far along the view direction it is - an orthographic projection keeps x and
+         * y exactly as they are, the distance along the view only decides depth - so the
+         * backdrop is put onto one depth instead of the plane's own: the same picture,
+         * with nothing left outside the clip range to be cut.
+         *
+         * The depth is the sketch plane's own distance from the camera whenever that is a
+         * usable one, so a face-on view (the usual one) draws the backdrop exactly where
+         * it was drawn before. It is clamped into the clip range otherwise: at a glancing
+         * angle the plane passes through the camera, so that distance goes to zero, and
+         * the far end of it runs well past the far plane.
+         */
+        class SketchBackdrop
+        {
+        public:
+            SketchBackdrop() = default;
+            SketchBackdrop(const Maths::FVector3& p_eye, const Maths::FVector3& p_look, float p_depth) :
+                m_eye(p_eye),
+                m_look(p_look),
+                m_depth(p_depth),
+                m_usable(true)
+            {
+            }
+
+            /** Puts one world point of the plane at the backdrop's depth, moving it along
+             * the view direction, so its screen position is untouched. */
+            Eigen::Vector3f operator()(const Eigen::Vector3f& p_world) const
+            {
+                if (!m_usable) {
+                    return p_world;
+                }
+                const Maths::FVector3 point(p_world.x(), p_world.y(), p_world.z());
+                const float along = Maths::FVector3::Dot(point - m_eye, m_look);
+                const Maths::FVector3 flat = point + (m_depth - along) * m_look;
+                return Eigen::Vector3f(flat.x, flat.y, flat.z);
+            }
+
+        private:
+            Maths::FVector3 m_eye;
+            Maths::FVector3 m_look;
+            float m_depth = 0.0f;
+            bool m_usable = false;
+        };
+    }
+
+    /** @return the backdrop the sketch's grid and axes are drawn from. A camera that
+     * cannot have one - a perspective one, where the distance along the view direction
+     * *does* move a point on screen, or one whose depth range is not a range - gets a
+     * backdrop that leaves every point where it is. */
+    static SketchBackdrop MakeSketchBackdrop(const Rendering::Entities::Camera* p_camera, const Base::Vector3d& p_planeOrigin)
+    {
+        if (p_camera == nullptr
+            || p_camera->GetProjectionMode() != ::Rendering::Settings::EProjectionMode::ORTHOGRAPHIC) {
+            return {};
+        }
+        // (not "near" / "far": the Windows SDK still has those as macros)
+        const float nearPlane = p_camera->GetNear();
+        const float farPlane = p_camera->GetFar();
+        if (!std::isfinite(nearPlane) || !std::isfinite(farPlane) || farPlane <= nearPlane) {
+            return {};
+        }
+        const Maths::FVector3 eye = p_camera->GetPosition();
+        const Maths::FVector3 look = p_camera->GetRotation() * Maths::FVector3::Forward;
+        const Maths::FVector3 origin(
+            static_cast<float>(p_planeOrigin.x),
+            static_cast<float>(p_planeOrigin.y),
+            static_cast<float>(p_planeOrigin.z));
+        const float along = Maths::FVector3::Dot(origin - eye, look);
+        const float lowest = nearPlane + (farPlane - nearPlane) * 0.02f;
+        const float highest = nearPlane + (farPlane - nearPlane) * 0.9f;
+        const float depth = std::isfinite(along)
+            ? std::min(std::max(along, lowest), highest)
+            : lowest;
+        return SketchBackdrop(eye, look, depth);
+    }
+
     void SketcherObjWidget::fitCamera()
     {
         auto& view = GetService(Editor::Panels::SceneView);
         //view.GetCameraController().EnableRotate(false);
         view.GetCamera()->SetSize(100);
         view.GetCamera()->SetProjectionMode(Rendering::Settings::EProjectionMode::ORTHOGRAPHIC);
-        float pos = view.GetCamera()->GetFar() / 2.0;
+        // Half the far plane is the distance that puts the sketch in the middle of the
+        // depth range. A perspective camera carries no far plane (it is infinite), and
+        // this runs in the very frame the view was switched, before the next
+        // UpdateDepthRange has sized the planes for an orthographic one - so the
+        // distance needs a fallback. Which distance it is barely matters: an
+        // orthographic view shows the plane the same from anywhere, it only has to be
+        // finite and in front of the near plane the next frame computes.
+        // (not named "far": the Windows SDK still has that as a macro)
+        const float farPlane = view.GetCamera()->GetFar();
+        const float pos = std::isfinite(farPlane) && farPlane > 0.0f ? farPlane * 0.5f : 1000.0f;
         Maths::FVector3 normal(m_sketch->plane().normal.x, m_sketch->plane().normal.y, m_sketch->plane().normal.z);
         Maths::FVector3 up(m_sketch->plane().yAxis.x, m_sketch->plane().yAxis.y, m_sketch->plane().yAxis.z);
         Maths::FQuaternion quat = Maths::FQuaternion::LookAt(-normal, up);
@@ -361,6 +455,11 @@ namespace MOON {
                 // below finite by dropping the lines farthest out, which are far off
                 // screen by then anyway.
                 constexpr int kMaxLinesPerFamily = 2000;
+                // The lines are drawn from a flat copy of the plane (see SketchBackdrop):
+                // this is what keeps a grazing view from cutting the grid off at the near
+                // and far planes while leaving every line where it is on screen.
+                const SketchBackdrop backdrop = MakeSketchBackdrop(
+                    m_sceneView->GetCamera(), m_sketch->plane().origin);
                 // Lines of constant u (they run along v), then lines of constant v.
                 const auto drawFamily = [&](bool p_constantU) {
                     const float fixedX = p_constantU ? grid.uX : grid.vX;
@@ -387,14 +486,13 @@ namespace MOON {
                             continue;
                         }
                         const auto& col = (i % 5) == 0 ? majorColor : minorColor;
-                        if (p_constantU) {
-                            renderer->drawLine(
-                                m_sketch->plane().valueEigen(g, lo), m_sketch->plane().valueEigen(g, hi), 1.0f, col);
-                        }
-                        else {
-                            renderer->drawLine(
-                                m_sketch->plane().valueEigen(lo, g), m_sketch->plane().valueEigen(hi, g), 1.0f, col);
-                        }
+                        const Eigen::Vector3f rawA = p_constantU
+                            ? m_sketch->plane().valueEigen(g, lo)
+                            : m_sketch->plane().valueEigen(lo, g);
+                        const Eigen::Vector3f rawB = p_constantU
+                            ? m_sketch->plane().valueEigen(g, hi)
+                            : m_sketch->plane().valueEigen(hi, g);
+                        renderer->drawLine(backdrop(rawA), backdrop(rawB), 1.0f, col);
                     }
                 };
                 drawFamily(true);
@@ -418,6 +516,12 @@ namespace MOON {
         // Drawn before the geometry, so the width the geometry pass pushes is not in
         // effect yet: the axes carry their own.
         renderer->pushSize(m_drawOption.axisLineWidth);
+        // Drawn from the same flat copy of the plane the grid is (see SketchBackdrop): an
+        // axis runs across the whole view, and the plane it lies on is clipped at a
+        // glancing angle like the grid was. The root point below is put there as well, so
+        // that it stays on the axis it starts.
+        const SketchBackdrop backdrop = MakeSketchBackdrop(
+            m_sceneView ? m_sceneView->GetCamera() : nullptr, m_sketch->plane().origin);
         const int axisIds[2] = { Sketcher::GeoEnum::VAxis, Sketcher::GeoEnum::HAxis };
         for (const int geoId : axisIds) {
             // The line and the origin are two elements, and the highlight follows the one
@@ -475,7 +579,7 @@ namespace MOON {
             // cover the highlight of the other.
             if (!isVertical) {
                 renderer->drawPoint(
-                    m_sketch->plane().valueEigen(0.0, 0.0),
+                    backdrop(m_sketch->plane().valueEigen(0.0, 0.0)),
                     pointSize + 1,
                     isOriginPicked ? selectColor
                                    : (isOriginPreSelected ? preselectColor
@@ -498,6 +602,7 @@ namespace MOON {
         }
         const auto& proj = axisCam->GetProjectionMatrix();
         const float proj11 = proj(1, 1);
+        const SketchBackdrop backdrop = MakeSketchBackdrop(axisCam, m_sketch->plane().origin);
         const auto& fd = m_sceneView->GetRenderer().GetFrameDescriptor();
         const float screenH = static_cast<float>(fd.renderHeight);
         const float aspect = screenH > 0.0f
@@ -511,13 +616,13 @@ namespace MOON {
             const double extent = 500.0;
             if (p_axisIndex == 0) {
                 renderer->drawLine(
-                    m_sketch->plane().valueEigen(-extent, 0.0),
-                    m_sketch->plane().valueEigen(extent, 0.0));
+                    backdrop(m_sketch->plane().valueEigen(-extent, 0.0)),
+                    backdrop(m_sketch->plane().valueEigen(extent, 0.0)));
             }
             else {
                 renderer->drawLine(
-                    m_sketch->plane().valueEigen(0.0, -extent),
-                    m_sketch->plane().valueEigen(0.0, extent));
+                    backdrop(m_sketch->plane().valueEigen(0.0, -extent)),
+                    backdrop(m_sketch->plane().valueEigen(0.0, extent)));
             }
             return;
         }
@@ -560,13 +665,13 @@ namespace MOON {
         const float ext = std::max((hi - lo) * 0.05f, 1e-3f);
         if (p_axisIndex == 0) {
             renderer->drawLine(
-                m_sketch->plane().valueEigen(lo - ext, 0.0),
-                m_sketch->plane().valueEigen(hi + ext, 0.0));
+                backdrop(m_sketch->plane().valueEigen(lo - ext, 0.0)),
+                backdrop(m_sketch->plane().valueEigen(hi + ext, 0.0)));
         }
         else {
             renderer->drawLine(
-                m_sketch->plane().valueEigen(0.0, lo - ext),
-                m_sketch->plane().valueEigen(0.0, hi + ext));
+                backdrop(m_sketch->plane().valueEigen(0.0, lo - ext)),
+                backdrop(m_sketch->plane().valueEigen(0.0, hi + ext)));
         }
     }
 
