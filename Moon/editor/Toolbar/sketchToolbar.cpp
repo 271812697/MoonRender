@@ -76,6 +76,7 @@ namespace MOON {
 		"DrawSketchHandlerPolygon",
 		"DrawSketchHandlerSlot",
 		"DrawSketchHandlerRotate",
+		"DrawSketchHandlerTranslate",
 		"DrawSketchHandlerSymmetry",
 		"DrawSketchHandlerTrimming",
 		"DrawSketchHandlerFillet",
@@ -233,6 +234,7 @@ namespace MOON {
 			slot = new CreateCurveCommand(self, "DrawSketchHandlerSlot");
 			trimming = new CreateCurveCommand(self, "DrawSketchHandlerTrimming");
 			rotate = new CreateCurveCommand(self, "DrawSketchHandlerRotate");
+			translate = new CreateCurveCommand(self, "DrawSketchHandlerTranslate");
 			symmetry=new CreateCurveCommand(self, "DrawSketchHandlerSymmetry");
 			fillet = new CreateCurveCommand(self, "DrawSketchHandlerFillet");
 			offset = new CreateCurveCommand(self, "DrawSketchHandlerOffset");
@@ -252,6 +254,7 @@ namespace MOON {
 			slot->setIcon(":/widgets/icons/Sketcher_CreateSlot.svg");
 			trimming->setIcon(":/widgets/icons/Sketcher_Trimming.svg");
 			rotate->setIcon(":/widgets/icons/Sketcher_Rotate.svg");
+			translate->setIcon(":/widgets/icons/Sketcher_Translate.svg");
 			symmetry->setIcon(":/widgets/icons/Sketcher_Symmetry.svg");
 			fillet->setIcon(":/widgets/icons/Sketcher_CreateFillet.svg");
 			offset->setIcon(":/widgets/icons/Sketcher_Offset.svg");
@@ -271,6 +274,7 @@ namespace MOON {
 			self->addAction(slot->action());
 			self->addAction(trimming->action());
 			self->addAction(rotate->action());
+			self->addAction(translate->action());
 			self->addAction(symmetry->action());
 			self->addAction(fillet->action());
 			self->addAction(offset->action());
@@ -293,7 +297,8 @@ namespace MOON {
 			};
 			for (CreateCurveCommand* command : {
 				point, line, lineSet, arc, arcSlot, ellipse, bspline, circle,
-				rectangle, polygon, slot, trimming, rotate, symmetry, fillet, offset
+				rectangle, polygon, slot, trimming, rotate, translate, symmetry, fillet,
+				offset
 				}) {
 				self->connect(
 					command->action(), &QAction::triggered, self, leaveExternalMode);
@@ -314,6 +319,7 @@ namespace MOON {
 			slot->action()->setText(QCoreApplication::translate("SketchToolbar", "Slot", nullptr));
 			trimming->action()->setText(QCoreApplication::translate("SketchToolbar", "Trimming", nullptr));
 			rotate->action()->setText(QCoreApplication::translate("SketchToolbar", "Rotate", nullptr));
+			translate->action()->setText(QCoreApplication::translate("SketchToolbar", "Translate", nullptr));
 			symmetry->action()->setText(QCoreApplication::translate("SketchToolbar", "Symmetry", nullptr));
 			fillet->action()->setText(QCoreApplication::translate("SketchToolbar", "Fillet", nullptr));
 			offset->action()->setText(QCoreApplication::translate("SketchToolbar", "Offset", nullptr));
@@ -329,6 +335,7 @@ namespace MOON {
 		CreateCurveCommand* lineSet;
 		CreateCurveCommand* circle;
 		CreateCurveCommand* rotate;
+		CreateCurveCommand* translate;
 		CreateCurveCommand* arc;
 		CreateCurveCommand* arcSlot;
 		CreateCurveCommand* ellipse;

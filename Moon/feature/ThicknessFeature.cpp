@@ -20,6 +20,8 @@
 #include <gp_Dir.hxx>
 #include <GeomAbs_Shape.hxx>
 #include <ShapeFix_ShapeTolerance.hxx>
+#include <ShapeFix_Solid.hxx>
+#include <TopoDS.hxx>
 #include <BRepAlgo.hxx>
 #include <ShapeAnalysis_Surface.hxx>
 #include <BRepLProp_SLProps.hxx>
@@ -170,14 +172,51 @@ namespace MOON {
             const std::vector<Part::TopoShape>& faces = next->second;
             try
             {
-                hollowed.push_back(solid.makeElementThickSolid(
+                Part::TopoShape hollow = solid.makeElementThickSolid(
                     faces,
                     thickness,
                     tol,
                     intersection,
                     false,
                         offsetMode,
-                    static_cast<Part::JoinType>(join)));
+                    static_cast<Part::JoinType>(join));
+                // The kernel hands back a hollowed solid that is not always a *valid*
+                // one - a wall that meets itself, a seam that did not sew - and it does
+                // that without failing: the call returns, and the shape it returns is
+                // the one every feature above this one is built on. An invalid shape
+                // poisons them all the same way: a boolean against it comes back empty
+                // and reports nothing (a revolve built on one disappeared exactly like
+                // that). So the result is checked here rather than trusted, repaired
+                // when it can be, and refused when it cannot.
+                if (BRepCheck_Analyzer(hollow.getShape()).IsValid() == Standard_False) {
+                    ShapeFix_Solid solidFixer;
+                    solidFixer.Init(TopoDS::Solid(hollow.getShape()));
+                    bool repaired = false;
+                    if (solidFixer.Perform()) {
+                        Part::TopoShape fixed;
+                        fixed.setShape(solidFixer.Solid());
+                        if (!fixed.isNull()
+                            && BRepCheck_Analyzer(fixed.getShape()).IsValid()) {
+                            hollow = fixed;
+                            repaired = true;
+                        }
+                    }
+                    if (!repaired) {
+                        CORE_ERROR(
+                            "[Thickness] {0}: the kernel came back with a hollowed solid "
+                            "that is not valid, and it could not be repaired; every "
+                            "feature built on it would silently come out empty",
+                            GetName());
+                        return false;
+                    }
+                    // Saying it out loud: a repaired solid carries no element names, so a
+                    // reference picked on this feature can only be kept by index.
+                    CORE_WARN(
+                        "[Thickness] {0}: its hollowed solid was repaired before it was "
+                        "handed on (it came back invalid)",
+                        GetName());
+                }
+                hollowed.push_back(hollow);
             }
             catch (Standard_Failure& e)
             {

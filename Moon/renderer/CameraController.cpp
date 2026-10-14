@@ -9,6 +9,7 @@
 #include <iostream>
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace
 {
@@ -314,31 +315,52 @@ void ::Editor::Core::CameraController::HandleInputs(float p_deltaTime)
 
 void ::Editor::Core::CameraController::UpdateDepthRange()
 {
-	// Keep the near/far planes proportional to the camera distance so the
-	// float32 depth buffer keeps enough precision on large models. With a tiny
-	// fixed near plane (0.1) and a huge far plane, surfaces on the far side of
-	// a large model lose precision and z-fight when the camera moves.
+	// The near plane follows the camera distance, so that zooming up to a model keeps
+	// what is in front of the camera unclipped without a tiny fixed near plane eating
+	// the far end of the depth range. The far plane is the perspective view's to
+	// decide, and it decides to have none - see below.
 	Maths::FVector3 sceneCenter = m_view.GetRoaterCenter();
 	float sceneRadius = 0.0f;
 	if (auto* bvh = m_view.GetScene()->GetBvh()) {
 		const auto& b = bvh->m_bounds;
 		// Only a box that is a box: an empty scene BVH keeps the default box, whose
-		// half diagonal overflows to inf, and a far plane of inf makes the perspective
-		// matrix NaN - a viewport that draws nothing at all and says nothing about it.
-		// Without usable bounds the roater center is used, exactly as when the scene
-		// has no BVH yet.
+		// half diagonal overflows to inf, and a far plane taken from it would be inf as
+		// well - which is not a far plane an orthographic view can use (see below).
+		// Without usable bounds the roater center is used, exactly as when the scene has
+		// no BVH yet.
 		if (b.isValid() && std::isfinite(b.pmin.x) && std::isfinite(b.pmax.z)) {
 			sceneCenter = (b.pmin + b.pmax) * 0.5f;
 			sceneRadius = Maths::FVector3::Length(b.pmax - b.pmin) * 0.5f;
 		}
 	}
 	const float dist = Maths::FVector3::Length(m_camera.GetPosition() - sceneCenter);
-	const float far = std::max(dist + sceneRadius * 2.0f, 1200.0f);
 	const float near = std::max(dist * 0.01f, 0.001f);
+	if (!std::isfinite(near)) {
+		return;
+	}
+	m_camera.SetNear(near);
+
+	// A perspective view gets no far plane at all - the projection takes the limit of
+	// the finite one (FMatrix4::CreateFrustum), so nothing is ever cut off for being
+	// too far away. That costs nothing: with reversed-Z and a float depth buffer the
+	// precision is relative to the distance (dZ ~ Z * 2^-24, see docs/DepthPrecision.md)
+	// whatever the far plane is, and what is left of it - clipping - is exactly what an
+	// infinite far plane gives up on purpose. Filament does the same in
+	// FCamera::setProjection.
+	if (m_camera.GetProjectionMode() == ::Rendering::Settings::EProjectionMode::PERSPECTIVE) {
+		m_camera.SetFar(std::numeric_limits<float>::infinity());
+		return;
+	}
+
+	// An orthographic view cannot be given one. Its depth is a linear map of the
+	// distance, so far - near is the whole precision budget: an infinite far plane would
+	// map every distance to the same depth value and the depth buffer would stop telling
+	// any two surfaces apart. It keeps a far plane sized to the scene, which is also why
+	// a set of bounds that overflows must not reach this line.
+	const float far = std::max(dist + sceneRadius * 2.0f, 1200.0f);
 	// Whatever the bounds were, a degenerate plane pair is not something the camera
 	// should be given: the previous values are kept instead.
-	if (std::isfinite(near) && std::isfinite(far) && near < far) {
-		m_camera.SetNear(near);
+	if (std::isfinite(far) && near < far) {
 		m_camera.SetFar(far);
 	}
 }

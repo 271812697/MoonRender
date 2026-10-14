@@ -65,7 +65,10 @@ namespace MOON {
 		DrawSketchHandlerCircle* self = nullptr;
 		
 		float radius;
-        Base::Vector2d centerPoint, firstPoint, secondPoint;
+        // thirdPoint is the point the circle is being drawn through: the tool only passes
+        // it through on its way to the centre, but the "x3"/"y3" boxes of the three rim
+        // point method have to show it.
+        Base::Vector2d centerPoint, firstPoint, secondPoint, thirdPoint;
        
         bool isDiameter;
 	};
@@ -83,14 +86,197 @@ namespace MOON {
 	void DrawSketchHandlerCircle::onUpdate()
 	{
         DrawSketchHandler::onUpdate();
-        if (state() == SelectMode::SeekSecond) {
-			drawFloatValue(m_internal->radius);
-        }
+        // The radius has a box of its own now (it used to be written at the cursor): the
+        // boxes follow the geometry every frame - the camera may have moved - and show the
+        // values the tool is about to use.
+        updateOnViewParameterPositions();
+        drawOnViewParameters();
 	}
 
 	void DrawSketchHandlerCircle::onSetActive(bool flag)
 	{
+        if (flag) {
+            configureOnViewParameters();
+        }
+        else {
+            onViewParameters.clear();
+        }
 	}
+
+    void DrawSketchHandlerCircle::onConstructionMethodChanged()
+    {
+        // The two methods are given different numbers (a centre and a radius, or three
+        // points on the rim), so the boxes are thrown away and made again.
+        configureOnViewParameters();
+    }
+
+    void DrawSketchHandlerCircle::configureOnViewParameters()
+    {
+        onViewParameters.clear();
+
+        // Where the circle starts - the centre, or the first point of the rim - is placed
+        // with the mouse; the boxes begin with the numbers that come after it.
+        if (constructionMethod() == ConstructionMethod::Center) {
+            onViewParameters.add("radius");
+        }
+        else {
+            onViewParameters.add("x2");
+            onViewParameters.add("y2");
+            onViewParameters.add("x3");
+            onViewParameters.add("y3");
+        }
+
+        onViewParameters.onValueChanged = [this](int, double) {
+            redrawFromControlParameters();
+        };
+        onViewParameters.onEditingFinished = [this](int index, double value) {
+            redrawFromControlParameters();
+            finishOnViewParameterStep(index, value);
+        };
+        onViewParameters.onReleased = [this](int) {
+            redrawFromControlParameters();
+        };
+    }
+
+    void DrawSketchHandlerCircle::redrawFromControlParameters()
+    {
+        Base::Vector2d pos = onSketchPos;
+        enforceControlParameters(pos);
+        updateDataAndDrawToPosition(pos);
+        adaptParameters(pos);
+    }
+
+    void DrawSketchHandlerCircle::setValueIfUnset(int p_index, double p_value)
+    {
+        OnViewParameter* parameter = onViewParameters.at(p_index);
+        if (parameter != nullptr && !parameter->isSet()) {
+            parameter->setValue(p_value);
+        }
+    }
+
+    StateMachines::ThreeSeekEnd DrawSketchHandlerCircle::stateOfOnViewParameter(int p_index) const
+    {
+        if (constructionMethod() == ConstructionMethod::Center) {
+            // The radius, once the centre is placed - the method is done with those two.
+            return SelectMode::SeekSecond;
+        }
+        // The second and third rim points, two numbers each (the first one is placed with
+        // the mouse like the centre is).
+        if (p_index < 2) {
+            return SelectMode::SeekSecond;
+        }
+        return SelectMode::SeekThird;
+    }
+
+    bool DrawSketchHandlerCircle::isLastControlStep() const
+    {
+        return state() == SelectMode::SeekSecond
+            && constructionMethod() == ConstructionMethod::Center;
+    }
+
+    void DrawSketchHandlerCircle::adaptParameters(Base::Vector2d /*onSketchPos*/)
+    {
+        const int expectedBoxes = constructionMethod() == ConstructionMethod::Center ? 1 : 4;
+        if (onViewParameters.size() < expectedBoxes) {
+            return;  // the tool is not active: there are no boxes to write
+        }
+        const bool isCenter = constructionMethod() == ConstructionMethod::Center;
+
+        if (state() == SelectMode::SeekSecond) {
+            if (isCenter) {
+                setValueIfUnset(0, m_internal->radius);
+            }
+            else {
+                setValueIfUnset(0, m_internal->secondPoint.x);
+                setValueIfUnset(1, m_internal->secondPoint.y);
+            }
+        }
+        else if (state() == SelectMode::SeekThird) {
+            setValueIfUnset(2, m_internal->thirdPoint.x);
+            setValueIfUnset(3, m_internal->thirdPoint.y);
+        }
+    }
+
+    void DrawSketchHandlerCircle::enforceControlParameters(Base::Vector2d& onSketchPos)
+    {
+        const int expectedBoxes = constructionMethod() == ConstructionMethod::Center ? 1 : 4;
+        if (onViewParameters.size() < expectedBoxes) {
+            return;  // the tool is not active: there are no boxes to read
+        }
+        const bool isCenter = constructionMethod() == ConstructionMethod::Center;
+
+        switch (state()) {
+        case SelectMode::SeekSecond: {
+            if (isCenter) {
+                // The centre is known: the radius decides how far out the cursor is taken,
+                // and the direction the mouse points at is kept.
+                OnViewParameter* radiusBox = onViewParameters.at(0);
+                if (radiusBox->isSet()) {
+                    Base::Vector2d dir = onSketchPos - m_internal->centerPoint;
+                    if (dir.Length() < Precision::Confusion()) {
+                        dir.x = 1.0;
+                    }
+                    const double radius = radiusBox->value();
+                    if (radius < Precision::Confusion()) {
+                        radiusBox->release();  // a radius of nothing is not a radius
+                        return;
+                    }
+                    onSketchPos = m_internal->centerPoint + radius * dir.Normalize();
+                }
+            }
+            else {
+                // The second of the three rim points.
+                if (OnViewParameter* x = onViewParameters.at(0); x != nullptr && x->isSet()) {
+                    onSketchPos.x = x->value();
+                }
+                if (OnViewParameter* y = onViewParameters.at(1); y != nullptr && y->isSet()) {
+                    onSketchPos.y = y->value();
+                }
+            }
+        } break;
+        case SelectMode::SeekThird: {
+            // The last of the three rim points.
+            if (OnViewParameter* x = onViewParameters.at(2); x != nullptr && x->isSet()) {
+                onSketchPos.x = x->value();
+            }
+            if (OnViewParameter* y = onViewParameters.at(3); y != nullptr && y->isSet()) {
+                onSketchPos.y = y->value();
+            }
+        } break;
+        default:
+            break;
+        }
+    }
+
+    void DrawSketchHandlerCircle::updateOnViewParameterPositions()
+    {
+        adaptParameters(onSketchPos);
+
+        if (m_sceneView == nullptr) {
+            return;
+        }
+
+        Base::Vector2d anchor = m_internal->secondPoint;
+        if (state() == SelectMode::SeekSecond) {
+            anchor = constructionMethod() == ConstructionMethod::Center
+                ? m_internal->centerPoint
+                : m_internal->secondPoint;
+        }
+        else if (state() == SelectMode::SeekThird) {
+            anchor = m_internal->secondPoint;
+        }
+
+        const Maths::FVector2 screen = m_sceneView->worldToScreen(getWorldPosFromSketchPos(anchor));
+        int slot = 0;
+        for (int i = 0; i < onViewParameters.size(); i++) {
+            if (stateOfOnViewParameter(i) != state()) {
+                continue;
+            }
+            onViewParameters.at(i)->setScreenPosition(
+                screen.x + 18.0f, screen.y - 12.0f + 24.0f * slot);
+            slot++;
+        }
+    }
 	void DrawSketchHandlerCircle::updateDataAndDrawToPosition(Base::Vector2d onSketchPos)
 	{
         switch (state()) {
@@ -145,6 +331,7 @@ namespace MOON {
                  auto p=    Part::Geom2dCircle::getCircleCenter( m_internal->firstPoint,  m_internal->secondPoint, onSketchPos);
 				 m_internal->centerPoint = { p.x, p.y };
                  m_internal->radius = (onSketchPos -m_internal->centerPoint).Length();
+                 m_internal->thirdPoint = onSketchPos;
 
                 drawPositionAtCursor(onSketchPos);
 

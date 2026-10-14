@@ -624,11 +624,26 @@ Maths::FMatrix4 Maths::FMatrix4::CreateOrthographic(const float p_size, const fl
 
 	ortho(0, 0) = 2.0f / (right - left);
 	ortho(1, 1) = 2.0f / (top - bottom);
-	ortho(2, 2) = -2.0f / (p_zFar - p_zNear);
 	ortho(0, 3) = -(right + left) / (right - left);
 	ortho(1, 3) = -(top + bottom) / (top - bottom);
-	ortho(2, 3) = -(p_zFar + p_zNear) / (p_zFar - p_zNear);
 	ortho(3, 3) = 1.0f;
+	if (std::isfinite(p_zFar)) {
+		const float zRange = p_zFar - p_zNear;
+		ortho(2, 2) = -2.0f / zRange;
+		ortho(2, 3) = -(p_zFar + p_zNear) / zRange;
+	}
+	else {
+		// An infinite far plane, as the limit of the pair above: -2/(far-near) goes to
+		// zero and -(far+near)/(far-near) goes to -1. Worth knowing what that means for
+		// an *orthographic* projection: the depth that comes out is the same for every
+		// distance, so the depth buffer stops telling surfaces apart. It is what an
+		// infinite far plane is for a perspective view (where the mapping is hyperbolic
+		// and only flattens far away); for an orthographic one it is a projection that
+		// cannot sort anything, so a camera that wants both an orthographic view and
+		// depth belongs at a large finite far plane instead.
+		ortho(2, 2) = 0.0f;
+		ortho(2, 3) = -1.0f;
+	}
 
 	return ortho;
 }
@@ -700,7 +715,6 @@ Maths::FMatrix4 Maths::FMatrix4::CreateFrustum(const float p_left, const float p
 	const float maxView = 2.0f * p_zNear;
 	const float width = p_right - p_left;
 	const float height = p_top - p_bottom;
-	const float zRange = p_zFar - p_zNear;
 
 	FMatrix4 Frustum;
 
@@ -708,9 +722,23 @@ Maths::FMatrix4 Maths::FMatrix4::CreateFrustum(const float p_left, const float p
 	Frustum.data[5] = maxView / height;
 	Frustum.data[2] = (p_right + p_left) / width;
 	Frustum.data[6] = (p_top + p_bottom) / height;
-	Frustum.data[10] = (-p_zFar - p_zNear) / zRange;
 	Frustum.data[14] = -1.0f;
-	Frustum.data[11] = (-maxView * p_zFar) / zRange;
+	if (std::isfinite(p_zFar)) {
+		const float zRange = p_zFar - p_zNear;
+		Frustum.data[10] = (-p_zFar - p_zNear) / zRange;
+		Frustum.data[11] = (-maxView * p_zFar) / zRange;
+	}
+	else {
+		// No far plane at all: the limit of the two entries above as far goes to
+		// infinity, (-far-near)/(far-near) -> -1 and (-2*near*far)/(far-near) -> -2*near.
+		// Filament writes the same two lines for the same reason, in
+		// FCamera::setProjection. The depth stays hyperbolic - precise up close, flat far
+		// away - so a perspective view loses nothing by having no far plane, and with a
+		// reversed-Z float depth buffer the precision is relative to the distance
+		// (dZ ~ Z * 2^-24, see docs/DepthPrecision.md) with or without one.
+		Frustum.data[10] = -1.0f;
+		Frustum.data[11] = -maxView;
+	}
 	Frustum.data[15] = 0.0f;
 
 	return Frustum;

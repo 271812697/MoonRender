@@ -19,6 +19,7 @@
 #include "Interactive/Widgets/DrawSketchHandlerLineSet.h"
 #include "Interactive/Widgets/DrawSketchHandlerCircle.h"
 #include "Interactive/Widgets/DrawSketchHandlerRotate.h"
+#include "Interactive/Widgets/DrawSketchHandlerTranslate.h"
 #include "Interactive/Widgets/DrawSketchHandlerArc.h"
 #include "Interactive/Widgets/DrawSketchHandlerArcSlot.h"
 #include "Interactive/Widgets/DrawSketchHandlerEllipse.h"
@@ -73,6 +74,7 @@ class Editor::Rendering::GizmoRenderPass::GizmoRenderPassInternal {
 			mWidgets["SmartDimension"] = new MOON::SmartDimensionWidget("SmartDimension");
 			
 			mWidgets["DrawSketchHandlerRotate"] = new MOON::DrawSketchHandlerRotate("DrawSketchHandlerRotate");
+			mWidgets["DrawSketchHandlerTranslate"] = new MOON::DrawSketchHandlerTranslate("DrawSketchHandlerTranslate");
 			mWidgets["DrawSketchHandlerTrimming"] = new MOON::DrawSketchHandlerTrimming("DrawSketchHandlerTrimming");
 			mWidgets["DrawSketchHandlerTrimming"]->setActive(false);
 			// One widget, two modes: the sketch toolbar switches it on with the mode of

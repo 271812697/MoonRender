@@ -94,6 +94,22 @@ namespace MOON {
                 resShape = revolve;
             }
 
+            // A boolean that comes back with nothing in it has failed - the swept solid,
+            // the shape below it, or the way they meet (a profile that crosses the axis
+            // swept most of a turn meets itself). Handing that result on commits an empty
+            // feature: the panel's preview shows the tool and looks right, and the model
+            // disappears. Saying so, and leaving the shape this feature had, is what
+            // keeps the document whole.
+            if (!baseShape.isNull()
+                && resShape.getSubTopoShapes(TopAbs_FACE).empty()) {
+                CORE_ERROR(
+                    "{0}: the revolve and the shape below it do not make a solid "
+                    "together - sweeping {1} degrees leaves nothing behind",
+                    GetName(),
+                    angle);
+                return false;
+            }
+
             setResultShape(resShape);
             return true;
         }
