@@ -24,6 +24,11 @@ namespace Rendering::Entities
 		float GetFov() const;
 		float GetSize() const;
 		float GetNear() const;
+		// An infinite far plane means "no far plane": the projection takes the limit of
+		// the finite one then (see FMatrix4::CreateFrustum) and nothing is ever clipped
+		// for being too far away. Only a perspective view can afford that - the depth of
+		// an orthographic one is a linear map of the distance, so an infinite far plane
+		// would put every distance on the same depth value.
 		float GetFar() const;
 		const Maths::FVector3& GetClearColor() const;
 		bool IsCameraViewMatrixChange();

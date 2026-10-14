@@ -108,8 +108,28 @@ void Rendering::Data::Frustum::CalculateFrustum(const Maths::FMatrix4& p_viewPro
 	m_frustum[BACK][C] = clip[11] - clip[10];
 	m_frustum[BACK][D] = clip[15] - clip[14];
 
-	// Normalize the BACK side
-	NormalizePlane(m_frustum, BACK);
+	// Normalize the BACK side.
+	//
+	// A projection that has no far plane at all (an infinite one, see
+	// FMatrix4::CreateFrustum) hands the two rows this side is read from the same value:
+	// the normal comes out exactly zero, and normalizing it would divide by zero and
+	// leave NaNs in every containment test. The far plane of such a projection is at
+	// infinity, and "the plane every point is in front of" says exactly that - (0,0,0,1)
+	// passes the point, sphere and cube tests alike, so nothing is ever rejected for
+	// being too far away. A camera with no far plane is the only way to get here.
+	const float backNormalLengthSq =
+		m_frustum[BACK][A] * m_frustum[BACK][A] +
+		m_frustum[BACK][B] * m_frustum[BACK][B] +
+		m_frustum[BACK][C] * m_frustum[BACK][C];
+	if (backNormalLengthSq > 1.0e-20f) {
+		NormalizePlane(m_frustum, BACK);
+	}
+	else {
+		m_frustum[BACK][A] = 0.0f;
+		m_frustum[BACK][B] = 0.0f;
+		m_frustum[BACK][C] = 0.0f;
+		m_frustum[BACK][D] = 1.0f;
+	}
 
 	// This will extract the FRONT side of the frustum
 	m_frustum[FRONT][A] = clip[3] + clip[2];

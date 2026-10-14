@@ -201,6 +201,45 @@ float32 的尾数精度不是均匀的：**数值越接近 1，相对间隔越�
 | 100,000 | 6e-3 单位 | ≈ 200× |
 | 1,000,000 | 0.06 单位 | ≈ 200× |
 
+### 4.5 透视相机不再有远平面
+
+反转深度让精度变成**相对距离**的（δZ ≈ Z × 2⁻²⁴，与 near/far 无关），于是远平面
+剩下的唯一作用就是**裁掉远处的东西**。透视相机干脆不要它：投影矩阵取 `far → ∞`
+的极限——这也是 Filament 的做法（`FCamera::setProjection` 写的就是这两行）：
+
+```
+透视投影：M22 = -(f+n)/(f-n) → -1
+          M23 = -2fn/(f-n)   → -2n        （n = 近平面）
+```
+
+- 位置：`FMatrix4::CreateFrustum`（`isfinite(far)` 为假时写下极限值）；
+  `CameraController::UpdateDepthRange` 给透视相机 `SetFar(infinity)`。
+- **深度仍然是双曲的**（近处精确、远处平坦），所以近处精度不变。实测一个深度间隔
+  值多少距离（near = 0.1，float32 深度缓冲）：
+
+  | Z | far = ∞ | far = 1200 | Z × 2⁻²⁴ |
+  | --- | --- | --- | --- |
+  | 10 | 9.3e-7 | 9.3e-7 | 6.0e-7 |
+  | 100 | 1.2e-5 | 5.8e-6 | 6.0e-6 |
+  | 1,000 | 7.3e-5 | 1.8e-5 | 6.0e-5 |
+  | 10,000 | 9.1e-4 | 7.3e-3 | 6.0e-4 |
+
+  两者互有高低、都在同一量级（差别来自 float 的二进制档位落在哪一侧：越靠近旧远
+  平面，有限 far 的窗口深度越小、档位越细）。超过旧远平面之后，有限 far 已经裁掉
+  了，无限远平面还在正常排序。
+- **超远视距**：Z = 10⁹ 处的窗口深度是 1e-10，仍在 [0, 1] 内、照常绘制；旧的
+  far = 1200 在 Z = 1e5 处已经是 -8.2e-5，也就是早已被远平面裁掉。
+- 视锥提取要跟上：无限远平面的**远平面退化成零法线**，`Frustum::CalculateFrustum`
+  把它写成 `(0, 0, 0, 1)`——一个“任何点都在它前面”的平面，点/球/盒三种包含测试都
+  自然通过，不会因为 NaN 把整个场景裁空。
+
+**正交相机不能这么做。** 正交投影的深度是距离的**线性**映射，`far − near` 就是全部
+精度预算：`far → ∞` 会让所有距离落在同一个深度值上（实测 `M22 = 0` 时 Z = 1 与
+Z = 10 000 的窗口深度都是 1.0，深度缓冲再也分不出前后）。所以
+`CameraController::UpdateDepthRange` 只把透视相机设成无限远，正交相机继续用贴合
+场景的有限 far（同一处按投影模式分支）；正交视图里要处理的东西，交给各自的几何
+手段，而不是把远平面推到无穷。
+
 ---
 
 ## 5. 为什么同时解决线面冲突
@@ -249,10 +288,9 @@ float32 的尾数精度不是均匀的：**数值越接近 1，相对间隔越�
 
 两套方案**同时启用**，且不冲突：
 
-- Reversed-Z 负责“精度大头”：远平面 δZ ≈ `far × 6e-8`，与 near/far 比例无关；
-- 动态近远平面负责“范围卫生”：far 始终贴合场景（避免被设成离谱大数、影响 float
-  指数范围），near 随距离缩放（放大不裁切），同时保留 fit 后大模型不被远裁剪切掉
-  的修复；
+- Reversed-Z 负责“精度大头”：δZ ≈ `Z × 6e-8`，与 near/far 比例无关；
+- 透视相机干脆没有远平面（见 4.5），远处永远不裁切；正交相机继续用贴合场景的
+  有限 far（`far − near` 就是它的精度预算），near 随距离缩放（放大不裁切）；
 - polygon offset 方向修正保证共面线/面关系在反转深度下依旧正确。
 
 最终精度表（两个方案叠加）：
@@ -294,3 +332,10 @@ Reversed-Z 改的是**全局渲染状态**，合入后应回归：
 连带修复：
 - `MoonRender/src/Rendering/Context/Driver.cpp`（polygon offset 方向）
 - `MoonRender/src/Rendering/Entities/Camera.cpp`（`ProjectionFitToSphere` 远平面）
+
+无限远平面（4.5）：
+- `MoonRender/src/Maths/FMatrix4.cpp`（`far → ∞` 的极限形式）
+- `MoonRender/src/Rendering/Data/Frustum.cpp`（退化的远平面写成 `(0,0,0,1)`）
+- `MoonRender/include/Rendering/Entities/Camera.h`（`far` 取无穷的含义）
+- `Moon/renderer/CameraController.cpp`（按投影模式给 far）
+- `Moon/Sketcher/SketcherObjWidgetDraw.cpp`（`fitCamera` 不再用 `far / 2` 直接算距离）
