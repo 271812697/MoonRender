@@ -188,6 +188,10 @@ Rendering::Settings::EPrimitiveMode Rendering::Resources::Mesh::GetPrimitiveMode
 
 void Rendering::Resources::Mesh::BuildBvh()
 {
+	// Built on demand: by the ray tracing when it builds its own data (see
+	// BvhService::BuildTracingData), and by the queries that walk this mesh (see
+	// EnsureMeshBvh there). Building it while the mesh was uploaded made every load pay
+	// for it, and nothing else wants it.
 
 	if (m_bvh) {
 		delete m_bvh;
@@ -390,7 +394,6 @@ void Rendering::Resources::Mesh::ComputeBoundingSphereAndBox(const std::vector< 
 			const auto& position = reinterpret_cast<const Maths::FVector3&>(vertex.position);
 			m_boundingSphere.radius = std::max(m_boundingSphere.radius, Maths::FVector3::Distance(m_boundingSphere.position, position));
 		}
-		BuildBvh();
 	}
 }
 void Rendering::Resources::Mesh::ComputeBoundingSphereAndBox(const std::vector< Geometry::Vertex>& p_vertices)
@@ -427,7 +430,6 @@ void Rendering::Resources::Mesh::ComputeBoundingSphereAndBox(const std::vector< 
 			const auto& position = reinterpret_cast<const Maths::FVector3&>(vertex.position);
 			m_boundingSphere.radius = std::max(m_boundingSphere.radius, Maths::FVector3::Distance(m_boundingSphere.position, position));
 		}
-		BuildBvh();
 	}
 }
 void Rendering::Resources::Mesh::ComputeBoundingSphereAndBox(const std::vector< Geometry::VertexBVH>& p_vertices)
@@ -461,6 +463,5 @@ void Rendering::Resources::Mesh::ComputeBoundingSphereAndBox(const std::vector< 
 		{
 			m_boundingSphere.radius = std::max(m_boundingSphere.radius, Maths::FVector3::Distance(m_boundingSphere.position, vertex.position));
 		}
-		BuildBvh();
 	}
 }

@@ -499,22 +499,12 @@ void Core::SceneSystem::Scene::BuildSceneBvh()
 	}
 	// Build BVH
 	//
-	// Every triangle mesh needs a BVH of its own as well, and whether it has one
-	// depends on who made it: the topology batches call
-	// ComputeBoundingSphereAndBox() per mesh while they are built, while a mesh read
-	// from a file only gets the *model's* box. Building the missing ones here is what
-	// keeps the path trace - and the picking that reads the same service - working
-	// for both. A mesh with no triangles cannot have one and is left alone; the
-	// service skips it below.
-	for (::Rendering::Resources::Mesh* mesh : sceneMeshes) {
-		if (mesh != nullptr
-			&& mesh->GetPrimitiveMode() == ::Rendering::Settings::EPrimitiveMode::TRIANGLES
-			&& mesh->GetBvh() == nullptr) {
-			mesh->BuildBvh();
-		}
-	}
+	// Only the scene's own BVHs are built here, from the instance boxes. The per-mesh
+	// BVHs - which the path tracer walks for its node array, and which are the expensive
+	// half of a load - are built by the ray tracing itself, the first time it runs after
+	// the scene changed (see BvhService::BuildTracingData): nothing else needs them.
 	if (meshInstances.size()>0) {
-		bvhService->Process(bounds,sceneMeshes, meshInstances);	
+		bvhService->Process(bounds, sceneMeshes, meshInstances, /*p_buildTracingData*/ false);
 	}
 }
 

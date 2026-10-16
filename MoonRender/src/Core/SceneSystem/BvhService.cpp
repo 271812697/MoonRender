@@ -21,6 +21,17 @@
 namespace Core::SceneSystem
 {
 
+	/** The per-mesh BVH a traversal walks. The ray tracing builds them for its own use
+	 * (see BvhService::BuildTracingData); the few queries that walk one without the ray
+	 * tracing having run - the debug ray hit, the clip plane one, the rectangle pick - get
+	 * it built here, which is the only time they are needed before that. */
+	void EnsureMeshBvh(::Rendering::Resources::Mesh* p_mesh)
+	{
+		if (p_mesh != nullptr && p_mesh->GetBvh() == nullptr) {
+			p_mesh->BuildBvh();
+		}
+	}
+
 	bool exportObjOnlyVertices(
 		const std::string& filename,
 		const float* vertices,
@@ -333,11 +344,15 @@ namespace Core::SceneSystem
 		curNode = topLevelIndex;
 		ProcessTLASNodes(topLevelBvh->m_root);
 	}
-	void BvhService::Process(const std::vector<::Rendering::Geometry::bbox>& boxs, const std::vector<::Rendering::Resources::Mesh*>& sceneMeshes, const std::vector<MeshInstance>& instances) {
+	void BvhService::Process(const std::vector<::Rendering::Geometry::bbox>& boxs, const std::vector<::Rendering::Resources::Mesh*>& sceneMeshes, const std::vector<MeshInstance>& instances, bool p_buildTracingData) {
 		
 		m_sceneBvh->Build(boxs.data(),boxs.size());;
 		mSceneMeshes = sceneMeshes;
 		mSceneMeshInstances = instances;
+		mSceneBoxes = boxs;
+		// Whatever the ray tracing had built describes the scene that was up before this
+		// call, unless this call is the one building it (see BuildTracingData).
+		m_tracingDataStale = !p_buildTracingData;
 
 		triMeshes.clear();
 		triMeshInstances.clear();
@@ -345,12 +360,13 @@ namespace Core::SceneSystem
 		std::vector<::Rendering::Geometry::bbox> triBoxs;
 		std::unordered_map<::Rendering::Resources::Mesh*, int>triMeshIndex;
 		for (int i = 0;i < sceneMeshes.size();i++) {
-			// A mesh without a BVH has no triangles to index - an empty topology batch
-			// (a sketch whose profile did not come out as a face, say) is the usual
-			// one. It stays out of the traced set, and its instances are skipped below
-			// with it so the mesh indices stay in step.
+			// A mesh with no triangles to index - an empty topology batch (a sketch whose
+			// profile did not come out as a face, say) - stays out of the traced set, and
+			// its instances are skipped below with it so the mesh indices stay in step. Its
+			// per-mesh BVH is not asked for here: the ray tracing builds the missing ones
+			// when it builds its own data (see BuildTracingData).
 			if (sceneMeshes[i]->GetPrimitiveMode() == ::Rendering::Settings::EPrimitiveMode::TRIANGLES
-				&& sceneMeshes[i]->GetBvh() != nullptr) {
+				&& (sceneMeshes[i]->GetIndexCount() > 0 || sceneMeshes[i]->GetVertexCount() > 0)) {
 				triMeshIndex[sceneMeshes[i]] = triMeshes.size();
 				triMeshes.push_back(sceneMeshes[i]);
 			}
@@ -383,6 +399,19 @@ namespace Core::SceneSystem
 
 		m_sceneTriBvh->Build(triBoxs.data(),triBoxs.size());
 		this->topLevelBvh = m_sceneTriBvh;
+		// The scene's own BVHs are built; what the path tracer traces on the GPU is not,
+		// unless this call was asked for it (see BuildTracingData).
+		if (!p_buildTracingData) {
+			return;
+		}
+		// The per-mesh BVHs the node array is walked from. They are the expensive half of a
+		// load, and nothing but the ray tracing needs them, which is why they are built here
+		// rather than with the scene's own BVHs.
+		for (::Rendering::Resources::Mesh* mesh : triMeshes) {
+			if (mesh != nullptr && mesh->GetBvh() == nullptr) {
+				mesh->BuildBvh();
+			}
+		}
 		// A scene whose meshes all fell out of the traced set - no triangle batch among
 		// them, or a hidden body whose only visible feature is a sketch wire - leaves an
 		// empty triangle BVH. There is no top level to walk then, and walking the null
@@ -568,6 +597,15 @@ namespace Core::SceneSystem
 		}
 		isDirty = true;
 	}
+
+	void BvhService::BuildTracingData() {
+		// The same call that built the scene's BVHs, this time also building what the ray
+		// tracing traces: the per-mesh BVHs, the nodes and materials, and the buffers the
+		// shader reads. It runs on the frame the ray tracing first asks for it after a
+		// scene change - a load no longer pays for a feature that may never be turned on.
+		Process(mSceneBoxes, mSceneMeshes, mSceneMeshInstances, /*p_buildTracingData*/ true);
+	}
+
 	void BvhService::SaveAsObj(const std::string& path)
 	{
 		std::vector<Maths::FVector3>vertices;
@@ -593,6 +631,7 @@ namespace Core::SceneSystem
 		//exportObjOnlyVertices(path,(float*)vertices.data(),indices.data(),vertices.size(),indices.size());
 	}
 	void BvhService::Clear() {
+		m_tracingDataStale = true;
 		if (m_sceneBvh) {
 			delete m_sceneBvh;
 		}
@@ -649,6 +688,7 @@ namespace Core::SceneSystem
 			meshTriangleInfo[i].start = -1;
 			meshTriangleInfo[i].num = -1;
 			baseOffset[i] = triOffset;
+			EnsureMeshBvh(triMeshes[i]);
 			triOffset+= triMeshes[i]->GetBvh()->GetNumIndices();
 		}
 		for (auto& it : triangleInfoMap) {
@@ -749,6 +789,7 @@ namespace Core::SceneSystem
 						auto invMatrix = Maths::FMatrix4::Inverse(matrix);
 						auto localRay = ray.Transformed(invMatrix);
 						auto& mesh = triMeshes[meshId];
+						EnsureMeshBvh(mesh);
 						auto meshBvh = mesh->GetBvh();
 						std::vector<::Rendering::Geometry::Bvh::Node*>meshBvhStack;
 						meshBvhStack.push_back(meshBvh->m_root);
@@ -838,6 +879,7 @@ namespace Core::SceneSystem
 						auto invMatrix = Maths::FMatrix4::Inverse(matrix);
 						auto localRay = ray.Transformed(invMatrix);
 						auto& mesh = triMeshes[meshId];
+					EnsureMeshBvh(mesh);
 						auto meshBvh = mesh->GetBvh();
 						std::vector<::Rendering::Geometry::Bvh::Node*>meshBvhStack;
 						meshBvhStack.push_back(meshBvh->m_root);
@@ -916,7 +958,10 @@ namespace Core::SceneSystem
 				auto& mesh = triMeshes[meshId];
 				int numTrs=mesh->GetIndexCount()? mesh->GetIndexCount()/3:mesh->GetVertexCount()/3;
 				float meshTempDist = 1e6;
-				if (localRay.HitDistance(mesh->GetBvh()->Bounds(), meshTempDist))
+				// The mesh's own box, not the BVH's: this walk is a triangle scan with a
+				// fast reject, and the per-mesh BVH is only built when the ray tracing asks
+				// for its data (see BuildTracingData) - the box is what the mesh has.
+				if (localRay.HitDistance(mesh->GetBoundingBox(), meshTempDist))
 				{	
 					
 					for (int triIndex = 0;triIndex < numTrs;triIndex++) {
@@ -999,6 +1044,7 @@ namespace Core::SceneSystem
 							int meshId = triMeshInstances[index].meshID;
 							auto& mesh = triMeshes[meshId];
 							int actorId= triMeshInstances[index].actorID;
+							EnsureMeshBvh(mesh);
 							auto meshBvh = mesh->GetBvh();
 							std::vector<::Rendering::Geometry::Bvh::Node*>meshBvhStack;
 							meshBvhStack.push_back(meshBvh->m_root);

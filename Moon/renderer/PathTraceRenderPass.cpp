@@ -833,6 +833,14 @@ void main()
 		auto& view = GetService(Editor::Panels::SceneView);
 		auto camera=view.GetCamera();
 		auto bvhService = view.GetScene()->GetBvhService();
+		// The per-mesh BVHs and the buffers the shader traces are the ray tracing's own
+		// data: they are built here, on the first frame after the scene changed, rather
+		// than with the scene's BVHs - a load has no reason to pay for a feature that may
+		// never be turned on (see BvhService::BuildTracingData). Inside the render loop is
+		// where it has to run: the per-mesh domain palettes are read through the GL context.
+		if (bvhService->IsTracingDataStale()) {
+			bvhService->BuildTracingData();
+		}
 		static ::Rendering::Settings::EProjectionMode preCameraType=camera->GetProjectionMode();
 		::Rendering::Settings::EProjectionMode curCameraType = camera->GetProjectionMode();
 		if (preCameraType!=curCameraType) {
