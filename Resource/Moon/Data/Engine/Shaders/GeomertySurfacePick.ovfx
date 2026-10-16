@@ -27,6 +27,10 @@ void main()
 in vec2 VSDomainId;
 in vec3 VSOUT_World;
 out vec4 FRAGMENT_COLOR;
+// The second color attachment of the picking target: where this fragment is in the
+// world. The picking pass reads it along with the id, and w = 1 is what says that
+// something really was drawn here (the attachment is cleared to zero).
+layout (location = 1) out vec4 FRAGMENT_WORLDPOS;
 
 void main()
 {
@@ -41,4 +45,5 @@ void main()
     int g = (actorId >> 8) & 0xFF;
     int b = (actorId >> 16) & 0xFF; 
     FRAGMENT_COLOR = vec4(r / 255.0, g / 255.0, b / 255.0, 1.0);
+    FRAGMENT_WORLDPOS = vec4(VSOUT_World, 1.0);
 }

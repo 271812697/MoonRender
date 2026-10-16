@@ -22,8 +22,23 @@ namespace Editor::Rendering
 			std::variant<Tools::Utils::OptRef<::Core::ECS::Actor>,
 			Editor::Core::GizmoBehaviour::EDirection>
 			>;
+
+		/** One pick: what was under the pixel, and where on the geometry that pixel was.
+		 *
+		 * The world position is not a second query: the picking target has a second color
+		 * attachment every geometry pick shader writes the fragment's world position into,
+		 * so the pixel's id and its position are read back together. This is what the
+		 * camera turns around when the user right-clicks - no ray through the scene, and
+		 * nothing that can disagree with what is on screen. */
+		struct PickHit
+		{
+			PickingResult result;
+			Maths::FVector3 worldPosition = Maths::FVector3::Zero;
+			bool hasWorldPosition = false;
+		};
+
 		PickingRenderPass(::Rendering::Core::CompositeRenderer& p_renderer);
-		PickingResult ReadbackPickingResult(
+		PickHit ReadbackPickingResult(
 			const ::Core::SceneSystem::Scene& p_scene,
 			uint32_t p_x,
 			uint32_t p_y,bool& isSelected
@@ -46,7 +61,7 @@ namespace Editor::Rendering
 		 */
 		bool TryConsumePick(
 			const ::Core::SceneSystem::Scene& p_scene,
-			PickingResult& p_outResult,
+			PickHit& p_outHit,
 			uint32_t& p_outX,
 			uint32_t& p_outY
 		);
@@ -58,6 +73,10 @@ namespace Editor::Rendering
 			const uint8_t p_pixel[4],
 			bool& p_isSelected
 		);
+		/** Reads the world position of a pixel out of the picking target's second color
+		 * attachment. @return false when nothing was drawn there (the attachment was
+		 * cleared to zero, which no shader writes). */
+		bool ReadbackWorldPosition(uint32_t p_x, uint32_t p_y, Maths::FVector3& p_out);
 		/** Conservative screen-space rejection for the picking pass.
 		 *
 		 * The pass is draw-call bound on big scenes (one draw per mesh), and only
@@ -87,7 +106,11 @@ namespace Editor::Rendering
 			bool pending = false;
 		};
 		static constexpr uint32_t kPickReadbackSlotCount = 3;
-		static constexpr uint64_t kPickReadbackBytes = 4;
+		/** One pixel of the id attachment (4 bytes) and one of the world position
+		 * attachment (4 floats), which is read at the next 16-byte boundary. */
+		static constexpr uint64_t kPickReadbackIdBytes = 4;
+		static constexpr uint64_t kPickReadbackPositionOffset = 16;
+		static constexpr uint64_t kPickReadbackBytes = 32;
 
 		std::vector<PickReadbackSlot> m_pickReadbackSlots;
 		uint32_t m_pickWriteIndex = 0;

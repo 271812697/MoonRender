@@ -46,6 +46,9 @@ layout (std140, binding = 0) uniform EngineUBO
 in vec3 VSOUT_World;
 uniform vec4 _PickingColor = vec4(1.0);
 out vec4 FRAGMENT_COLOR;
+// The picking target's second color attachment: the fragment's place in the world,
+// read back with the id (w = 1 marks a pixel something was drawn at).
+layout (location = 1) out vec4 FRAGMENT_WORLDPOS;
 void main()
 {
     if(ubo_enableClip==1){
@@ -55,4 +58,5 @@ void main()
         }
     }
     FRAGMENT_COLOR = _PickingColor;
+    FRAGMENT_WORLDPOS = vec4(VSOUT_World, 1.0);
 }

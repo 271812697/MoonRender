@@ -49,6 +49,11 @@ namespace Editor::Panels
 		bool MouseHit(Maths::FVector3& out);
 		bool MouseClipHit(Maths::FVector3& out,const Maths::FVector4& clipPlane);
 		Editor::Rendering::PickingRenderPass::PickingResult GetPickResult();
+		/** Where the last pick landed on the geometry: the world position the picking
+		 * target writes next to the id of every pixel it draws (see
+		 * PickingRenderPass::PickHit), for the pixel the cursor is over.
+		 * @return false when nothing with a position is under the cursor. */
+		bool GetPickWorldPosition(Maths::FVector3& p_out) const;
 		::Rendering::Geometry::Ray GetMouseRay();
 		virtual ::Core::ECS::Actor* GetSelectedActor()override;
 		virtual void SelectActor(::Core::ECS::Actor& actor)override;
@@ -84,7 +89,10 @@ namespace Editor::Panels
 		::Core::Resources::Material m_fallbackMaterial;
 		Tools::Utils::OptRef<::Core::ECS::Actor> m_highlightedActor;
 		std::optional<Editor::Core::GizmoBehaviour::EDirection> m_highlightedGizmoDirection;
-		Editor::Rendering::PickingRenderPass::PickingResult pickingResult;
+		/** What the picking target last said about the cursor: the actor (or gizmo
+		 * direction) that is drawn there, and the world position of that very pixel -
+		 * which is the point the camera turns around when the right button is pressed. */
+		Editor::Rendering::PickingRenderPass::PickHit pickingResult;
 		/** Last mouse position the picking readback was performed for. */
 		std::pair<double, double> m_lastPickingMouse{ -1.0, -1.0 };
 		/** Throttles hover picks: the picking pass is a full scene pass, so it is

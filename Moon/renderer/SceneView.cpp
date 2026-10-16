@@ -454,19 +454,14 @@ void Editor::Panels::SceneView::ReceiveEvent(QEvent* e)
 		QMouseEvent* e2 = static_cast<QMouseEvent*>(e);
 		if(e2->button()== Qt::RightButton)
 		{ 
-			MOON::EventWidget* gizmoWidget=GetRenderer().GetPass<Editor::Rendering::GizmoRenderPass>("ImRenderer").getGizmoWidget("ClipPlane");
-			
-			bool clipFlag = gizmoWidget->isActived();
-			if (clipFlag) {
-				MOON::ClipPlane* clipPlaneWidget = dynamic_cast<MOON::ClipPlane*>(gizmoWidget);
-				Maths::FVector4 plane=clipPlaneWidget->getClipPlane();
-				MouseClipHit(m_roaterCenter,plane);
-			}
-			else
+			// The camera turns around the point under the cursor. That point is what
+			// the picking target writes next to the id of every pixel it draws, and it
+			// is already in the result the last hover or click pick left behind: there
+			// is no ray through the scene to cast, and nothing to read back here.
+			if (pickingResult.hasWorldPosition)
 			{
-				MouseHit(m_roaterCenter);
+				m_roaterCenter = pickingResult.worldPosition;
 			}
-
 		}
 	}
 	if (!m_cameraController.IsRightMousePressed()) {
@@ -521,7 +516,17 @@ bool Editor::Panels::SceneView::MouseClipHit(Maths::FVector3& out, const Maths::
 
 Editor::Rendering::PickingRenderPass::PickingResult Editor::Panels::SceneView::GetPickResult()
 {
-	return pickingResult;
+	return pickingResult.result;
+}
+
+bool Editor::Panels::SceneView::GetPickWorldPosition(Maths::FVector3& p_out) const
+{
+	if (!pickingResult.hasWorldPosition)
+	{
+		return false;
+	}
+	p_out = pickingResult.worldPosition;
+	return true;
 }
 
 ::Rendering::Geometry::Ray Editor::Panels::SceneView::GetMouseRay()
@@ -671,8 +676,8 @@ void Editor::Panels::SceneView::HandleActorPicking()
 
 	if (leftPressed)
 	{
-		// Selection has to be pixel exact: force this frame's target and resolve
-		// it after the frame has been drawn (see ResolvePendingClick).
+		// Selection has to be pixel exact: force this frame's target and resolve it after
+		// the frame has been drawn (see ResolvePendingClick).
 		actorPickingPass.RequestPick(static_cast<uint32_t>(mouseX), static_cast<uint32_t>(mouseY));
 		m_clickPickPending = true;
 		m_clickPickX = mouseX;
@@ -694,13 +699,13 @@ void Editor::Panels::SceneView::HandleActorPicking()
 	m_hasLastPickViewProjection = true;
 
 	// Hovering consumes the asynchronous result: the CPU never waits for the GPU.
-	Rendering::PickingRenderPass::PickingResult finishedPick;
+	Rendering::PickingRenderPass::PickHit finishedPick;
 	uint32_t pickX = 0;
 	uint32_t pickY = 0;
 	if (actorPickingPass.TryConsumePick(scene, finishedPick, pickX, pickY))
 	{
 		pickingResult = finishedPick;
-		ApplyPickResult(pickingResult);
+		ApplyPickResult(pickingResult.result);
 	}
 }
 
@@ -741,7 +746,7 @@ void Editor::Panels::SceneView::ResolvePendingClick()
 		static_cast<uint32_t>(m_clickPickX),
 		static_cast<uint32_t>(m_clickPickY),
 		isSeletedSomething);
-	ApplyPickResult(pickingResult);
+	ApplyPickResult(pickingResult.result);
 
 	if (m_highlightedGizmoDirection)
 	{
@@ -760,5 +765,4 @@ void Editor::Panels::SceneView::ResolvePendingClick()
 		UnselectActor();
 	}
 }
-
 
