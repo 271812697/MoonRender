@@ -1,30 +1,26 @@
-#shader vertex
-#version 450 core
+// Bloom composite: mixes the bloom chain's result into the image.
+//
+// A full-screen pass (domain : postProcess) - MoonMatc supplies the quad vertex stage.
 
-layout(location = 0) in vec2 geo_Pos;
-layout(location = 1) in vec2 geo_TexCoords;
+material {
+    name         : Bloom,
+    shadingModel : unlit,
+    domain       : postProcess,
+    blending     : opaque,
+    culling      : none,
+    depthWrite   : false,
 
-out vec2 TexCoords;
-
-void main()
-{
-    TexCoords = geo_TexCoords;
-    gl_Position = vec4(geo_Pos, 0.0, 1.0);
+    parameters : [
+        { type : sampler2D, name : _InputTexture },
+        { type : sampler2D, name : _BloomTexture },
+        { type : float,     name : _BloomStrength }
+    ]
 }
 
-#shader fragment
-#version 450 core
-
-in vec2 TexCoords;
-out vec4 FRAGMENT_COLOR;
-
-uniform sampler2D _InputTexture;
-uniform sampler2D _BloomTexture;
-uniform float _BloomStrength;
-
-void main()
-{
-    const vec3 hdrColor = texture(_InputTexture, TexCoords).rgb;
-    const vec3 bloomColor = texture(_BloomTexture, TexCoords).rgb;
-    FRAGMENT_COLOR = vec4(mix(hdrColor, bloomColor, _BloomStrength), 1.0);
+fragment {
+    void material(inout MaterialInputs m) {
+        const vec3 hdrColor = texture(_InputTexture, TexCoords).rgb;
+        const vec3 bloomColor = texture(_BloomTexture, TexCoords).rgb;
+        m.baseColor = vec4(mix(hdrColor, bloomColor, _BloomStrength), 1.0);
+    }
 }

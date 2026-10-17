@@ -1,4 +1,4 @@
-﻿#include <tracy/Tracy.hpp>
+#include <tracy/Tracy.hpp>
 #include <editor/UI/SettingPanel/RenderSettingWidget.h>
 #include <Core/ECS/Components/CPostProcessStack.h>
 #include "renderer/PathTraceRenderPass.h"
@@ -17,6 +17,7 @@
 #include <Rendering/HAL/Profiling.h>
 #include <Rendering/Settings/EPixelDataFormat.h>
 #include <Rendering/Settings/ETextureType.h>
+#include <Rendering/Resources/ShaderArchive.h>
 #include "Settings/DebugSetting.h"
 #include "Interactive/Widgets/SplitScreen.h"
 #include "Interactive/Im3DRenderer.h"
@@ -28,23 +29,17 @@ namespace Editor::Rendering {
 	// 加载shader的源码
 	std::string loadShaderSource(std::string path)
 	{
-		static bool isRecursiveCall = false;
-		std::string fullSourceCode = "";
-		std::ifstream file(path);
-		if (!file.is_open())
+		// Out of the archive the build packed the shaders into; the disk is only the
+		// fallback for a checkout that has not been packed (see ShaderArchive.h).
+		std::string source;
+		if (!::Rendering::Resources::ReadShaderSource(path, source))
 		{
 			CORE_ERROR("ERROR: could not open the shader at: {0}\n", path);
 
 			return "";
 		}
-		std::string lineBuffer;
-		while (std::getline(file, lineBuffer))
-		{
-			fullSourceCode += lineBuffer + '\n';
-		}
-		fullSourceCode += '\0';
-		file.close();
-		return fullSourceCode;
+		source += '\0';
+		return source;
 	}
 	static float Luminance(float r, float g, float b)
 	{

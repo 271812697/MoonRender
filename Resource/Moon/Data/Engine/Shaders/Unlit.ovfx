@@ -1,66 +1,41 @@
-#pass SHADOW_PASS
+// Unlit surface material: no lighting, albedo straight out of the texture.
+//
+// Written in the material form MoonMatc consumes (see docs/ShaderPipeline.md): the state and
+// the parameters in `material { }`, and the shading itself as an entry point that only fills
+// in MaterialInputs. The transform, the uniforms and main() are put in by MoonMatc from the
+// shader prelude, so this file is the whole material.
 
-#feature ALPHA_CLIPPING
+material {
+    name         : Unlit,
+    shadingModel : unlit,
+    blending     : opaque,
+    culling      : none,
+    depthWrite   : true,
 
-#shader vertex
-#version 450 core
+    // Variant whose fragment stage is empty: the shadow pass only needs geometry.
+    features : [ ALPHA_CLIPPING ],
+    passes   : [ SHADOW_PASS ],
 
-#include ":Shaders/Common/Buffers/EngineUBO.ovfxh"
-#include ":Shaders/Common/Utils.ovfxh"
-
-layout (location = 0) in vec3 geo_Pos;
-layout (location = 1) in vec2 geo_TexCoords;
-
-out VS_OUT
-{
-    vec3 FragPos;
-    vec2 TexCoords;
-} vs_out;
-
-void main()
-{
-    vs_out.FragPos = vec3(ubo_Model * vec4(geo_Pos, 1.0));
-    vs_out.TexCoords = geo_TexCoords;
-
-    gl_Position = ubo_Projection * ubo_View * vec4(vs_out.FragPos, 1.0);
+    parameters : [
+        { type : sampler2D, name : u_DiffuseMap },
+        { type : float4,    name : u_Diffuse },
+        { type : float2,    name : u_TextureTiling },
+        { type : float2,    name : u_TextureOffset },
+        { type : float,     name : u_AlphaClippingThreshold }
+    ]
 }
 
-#shader fragment
-#version 450 core
+fragment {
+    void material(inout MaterialInputs m) {
+        const vec2 texCoords = TileAndOffsetTexCoords(fs_in.TexCoords, u_TextureTiling, u_TextureOffset);
+        const vec4 diffuseColor = texture(u_DiffuseMap, texCoords) * u_Diffuse;
 
-#include ":Shaders/Common/Buffers/EngineUBO.ovfxh"
-#include ":Shaders/Common/Utils.ovfxh"
+    #if defined(ALPHA_CLIPPING)
+        if (diffuseColor.a < u_AlphaClippingThreshold) {
+            discard;
+        }
+    #endif
 
-in VS_OUT
-{
-    vec3 FragPos;
-    vec2 TexCoords;
-} fs_in;
-
-uniform sampler2D u_DiffuseMap;
-uniform vec4 u_Diffuse = vec4(1.0);
-uniform vec2 u_TextureTiling = vec2(1.0);
-uniform vec2 u_TextureOffset = vec2(0.0);
-
-#if defined(ALPHA_CLIPPING)
-uniform float u_AlphaClippingThreshold = 0.1f;
-#endif
-
-out vec4 FRAGMENT_COLOR;
-
-void main()
-{
-#if defined(SHADOW_PASS)
-    // Empty fragment shader for shadow pass
-#else
-    const vec2 texCoords = TileAndOffsetTexCoords(fs_in.TexCoords, u_TextureTiling, u_TextureOffset);
-    const vec4 diffuseColor = texture(u_DiffuseMap, texCoords) * u_Diffuse;
-#if defined(ALPHA_CLIPPING)
-    if (diffuseColor.a < u_AlphaClippingThreshold)
-    {
-        discard;
+        m.baseColor = diffuseColor;
     }
-#endif
-    FRAGMENT_COLOR = diffuseColor;
-#endif
 }

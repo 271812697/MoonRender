@@ -14,6 +14,9 @@ target_link_libraries(${TARGET_NAME} PUBLIC
  tracy
  assimp
  tinyxml2
+ # The shader sources packed at build time (Tools/ShaderPack): linking it is what makes
+ # the engine find its shaders in the executable instead of on the disk.
+ MoonShader
  )
 target_compile_options(${TARGET_NAME} PRIVATE /bigobj )
 target_compile_definitions(${TARGET_NAME} PUBLIC GRAPHICS_API_OPENGL)

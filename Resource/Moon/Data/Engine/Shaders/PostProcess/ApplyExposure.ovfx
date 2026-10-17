@@ -1,29 +1,25 @@
-#shader vertex
-#version 450 core
+// Applies the auto-exposure luminance to the HDR image.
+//
+// A full-screen pass (domain : postProcess) - MoonMatc supplies the quad vertex stage.
 
-layout(location = 0) in vec2 geo_Pos;
-layout(location = 1) in vec2 geo_TexCoords;
+material {
+    name         : ApplyExposure,
+    shadingModel : unlit,
+    domain       : postProcess,
+    blending     : opaque,
+    culling      : none,
+    depthWrite   : false,
 
-out vec2 TexCoords;
-
-void main()
-{
-    TexCoords = geo_TexCoords;
-    gl_Position = vec4(geo_Pos, 0.0, 1.0);
+    parameters : [
+        { type : sampler2D, name : _InputTexture },
+        { type : sampler2D, name : _ExposureTexture }
+    ]
 }
 
-#shader fragment
-#version 450 core
-
-in vec2 TexCoords;
-out vec4 FRAGMENT_COLOR;
-
-uniform sampler2D _InputTexture;
-uniform sampler2D _ExposureTexture;
-
-void main()
-{
-    const float exposure = texture(_ExposureTexture, vec2(0.5)).r;
-    vec3 color = texture(_InputTexture, TexCoords).rgb * exposure;
-    FRAGMENT_COLOR = vec4(color, 1.0);
+fragment {
+    void material(inout MaterialInputs m) {
+        const float exposure = texture(_ExposureTexture, vec2(0.5)).r;
+        const vec3 color = texture(_InputTexture, TexCoords).rgb * exposure;
+        m.baseColor = vec4(color, 1.0);
+    }
 }
