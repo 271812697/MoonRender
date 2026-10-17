@@ -1,4 +1,4 @@
-﻿#include <algorithm>
+#include <algorithm>
 #include <functional>
 #include <string>
 #include <array>
@@ -105,7 +105,7 @@ namespace MOON
             {
                 uint32_t numCores   = 0;
                 uint32_t numThreads = 0;
-                JobQueue* jobQueuePerThread;
+                JobQueue* jobQueuePerThread = nullptr;
                 std::atomic_bool alive { true };
                 std::condition_variable wakeCondition;
                 std::mutex wakeMutex;
@@ -114,26 +114,39 @@ namespace MOON
 
                 ~InternalState()
                 {
-                    alive.store(false); // indicate that new jobs cannot be started from this point
-                    bool bWakeLoop = true;
-                    std::thread waker([&]
-                                      {
-                        while (bWakeLoop)
-                        {
-                            wakeCondition.notify_all(); // wakes up sleeping worker threads
-                        } });
-
-                    for(auto& thread : threads)
-                    {
-                        if(thread.joinable())
-                            thread.join();
-                    }
-                    bWakeLoop = false;
-                    if(waker.joinable())
-                        waker.join();
-
-
+                    stop();
                     delete[] jobQueuePerThread;
+                    jobQueuePerThread = nullptr;
+                }
+
+                /** Stops the workers and waits for them, so that nothing below this
+                 * point can still be reading the queues.
+                 *
+                 * The flag is cleared while holding the very mutex the workers sleep on,
+                 * and they read it again once they hold that mutex: a worker therefore
+                 * either sees the flag before it waits, or is woken out of the wait -
+                 * neither of them can slip through the gap between the two and sleep
+                 * forever. That gap is what the previous version tried to paper over by
+                 * spinning a second thread on notify_all() (with a plain bool the
+                 * compiler is free to hoist out of the loop, which turned the join below
+                 * into a hang); the threads themselves were detached, so the join loop
+                 * never ran and the queues were deleted under working threads.
+                 */
+                void stop()
+                {
+                    {
+                        std::lock_guard<std::mutex> lock(wakeMutex);
+                        alive.store(false); // indicate that new jobs cannot be started from this point
+                        wakeCondition.notify_all(); // wakes up sleeping worker threads
+                    }
+                    for (std::thread& worker : threads)
+                    {
+                        if (worker.joinable())
+                        {
+                            worker.join();
+                        }
+                    }
+                    threads.clear();
                 }
             };
             static InternalState* internal_state = nullptr;
@@ -212,6 +225,15 @@ namespace MOON
 
                                     // finished with jobs, put to sleep
                                     std::unique_lock<std::mutex> lock(internal_state->wakeMutex);
+                                    // Read the flag again now that the lock is held: stop()
+                                    // clears it under this same lock, so a stop that lands
+                                    // between the loop condition and this line is still seen
+                                    // here - otherwise the worker would sleep through the
+                                    // wake-up and the join in stop() would never return.
+                                    if (!internal_state->alive.load())
+                                    {
+                                        break;
+                                    }
                                     internal_state->wakeCondition.wait(lock);
 
                                 } });
@@ -236,8 +258,10 @@ namespace MOON
                                 if (!((((HRESULT)(hr)) >= 0)))
                                     __debugbreak();
 #endif
-
-                    worker.detach();
+                    // Kept joinable on purpose: Release() -> ~InternalState() -> stop()
+                    // joins them before the queues they read are deleted. A detached
+                    // worker survives that, keeps running against freed memory, and is
+                    // one of the reasons the process could hang on the way out.
                 }
                 CORE_INFO("Initialised JobSystem with [{} cores] [{} threads]", internal_state->numCores, internal_state->numThreads);
             }
