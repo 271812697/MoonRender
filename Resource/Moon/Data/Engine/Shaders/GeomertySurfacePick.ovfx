@@ -1,13 +1,31 @@
-#shader vertex
-#version 450 core
-#include ":Shaders/Common/Buffers/EngineUBO.ovfxh"
+// The picking material of the topology batch meshes: the actor id rides in the mesh's domain
+// id attribute, and where the fragment is in the world goes to the picking target's second
+// attachment.
+//
+// Written in the material form MoonMatc consumes (see docs/ShaderPipeline.md). Both stages own
+// their main(): the fragment writes two colour attachments of its own, the vertex stage sets
+// gl_PointSize so a vertex dot is picked where it is drawn, and the varyings it passes are its
+// own. MoonMatc puts the prelude, the variant #defines and the parameters in front of them and
+// generates nothing else for either stage.
+
+material {
+    name         : GeomertySurfacePick,
+    shadingModel : unlit,
+    blending     : opaque,
+    culling      : none,           // the picking pass draws with culling off
+    depthWrite   : true,
+
+    parameters : [
+        // The topology vertices are point sprites, and they are picked through this same
+        // material: without a size they would be picked as one pixel dots wherever the
+        // driver puts them, instead of where the dot is drawn.
+        { type : float, name : u_PointSize }
+    ]
+}
+
+vertex {
 layout (location = 0) in vec3 geo_Pos;
 layout (location = 3) in vec2 geo_DomainID;
-
-// The topology vertices are point sprites, and they are picked through this same
-// material: without a size they would be picked as one pixel dots wherever the
-// driver puts them, instead of where the dot is drawn.
-uniform float u_PointSize = 8.0;
 
 out vec3 VSOUT_World;
 out vec2 VSDomainId;
@@ -20,10 +38,9 @@ void main()
     gl_Position = ubo_Projection * ubo_View * worldPos;
     gl_PointSize = u_PointSize;
 }
+}
 
-#shader fragment
-#version 450 core
-#include ":Shaders/Common/Buffers/EngineUBO.ovfxh"
+fragment {
 in vec2 VSDomainId;
 in vec3 VSOUT_World;
 out vec4 FRAGMENT_COLOR;
@@ -46,4 +63,5 @@ void main()
     int b = (actorId >> 16) & 0xFF; 
     FRAGMENT_COLOR = vec4(r / 255.0, g / 255.0, b / 255.0, 1.0);
     FRAGMENT_WORLDPOS = vec4(VSOUT_World, 1.0);
+}
 }

@@ -1,67 +1,54 @@
-#feature CLIP_PLANE
-#shader vertex
-#version 450 core
+// Topology vertex dots: one round point sprite per vertex of a shape.
+//
+// Written in the material form MoonMatc consumes (see docs/ShaderPipeline.md): the state and
+// the parameters in `material { }`, and the shading as an entry point that only fills in
+// MaterialInputs. The transform, the varying and main() are put in by MoonMatc from the
+// shader prelude; the one thing the skeleton has no way to write is the sprite size, which is
+// why the vertex block exists at all.
 
-#include ":Shaders/Common/Buffers/EngineUBO.ovfxh"
-#include ":Shaders/Common/Utils.ovfxh"
+material {
+    name         : GeomertyPoint,
+    shadingModel : unlit,
+    blending     : opaque,
+    culling      : none,
+    depthWrite   : false,
 
-// The topology vertices are drawn as point sprites, so they share the layout of
-// the line mesh (one point per vertex of the shape, its id in TexCoords.x).
-layout (location = 0) in vec3 geo_Pos;
-layout (location = 1) in vec2 geo_TexCoords;
-layout (location = 2) in vec3 geo_Normal;
-layout (location = 3) in vec2 geo_DomainId;
+    // The clip-plane variant the viewport draws; without it the pass does not clip.
+    features : [ CLIP_PLANE ],
 
-// Size of the dot in pixels. Without it the driver would use its own default,
-// which is a single pixel.
-uniform float u_PointSize = 8.0;
-
-out VS_OUT
-{
-    vec3 FragPos;
-    vec2 TexCoords;
-} vs_out;
-
-void main()
-{
-    vs_out.FragPos = vec3(ubo_Model * vec4(geo_Pos, 1.0));
-    vs_out.TexCoords = geo_TexCoords;
-    gl_Position = ubo_Projection * ubo_View * vec4(vs_out.FragPos, 1.0);
-    gl_PointSize = u_PointSize;
+    parameters : [
+        { type : float,  name : u_PointSize },
+        { type : float4, name : color }
+    ]
 }
 
+vertex {
+    // gl_PointSize is a vertex-stage output of its own rather than part of the geometry
+    // transform, so the skeleton leaves it alone: without this the driver draws a single
+    // pixel instead of the dot the material asks for.
+    void materialVertex(inout vec3 position, inout vec2 texCoords, inout vec3 normal) {
+        gl_PointSize = u_PointSize;
+    }
+}
 
+fragment {
+    void material(inout MaterialInputs m) {
+    #if defined(CLIP_PLANE)
+        if (ubo_enableClip == 1) {
+            float offsetw = dot(ubo_plane.xyz, fs_in.FragPos) + ubo_plane.w;
+            if (offsetw > 0) {
+                discard;
+            }
+        }
+    #endif
 
-#shader fragment
-#version 450 core
-
-#include ":Shaders/Common/Buffers/EngineUBO.ovfxh"
-
-in VS_OUT
-{
-    vec3 FragPos;
-    vec2 TexCoords;
-} fs_in;
-
-out vec4 FRAGMENT_COLOR;
-uniform vec4 color = vec4(1.0, 0.0, 0.0, 1.0);
-
-void main()
-{
-#if defined(CLIP_PLANE)
-    if(ubo_enableClip==1){
-        float offsetw=dot(ubo_plane.xyz,fs_in.FragPos)+ubo_plane.w;
-        if(offsetw>0){
+        // A round dot, softly cut at the border: the square a point sprite is would
+        // otherwise read as a tiny quad at the corner of the body.
+        float d = length(gl_PointCoord - vec2(0.5));
+        if (d > 0.5) {
             discard;
         }
+        float edge = smoothstep(0.5, 0.40, d);
+        m.baseColor = vec4(color.rgb, color.a * edge);
     }
-#endif
-    // A round dot, softly cut at the border: the square a point sprite is would
-    // otherwise read as a tiny quad at the corner of the body.
-    float d = length(gl_PointCoord - vec2(0.5));
-    if (d > 0.5) {
-        discard;
-    }
-    float edge = smoothstep(0.5, 0.40, d);
-    FRAGMENT_COLOR = vec4(color.rgb, color.a * edge);
 }

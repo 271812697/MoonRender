@@ -805,25 +805,40 @@ void main()
 			std::vector<std::unique_ptr<Rendering::HAL::ShaderStage>> stages;
 			bool ok = true;
 
-			for (const bool vertex : { true, false })
+			struct StageSpec
 			{
-				const std::string stageName = vertex ? "vertex" : "fragment";
-				const std::string_view source = p_package.Source(variant, vertex);
+				Rendering::Resources::ShaderPackage::Stage stage;
+				EShaderType type;
+				const char* name;
+				bool optional;   // a geometry stage only exists for the shaders that expand primitives
+			};
+			static constexpr StageSpec kStages[] = {
+				{ Rendering::Resources::ShaderPackage::Stage::Vertex,   EShaderType::VERTEX,   "vertex",   false },
+				{ Rendering::Resources::ShaderPackage::Stage::Fragment, EShaderType::FRAGMENT, "fragment", false },
+				{ Rendering::Resources::ShaderPackage::Stage::Geometry, EShaderType::GEOMERTY, "geometry", true },
+			};
+
+			for (const StageSpec& spec : kStages)
+			{
+				std::string source = p_package.Source(variant, spec.stage);
 				if (source.empty())
 				{
+					if (spec.optional)
+					{
+						continue;
+					}
 					std::cout << std::format("[Shader Package] {}<{}> (pass '{}'): no source",
-						p_package.Name(), stageName, variant.pass) << std::endl;
+						p_package.Name(), spec.name, variant.pass) << std::endl;
 					ok = false;
 					break;
 				}
 
-				auto stage = std::make_unique<Rendering::HAL::ShaderStage>(
-					vertex ? EShaderType::VERTEX : EShaderType::FRAGMENT);
-				stage->Upload(std::string{ source });
+				auto stage = std::make_unique<Rendering::HAL::ShaderStage>(spec.type);
+				stage->Upload(std::move(source));
 				if (const auto result = stage->Compile(); !result.success)
 				{
 					std::cout << std::format("[Shader Compile] {}<{}> (pass '{}'): {}",
-						p_package.Name(), stageName, variant.pass, result.message) << std::endl;
+						p_package.Name(), spec.name, variant.pass, result.message) << std::endl;
 					ok = false;
 					break;
 				}

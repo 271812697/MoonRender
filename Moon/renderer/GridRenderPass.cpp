@@ -1,4 +1,3 @@
-﻿#include "EditorResources.h"
 #include "DebugModelRenderFeature.h"
 #include "GridRenderPass.h"
 #include "Core/Global/ServiceLocator.h"

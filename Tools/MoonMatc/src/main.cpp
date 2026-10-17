@@ -110,12 +110,39 @@ namespace
 	// The material file
 	// ---------------------------------------------------------------------------------
 
-	/** One entry of `parameters : [ { type : float3, name : u_Albedo }, ... ]`. */
+	/** One entry of `parameters : [ { type : float3, name : u_Albedo }, ... ]`. `count` is the
+	 * array size when the parameter is one - `{ type : float3, name : samples, count : 64 }`
+	 * is the SSAO kernel, which used to have to declare its uniform by hand. `default` is the
+	 * GLSL initializer the old hand-written uniforms had (`uniform float x = 0.5;`): it is
+	 * emitted as it is, so GL seeds the property with that value and a material whose uniforms
+	 * are never set keeps the number it always had. */
 	struct Parameter
 	{
 		std::string type;
 		std::string name;
+		std::string count;
+		std::string defaultValue;
 	};
+
+	/** The three stages a material can own. */
+	enum class Stage
+	{
+		Vertex,
+		Fragment,
+		/** GLSL's third stage, which this engine's line/edge expansion shaders use and
+		 * filament's material model has no room for. Always written by the material. */
+		Geometry
+	};
+
+	const char* StageName(Stage p_stage)
+	{
+		switch (p_stage)
+		{
+		case Stage::Vertex: return "vertex";
+		case Stage::Fragment: return "fragment";
+		default: return "geometry";
+		}
+	}
 
 	struct PassVariant
 	{
@@ -137,8 +164,13 @@ namespace
 		std::vector<std::string> passes;          // extra passes, default pass implied
 		std::string vertexBody;                   // the vertex { ... } block, verbatim
 		std::string fragmentBody;                 // the fragment { ... } block, verbatim
+		/** The geometry { } block, verbatim. Our own extension: GLSL has a third stage, and
+		 * the four shaders that expand lines and triangle edges into screen-space geometry
+		 * need it (filament's material model has no such stage). */
+		std::string geometryBody;
 		uint32_t vertexEntryLine = 1;             // where those blocks start, for #line
 		uint32_t fragmentEntryLine = 1;
+		uint32_t geometryEntryLine = 1;
 	};
 
 	/** The 1-based line a fragment of the source starts on: the #line directives handed to
@@ -227,26 +259,50 @@ namespace
 
 				if (key == "parameters")
 				{
+					// One field of a parameter object: `field : value`, the value ending at the
+					// comma that separates it from the next field. The key has to be a whole
+					// word, so that "count" does not match inside `name : u_Count`.
+					const auto valueOf = [&array](const std::string& p_object, const std::string& p_field) -> std::string {
+						size_t at = p_object.find(p_field);
+						while (at != std::string::npos)
+						{
+							const size_t after = at + p_field.size();
+							const size_t colon = p_object.find(':', after);
+							const bool wordStart = at == 0
+								|| !std::isalnum(static_cast<unsigned char>(p_object[at - 1]))
+								&& p_object[at - 1] != '_';
+							if (wordStart && colon != std::string::npos && Trim(p_object.substr(after, colon - after)).empty())
+							{
+								// The value ends at the comma that separates it from the next
+								// field - but a `default : vec4(1, 2, 3, 4)` has commas of its
+								// own, so the ones inside brackets do not count.
+								size_t end = colon + 1;
+								int depth = 0;
+								for (; end < p_object.size(); ++end)
+								{
+									const char c = p_object[end];
+									if (c == '(' || c == '[') { ++depth; }
+									else if (c == ')' || c == ']') { --depth; }
+									else if (c == ',' && depth == 0) { break; }
+								}
+								return Trim(p_object.substr(colon + 1, end - colon - 1));
+							}
+							at = p_object.find(p_field, at + 1);
+						}
+						return {};
+					};
+
 					size_t at = 0;
 					while ((at = array.find('{', at)) != std::string::npos)
 					{
 						const size_t end = array.find('}', at);
 						if (end == std::string::npos) { break; }
-						std::string object = array.substr(at + 1, end - at - 1);
+						const std::string object = array.substr(at + 1, end - at - 1);
 						Parameter parameter;
-						const size_t typeAt = object.find("type");
-						const size_t nameAt = object.find("name");
-						if (typeAt != std::string::npos)
-						{
-							const size_t colon = object.find(':', typeAt);
-							const size_t comma = object.find(',', colon);
-							parameter.type = Trim(object.substr(colon + 1, comma - colon - 1));
-						}
-						if (nameAt != std::string::npos)
-						{
-							const size_t colon = object.find(':', nameAt);
-							parameter.name = Trim(object.substr(colon + 1));
-						}
+						parameter.type = valueOf(object, "type");
+						parameter.name = valueOf(object, "name");
+						parameter.count = valueOf(object, "count");
+						parameter.defaultValue = valueOf(object, "default");
 						if (!parameter.name.empty())
 						{
 							p_out.parameters.push_back(parameter);
@@ -296,11 +352,13 @@ namespace
 
 		std::string vertexBody;
 		size_t vertexNext = 0;
+		size_t afterVertex = 0;
 		if (TakeBlock(text, "vertex", next, vertexBody, vertexNext))
 		{
 			p_out.vertexBody = Trim(vertexBody);
 			p_out.vertexEntryLine = LineOf(text, p_out.vertexBody);
 			next = vertexNext;
+			afterVertex = vertexNext;
 		}
 		std::string fragmentBody;
 		size_t fragmentNext = 0;
@@ -308,6 +366,20 @@ namespace
 		{
 			p_out.fragmentBody = Trim(fragmentBody);
 			p_out.fragmentEntryLine = LineOf(text, p_out.fragmentBody);
+			next = fragmentNext;
+		}
+
+		// The geometry stage: our extension, and the old files put it between the vertex and
+		// the fragment sections - so it is searched from the end of the vertex block, not from
+		// wherever the fragment block ended. The legacy loader's marker is spelled
+		// "#shader geomerty", so the block keyword is accepted either way.
+		std::string geometryBody;
+		size_t geometryNext = 0;
+		if (TakeBlock(text, "geometry", afterVertex, geometryBody, geometryNext)
+			|| TakeBlock(text, "geomerty", afterVertex, geometryBody, geometryNext))
+		{
+			p_out.geometryBody = Trim(geometryBody);
+			p_out.geometryEntryLine = LineOf(text, p_out.geometryBody);
 		}
 
 		if (p_out.name.empty())
@@ -319,6 +391,179 @@ namespace
 		{
 			p_error = "a fragment { } block is required";
 			return false;
+		}
+		return true;
+	}
+
+	// ---------------------------------------------------------------------------------
+	// #include
+	//
+	// The runtime used to expand these (ShaderLoader's AssembleSource, the engine's answer
+	// to filament's Includes.cpp). Once a shader is a package there is no runtime pass left
+	// to do it - the GLSL goes straight to the driver - so the expansion moves here, where
+	// it also gets the chance to drop the two headers the prelude already carries.
+	// ---------------------------------------------------------------------------------
+
+	/** The headers every generated stage already has: a material that includes one of them
+	 * would declare the same UBO or helper twice. */
+	bool IsPreludeHeader(const std::string& p_relative)
+	{
+		return p_relative == "Common/Buffers/EngineUBO.ovfxh"
+			|| p_relative == "Common/Utils.ovfxh";
+	}
+
+	struct ResolvedInclude
+	{
+		std::filesystem::path path;  // the file on disk
+		std::string relative;        // how #line should name it
+	};
+
+	/** Where one #include points, the way the engine's path parser resolves it: a leading
+	 * ':' marks an engine path, and the directories handed in with -I are the shader roots
+	 * the ":Shaders/" prefix stands for. A relative include is tried against them too, which
+	 * is what a file inside the tree gets for free. */
+	bool ResolveInclude(const std::string& p_target, const std::vector<std::string>& p_dirs, ResolvedInclude& p_out)
+	{
+		std::string target = p_target;
+		if (!target.empty() && target.front() == ':')
+		{
+			target.erase(target.begin());
+		}
+		std::replace(target.begin(), target.end(), '\\', '/');
+
+		std::string withoutRoot = target;
+		constexpr std::string_view kRoot = "Shaders/";
+		if (withoutRoot.starts_with(kRoot))
+		{
+			withoutRoot.erase(0, kRoot.size());
+		}
+
+		for (const std::string& dir : p_dirs)
+		{
+			for (const std::string& candidate : { withoutRoot, target })
+			{
+				const std::filesystem::path path = std::filesystem::path(dir) / candidate;
+				std::error_code error;
+				if (std::filesystem::is_regular_file(path, error))
+				{
+					p_out.path = path;
+					p_out.relative = candidate;
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	/** Expands the #include lines of one stage and keeps the diagnostic anchors straight: an
+	 * included file opens with its own "#line 1", and the line after it goes back to the file
+	 * (and the line) the #include was written on.
+	 *
+	 * Each file is expanded once per stage - the headers have no include guards, and PBR.ovfxh
+	 * reaches Utils.ovfxh a second time - and the two the prelude already carries are dropped
+	 * instead of duplicated. */
+	bool ExpandIncludes(
+		const std::string& p_text,
+		const std::vector<std::string>& p_dirs,
+		const std::string& p_origin,
+		std::set<std::string>& p_visited,
+		std::string& p_out,
+		std::string& p_error)
+	{
+		std::string currentFile = p_origin;
+		uint32_t nextLine = 1;
+
+		std::istringstream stream(p_text);
+		std::string line;
+		while (std::getline(stream, line))
+		{
+			const std::string trimmed = Trim(line);
+			if (trimmed.starts_with("#line "))
+			{
+				// "#line N file": the line after it is line N of that file.
+				p_out += line;
+				p_out += '\n';
+				// The number after "#line " is the line the one after it will be.
+				size_t at = 6;
+				while (at < trimmed.size() && trimmed[at] == ' ') { ++at; }
+				uint32_t number = 0;
+				bool hasDigits = false;
+				while (at < trimmed.size() && std::isdigit(static_cast<unsigned char>(trimmed[at])))
+				{
+					number = number * 10 + static_cast<uint32_t>(trimmed[at] - '0');
+					++at;
+					hasDigits = true;
+				}
+				if (hasDigits)
+				{
+					nextLine = number;
+				}
+				const size_t first = trimmed.find('"');
+				const size_t last = trimmed.rfind('"');
+				if (first != std::string::npos && last != std::string::npos && last > first)
+				{
+					currentFile = trimmed.substr(first + 1, last - first - 1);
+				}
+				continue;
+			}
+
+			if (trimmed.starts_with("#include"))
+			{
+				const size_t first = trimmed.find('"');
+				const size_t last = trimmed.rfind('"');
+				if (first == std::string::npos || last == std::string::npos || last <= first)
+				{
+					p_error = "malformed #include in " + currentFile + " (line " + std::to_string(nextLine) + ")";
+					return false;
+				}
+
+				const std::string target = trimmed.substr(first + 1, last - first - 1);
+				ResolvedInclude resolved;
+				if (!ResolveInclude(target, p_dirs, resolved))
+				{
+					p_error = "cannot resolve #include \"" + target + "\" (" + currentFile
+						+ ", line " + std::to_string(nextLine) + ")";
+					return false;
+				}
+
+				// Consumed either way: the include line itself occupies a line of currentFile.
+				++nextLine;
+
+				if (IsPreludeHeader(resolved.relative) || p_visited.contains(resolved.relative))
+				{
+					// Already in this stage, as part of the prelude or from an earlier
+					// #include: dropping the line is what keeps the declarations single.
+					continue;
+				}
+				p_visited.insert(resolved.relative);
+
+				bool readOk = false;
+				const std::string content = ReadFile(resolved.path, readOk);
+				if (!readOk)
+				{
+					p_error = "cannot read \"" + resolved.path.string() + "\"";
+					return false;
+				}
+
+				std::string expanded;
+				if (!ExpandIncludes(content, p_dirs, resolved.relative, p_visited, expanded, p_error))
+				{
+					return false;
+				}
+
+				p_out += "#line 1 \"" + resolved.relative + "\"\n";
+				p_out += expanded;
+				if (!expanded.empty() && expanded.back() != '\n')
+				{
+					p_out += '\n';
+				}
+				p_out += "#line " + std::to_string(nextLine) + " \"" + currentFile + "\"\n";
+				continue;
+			}
+
+			p_out += line;
+			p_out += '\n';
+			++nextLine;
 		}
 		return true;
 	}
@@ -392,9 +637,164 @@ namespace
 		return out.str();
 	}
 
+	/** The feature a geometry body's leading guard is about, if it is a plain single-feature
+	 * test: `#ifdef F` / `#if defined(F)` / `#if F` are +1, the negations are -1, and anything
+	 * fancier (`||`, `&&`, comparisons) is 0 "do not try to be clever". */
+	int GeometryGuardFeature(const std::string& p_body, std::string& p_feature)
+	{
+		std::istringstream stream(p_body);
+		std::string line;
+		while (std::getline(stream, line))
+		{
+			const std::string trimmed = Trim(line);
+			if (trimmed.empty())
+			{
+				continue;
+			}
+			if (!trimmed.starts_with("#if"))
+			{
+				return 0;
+			}
+
+			bool negated = false;
+			std::string condition;
+			if (trimmed.starts_with("#ifdef ") || trimmed.starts_with("#ifndef "))
+			{
+				negated = trimmed.starts_with("#ifndef ");
+				condition = Trim(trimmed.substr(7));
+			}
+			else if (trimmed.starts_with("#if "))
+			{
+				condition = Trim(trimmed.substr(4));
+				if (condition.starts_with("!"))
+				{
+					negated = true;
+					condition = Trim(condition.substr(1));
+				}
+				if (condition.starts_with("defined"))
+				{
+					condition = Trim(condition.substr(7));
+					if (!condition.empty() && condition.front() == '(')
+					{
+						condition = Trim(condition.substr(1));
+					}
+				}
+			}
+			else
+			{
+				return 0;
+			}
+
+			// A guard this helper understands is exactly one identifier, nothing after it.
+			std::string name;
+			for (const char c : condition)
+			{
+				if (std::isalnum(static_cast<unsigned char>(c)) || c == '_') { name += c; }
+				else { break; }
+			}
+			if (name.empty() || Trim(condition.substr(name.size())) != ")" && !Trim(condition.substr(name.size())).empty())
+			{
+				return 0;
+			}
+			if (name.starts_with("defined") || name.starts_with("GL_") || name.starts_with("MOON_"))
+			{
+				// Not one of the material's own features.
+				return 0;
+			}
+
+			p_feature = name;
+			return negated ? -1 : 1;
+		}
+		return 0;
+	}
+
+	/** True when the block's first `#if` is closed by an `#endif` with nothing but whitespace
+	 * after it - i.e. the guard covers the whole stage body rather than one helper in it. */
+	bool GuardWrapsBlock(const std::string& p_body)
+	{
+		std::istringstream stream(p_body);
+		std::string line;
+		int depth = 0;
+		bool opened = false;
+		std::string rest;
+		while (std::getline(stream, line))
+		{
+			const std::string trimmed = Trim(line);
+			if (!opened)
+			{
+				if (trimmed.starts_with("#if")) { opened = true; depth = 1; }
+				else if (!trimmed.empty()) { return false; }
+				continue;
+			}
+			if (trimmed.starts_with("#if")) { ++depth; }
+			else if (trimmed.starts_with("#endif"))
+			{
+				if (--depth == 0)
+				{
+					// Everything after the closing #endif must be whitespace.
+					std::string tail;
+					std::getline(stream, tail, '\0');
+					return Trim(tail).empty();
+				}
+			}
+		}
+		return false;
+	}
+
+	/** Whether this variant carries the geometry stage.
+	 *
+	 * A material declares one geometry block, but the shaders that use one open it with the
+	 * feature that needs it (`#if defined(WITH_EDGE)`), and the old pipeline skipped the whole
+	 * stage for the variants where that feature was off (ShaderLoader's stage-skip hack). The
+	 * same rule here: a variant that would only run a pass-through geometry shader does not
+	 * get one - no blob, nothing to compile, nothing to run per draw.
+	 *
+	 * Only a guard that wraps the WHOLE block counts (first line `#if`, matching `#endif` at the
+	 * end of the block): a guard around part of it says nothing about whether the stage is
+	 * needed, and those keep their geometry stage. */
+	bool WantsGeometryStage(const std::string& p_body, const PassVariant& p_variant)
+	{
+		std::string feature;
+		const int sense = GeometryGuardFeature(p_body, feature);
+		if (sense == 0 || !GuardWrapsBlock(p_body))
+		{
+			return true;
+		}
+		const bool present = p_variant.features.contains(feature);
+		return sense > 0 ? present : !present;
+	}
+
+	/** True when a block defines its own `void main()`. That is the escape hatch for the few
+	 * shaders whose stage is not "adjust the attributes, then the fixed transform" - a
+	 * billboard that rebuilds the model-view matrix, a skybox that writes w = z. Filament
+	 * keeps the transform out of the material too, so a material that owns its stage is our
+	 * deviation, documented in docs/ShaderPipeline.md (section 10, differences from Filament). */
+	bool DefinesMain(const std::string& p_body)
+	{
+		size_t at = 0;
+		while ((at = p_body.find("void", at)) != std::string::npos)
+		{
+			size_t i = at + 4;
+			while (i < p_body.size() && std::isspace(static_cast<unsigned char>(p_body[i]))) { ++i; }
+			if (p_body.compare(i, 4, "main") == 0)
+			{
+				i += 4;
+				while (i < p_body.size() && std::isspace(static_cast<unsigned char>(p_body[i]))) { ++i; }
+				if (i < p_body.size() && p_body[i] == '(')
+				{
+					return true;
+				}
+			}
+			at += 4;
+		}
+		return false;
+	}
+
 	/** The vertex main: the transform the entry point is not allowed to touch. Copied from
 	 * what Unlit/Standard.ovfx do by hand today, and from filament's post_process_main.vs for
-	 * the full-screen case. */
+	 * the full-screen case.
+	 *
+	 * Only generated for a stage that does not own its main() - see BuildStage. */
 	std::string VertexSkeleton(bool p_hasUserVertex, const std::string& p_domain)
 	{
 		std::ostringstream out;
@@ -404,9 +804,9 @@ namespace
 			out << "layout (location = 0) in vec2 geo_Pos;\n"
 				<< "layout (location = 1) in vec2 geo_TexCoords;\n\n"
 				<< "void main() {\n"
-				<< "    TexCoords = geo_TexCoords;\n"
-				<< "    gl_Position = vec4(geo_Pos, 0.0, 1.0);\n"
-				<< "}\n";
+					<< "    TexCoords = geo_TexCoords;\n"
+					<< "    gl_Position = vec4(geo_Pos, 0.0, 1.0);\n"
+					<< "}\n";
 			return out.str();
 		}
 		out << "layout (location = 0) in vec3 geo_Pos;\n"
@@ -433,7 +833,7 @@ namespace
 
 	/** The fragment main, copied in shape from filament's surface_main.fs:50-56: fill the
 	 * inputs with defaults, run the material's entry point, then let the shading model turn
-	 * them into a colour. */
+	 * them into a colour. Only generated for a stage that does not own its main(). */
 	std::string FragmentSkeleton()
 	{
 		std::ostringstream out;
@@ -477,16 +877,30 @@ namespace
 		std::ostringstream out;
 		for (const Parameter& parameter : p_parameters)
 		{
-			out << "uniform " << GlslType(parameter.type) << " " << parameter.name << ";\n";
+			out << "uniform " << GlslType(parameter.type) << " " << parameter.name;
+			if (!parameter.count.empty())
+			{
+				out << "[" << parameter.count << "]";
+			}
+			if (!parameter.defaultValue.empty())
+			{
+				out << " = " << parameter.defaultValue;
+			}
+			out << ";\n";
 		}
 		out << "\n";
 		return out.str();
 	}
 
-	/** The `#define`s one variant is compiled with: the pass, then the features. */
-	std::string VariantDefines(const PassVariant& p_variant)
+	/** The `#define`s one variant is compiled with: the stage, then the pass, then the
+	 * features. The stage one is what lets Common/Utils.ovfxh keep its derivative helper out
+	 * of the stages that cannot call it (see ComputeTBN there). */
+	std::string VariantDefines(const PassVariant& p_variant, Stage p_stage)
 	{
 		std::ostringstream out;
+		out << (p_stage == Stage::Vertex ? "#define MOON_STAGE_VERTEX\n"
+			: p_stage == Stage::Fragment ? "#define MOON_STAGE_FRAGMENT\n"
+			: "#define MOON_STAGE_GEOMETRY\n");
 		if (!p_variant.pass.empty())
 		{
 			out << "#define " << p_variant.pass << "\n";
@@ -498,34 +912,85 @@ namespace
 		return out.str();
 	}
 
+	/** Where the per-variant #defines go in a stage's shared text.
+	 *
+	 * Every variant of a material compiles the same stage text except for the `#define` lines
+	 * at the top, so the package stores that text once per stage and the runtime splices the
+	 * defines in - filament's DictionaryChunk idea. Without it `Standard` is 192 copies of the
+	 * same 64 KB and the archive is 20 MB instead of two. */
+	constexpr char kDefinesPlaceholder[] = "//@MOON_VARIANT_DEFINES@";
+
 	/** One complete stage source: version, defines, prelude, the entry point, main.
 	 *
 	 * The #line directives point back into the .ovfx the user wrote, so a compile error names
 	 * the file and the line it came from rather than a line of this concatenation - the same
-	 * job filament's Includes.cpp does for #include. */
+	 * job filament's Includes.cpp does for #include.
+	 *
+	 * A stage that defines `void main()` of its own is taken as it is: it keeps the prelude and
+	 * its parameters, and nothing else is generated - no attribute declarations, no varyings,
+	 * no output, no main. That is the escape hatch for the shaders whose stage is not "adjust
+	 * the attributes, then the fixed transform": a billboard that rebuilds the model-view
+	 * matrix, a skybox that sets w = z, a picking pass with a second colour attachment. A
+	 * geometry stage is always like this - there is no skeleton for it at all.
+	 *
+	 * With p_shared the defines are replaced by kDefinesPlaceholder: that is the one copy of
+	 * this stage the package keeps, and every variant contributes just its define lines. */
 	std::string BuildStage(
-		bool p_vertex,
+		Stage p_stage,
 		const MaterialFile& p_material,
 		const PassVariant& p_variant,
 		const std::string& p_prelude,
 		const std::string& p_fileName,
-		uint32_t p_entryLine)
+		const std::vector<std::string>& p_includeDirs,
+		std::string& p_error,
+		bool p_shared = false)
 	{
+		const std::string& body = p_stage == Stage::Vertex ? p_material.vertexBody
+			: p_stage == Stage::Fragment ? p_material.fragmentBody
+			: p_material.geometryBody;
+		const uint32_t entryLine = p_stage == Stage::Vertex ? p_material.vertexEntryLine
+			: p_stage == Stage::Fragment ? p_material.fragmentEntryLine
+			: p_material.geometryEntryLine;
+		const bool rawStage = p_stage == Stage::Geometry || DefinesMain(body);
+
 		std::ostringstream out;
 		out << "#version 450 core\n"
-			<< "// generated by MoonMatc from " << p_fileName
-			<< " (pass '" << p_variant.pass << "', "
-			<< p_variant.features.size() << " feature(s))\n"
-			<< VariantDefines(p_variant)
-			<< p_prelude
-			<< VaryingsPrelude(p_vertex, p_material.domain)
-			<< ParametersPrelude(p_material.parameters)
-			<< "\n#line " << p_entryLine << " \"" << p_fileName << "\"\n"
-			<< (p_vertex ? p_material.vertexBody : p_material.fragmentBody)
-			<< "\n#line 1 \"<generated>\"\n"
-			<< (p_vertex ? VertexSkeleton(!p_material.vertexBody.empty(), p_material.domain)
+			<< "// generated by MoonMatc from " << p_fileName << ", stage " << StageName(p_stage) << '\n';
+		if (p_shared)
+		{
+			out << kDefinesPlaceholder << '\n';
+		}
+		else
+		{
+			out << "// pass '" << p_variant.pass << "', " << p_variant.features.size()
+				<< " feature(s)\n"
+				<< VariantDefines(p_variant, p_stage);
+		}
+		out << p_prelude;
+		if (!rawStage)
+		{
+			out << VaryingsPrelude(p_stage == Stage::Vertex, p_material.domain);
+		}
+		out << ParametersPrelude(p_material.parameters)
+			<< "\n#line " << entryLine << " \"" << p_fileName << "\"\n"
+			<< body
+			<< "\n#line 1 \"<generated>\"\n";
+		if (!rawStage)
+		{
+			out << (p_stage == Stage::Vertex
+				? VertexSkeleton(!p_material.vertexBody.empty(), p_material.domain)
 				: FragmentSkeleton());
-		return out.str();
+		}
+
+		// The material's own #includes are expanded here, into the stage that is about to be
+		// compiled - there is no runtime pass left to do it once it is a package.
+		std::set<std::string> visited;
+		std::string expanded;
+		if (!ExpandIncludes(out.str(), p_includeDirs, p_fileName, visited, expanded, p_error))
+		{
+			return {};
+		}
+		return expanded;
 	}
 
 	// ---------------------------------------------------------------------------------
@@ -652,7 +1117,38 @@ int main(int argc, char* argv[])
 	}
 	commonPrelude += "\n#line 1 \"<material inputs>\"\n" + MaterialInputsPrelude(material.shadingModel);
 
-	// Entries: "pass|features|stage" -> GLSL, and the reflection table.
+	// The shared stage texts, one per stage the material has, with the variant defines left as
+	// a placeholder. Everything else in a stage is the same for every variant, so this is the
+	// difference between "192 copies of the same 64 KB" and one.
+	std::map<std::string, std::string> sharedStages;
+	{
+		const PassVariant none;
+		for (const Stage stage : { Stage::Vertex, Stage::Fragment })
+		{
+			std::string text = BuildStage(
+				stage, material, none, commonPrelude, nameForLines, includeDirs, error, true);
+			if (text.empty())
+			{
+				std::cerr << "[MoonMatc] " << inputPath << ": " << error << std::endl;
+				return 1;
+			}
+			sharedStages[StageName(stage)] = std::move(text);
+		}
+		if (!material.geometryBody.empty())
+		{
+			std::string text = BuildStage(
+				Stage::Geometry, material, none, commonPrelude, nameForLines, includeDirs, error, true);
+			if (text.empty())
+			{
+				std::cerr << "[MoonMatc] " << inputPath << ": " << error << std::endl;
+				return 1;
+			}
+			sharedStages[StageName(Stage::Geometry)] = std::move(text);
+		}
+	}
+
+	// Entries: "pass/features/stage" -> the variant's #define lines, and the reflection table.
+	// The full source of a stage is sharedStages[stage] with those lines spliced in.
 	std::map<std::string, std::string> blobs;
 	std::vector<std::string> blobOrder;
 	for (const PassVariant& variant : variants)
@@ -663,12 +1159,22 @@ int main(int argc, char* argv[])
 			featureKey += (featureKey.empty() ? "" : "|") + feature;
 		}
 		const std::string prefix = variant.pass + "/" + featureKey + "/";
-		blobs[prefix + "vertex"] = BuildStage(
-			true, material, variant, commonPrelude, nameForLines, material.vertexEntryLine);
-		blobs[prefix + "fragment"] = BuildStage(
-			false, material, variant, commonPrelude, nameForLines, material.fragmentEntryLine);
+
+		blobs[prefix + "vertex"] = VariantDefines(variant, Stage::Vertex);
+		blobs[prefix + "fragment"] = VariantDefines(variant, Stage::Fragment);
 		blobOrder.push_back(prefix + "vertex");
 		blobOrder.push_back(prefix + "fragment");
+
+		// A geometry stage is written by the material and only exists for the shaders that
+		// expand primitives, so it is emitted when the block is there and left out otherwise.
+		// It is also left out for the variants whose guard feature is off: the shaders that
+		// use one open it with `#if defined(WITH_EDGE)`, and the old pipeline skipped the
+		// stage there rather than running a pass-through.
+		if (!material.geometryBody.empty() && WantsGeometryStage(material.geometryBody, variant))
+		{
+			blobs[prefix + "geometry"] = VariantDefines(variant, Stage::Geometry);
+			blobOrder.push_back(prefix + "geometry");
+		}
 	}
 
 	// Reflection: the parameters this material exposes, in the shape a panel (or a material
@@ -692,8 +1198,12 @@ int main(int argc, char* argv[])
 	for (size_t i = 0; i < material.parameters.size(); ++i)
 	{
 		json << "    { \"name\": \"" << material.parameters[i].name
-			<< "\", \"type\": \"" << material.parameters[i].type << "\" }"
-			<< (i + 1 < material.parameters.size() ? "," : "") << "\n";
+			<< "\", \"type\": \"" << material.parameters[i].type << "\"";
+		if (!material.parameters[i].count.empty())
+		{
+			json << ", \"count\": " << material.parameters[i].count;
+		}
+		json << " }" << (i + 1 < material.parameters.size() ? "," : "") << "\n";
 	}
 	json << "  ]\n}\n";
 
@@ -702,6 +1212,17 @@ int main(int argc, char* argv[])
 		return 1;
 	}
 
+	// The full source of a stage: its shared text with this variant's defines spliced in.
+	const auto composeStage = [&sharedStages](const std::string& p_stage, const std::string& p_defines) {
+		std::string text = sharedStages.at(p_stage);
+		const size_t at = text.find(kDefinesPlaceholder);
+		if (at != std::string::npos)
+		{
+			text.replace(at, sizeof(kDefinesPlaceholder) - 1, p_defines);
+		}
+		return text;
+	};
+
 	if (!dumpGlslDir.empty())
 	{
 		for (const std::string& key : blobOrder)
@@ -709,7 +1230,11 @@ int main(int argc, char* argv[])
 			std::string fileNameOut = key;
 			std::replace(fileNameOut.begin(), fileNameOut.end(), '/', '_');
 			std::replace(fileNameOut.begin(), fileNameOut.end(), '|', '-');
-			if (!WriteFile(std::filesystem::path(dumpGlslDir) / (fileNameOut + ".glsl"), blobs[key]))
+
+			// The last path component is the stage name the shared text is keyed by.
+			const std::string stage = key.substr(key.rfind('/') + 1);
+			if (!WriteFile(std::filesystem::path(dumpGlslDir) / (fileNameOut + ".glsl"),
+					composeStage(stage, blobs[key])))
 			{
 				return 1;
 			}
@@ -718,7 +1243,8 @@ int main(int argc, char* argv[])
 
 	if (preprocessOnly)
 	{
-		std::cout << blobs[blobOrder.front()] << std::endl;
+		const std::string& first = blobOrder.front();
+		std::cout << composeStage(first.substr(first.rfind('/') + 1), blobs[first]) << std::endl;
 		return 0;
 	}
 
@@ -726,7 +1252,26 @@ int main(int argc, char* argv[])
 	std::string package;
 	package.append(kMagic, sizeof(kMagic));
 
-	// SHDRGLSL: the blob dictionary - a count, then (key length, key, size, bytes) per blob.
+	// SHDRSTAG: the shared stage texts (one per stage), each with kDefinesPlaceholder where the
+	// variant's #define lines belong. This is what keeps a 192-variant material from carrying
+	// 192 copies of the same source.
+	{
+		std::string payload;
+		const uint32_t count = static_cast<uint32_t>(sharedStages.size());
+		payload.append(reinterpret_cast<const char*>(&count), sizeof(count));
+		for (const auto& [stage, text] : sharedStages)
+		{
+			const uint32_t nameSize = static_cast<uint32_t>(stage.size());
+			const uint32_t size = static_cast<uint32_t>(text.size());
+			payload.append(reinterpret_cast<const char*>(&nameSize), sizeof(nameSize));
+			payload.append(stage);
+			payload.append(reinterpret_cast<const char*>(&size), sizeof(size));
+			payload.append(text);
+		}
+		AppendChunk(package, "SHDRSTAG", payload);
+	}
+
+	// SHDRGLSL: the per-variant defines - a count, then (key length, key, size, bytes) per entry.
 	{
 		std::string payload;
 		const uint32_t count = static_cast<uint32_t>(blobOrder.size());

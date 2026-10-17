@@ -1,4 +1,4 @@
-﻿set(TARGET_NAME Moon)
+set(TARGET_NAME Moon)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -76,6 +76,17 @@ add_custom_command(
     COMMENT "Copying tbb.dll"
 )
 file(GLOB_RECURSE RESOURCE_FILES "${ResDIR}/*")
+
+# The engine shaders are packed into the MoonShader archive (Tools/ShaderPack), so they are
+# not copied into the run directory any more - the runtime reads them out of the exe
+# ("sources are read from the embedded archive"). PathTrace is the one set that still has to
+# sit on disk: PathTraceRenderPass reads the file text itself and injects its option
+# #defines before compiling it (the permanent exception in docs/ShaderPipeline.md section 8).
+list(FILTER RESOURCE_FILES EXCLUDE REGEX "/Data/Engine/Shaders/")
+file(GLOB_RECURSE RUNTIME_SHADER_FILES CONFIGURE_DEPENDS
+     "${ResDIR}/Moon/Data/Engine/Shaders/PathTrace/*")
+list(APPEND RESOURCE_FILES ${RUNTIME_SHADER_FILES})
+
 if(RESOURCE_FILES)  
     foreach(FILE ${RESOURCE_FILES})
         file(RELATIVE_PATH REL_FILE_PATH ${ResDIR} ${FILE})

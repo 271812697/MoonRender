@@ -110,6 +110,28 @@ fragment {
 照 Filament 的 `surface_vertex_inputs.vs` / `..._outputs`：位置/法线/切线/UV 由 prelude 提供，
 入口函数只能改属性，不能改变换。我们目前的 `VERTEX_POS_NORMAL` feature 就是它的雏形。
 
+### 2.4 本轮补上的四个语法（迁移 44 个 shader 时逐个逼出来的）
+
+| 语法 | 用途 | 例子 |
+|---|---|---|
+| `vertex { void main() {} }` / `fragment { void main() {} }` | **整段自管**（raw stage）：块里定义了 `main()`，MoonMatc 就只给 prelude + 参数，属性/varying/`FRAGMENT_COLOR`/骨架 main 全都不生成，块自己声明、自己写 `gl_Position` | `GizmoLine` `SkyboxConvert` `Point` `Standard` |
+| `geometry { ... }` | GLSL 第三阶段，**我们的扩展**（Filament 没有）。总是整段自管，块里定义 `layout(triangles) in` 等 | `GizmoLine` `GeomertySurface` `SectionFace` `GizmoCell` `SectionContour` |
+| `{ type : float3, name : samples, count : 64 }` | 数组 uniform（SSAO 的 64 采样核） | `ssao` |
+| `{ type : float, name : u_GridSize, default : 0.01 }` | uniform 的 GLSL 初始化值：老文件 `uniform float x = 0.01;` 的下发默认值必须保留，否则没人设的参数会静默变 0 | `Grid` `SectionCap` `Billboard` `Standard` |
+
+另外两件配套的事：
+
+- **`#include` 改成构建期展开**。老路径由运行时 `ShaderLoader::AssembleSource` 展开（对标
+  Filament 的 `Includes.cpp`）；成了 package 之后 GLSL 直接进驱动，没有运行时那一趟了，所以
+  `MoonMatc` 自己递归展开（`-I` 是 shader 根，`:Shaders/...` 前缀映射到它），每个文件每个阶段
+  只展开一次（头文件没有 include guard，`PBR.ovfxh` 会二次够到 `Utils.ovfxh`），
+  `Common/Buffers/EngineUBO.ovfxh` 和 `Common/Utils.ovfxh` 这两份 prelude 自带的直接丢掉。
+  展开处插 `#line` 回指，报错仍然指到 `.ovfxh` 自己的行。
+- **每个阶段带 `#define MOON_STAGE_VERTEX|FRAGMENT|GEOMETRY`**。`Common/Utils.ovfxh` 里的
+  `ComputeTBN()` 用 `dFdxFine`，只有片元阶段能用；以前它被拼进所有阶段，NVIDIA 驱动容忍、
+  glslang 不容忍。现在用 `#if !defined(MOON_STAGE_VERTEX) && !defined(MOON_STAGE_GEOMETRY)`
+  把它挡在非片元阶段外（老路径不定义这些宏，行为不变），顶点/几何阶段才终于能离线校验。
+
 ---
 
 ## 3. prelude：我们的"生成骨架"
@@ -173,6 +195,23 @@ Filament：8 位掩码 + 白名单 + **固定枚举**（`determineSurfaceVariant
 `SHDR_GLSL` 内部分组成一块"字典"（blob 数组 + (pass, variant, stage) → blob 下标 的索引），
 对应 Filament 的 `DictionaryChunk` + `MAT_GLSL`。
 
+**实际实现的 tag**（8 字节，注意不是上面表格里带下划线的拼法）：
+
+| tag | 内容 |
+|---|---|
+| `SHDRSTAG` | **每个阶段一份**的全文，变体 `#define` 的位置留成占位符 `//@MOON_VARIANT_DEFINES@` |
+| `SHDRGLSL` | 每 (pass, variant, stage) 只存**自己那几行 `#define`** |
+| `SHDRVARI` | 变体清单（pass + feature 集合） |
+| `SHDRPARM` | 参数表（name/type），JSON 的二进制版 |
+| `SHDRSTAT` | `material { }` 里的状态字段（blending/culling/depthWrite …），目前只记录、运行时不读 |
+| `SHDRNAME` | 材质名 |
+
+`SHDRSTAG` + `SHDRGLSL` 的拆分是**必须的**，不是优化：一个材质的每个变体除了那几行 `#define`
+以外完全相同，`Standard` 有 192 个变体，不拆就是 192 份同样 64 KB 的源码 —— 打包出来
+20.5 MB（`shader.cpp` 99.8 MB）；拆完 1.31 MB（`shader.cpp` 6.8 MB）。运行时
+`ShaderPackage::Source()` 把两者拼起来（`Source` 因此返回 `std::string` 而不是 `string_view`）。
+没有 `SHDRSTAG` 的旧包仍然按"blob 就是整段"读，所以格式是向后兼容的。
+
 ---
 
 ## 6. 运行时
@@ -189,7 +228,9 @@ ShaderManager[key]
 ```
 
 删除：`ParseShader`（扫 `#shader/#feature`）、`AssembleShader`（2^n 循环 + 宏注入）。
-`CreateFromSource`（PathTrace 在用）暂时保留，等那 4 个 shader 也迁移后再删。
+**这两个暂时不能删**：PathTrace 的 4 个 shader 还按"读文件文本 + 插 define"的旧方式编译，
+`CreateFromSource`（内嵌字符串）更是 5 个绘制点在用。§8 已把 PathTrace 定为永久例外
+（后续重构路径追踪器时一起改），所以这条"删除"要等那之后。
 
 ---
 
@@ -203,9 +244,187 @@ ShaderManager[key]
 4. `Standard.ovfx` 最后做（PBR/IBL/阴影/变体最多）。
 5. 全部迁完后再删旧解析路径，并把 `.ovfx` 改名为 `.mat`。
 
+完成情况：1-4 已做完（`Engine/Shaders` 下 44 / 48 个 `material{}` 形式，剩 4 个 PathTrace 定为
+永久例外，见 §8）；第 5 步**不做**——旧的文件版解析路径还要留给 PathTrace，`.ovfx` 也因此不改名
+`.mat`。
+
+> 之所以停在"两条路并存"而不是彻底切换：剩下那 4 个路径追踪 shader 的加载方式是
+> "运行时往源码里插 define 再编"，和构建期出包的模型天然冲突；决定等**路径追踪器整体重构**时
+> 连加载方式一起换，现在迁移属于白改（详见 §8 "剩余"）。
+
 ---
 
-## 8. 已定的三个问题（2026-10 决策）
+## 8. 交接：当前进度、换算配方、已踩的坑
+
+### 进度
+
+| 组 | 状态 |
+|---|---|
+| 构建期 `Tools/MoonMatc`（= matc） | ✅ `material{}`/`vertex{}`/`geometry{}`/`fragment{}` 解析、`domain: surface\|postProcess`、变体展开、`uniform` 生成（DSL 名 → GLSL、`count` 数组、`default` 初值）、`#include` 构建期展开、整段自管阶段、阶段宏、`#line` 回指、`.ovshader` chunk、反射 JSON、未迁移文件透传 |
+| 打包 `Tools/ShaderPack`（= resgen） | ✅ `name=path` 合并成 `shader.h` / `shader.cpp`，`MoonShader` 由 `MoonRender` 链接 |
+| 运行时 `ShaderArchive` / `ShaderPackage` / `ShaderLoader` | ✅ 归档优先、`MOONSDR1` 分流、按变体清单编译（顶点/片元/几何三段，几何可选） |
+| **已迁移（44 / 48）** | ✅ `Unlit` `Standard` `GeomertySurface` `GeomertySurfacePick` `GeomertyLine` `GeomertyPoint` `GizmoCell` `Gizmo` `GizmoLine` `GizmoPoint` `GizmoTriangle` `Grid` `Line` `Point` `Billboard` `Atmosphere` `Skysphere` `SkyboxConvert` `SkyboxIrrandiance` `SkyboxPrefilter` `BrdfLut` `ClearBackground` `PickingFallback` `OutlineFallback` `ShadowFallback` `MirrorPlaneShadow` `SectionCap` `SectionContour` `SectionFace` `SectionParity` `gbuffer` `ssao` `ssaoblur`；`PostProcess/` 全部 12 个 |
+
+`Resource/Moon/Data/Engine/Shaders` 下共 48 个 `.ovfx`（+ 10 个 `.ovfxh`，共 58 个源打进归档）。
+
+### 剩余（都已定案，不是待办）
+
+**1. D 组 4 个（PathTrace）：定为永久例外，不迁。**
+
+`PathTrace/Output` `PathTrace/PathTrace` `PathTrace/PathTraceLowRes` `PathTrace/ToneMap` 继续走
+`CreateFromSource` + `#shader` 语法。这不是"没来得及"，是**明确决定不迁**（2026-10，后续路径追踪器
+要整体重构，届时连加载方式一起改，现在动属于白改）。理由和数字留在这里，免得后来人重走一遍：
+
+- `PathTraceRenderPass::UpdateShaders()`（`PathTraceRenderPass.cpp:590-742`）先
+  `loadShaderSource()` 把文件读成字符串，再按渲染选项**往源码里插入 `#define`**，然后按 define 串
+  缓存 `CreateFromSource` 的结果。文件一旦改成 `material{}`，这段"找 `#shader fragment` + 插
+  define"就失效——迁它等于改这条渲染通路的加载方式；
+- 12 个 `OPT_*` 布尔（`OPT_ENVMAP` `OPT_LIGHTS` `OPT_RR` `OPT_MEDIUM` `OPT_VOL_MIS`
+  `OPT_ALPHA_TEST` `OPT_BACKGROUND` `OPT_TRANSPARENT_BACKGROUND` `OPT_HIDE_EMITTERS`
+  `OPT_UNIFORM_LIGHT` `OPT_OPENGL_NORMALMAP` `OPT_ROUGHNESS_MOLLIFICATION`）当 features 用，
+  幂集是 2^12 = 4096 个变体 × 每份 53 KB × 2 阶段；而且 `PropertyWidget` 允许运行时任意
+  `AddFeature`，所以"只编真会用的组合"也不封闭；
+- 规模：`PathTrace` / `PathTraceLowRes` 各 1926 / 1905 行、各 28 处 `OPT_*` 守卫（6 个 `#else`），
+  `ToneMap` 2 处，`Output` 0 处。要把它们迁成"1 个变体 + uniform 布尔"，先得做完这件事再跑
+  benchmark——留给路径追踪器重构；
+- 附带好处：`OPT_RR_DEPTH` 那个带参数的 define 其实没被 shader 用到（`PathTrace.ovfx` 里只有
+  `OPT_RR` 和一个 `RR_DEPTH` uniform），所以将来只需要处理 12 个纯布尔。
+
+因为这条决定，**`ShaderLoader` 的文件版旧解析路径（`CompileShaderFromFile` → `ParseShader` →
+`AssembleShader`）保留**，§7 的第 5 步（删旧路径）相应搁置。
+
+**部署形态也跟着变了**：引擎着色器现在只在 exe 里（`Moon/CMakeLists.txt` 的资源拷贝步骤把
+`Data/Engine/Shaders/` 排除掉了），运行目录里只剩 `Data/Engine/Shaders/PathTrace/*.ovfx`
+（4 个，上面的永久例外）还要从磁盘读。改那段拷贝规则时别再一刀切。
+
+**2. `Resource/Moon/Data/Editor/Shaders/` 下那 5 个老副本：已删。**
+
+`Grid` `Gizmo` `Billboard` `PickingFallback` `OutlineFallback` 原来由 `EditorResources` 构造时
+加载（`m_shaders`），但 `EditorResources::GetShader()` **全工程 0 个调用点**——它们只被加载、
+从来没被用来画过任何东西（`GridRenderPass` 用的是 `ShaderManager[":Shaders/Grid.ovfx"]`，也就是
+`Engine/Shaders` 那份；`DebugSceneRenderer` 只是 include 了头文件）。已连同 `m_shaders` 成员、
+`GetShader()`、`CreateShader()` helper、两个无用的 `#include`、目录本身和 CMake 里的拷贝/IDE 挂载
+一起删掉。顺带的好处：启动少编 5 个 shader，运行目录不用再带它们。
+
+### 代价（本轮引入，必须交代）
+
+| 项 | 迁移前 | 拆分前 | 现在 |
+|---|---|---|---|
+| 归档字节（打进 exe） | 683 KB | 20.5 MB | **1.31 MB** |
+| `Build/generated/shaders/shader.cpp` | 0.7 MB | 99.8 MB | **6.8 MB** |
+| `Moon.exe` | — | 30.1 MB | **11.9 MB** |
+| 启动到首帧（开 1.moon） | ~10 s | ~25 s | **~26 s** |
+
+体积那一列已经解决（`SHDRSTAG` 共享阶段文本，见 §5）：剩余 1.31 MB 对比原来的 683 KB，
+基本就是变体数量和 `Standard`/`GeomertySurface`/`GizmoCell` 的真实增量。
+
+**剩下的是启动那 ~15 s，它没被解决**：变体数没变，驱动就要编同样多的程序
+（`Standard` 192 变体 × 2~3 阶段 + `GizmoCell` 64 × 3 + `GeomertySurface` 64 × 3 …）。
+老路径其实也编这么多，所以严格说这不是迁移引入的，但现在的数字不好看。真正的解法是
+**按需编译变体**（首次 `GetVariant` 时才编，而不是 `Shader` 构造时全编）——那是运行时行为改动
+（首帧会卡一下），需要单独决策，本轮没动。
+
+### 换算配方（已用 44 个文件验证）
+
+```diff
+- #feature X             →  material { features : [ X ], ... }
+- #pass P                →  material { passes : [ P ], ... }
+- #shader vertex 整段     →  删掉（postProcess 生成全屏 quad；surface 生成 MVP + materialVertex）
+- #shader fragment
+- #shader geomerty 整段   →  geometry { 原样 }（整段自管，MoonMatc 只给 prelude + 参数）
+- uniform <type> <name>;  →  material { parameters : [ { type : <DSL 名>, name : <同名> } ] }
+- uniform <t> <n> = V;    →  { type : <DSL 名>, name : <n>, default : V }   ← 初值必须留
+- <t> <name>[N];          →  { type : <DSL 名>, name : <name>, count : N }
+- void main() { ... }     →  fragment { void material(inout MaterialInputs m) { ... } }（或整段自管）
+- FRAGMENT_COLOR = X;     →  m.baseColor = X;（整段自管时保持原样）
+```
+
+- 参数类型写 **DSL 名**：`float/float2/float3/float4/bool/int/mat4/sampler2D/samplerCube`
+  （工具转 GLSL）；表里没有的名字（`samplerBuffer`/`usamplerBuffer`）原样透传给 GLSL；
+- `TexCoords`（postProcess）或 `fs_in.TexCoords` / `fs_in.FragPos` / `fs_in.Normal`（surface）
+  由 skeleton 提供，`FRAGMENT_COLOR` 也不用声明；**整段自管时这三样都得自己声明**；
+- helper 函数、常量数组、`#define`、`#if defined(FEATURE)` 都可以留在块内；
+- 真的能用 skeleton 就别用整段自管：`materialVertex` 能改属性，改不了 `gl_Position`。
+
+### 验证
+
+```powershell
+cmake --build Build --target Moon --config Release -- /nologo /m:1
+```
+
+再**带一个工程启动**，让视口真的画帧（不开工程停在首页时，一半 shader 根本不会被加载）：
+
+```powershell
+Start-Process Build\bin\Release\Moon.exe -ArgumentList '"D:\Project\UseQt\SketchExample\1.moon"' `
+    -WorkingDirectory Build\bin\Release -RedirectStandardOutput Build\run.txt
+```
+正常日志只有 `[Shader] sources are read from the embedded archive (58 files packed)`，
+不应有 `[Shader Package]`（变体缺源）/ `[Shader Compile]`（编译失败）/ `[Shader Linking]`。
+`Moon.exe <工程路径>` 是这一轮加的小功能（`Moon/main.cpp`，200 ms 后 `onReadFile`），就是为了让
+这件事能脚本化——以前只能手点首页。
+
+想不启动就验证生成的 GLSL（构建期 MoonMatc 只拼文本、不调驱动）：
+
+```powershell
+Build\bin\Release\MoonMatc.exe -i <X.ovfx> -o Build\verify\X.ovshader -I Resource\Moon\Data\Engine\Shaders `
+    --dump-glsl Build\verify --dump-json Build\verify\X.json
+```
+每个 dump 出来的 `.glsl` 复制一份、在 `#version` 下一行插
+`#extension GL_GOOGLE_cpp_style_line_directive : require`（`MoonMatc` 写的是带文件名的 `#line`，
+validator 默认不认，驱动认），再 `glslangValidator -S vert|frag|geom`。
+三个阶段都必须过——`ComputeTBN` 的 `dFdxFine` 已经被 `MOON_STAGE_*` 挡掉，顶点/几何阶段不再是
+"注定失败"，这里报错就是 shader 真有问题。
+
+**阶段名要从文件名后缀判断**（`_vertex` / `_fragment` / `_geometry`），不能用
+`-match 'vertex'` 这种大小写不敏感的包含判断：`_VERTEX_POS_NORMAL_fragment.glsl` 会命中
+`vertex`，于是把片元当顶点编，报一堆假失败（本轮踩过）。
+
+干净状态下跑一遍全量（44 个材质、1002 个阶段）：
+```
+materials: 44 ; stages validated: 1002 ; failures: 0
+```
+
+### 已踩的坑
+
+1. chunk tag **必须 8 字节**（9 字符会被截断、运行时永远匹配不上）；
+2. `#line` **不能插在 `#version` 之前**（GLSL 要求它是第一条语句）；
+3. 参数必须生成 `uniform`，类型要做 `float4 → vec4` 映射；
+4. blob 键是 `pass/feat1|feat2/stage`（分隔符在 feature **之间**，无尾分隔符）；
+5. 老的 geometry-stage 跳过 hack 依赖"`#version` 后第一行是 `#if defined`"，插 `#line` 会破坏它（已在扫描前跳过 `#line` / `//`）。
+6. 入口点参数叫 `m`（`void material(inout MaterialInputs m)`），shader 里原来的局部变量 `m`
+   **必须改名**：`BloomDownsampling` 的采样本来就叫 `m`，改名成 `mm`（局部变量会遮蔽同名的形参，
+   就地改完也能编，但读起来是灾难）；
+7. `uniform float u_X = 0.5;` 这种**声明处默认值**必须翻译成 `default :`，不能直接删：
+   `Grid` 的 `u_GridSize`/`u_GridOpacity`/`u_FadeDistance`、`SectionCap` 的
+   `u_Albedo`/`u_environmentIntensity`、`Billboard` 的 4 个、`Standard`/`GeomertySurface`/
+   `SectionFace` 的一大票 —— 全都没有任何 C++ 或 `.ovmat` 设过，删掉就静默变 0（网格 spacing
+   变 0 → `fwidth(coord/0)`，直接坏）。只有确认每帧 `SetProperty` 的（`ssaoblur` 的
+   `u_BlurDepthTolerance`）才可以删；
+8. **geometry 块默认"每个变体都有"**：MoonMatc 给声明了 geometry 的材质在**所有**变体里写几何
+   阶段，而老路径有个 hack —— stage 体以 `#if defined(WITH_EDGE)` 开头时，feature 没开的变体
+   整段跳过。现在的规则（`WantsGeometryStage`）：**只有当整个 geometry 块的第一个非空行是
+   单 feature 的守卫、且配对的 `#endif` 就是块尾**时，才按变体裁掉；其余情况一律照写（拿不准就
+   保守）。`Standard` 正好是这种"整块被包住"的形状，192 变体里 96 个不带几何阶段；
+   `GizmoCell`/`GeomertySurface`/`SectionFace` 的守卫在 varying 声明之后，裁不了，仍然每个变体
+   一份（它们体内那个 `#else` 直通分支就是为此保留的）。真要彻底省，得让 DSL 显式声明
+   "本材质几何阶段需要哪个 feature"，那是一个新字段，还没加；
+9. `mix(vec3, vec3, bool)` **不是 GLSL 4.5 的重载**（选择子必须是 `bvec3`）：老代码能编纯粹是
+   NVIDIA 驱动放宽了。`Standard`/`GeomertySurface`/`SectionFace` 的
+   `mix(pbr, ..., u_BuiltInToneMapping)` 因此在迁移时写成 `bvec3(u_BuiltInToneMapping)`
+   ——逐分量选择，结果与驱动原来的行为一致，但这是本轮唯一动了表达式的地方；
+10. 整段自管的阶段**不吃 skeleton 的任何东西**：属性、varying、`FRAGMENT_COLOR`、`main` 全都
+   得自己声明。混用会被链接器抓住：raw 顶点 + 生成片段 → 生成的那份
+    `in VS_OUT { FragPos, TexCoords, Normal } fs_in` 会对上一个从没写过这些 varying 的顶点阶段；
+11. 参数里的 `default` 值可能自带逗号（`vec4(1.0, 2.0, 3.0, 4.0)`），参数表扫描器必须按括号
+    深度找分隔逗号，否则 `default` 会被截成 `vec4(1.0`；
+12. `#include` 现在是**构建期**展开的，每个文件每个阶段只展开一次，且
+    `EngineUBO.ovfxh`/`Utils.ovfxh` 因为 prelude 自带会被丢掉——所以老文件里那两行 include
+    留着是**静默无害**的（不会重复声明），但建议删掉。
+
+
+---
+
+## 9. 已定的三个问题（2026-10 决策）
 
 | 问题 | 决定 |
 |---|---|
@@ -213,9 +432,28 @@ ShaderManager[key]
 | `.ovshader` 内容 | **保留最终 GLSL 文本**（体积换可读性、可调试、`--dump-glsl` 可导出）；不出 SPIR-V（GL 4.5 消费不了） |
 | 反射输出 | **同时输出 JSON**（`--dump-json`，等价 `matc -r`），材质编辑器直接吃 JSON，不必解析二进制 chunk |
 
-## 9. 与 Filament 的已知差异（明确记录，避免误以为抄漏）
+## 10. 与 Filament 的已知差异（明确记录，避免误以为抄漏）
 
-- **变体枚举**：Filament 是固定枚举（`determineSurfaceVariants`），我们第一版仍是 feature 的幂集（`Unlit` 有 1 个 feature = 2 个变体，可接受）；固定枚举随变体模型一起做。
-- **深度/阴影 pass**：Filament 用 `DEP` 变体位，深度变体只编顶点阶段、片元阶段整个跳过；我们仍保留 `passes : [ SHADOW_PASS ]` 显示声明，片元阶段照编（`Unlit` 今天就是靠 `#if defined(SHADOW_PASS)` 变空）。等变体模型落地后统一。
-- **材质 DSL**：Filament 的 `material { }` 有几十个字段（`requires` / `variables` / `subpass` / `stereoscopicType` …），我们只实现用得到的那些，字段名保持一致，后续按需补。
+- **变体枚举**：Filament 是固定枚举（`determineSurfaceVariants`），我们第一版仍是 feature 的幂集；
+  `Standard` 现在是 3 pass × 2^6 feature = **192 个变体**（体积问题已用 §5 的 `SHDRSTAG` 解决，
+  但变体数本身没有收敛）。固定枚举 + `variantFilter` 是下一件该做的事。
+- **路径追踪 4 个 shader 不迁**（§8 "剩余"）：Filament 没有"运行时往源码插 define 再编译"的机制，
+  它靠固定变体枚举 + 材质实例；我们的 PathTrace 恰好靠前者，所以永久留在旧路径上，等路径追踪器
+  重构时连加载方式一起改。这也是整个迁移唯一未收口的地方。
+- **深度/阴影 pass**：Filament 用 `DEP` 变体位，深度变体只编顶点阶段、片元阶段整个跳过；我们仍保留
+  `passes : [ SHADOW_PASS ]` 显示声明，片元阶段照编（`Unlit` 今天就是靠 `#if defined(SHADOW_PASS)` 变空）。
+  等变体模型落地后统一。
+- **整段自管的阶段**（§2.4）：Filament 把变换锁死在生成的 `main()` 里，材质只能改属性；我们允许
+  `vertex { void main() }` / `fragment { void main() }` 全权接管。这条是为救现有 8 个"自己写
+  `gl_Position`/自带 varying"的 shader 而加的，代价是材料不再受骨架约束。Filament 的等价物是
+  CPU 侧预变换（billboard）或自定义 vertex domain，属于以后可以逐个收回的债。
+- **geometry 阶段**：Filament 的材质模型没有第三阶段（它靠 CPU/顶点着色器做线宽展开）。我们保留了
+  GL 的几何阶段（`geometry { }`），因为 `GizmoLine`/`GeomertySurface`/`SectionFace`/`GizmoCell`/
+  `SectionContour` 的边缘展开全在里面。这是永久性差异，不是待办。附带一条自创规则：geometry 块若
+  整块被单个 feature 守卫包住，就只在该 feature 开的变体里生成（老 loader 的 skip hack 的等价物，
+  见 §8 坑 8）——Filament 没有几何阶段，自然也没有这条。
+- **参数默认值**（§2.4 的 `default`）：Filament 用 `variables` + 材质实例，我们直接把 GLSL 初始化值
+  写回 uniform 声明，靠 GL 把初值反射进属性表（`Material::UpdateProperties`）。
+- **材质 DSL**：Filament 的 `material { }` 有几十个字段（`requires` / `variables` / `subpass` / `stereoscopicType` …），
+  我们只实现用得到的那些，字段名保持一致，后续按需补。
 

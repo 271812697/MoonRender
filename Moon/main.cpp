@@ -3,7 +3,10 @@
 #include "GeometryInit.h"
 #include "core/JobSystem.h"
 #include <QApplication>
+#include <QFileInfo>
 #include <QFontDatabase>
+#include <QStringList>
+#include <QTimer>
 #include <editor/editor.h>
 #include "Core/Global/ServiceLocator.h"
 #include "editor/UI/HomePanel/RecentProjects.h"
@@ -39,6 +42,18 @@ int main(int argc, char* argv[])
 		editor.setWindowTitle("MOON");
 		editor.resize(1920, 1080);
 		editor.show();
+		// A project named on the command line is opened as soon as the event loop runs: the
+		// viewport builds its GL context on the first show, and a document is only loaded
+		// into one that has it - the same reason the start page opens a project by signal
+		// from inside the loop rather than from the constructor. Short delay on top of that,
+		// so the first show (and the context it makes) has actually happened. This is what
+		// lets a scripted run render a document without anyone clicking: the shader passes
+		// are only compiled once something is being drawn.
+		const QStringList arguments = QApplication::arguments();
+		if (arguments.size() > 1 && QFileInfo::exists(arguments[1])) {
+			const QString project = arguments[1];
+			QTimer::singleShot(200, &app, [project] { GetViewerWidget.onReadFile(project); });
+		}
 		res = QApplication::exec();
 		// The picture of the document that is open is taken here, the way closing a project
 		// takes one: the viewport is still drawing it, so what is grabbed is how it was left.

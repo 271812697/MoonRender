@@ -84,3 +84,20 @@ target_include_directories(MoonShader PUBLIC
   "${CMAKE_SOURCE_DIR}/MoonRender/include")
 target_compile_options(MoonShader PRIVATE /bigobj)
 set_target_properties(MoonShader PROPERTIES CXX_STANDARD 20)
+
+# The shader sources in the IDE.
+#
+# What this target builds is a generated shader.cpp, so without this the .ovfx/.ovfxh tree -
+# the thing that actually gets edited - is invisible in the solution: VS only shows what a
+# target lists. They are attached header-only, so no compiler ever looks at them; they are
+# there to be opened, and to be visible as the inputs the custom commands above rebuild from.
+set(SHADER_IDE_FILES)
+foreach(source ${SHADER_SOURCES})
+  list(APPEND SHADER_IDE_FILES "${SHADER_SOURCE_DIR}/${source}")
+endforeach()
+foreach(header ${SHADER_HEADERS})
+  list(APPEND SHADER_IDE_FILES "${SHADER_SOURCE_DIR}/${header}")
+endforeach()
+set_source_files_properties(${SHADER_IDE_FILES} PROPERTIES HEADER_FILE_ONLY TRUE)
+target_sources(MoonShader PRIVATE ${SHADER_IDE_FILES})
+source_group(TREE "${SHADER_SOURCE_DIR}" PREFIX "Shaders" FILES ${SHADER_IDE_FILES})

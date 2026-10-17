@@ -123,6 +123,24 @@ namespace Rendering::Resources
 					m_parameters.push_back(std::move(parameter));
 				}
 			}
+			else if (tag == "SHDRSTAG")
+			{
+				uint32_t count = 0;
+				if (!Take(payload, count))
+				{
+					continue;
+				}
+				for (uint32_t i = 0; i < count; ++i)
+				{
+					std::string stage;
+					std::string_view text;
+					if (!TakeString(payload, stage) || !TakeView(payload, text))
+					{
+						break;
+					}
+					m_stageTexts[stage] = text;
+				}
+			}
 			else if (tag == "SHDRGLSL")
 			{
 				uint32_t count = 0;
@@ -153,7 +171,7 @@ namespace Rendering::Resources
 	{
 		/** The blob key MoonMatc writes: "pass/feature|feature/stage" - the separators sit
 		 * between the features, not after each of them. */
-		std::string BlobKey(const ShaderPackage::Variant& p_variant, bool p_vertex)
+		std::string BlobKey(const ShaderPackage::Variant& p_variant, ShaderPackage::Stage p_stage)
 		{
 			std::string key = p_variant.pass + "/";
 			bool first = true;
@@ -167,14 +185,19 @@ namespace Rendering::Resources
 				first = false;
 			}
 			key += "/";
-			key += (p_vertex ? "vertex" : "fragment");
+			switch (p_stage)
+			{
+			case ShaderPackage::Stage::Vertex: key += "vertex"; break;
+			case ShaderPackage::Stage::Fragment: key += "fragment"; break;
+			default: key += "geometry"; break;
+			}
 			return key;
 		}
 	}
 
-	const ShaderPackage::Blob* ShaderPackage::FindBlob(const Variant& p_variant, bool p_vertex) const
+	const ShaderPackage::Blob* ShaderPackage::FindBlob(const Variant& p_variant, Stage p_stage) const
 	{
-		const std::string key = BlobKey(p_variant, p_vertex);
+		const std::string key = BlobKey(p_variant, p_stage);
 		for (const Blob& blob : m_blobs)
 		{
 			if (blob.name == key)
@@ -185,9 +208,37 @@ namespace Rendering::Resources
 		return nullptr;
 	}
 
-	std::string_view ShaderPackage::Source(const Variant& p_variant, bool p_vertex) const
+	std::string ShaderPackage::Source(const Variant& p_variant, Stage p_stage) const
 	{
-		const Blob* blob = FindBlob(p_variant, p_vertex);
-		return blob != nullptr ? blob->source : std::string_view{};
+		const Blob* blob = FindBlob(p_variant, p_stage);
+		if (blob == nullptr)
+		{
+			return {};
+		}
+
+		// Stage name -> the text every variant shares, with a placeholder for the defines this
+		// variant contributes. A package from before the shared-stage chunk has no such text
+		// and its blobs are whole stages, so it keeps working unchanged.
+		const std::string_view stageName = [p_stage] {
+			switch (p_stage)
+			{
+			case Stage::Vertex: return std::string_view{ "vertex" };
+			case Stage::Fragment: return std::string_view{ "fragment" };
+			default: return std::string_view{ "geometry" };
+			}
+		}();
+		const auto shared = m_stageTexts.find(std::string{ stageName });
+		if (shared == m_stageTexts.end())
+		{
+			return std::string{ blob->source };
+		}
+
+		std::string text{ shared->second };
+		const size_t at = text.find(kShaderDefinesPlaceholder);
+		if (at != std::string::npos)
+		{
+			text.replace(at, kShaderDefinesPlaceholder.size(), blob->source);
+		}
+		return text;
 	}
 }
