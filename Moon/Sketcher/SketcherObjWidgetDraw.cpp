@@ -130,62 +130,117 @@ namespace MOON {
     }
     namespace
     {
-        /** The sketch backdrop - the grid and the axes - drawn at one depth.
+        /** Where the sketch backdrop - the grid and the axes - sits in depth.
          *
-         * A sketch plane seen at a glancing angle runs along the view direction for
-         * thousands of units, and the grid and the axes lie on it: the part of them
-         * nearer than the near plane and the part beyond the far plane used to be clipped
-         * away, which leaves the backdrop as a band in the middle of the screen instead
-         * of covering it. Where a point of the plane lands on screen does not depend on
-         * how far along the view direction it is - an orthographic projection keeps x and
-         * y exactly as they are, the distance along the view only decides depth - so the
-         * backdrop is put onto one depth instead of the plane's own: the same picture,
-         * with nothing left outside the clip range to be cut.
+         * The backdrop is part of the scene and is drawn in the renderer's
+         * depth-tested batch (see drawBackground), so that a solid standing in front of
+         * the sketch plane hides it and one standing behind it is covered by it. That
+         * costs the freedom the overlay batch gave: the near and the far plane cut a
+         * depth-tested backdrop like they cut anything else, and a sketch plane seen at
+         * a glancing angle runs along the view direction for thousands of units, so its
+         * far end is beyond the far plane and used to leave a hole across the view.
          *
-         * The depth is the sketch plane's own distance from the camera whenever that is a
-         * usable one, so a face-on view (the usual one) draws the backdrop exactly where
-         * it was drawn before. It is clamped into the clip range otherwise: at a glancing
-         * angle the plane passes through the camera, so that distance goes to zero, and
-         * the far end of it runs well past the far plane.
+         * The way out is the same property that made the old flattening work: under an
+         * orthographic camera, moving a point along the view direction does not move it
+         * on screen, only its depth. So the part of a segment that is beyond the far
+         * plane is not dropped - it is slid onto the far plane, which shows it in the
+         * same place while giving it the farthest depth there is. Nothing else is drawn
+         * out there (it would be cut as well), so every occlusion decision comes out as
+         * it would with the segment's own depth - and in the part that is inside the
+         * range, which is where all the scene geometry is, its own depth is used.
+         *
+         * The offset towards the camera is there because a face the sketch was made on
+         * is coplanar with the sketch plane: at exactly equal depth the two would trade
+         * pixels, since the face comes from a triangulation and lands a hair off the
+         * plane. A fraction of the depth range is far smaller than anything the user can
+         * draw and is still enough to settle the comparison.
          */
-        class SketchBackdrop
+        struct BackdropDepth
         {
-        public:
-            SketchBackdrop() = default;
-            SketchBackdrop(const Maths::FVector3& p_eye, const Maths::FVector3& p_look, float p_depth) :
-                m_eye(p_eye),
-                m_look(p_look),
-                m_depth(p_depth),
-                m_usable(true)
+            BackdropDepth() = default;
+            BackdropDepth(
+                const Eigen::Vector3f& p_eye,
+                const Eigen::Vector3f& p_forward,
+                float p_nearPlane,
+                float p_farPlane
+            ) :
+                eye(p_eye),
+                forward(p_forward),
+                nearPlane(p_nearPlane),
+                farPlane(p_farPlane),
+                usable(true)
             {
+                const float range = p_farPlane - p_nearPlane;
+                // A hair inside the real clip planes: a vertex exactly on one is a coin
+                // flip for the clipper, and being cut is what this is here to avoid.
+                lowBound = p_nearPlane + range * 1.0e-3f;
+                highBound = p_farPlane - range * 1.0e-3f;
+                bias = range * 1.0e-5f;
             }
 
-            /** Puts one world point of the plane at the backdrop's depth, moving it along
-             * the view direction, so its screen position is untouched. */
-            Eigen::Vector3f operator()(const Eigen::Vector3f& p_world) const
+            /** Distance of a world point along the view direction. */
+            float depthOf(const Eigen::Vector3f& p_point) const
             {
-                if (!m_usable) {
-                    return p_world;
+                return (p_point - eye).dot(forward);
+            }
+
+            /** The same point slid to another depth, i.e. moved along the view direction
+             * only: under an orthographic camera it stays where it is on screen. */
+            Eigen::Vector3f atDepth(const Eigen::Vector3f& p_point, float p_depth) const
+            {
+                return p_point + forward * (p_depth - depthOf(p_point));
+            }
+
+            /** A backdrop point, nudged off the plane towards the camera (so that a
+             * coplanar face loses the comparison instead of speckling with it) and kept
+             * inside the drawable depth range. */
+            Eigen::Vector3f place(const Eigen::Vector3f& p_point) const
+            {
+                if (!usable) {
+                    return p_point;
                 }
-                const Maths::FVector3 point(p_world.x(), p_world.y(), p_world.z());
-                const float along = Maths::FVector3::Dot(point - m_eye, m_look);
-                const Maths::FVector3 flat = point + (m_depth - along) * m_look;
-                return Eigen::Vector3f(flat.x, flat.y, flat.z);
+                return atDepth(p_point - forward * bias, inRange(depthOf(p_point) - bias));
             }
 
-        private:
-            Maths::FVector3 m_eye;
-            Maths::FVector3 m_look;
-            float m_depth = 0.0f;
-            bool m_usable = false;
+            float inRange(float p_depth) const
+            {
+                return std::min(std::max(p_depth, lowBound), highBound);
+            }
+
+            Eigen::Vector3f eye = Eigen::Vector3f::Zero();
+            Eigen::Vector3f forward = Eigen::Vector3f(0.0f, 0.0f, -1.0f);
+            float nearPlane = 0.0f;
+            float farPlane = 0.0f;
+            /** The depths the backdrop is kept between: a hair inside the clip planes. */
+            float lowBound = 0.0f;
+            float highBound = 0.0f;
+            float bias = 0.0f;
+            /** False when the camera cannot describe a depth range: the backdrop is
+             * then drawn where it is and left to the renderer's own clipping. */
+            bool usable = false;
+        };
+
+        /** One backdrop segment, split into the pieces it has to be drawn as: the
+         * segment itself, which the clip planes narrow to its own depth range for free,
+         * plus the parts that run past the near or the far plane, painted flat on that
+         * plane. Up to three pieces, in drawing order. */
+        struct BackdropSegment
+        {
+            struct Piece
+            {
+                Eigen::Vector3f a;
+                Eigen::Vector3f b;
+            };
+            Piece pieces[3];
+            int count = 0;
         };
     }
 
-    /** @return the backdrop the sketch's grid and axes are drawn from. A camera that
-     * cannot have one - a perspective one, where the distance along the view direction
-     * *does* move a point on screen, or one whose depth range is not a range - gets a
-     * backdrop that leaves every point where it is. */
-    static SketchBackdrop MakeSketchBackdrop(const Rendering::Entities::Camera* p_camera, const Base::Vector3d& p_planeOrigin)
+    /** @return the depth range the backdrop has to stay inside. A camera that cannot
+     * describe one - none at all, not orthographic (the sketch is edited with an
+     * orthographic camera, so this is the odd case), or a depth range that is not a
+     * range - gets the unusable one, which clips and nudges nothing. */
+    static BackdropDepth MakeBackdropDepth(const Rendering::Entities::Camera* p_camera)
     {
         if (p_camera == nullptr
             || p_camera->GetProjectionMode() != ::Rendering::Settings::EProjectionMode::ORTHOGRAPHIC) {
@@ -199,17 +254,70 @@ namespace MOON {
         }
         const Maths::FVector3 eye = p_camera->GetPosition();
         const Maths::FVector3 look = p_camera->GetRotation() * Maths::FVector3::Forward;
-        const Maths::FVector3 origin(
-            static_cast<float>(p_planeOrigin.x),
-            static_cast<float>(p_planeOrigin.y),
-            static_cast<float>(p_planeOrigin.z));
-        const float along = Maths::FVector3::Dot(origin - eye, look);
-        const float lowest = nearPlane + (farPlane - nearPlane) * 0.02f;
-        const float highest = nearPlane + (farPlane - nearPlane) * 0.9f;
-        const float depth = std::isfinite(along)
-            ? std::min(std::max(along, lowest), highest)
-            : lowest;
-        return SketchBackdrop(eye, look, depth);
+        return BackdropDepth(
+            Eigen::Vector3f(eye.x, eye.y, eye.z),
+            Eigen::Vector3f(look.x, look.y, look.z),
+            nearPlane,
+            farPlane);
+    }
+
+    /** Splits one backdrop segment into the pieces described by BackdropSegment: the
+     * segment at its own depth (the clip planes cut that to the range by themselves) and
+     * the overhangs, painted flat on the plane they run past so the backdrop keeps
+     * filling the view instead of stopping at the far plane. */
+    static BackdropSegment splitBackdropSegment(
+        const BackdropDepth& p_depth,
+        const Eigen::Vector3f& p_a,
+        const Eigen::Vector3f& p_b
+    )
+    {
+        BackdropSegment out;
+        const auto add = [&out](const Eigen::Vector3f& p_a, const Eigen::Vector3f& p_b) {
+            out.pieces[out.count].a = p_a;
+            out.pieces[out.count].b = p_b;
+            ++out.count;
+            };
+        add(p_depth.place(p_a), p_depth.place(p_b));
+        if (!p_depth.usable) {
+            return out;
+        }
+        const float da = p_depth.depthOf(p_a);
+        const float db = p_depth.depthOf(p_b);
+        const float d = db - da;
+        if (std::abs(d) < 1.0e-9f) {
+            // The segment runs across the view at one depth: either it is in range and
+            // the plain piece is that, or it is entirely on one side - in which case it
+            // was just cut away and is painted on that plane here. (place() above already
+            // slid it there, so counting it once is enough.)
+            return out;
+        }
+        // The two parameters where the segment's depth crosses a bound. Sorted, the
+        // interval between them is the part inside the range.
+        const float s0 = (p_depth.lowBound - da) / d;
+        const float s1 = (p_depth.highBound - da) / d;
+        const float firstCrossing = std::min(s0, s1);
+        const float lastCrossing = std::max(s0, s1);
+        // Which bound the segment leaves through first, i.e. what the overhang at the
+        // start of the segment has to be painted on.
+        const float lowSide = (d > 0.0f) ? p_depth.lowBound : p_depth.highBound;
+        const float highSide = (d > 0.0f) ? p_depth.highBound : p_depth.lowBound;
+        const Eigen::Vector3f span = p_b - p_a;
+        const auto at = [&](float p_s) {
+            return p_a + span * p_s;
+            };
+        if (firstCrossing > 0.0f) {
+            const float end = std::min(firstCrossing, 1.0f);
+            add(
+                p_depth.place(p_depth.atDepth(at(0.0f), lowSide)),
+                p_depth.place(p_depth.atDepth(at(end), lowSide)));
+        }
+        if (lastCrossing < 1.0f) {
+            const float start = std::max(lastCrossing, 0.0f);
+            add(
+                p_depth.place(p_depth.atDepth(at(start), highSide)),
+                p_depth.place(p_depth.atDepth(at(1.0f), highSide)));
+        }
+        return out;
     }
 
     void SketcherObjWidget::fitCamera()
@@ -372,10 +480,12 @@ namespace MOON {
     {
         if (!InEdit()) return;
 
-        // Adaptive background grid: big cells use the darker tone, the smaller
-        // subdivisions inside use the lighter tone. The spacing snaps to a nice
-        // 1/2/5 x 10^n step so the on-screen density stays roughly constant while
-        // zooming.
+        // Adaptive background grid: the major cells carry the stronger tone, the
+        // minor subdivisions inside them the weaker one. The spacing snaps to a
+        // 1 / 2 x 10^n step (see SketchPicking::gridView) so the on-screen density
+        // stays roughly constant while zooming, and so that the cell sides run
+        // 1, 0.2, 0.1, 0.02, 0.01 - round decimal values - instead of the
+        // 1, 0.5, 0.2, 0.1 the usual 1/2/5 ladder gives.
         //
         // Everything here is worked out in the (u, v) of the sketch plane, because
         // that is the space the grid lives in - and that is exactly what the camera
@@ -386,25 +496,56 @@ namespace MOON {
         // axis-aligned rectangle only holds face on - tilted, the true quad sticks out
         // of that rectangle and the grid is left with corners missing.
         if (m_sketch->isDrawGrid()) {
-            const Eigen::Vector4<uint8_t> minorColor(150, 132, 118, 118); // (A,B,G,R) = (255, b,g,r)
-            const Eigen::Vector4<uint8_t> majorColor(255, 66, 56, 56); // (A,B,G,R) = (255, b,g,r)
+            const Eigen::Vector4<uint8_t>& minorColor = m_drawOption.gridMinorColor;
+            const Eigen::Vector4<uint8_t>& majorColor = m_drawOption.gridMajorColor;
+            const float gridLineWidth = m_drawOption.gridLineWidth;
             if (m_sceneView && m_sceneView->GetCamera()) {
-                // What a camera the analysis below cannot describe gets: a perspective
-                // one, or an orthographic one whose view direction lies in the sketch
-                // plane.
+                // The backdrop belongs to the scene and not to an overlay: it goes into
+                // the depth-tested batch, so a solid standing in front of the sketch
+                // plane hides it and one standing behind it is covered by it. The
+                // overlay batch it used to be drawn in has no depth test at all, which
+                // is exactly why the grid used to paint itself over the whole view.
+                const BackdropDepth depth = MakeBackdropDepth(m_sceneView->GetCamera());
+                renderer->pushEnableSorting(true);
+                // One grid segment. splitBackdropSegment() hands back the pieces it has
+                // to be drawn as: itself (its own depth, which is what the occlusion
+                // needs) plus, where it runs past a clip plane, the overhang painted on
+                // that plane, so the grid still reaches the edge of the view.
+                const auto drawSegment = [&](
+                    const Eigen::Vector3f& p_a,
+                    const Eigen::Vector3f& p_b,
+                    const Eigen::Vector4<uint8_t>& p_color) {
+                    const BackdropSegment segment = splitBackdropSegment(depth, p_a, p_b);
+                    for (int i = 0; i < segment.count; ++i) {
+                        renderer->drawLine(
+                            segment.pieces[i].a,
+                            segment.pieces[i].b,
+                            gridLineWidth,
+                            p_color);
+                    }
+                };
+                // What a camera the analysis below cannot describe gets: one whose view
+                // direction lies in the sketch plane.
                 const auto drawFixedGrid = [&]() {
                     const float extent = 100.0f;
                     for (int k = -10; k <= 10; ++k) {
                         const float g = k * 10.0f;
                         const auto& col = (k % 5) == 0 ? majorColor : minorColor;
-                        renderer->drawLine(m_sketch->plane().valueEigen(g, -extent), m_sketch->plane().valueEigen(g, extent), 1.0f, col);
-                        renderer->drawLine(m_sketch->plane().valueEigen(-extent, g), m_sketch->plane().valueEigen(extent, g), 1.0f, col);
+                        drawSegment(
+                            m_sketch->plane().valueEigen(g, -extent),
+                            m_sketch->plane().valueEigen(g, extent),
+                            col);
+                        drawSegment(
+                            m_sketch->plane().valueEigen(-extent, g),
+                            m_sketch->plane().valueEigen(extent, g),
+                            col);
                     }
                 };
 
                 SketchPicking::GridView grid;
                 if (!SketchPicking::gridView(*m_sketch, *m_sceneView, grid)) {
                     drawFixedGrid();
+                    renderer->popEnableSorting();
                     return;
                 }
 
@@ -455,11 +596,6 @@ namespace MOON {
                 // below finite by dropping the lines farthest out, which are far off
                 // screen by then anyway.
                 constexpr int kMaxLinesPerFamily = 2000;
-                // The lines are drawn from a flat copy of the plane (see SketchBackdrop):
-                // this is what keeps a grazing view from cutting the grid off at the near
-                // and far planes while leaving every line where it is on screen.
-                const SketchBackdrop backdrop = MakeSketchBackdrop(
-                    m_sceneView->GetCamera(), m_sketch->plane().origin);
                 // Lines of constant u (they run along v), then lines of constant v.
                 const auto drawFamily = [&](bool p_constantU) {
                     const float fixedX = p_constantU ? grid.uX : grid.vX;
@@ -492,11 +628,12 @@ namespace MOON {
                         const Eigen::Vector3f rawB = p_constantU
                             ? m_sketch->plane().valueEigen(g, hi)
                             : m_sketch->plane().valueEigen(hi, g);
-                        renderer->drawLine(backdrop(rawA), backdrop(rawB), 1.0f, col);
+                        drawSegment(rawA, rawB, col);
                     }
                 };
                 drawFamily(true);
                 drawFamily(false);
+                renderer->popEnableSorting();
             }
         }
     }
@@ -516,12 +653,12 @@ namespace MOON {
         // Drawn before the geometry, so the width the geometry pass pushes is not in
         // effect yet: the axes carry their own.
         renderer->pushSize(m_drawOption.axisLineWidth);
-        // Drawn from the same flat copy of the plane the grid is (see SketchBackdrop): an
-        // axis runs across the whole view, and the plane it lies on is clipped at a
-        // glancing angle like the grid was. The root point below is put there as well, so
-        // that it stays on the axis it starts.
-        const SketchBackdrop backdrop = MakeSketchBackdrop(
-            m_sceneView ? m_sceneView->GetCamera() : nullptr, m_sketch->plane().origin);
+        // The axes go into the depth-tested batch with the grid: they are part of the
+        // scene like it, so a solid in front of the sketch plane hides them. The root
+        // point is nudged off the plane together with them, so that it stays on the
+        // axis it starts. (See drawBackground for why the overlay batch is wrong.)
+        const BackdropDepth depth = MakeBackdropDepth(m_sceneView ? m_sceneView->GetCamera() : nullptr);
+        renderer->pushEnableSorting(true);
         const int axisIds[2] = { Sketcher::GeoEnum::VAxis, Sketcher::GeoEnum::HAxis };
         for (const int geoId : axisIds) {
             // The line and the origin are two elements, and the highlight follows the one
@@ -579,13 +716,14 @@ namespace MOON {
             // cover the highlight of the other.
             if (!isVertical) {
                 renderer->drawPoint(
-                    backdrop(m_sketch->plane().valueEigen(0.0, 0.0)),
+                    depth.place(m_sketch->plane().valueEigen(0.0, 0.0)),
                     pointSize + 1,
                     isOriginPicked ? selectColor
                                    : (isOriginPreSelected ? preselectColor
                                                           : m_drawOption.externalColor));
             }
         }
+        renderer->popEnableSorting();
         renderer->popSize();
     }
     void SketcherObjWidget::drawAxisSpanning(int p_axisIndex)
@@ -602,7 +740,16 @@ namespace MOON {
         }
         const auto& proj = axisCam->GetProjectionMatrix();
         const float proj11 = proj(1, 1);
-        const SketchBackdrop backdrop = MakeSketchBackdrop(axisCam, m_sketch->plane().origin);
+        const BackdropDepth depth = MakeBackdropDepth(axisCam);
+        // The span the caller computed is the part on screen; an axis runs along the
+        // view direction as well, so the part past a clip plane is painted on that plane
+        // rather than lost (see BackdropDepth).
+        const auto drawSpan = [this, &depth](const Eigen::Vector3f& p_a, const Eigen::Vector3f& p_b) {
+            const BackdropSegment segment = splitBackdropSegment(depth, p_a, p_b);
+            for (int i = 0; i < segment.count; ++i) {
+                renderer->drawLine(segment.pieces[i].a, segment.pieces[i].b);
+            }
+        };
         const auto& fd = m_sceneView->GetRenderer().GetFrameDescriptor();
         const float screenH = static_cast<float>(fd.renderHeight);
         const float aspect = screenH > 0.0f
@@ -615,14 +762,14 @@ namespace MOON {
             // orthographic camera, so this is only a fallback): a fixed span.
             const double extent = 500.0;
             if (p_axisIndex == 0) {
-                renderer->drawLine(
-                    backdrop(m_sketch->plane().valueEigen(-extent, 0.0)),
-                    backdrop(m_sketch->plane().valueEigen(extent, 0.0)));
+                drawSpan(
+                    m_sketch->plane().valueEigen(-extent, 0.0),
+                    m_sketch->plane().valueEigen(extent, 0.0));
             }
             else {
-                renderer->drawLine(
-                    backdrop(m_sketch->plane().valueEigen(0.0, -extent)),
-                    backdrop(m_sketch->plane().valueEigen(0.0, extent)));
+                drawSpan(
+                    m_sketch->plane().valueEigen(0.0, -extent),
+                    m_sketch->plane().valueEigen(0.0, extent));
             }
             return;
         }
@@ -664,14 +811,14 @@ namespace MOON {
         // A little beyond the crossings so the line reaches the border.
         const float ext = std::max((hi - lo) * 0.05f, 1e-3f);
         if (p_axisIndex == 0) {
-            renderer->drawLine(
-                backdrop(m_sketch->plane().valueEigen(lo - ext, 0.0)),
-                backdrop(m_sketch->plane().valueEigen(hi + ext, 0.0)));
+            drawSpan(
+                m_sketch->plane().valueEigen(lo - ext, 0.0),
+                m_sketch->plane().valueEigen(hi + ext, 0.0));
         }
         else {
-            renderer->drawLine(
-                backdrop(m_sketch->plane().valueEigen(0.0, lo - ext)),
-                backdrop(m_sketch->plane().valueEigen(0.0, hi + ext)));
+            drawSpan(
+                m_sketch->plane().valueEigen(0.0, lo - ext),
+                m_sketch->plane().valueEigen(0.0, hi + ext));
         }
     }
 
@@ -679,9 +826,11 @@ namespace MOON {
     void SketcherObjWidget::draw() {
         if (InEdit()) {
             drawBackground();
-            // The axes are a backdrop and go under everything else: a line drawn exactly
-            // on one of them overlaps it pixel for pixel, so whichever is drawn last
-            // hides the other (see drawSketchAxes).
+            // The backdrop - the grid and the axes - goes into the depth-tested batch,
+            // the sketch's own geometry below into the overlay one, so the scene occludes
+            // the backdrop but never the curves being edited. Within the backdrop the
+            // axes come last: a line drawn exactly on one of them overlaps it pixel for
+            // pixel, so whichever is drawn last hides the other (see drawSketchAxes).
             drawSketchAxes();
         }
         renderer->pushSize(m_drawOption.curveLineWidth);

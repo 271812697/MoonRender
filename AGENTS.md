@@ -10,8 +10,11 @@
 ## 验证
 
 - 改了 C++ 就用真实编译验证，不要只靠阅读代码下结论：
-  `cmake --build Build --target Moon --config Release -- /m /nologo`
-  （增量编译需要访问 AppData 下的 Windows SDK，需在沙箱外运行。）
+  `cmake --build Build --target Moon --config Release -- /nologo /m:1`
+- **不要加 `/m`**：MSBuild 的 `/m` 会起进程外工作节点，节点之间靠命名管道通信，沙箱禁止开
+  命名管道，于是它一个字都不输出、直接 `exit 1`（日志里只剩一行 `Checking File Globs`，
+  很容易误判成 CMake 出错）。`/m:1` 是单进程内并行，沙箱里可直接跑、不用提权；只有追求
+  全量编译速度时才值得用完全权限 + `/m`。
 - 新增或移动源文件后先重跑 `cmake -S . -B Build` 重新生成工程。
 
 ## 接口

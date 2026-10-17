@@ -262,6 +262,16 @@ namespace MOON {
                 BoolProperty::Style::InviwoRect
             )
         );
+        addParam(new ColorPickerProperty("Grid Minor Color", sketchGroup));
+        addParam(new ColorPickerProperty("Grid Major Color", sketchGroup));
+        auto* gridWidth = new SliderFloatProperty("Grid Line Width", sketchGroup, 0.5f, 10.0f);
+        gridWidth->setStep(0.1f);
+        addParam(gridWidth);
+        // How wide one grid cell is on screen: the step is picked from this, so
+        // raising it means fewer, coarser cells at the same zoom.
+        auto* gridTarget = new SliderFloatProperty("Grid Target Px", sketchGroup, 4.0f, 120.0f);
+        gridTarget->setStep(1.0f);
+        addParam(gridTarget);
         addParam(new ColorPickerProperty("Point Color", sketchGroup));
         addParam(new ColorPickerProperty("Preselect Color", sketchGroup));
         addParam(new ColorPickerProperty("Select Color", sketchGroup));
@@ -360,8 +370,20 @@ namespace MOON {
         if (propertyName == "Sketch:Snap To Grid" && mInternal->feature) {
             return QVariant::fromValue(mInternal->feature->getSketcherObj()->isSnapToGrid());
         }
+        if (propertyName == "Sketch:Grid Target Px" && mInternal->feature) {
+            return QVariant::fromValue(mInternal->feature->getSketcherObj()->gridTargetPx());
+        }
         if (mInternal && mInternal->feature) {
             const auto& opt = mInternal->ensureWidget()->drawOption();
+            if (propertyName == "Sketch:Grid Minor Color") {
+                return QVariant::fromValue(abgrToQColor(opt.gridMinorColor));
+            }
+            if (propertyName == "Sketch:Grid Major Color") {
+                return QVariant::fromValue(abgrToQColor(opt.gridMajorColor));
+            }
+            if (propertyName == "Sketch:Grid Line Width") {
+                return QVariant::fromValue(opt.gridLineWidth);
+            }
             if (propertyName == "Sketch:Point Color") {
                 return QVariant::fromValue(abgrToQColor(opt.pointColor));
             }
@@ -410,9 +432,21 @@ namespace MOON {
         if (propertyName == "Sketch:Snap To Grid" && mInternal->feature) {
             mInternal->feature->getSketcherObj()->setSnapToGrid(value.value<bool>());
         }
+        if (propertyName == "Sketch:Grid Target Px" && mInternal->feature) {
+            mInternal->feature->getSketcherObj()->setGridTargetPx(value.toFloat());
+        }
         if (mInternal && mInternal->feature) {
             auto& opt = mInternal->ensureWidget()->drawOption();
-            if (propertyName == "Sketch:Point Color") {
+            if (propertyName == "Sketch:Grid Minor Color") {
+                opt.gridMinorColor = qColorToAbgr(value.value<QColor>());
+            }
+            else if (propertyName == "Sketch:Grid Major Color") {
+                opt.gridMajorColor = qColorToAbgr(value.value<QColor>());
+            }
+            else if (propertyName == "Sketch:Grid Line Width") {
+                opt.gridLineWidth = value.toFloat();
+            }
+            else if (propertyName == "Sketch:Point Color") {
                 opt.pointColor = qColorToAbgr(value.value<QColor>());
             }
             else if (propertyName == "Sketch:Preselect Color") {

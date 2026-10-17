@@ -409,13 +409,21 @@ namespace MOON {
 
 		/** --- what the sketch shows -----------------------------------------------
 		 * The flags the document keeps with the geometry: the drawing grid, the grid
-		 * snapping, and which curves and constraints the user hid. They are data of
-		 * the sketch (they are written to the .moon file with it), so they live
-		 * here - the widget reads them to draw, the panels read and set them. */
+		 * snapping, the on-screen spacing of that grid, and which curves and
+		 * constraints the user hid. They are data of the sketch (they are written to
+		 * the .moon file with it), so they live here - the widget reads them to
+		 * draw, the panels read and set them. */
 		void setDrawGrid(bool v) { m_drawGrid = v; }
 		bool isDrawGrid() const { return m_drawGrid; }
 		void setSnapToGrid(bool v) { m_snapToGrid = v; }
 		bool isSnapToGrid() const { return m_snapToGrid; }
+		/** How far apart, in screen pixels, the grid lines should be spaced: the
+		 * adaptive step is picked so that one minor cell is about this wide. It is
+		 * the one number the drawing (SketcherObjWidget) and the snapping
+		 * (SketchPicking) both read, so the lattice seen and the lattice snapped to
+		 * stay the same at any zoom. */
+		void setGridTargetPx(float v) { m_gridTargetPx = v > 0.0f ? v : 20.0f; }
+		float gridTargetPx() const { return m_gridTargetPx; }
 		void setGeometryVisible(int geoId, bool visible);
 		bool isGeometryVisible(int geoId) const
 		{
@@ -480,6 +488,7 @@ namespace MOON {
 		Base::Matrix4D planeTransform;
 		bool m_drawGrid = true;
 		bool m_snapToGrid = false;
+		float m_gridTargetPx = 20.0f;
 		std::set<int> mConstructionGeoIds;
 		std::set<int> mHiddenGeoIds;
 		Sketcher::Sketch solvedSketch;
