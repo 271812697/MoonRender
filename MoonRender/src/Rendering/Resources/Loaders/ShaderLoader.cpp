@@ -18,6 +18,7 @@
 #include <Rendering/Resources/Shader.h>
 #include <Rendering/Resources/ShaderArchive.h>
 #include <Rendering/Resources/ShaderPackage.h>
+#include <Rendering/Settings/EBindingPoint.h>
 #include <Rendering/Utils/ShaderUtil.h>
 
 namespace
@@ -789,74 +790,104 @@ void main()
 		return AssembleShader(shaderParseResult);
 	}
 
-	/** Checks the driver's std140 layout against the package's, once per shader.
+	/** Checks the driver's bindings against the package's, once per shader.
 	 *
-	 * The generated GLSL declares `layout(std140, binding = 2) uniform MaterialParams` and the
-	 * runtime writes that block by the package's offsets, so the two have to agree. A mismatch
-	 * would render every material with shifted values; reporting it here turns that into one
-	 * line in the log. Members a particular variant does not read are dropped by the linker and
-	 * are simply skipped. */
-	void ValidateParameterBlock(
+	 * The generated GLSL declares the engine's blocks and the material block at fixed binding
+	 * points (see Rendering/Settings/EBindingPoint.h) and each sampler on a fixed texture unit;
+	 * the runtime writes by those numbers. A mismatch would render every material wrong, so it
+	 * is reported here as one line instead of being debugged as a visual bug. Members a
+	 * particular variant does not read are dropped by the linker and are simply skipped. */
+	void ValidateBindings(
 		const Rendering::Resources::ShaderPackage& p_package,
 		Rendering::HAL::ShaderProgram& p_program)
 	{
-		if (p_package.ParameterBlockSize() == 0)
-		{
-			return;
-		}
-
 		const GLuint program = static_cast<GLuint>(p_program.GetID());
-		const GLuint block = glGetUniformBlockIndex(program, "MaterialParams");
-		if (block == GL_INVALID_INDEX)
+
+		const auto checkBlock = [&](const char* p_name, GLint p_expected) -> GLuint
 		{
-			std::cout << std::format("[Shader Layout] {}: MaterialParams is not an active block",
-				p_package.Name()) << std::endl;
-			return;
+			const GLuint index = glGetUniformBlockIndex(program, p_name);
+			if (index == GL_INVALID_INDEX)
+			{
+				return index; // the variant does not read this block
+			}
+
+			GLint binding = -1;
+			glGetActiveUniformBlockiv(program, index, GL_UNIFORM_BLOCK_BINDING, &binding);
+			if (binding != p_expected)
+			{
+				std::cout << std::format("[Shader Binding] {}: {} is bound to {}, expected {}",
+					p_package.Name(), p_name, binding, p_expected) << std::endl;
+			}
+			return index;
+		};
+
+		checkBlock("EngineUBO", Rendering::Settings::kEngineUBOBinding);
+		checkBlock("ObjectUBO", Rendering::Settings::kObjectUBOBinding);
+		const GLuint materialBlock =
+			checkBlock("MaterialParams", Rendering::Settings::kMaterialParameterBinding);
+
+		if (materialBlock != GL_INVALID_INDEX && p_package.ParameterBlockSize() > 0)
+		{
+			GLint blockSize = -1;
+			glGetActiveUniformBlockiv(program, materialBlock, GL_UNIFORM_BLOCK_DATA_SIZE, &blockSize);
+			if (blockSize > static_cast<GLint>(p_package.ParameterBlockSize()))
+			{
+				std::cout << std::format("[Shader Binding] {}: the driver's block is {} bytes, the package says {}",
+					p_package.Name(), blockSize, p_package.ParameterBlockSize()) << std::endl;
+			}
+
+			for (const Rendering::Resources::ShaderPackage::Parameter& parameter : p_package.Parameters())
+			{
+				if (parameter.isSampler || parameter.offset < 0)
+				{
+					continue;
+				}
+
+				std::string name = parameter.name;
+				if (parameter.count > 0)
+				{
+					name += "[0]";
+				}
+
+				const char* names[] = { name.c_str() };
+				GLuint index = GL_INVALID_INDEX;
+				glGetUniformIndices(program, 1, names, &index);
+				if (index == GL_INVALID_INDEX)
+				{
+					continue; // not read by this variant
+				}
+
+				GLint offset = -1;
+				glGetActiveUniformsiv(program, 1, &index, GL_UNIFORM_OFFSET, &offset);
+				if (offset != static_cast<GLint>(parameter.offset))
+				{
+					std::cout << std::format("[Shader Binding] {}: {} is at offset {}, the package says {}",
+						p_package.Name(), parameter.name, offset, parameter.offset) << std::endl;
+				}
+			}
 		}
 
-		GLint binding = -1;
-		glGetActiveUniformBlockiv(program, block, GL_UNIFORM_BLOCK_BINDING, &binding);
-		if (binding != 2)
-		{
-			std::cout << std::format("[Shader Layout] {}: MaterialParams is bound to {}, expected 2",
-				p_package.Name(), binding) << std::endl;
-		}
-
-		GLint blockSize = -1;
-		glGetActiveUniformBlockiv(program, block, GL_UNIFORM_BLOCK_DATA_SIZE, &blockSize);
-		if (blockSize > static_cast<GLint>(p_package.ParameterBlockSize()))
-		{
-			std::cout << std::format("[Shader Layout] {}: the driver's block is {} bytes, the package says {}",
-				p_package.Name(), blockSize, p_package.ParameterBlockSize()) << std::endl;
-		}
-
+		// Samplers: layout(binding = N) should have put each one on the unit the runtime binds
+		// its texture to. The value is what the driver decided at link time.
 		for (const Rendering::Resources::ShaderPackage::Parameter& parameter : p_package.Parameters())
 		{
-			if (parameter.isSampler || parameter.offset < 0)
+			if (!parameter.isSampler)
 			{
 				continue;
 			}
 
-			std::string name = parameter.name;
-			if (parameter.count > 0)
-			{
-				name += "[0]";
-			}
-
-			const char* names[] = { name.c_str() };
-			GLuint index = GL_INVALID_INDEX;
-			glGetUniformIndices(program, 1, names, &index);
-			if (index == GL_INVALID_INDEX)
+			const GLint location = glGetUniformLocation(program, parameter.name.c_str());
+			if (location < 0)
 			{
 				continue; // not read by this variant
 			}
 
-			GLint offset = -1;
-			glGetActiveUniformsiv(program, 1, &index, GL_UNIFORM_OFFSET, &offset);
-			if (offset != static_cast<GLint>(parameter.offset))
+			GLint unit = -1;
+			glGetUniformiv(program, location, &unit);
+			if (unit != static_cast<GLint>(parameter.binding))
 			{
-				std::cout << std::format("[Shader Layout] {}: {} is at offset {}, the package says {}",
-					p_package.Name(), parameter.name, offset, parameter.offset) << std::endl;
+				std::cout << std::format("[Shader Binding] {}: sampler {} is on unit {}, the package says {}",
+					p_package.Name(), parameter.name, unit, parameter.binding) << std::endl;
 			}
 		}
 	}
@@ -961,7 +992,7 @@ void main()
 			// line in the log rather than a corrupted image.
 			if (!blockValidated)
 			{
-				ValidateParameterBlock(p_package, *program);
+				ValidateBindings(p_package, *program);
 				blockValidated = true;
 			}
 

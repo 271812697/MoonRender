@@ -26,6 +26,25 @@ Core::Rendering::EngineBufferRenderFeature::EngineBufferRenderFeature(
 {
 	m_engineBuffer = std::make_unique<::Rendering::HAL::UniformBuffer>();
 	m_engineBuffer->Allocate(kUBOSize, ::Rendering::Settings::EAccessSpecifier::STREAM_DRAW);
+	m_reflectionBuffer = std::make_unique<::Rendering::HAL::UniformBuffer>();
+	m_reflectionBuffer->Allocate(sizeof(ReflectionUBO), ::Rendering::Settings::EAccessSpecifier::STATIC_DRAW);
+	{
+		// The IBL path scales its result by this block's brightness (Filament's iblLuminance)
+		// and may clip by its box. A probe-less view has no probe to take an intensity from, so
+		// the sky's physical values are scaled here: the surface shaders used to apply a 0.2
+		// per-material factor, and moving it into one place keeps the exposure that produced.
+		ReflectionUBO reflection{
+			.position = Maths::FVector4{ 0.0f, 0.0f, 0.0f, 0.0f },
+			.rotation = Maths::FMatrix4::Identity,
+			.boxCenter = Maths::FVector4{ 0.0f, 0.0f, 0.0f, 0.0f },
+			.boxHalfExtents = Maths::FVector4{ 1.0f, 1.0f, 1.0f, 0.0f },
+			.brightness = 0.2f,
+			.boxProjection = 0,
+			.local = 0,
+			.padding = 0
+		};
+		m_reflectionBuffer->Upload(&reflection);
+	}
 	m_startTime = std::chrono::high_resolution_clock::now();
 	m_LateUboData = new LateUboData();
 }
@@ -152,6 +171,9 @@ void Core::Rendering::EngineBufferRenderFeature::OnBeginFrame(const ::Rendering:
 		.offset = offsetof(EngineUBO, ubo_enableClip), .size = sizeof(enableClip) });
 
 	m_engineBuffer->Bind(kEngineUBOBinding);
+	// The IBL shaders read the reflection probe block even when no probe exists: an unbound
+	// block reads as zero, and a zero brightness would switch environment lighting off.
+	m_reflectionBuffer->Bind(kReflectionUBOBinding);
 }
 
 void Core::Rendering::EngineBufferRenderFeature::OnEndFrame()

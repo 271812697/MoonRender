@@ -4,15 +4,15 @@
 #include <Maths/FMatrix4.h>
 #include <Maths/FVector3.h>
 #include <Maths/FVector4.h>
+#include <Rendering/Settings/EBindingPoint.h>
 
 namespace Core::Rendering
 {
-	/** GL uniform-buffer binding points of the engine's per-view and per-renderable blocks.
-	 * They mirror filament's descriptor sets: 0 = per view, 1 = per renderable (the reflection
-	 * block sits on 1 in GL and the per-material block on 2, so the renderable one moved to 3 -
-	 * GL has one binding-point namespace, filament's sets do not). */
-	constexpr uint32_t kEngineUBOBinding = 0;
-	constexpr uint32_t kObjectUBOBinding = 3;
+	/** The binding points themselves live next to the other engine blocks (see
+	 * EBindingPoint.h); these aliases keep the names this header used before. */
+	using ::Rendering::Settings::kEngineUBOBinding;
+	using ::Rendering::Settings::kObjectUBOBinding;
+	using ::Rendering::Settings::kReflectionUBOBinding;
 
 	/** The C++ mirror of Common/Buffers/EngineUBO.ovfxh's per-view block.
 	 *
@@ -60,4 +60,31 @@ namespace Core::Rendering
 
 	static_assert(offsetof(ObjectUBO, ubo_UserMatrix) == 64, "std140 layout");
 	static_assert(sizeof(ObjectUBO) == 128, "the block the shaders declare");
+
+	/** The C++ mirror of Common/Buffers/ReflectionUBO.ovfxh - the per-view reflection probe
+	 * data that IBL.ovfxh reads (position/box for parallax correction and the IBL brightness).
+	 *
+	 * The engine binds this every frame with the defaults the IBL path expects (brightness 1,
+	 * no box projection, not local) and a real ReflectionRenderFeature overrides it per probe.
+	 * Without it the block is unbound: its brightness reads as zero and every Standard material
+	 * loses its environment light. */
+	struct ReflectionUBO
+	{
+		Maths::FVector4 position;
+		Maths::FMatrix4 rotation;
+		Maths::FVector4 boxCenter;
+		Maths::FVector4 boxHalfExtents;
+		float brightness;
+		int boxProjection;
+		int local;
+		int padding; // std140 rounds the block up to 16 bytes; keep the C++ mirror the same size
+	};
+
+	static_assert(offsetof(ReflectionUBO, rotation) == 16, "vec4 then mat4, std140");
+	static_assert(offsetof(ReflectionUBO, boxCenter) == 80, "std140 layout");
+	static_assert(offsetof(ReflectionUBO, boxHalfExtents) == 96, "std140 layout");
+	static_assert(offsetof(ReflectionUBO, brightness) == 112, "std140 layout");
+	static_assert(offsetof(ReflectionUBO, boxProjection) == 116, "std140 layout");
+	static_assert(offsetof(ReflectionUBO, local) == 120, "std140 layout");
+	static_assert(sizeof(ReflectionUBO) == 128, "the block the shaders declare");
 }

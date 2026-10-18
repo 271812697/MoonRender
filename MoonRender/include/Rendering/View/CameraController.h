@@ -28,6 +28,10 @@ namespace Editor::Core
 		void MoveToPose(const Maths::FVector3& pos, const Maths::FQuaternion& quat);
 		void SetSpeed(float p_speed);
 		float GetSpeed() const;
+		/** Multiplies the wheel-zoom step. The step is proportional to the scene's extent, which
+		 * makes it far too small for a preview scene a couple of units across; a view can raise
+		 * it without touching the main viewport. */
+		void SetZoomSpeed(float p_speed);
 		void SetPosition(const Maths::FVector3& p_position);
 		void SetRotation(const Maths::FQuaternion& p_rotation);
 		const Maths::FVector3& GetPosition() const;
@@ -85,6 +89,7 @@ namespace Editor::Core
 		float m_cameraDragSpeed = 1.0f;
 		float m_cameraOrbitSpeed = 0.5f;
 		float m_cameraMoveSpeed = 15.0f;
+		float m_zoomSpeed = 1.0f;
 		float m_focusDistance = 15.0f;
 		float m_focusLerpCoefficient = 8.0f;
 

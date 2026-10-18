@@ -225,6 +225,8 @@ public:
 		meshPicker->setToolTip(QStringLiteral("What the material is shown on"));
 		meshPicker->addItem(QStringLiteral("Sphere"),
 			static_cast<int>(::Editor::Panels::EPreviewMesh::SPHERE));
+		meshPicker->addItem(QStringLiteral("Ball"),
+			static_cast<int>(::Editor::Panels::EPreviewMesh::BALL));
 		meshPicker->addItem(QStringLiteral("Cube"),
 			static_cast<int>(::Editor::Panels::EPreviewMesh::CUBE));
 		meshPicker->addItem(QStringLiteral("Plane"),

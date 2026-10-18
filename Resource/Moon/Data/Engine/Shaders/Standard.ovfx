@@ -118,7 +118,9 @@ material {
         // The renderer owns these: it sets them per frame and they are not material design.
         { type : sampler2D,   name : _ShadowMap, ui : false },
         { type : mat4,        name : _LightSpaceMatrix, ui : false },
-        { type : samplerCube, name : _EnvironmentMap, ui : false },
+        { type : samplerCube, name : _IrradianceCube, ui : false },
+        { type : samplerCube, name : _PrefilterCube, ui : false },
+        { type : sampler2D,   name : _BRDFLut, ui : false },
         { type : sampler2D,   name : occlusionTex, ui : false }
     ]
 }
@@ -386,7 +388,8 @@ fragment {
         }
     #endif
 
-        vec4 albedo = texture(u_AlbedoMap, texCoords) * u_Albedo;
+        vec4 albedoTexel = texture(u_AlbedoMap, texCoords);
+        vec4 albedo = albedoTexel * u_Albedo;
         albedo.a *= texture(u_MaskMap, texCoords).r;
 
     #if defined(SHADOW_PASS)
@@ -405,6 +408,10 @@ fragment {
         {
             discard;
         }
+
+        // The albedo map and the picker tint are both sRGB: decode them separately and combine
+        // in linear. Decoding the product (the old path) darkens any tint that is not white.
+        vec3 linearAlbedo = pow(albedoTexel.rgb, vec3(2.2)) * pow(u_Albedo.rgb, vec3(2.2));
 
     #if defined(NORMAL_MAPPING)
         //mat3 tbn=ComputeTBN(fs_in.FragPos,fs_in.Normal,texCoords);
@@ -448,10 +455,10 @@ fragment {
         edist[1] += fs_in.edgeEqn[1].z;
         edist[2] += fs_in.edgeEqn[2].z;
         float emix = clamp(0.5 + 0.5*1.0 - min( min( edist[0], edist[1]), edist[2]), 0.0, 1.0);
-        albedo.rgb = mix(albedo.rgb, vec3(0.0), emix);
+        linearAlbedo = mix(linearAlbedo, vec3(0.0), emix);
     #endif
-       vec3 pbr = PBRLightingModel(
-            albedo.rgb,
+       vec3 pbr = PBRLighting(
+            linearAlbedo,
             metallic,
             roughness,
             ao,
@@ -460,7 +467,9 @@ fragment {
             fs_in.FragPos,
             _ShadowMap,
             _LightSpaceMatrix,
-            _EnvironmentMap,
+            _IrradianceCube,
+            _PrefilterCube,
+            _BRDFLut,
             u_Transmission,
             u_RefractionIndex
         );
@@ -476,7 +485,13 @@ fragment {
         pbr = mix(pbr, pbr / (pbr + vec3(1.0)), bvec3(u_BuiltInToneMapping));
         pbr = mix(pbr, pow(pbr, vec3(1.0 / 2.2)), bvec3(u_BuiltInGammaCorrection));
 
-        const vec3 emissive = texture(u_EmissiveMap, texCoords).rgb * u_EmissiveColor * u_EmissiveIntensity;
+        // The emissive map is sRGB and the colour comes from the panel's colour picker, which is
+    // sRGB too: decode each separately, then scale by the (linear) intensity. Decoding the
+    // product instead would darken any tint that is not white or black.
+    const vec3 emissive =
+        pow(texture(u_EmissiveMap, texCoords).rgb, vec3(2.2))
+        * pow(u_EmissiveColor, vec3(2.2))
+        * u_EmissiveIntensity;
         pbr += emissive;
 
         FRAGMENT_COLOR = vec4(pbr, albedo.a);

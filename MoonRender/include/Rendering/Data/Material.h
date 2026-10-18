@@ -12,14 +12,14 @@
 #include <Rendering/HAL/TextureHandle.h>
 #include <Rendering/Resources/Shader.h>
 #include <Rendering/Resources/Texture.h>
+#include <Rendering/Settings/EBindingPoint.h>
 #include <Rendering/Settings/EProjectionMode.h>
 
 namespace Rendering::Data
 {
-	/** GL uniform-buffer binding point of the per-material parameter block: filament's
-	 * PER_MATERIAL descriptor set, whose first binding is the material's uniform buffer. MoonMatc
-	 * generates `layout(std140, binding = 2)` for the block; keep the two in sync. */
-	constexpr uint32_t kMaterialParameterBinding = 2;
+	/** The per-material binding point lives with the other engine blocks (see
+	 * Rendering/Settings/EBindingPoint.h). */
+	using ::Rendering::Settings::kMaterialParameterBinding;
 
 	using MaterialPropertyType = std::variant<
 		std::monostate,

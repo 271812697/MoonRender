@@ -1,11 +1,15 @@
 #include <Rendering/View/PreviewView.h>
 
+#include <algorithm>
 #include <cfloat>
 #include <cmath>
+#include <filesystem>
 #include <vector>
 
+#include <Core/ECS/Components/CDirectionalLight.h>
 #include <Core/ECS/Components/CMaterialRenderer.h>
 #include <Core/ECS/Components/CModelRenderer.h>
+#include <Core/ECS/Components/CPostProcessStack.h>
 #include <Core/ECS/Components/CPointLight.h>
 #include <Core/Rendering/GbufferPass.h>
 #include <Core/Rendering/HzbBuildPass.h>
@@ -16,7 +20,9 @@
 #include <Maths/FVector3.h>
 #include <Rendering/Context/Driver.h>
 #include <Rendering/Geometry/Vertex.h>
+#include <Rendering/Resources/Loaders/ModelLoader.h>
 #include <Rendering/Resources/Mesh.h>
+#include <Tools/Utils/PathParser.h>
 
 namespace
 {
@@ -190,6 +196,194 @@ namespace
 
 		p_indices.insert(p_indices.end(), { 0, 1, 2, 0, 2, 3 });
 	}
+
+	/** The "material ball" most engines show a material on: a UV sphere with a circular dimple
+	 * facing +Z, resting on a small pedestal.
+	 *
+	 * The dimple is a radial modulation of the sphere, so the parametric direction - and with it
+	 * the UVs and the tangent frame - stays the UV sphere's; the normal comes from the analytic
+	 * normal of the modulated surface, which is what makes the rim read as a rim instead of a
+	 * dented sphere. The pedestal is a surface of revolution. */
+	void BuildMaterialBall(
+		std::vector<::Rendering::Geometry::Vertex>& p_vertices,
+		std::vector<uint32_t>& p_indices)
+	{
+		using namespace Maths;
+
+		constexpr float pi = 3.14159265358979323846f;
+		constexpr uint32_t rings = 32;
+		constexpr uint32_t segments = 64;
+		constexpr float dentAngle = 0.55f;  // angular radius of the dimple (~31.5 degrees)
+		constexpr float dentDepth = 0.24f;
+		constexpr float centerY = 0.1f;
+
+		const auto addVertex = [&](const FVector3& p_position, const FVector3& p_normal,
+			const FVector3& p_tangent, float p_u, float p_v)
+		{
+			const FVector3 bitangent = FVector3::Normalize(FVector3::Cross(p_normal, p_tangent));
+
+			::Rendering::Geometry::Vertex vertex{};
+			vertex.position[0] = p_position.x;
+			vertex.position[1] = p_position.y;
+			vertex.position[2] = p_position.z;
+			vertex.texCoords[0] = p_u;
+			vertex.texCoords[1] = p_v;
+			vertex.normals[0] = p_normal.x;
+			vertex.normals[1] = p_normal.y;
+			vertex.normals[2] = p_normal.z;
+			vertex.tangent[0] = p_tangent.x;
+			vertex.tangent[1] = p_tangent.y;
+			vertex.tangent[2] = p_tangent.z;
+			vertex.bitangent[0] = bitangent.x;
+			vertex.bitangent[1] = bitangent.y;
+			vertex.bitangent[2] = bitangent.z;
+			p_vertices.push_back(vertex);
+		};
+
+		const uint32_t stride = segments + 1;
+		for (uint32_t ring = 0; ring <= rings; ++ring)
+		{
+			const float v = static_cast<float>(ring) / rings;
+			const float phi = v * pi;
+			const float sinPhi = std::sin(phi);
+			const float cosPhi = std::cos(phi);
+
+			for (uint32_t segment = 0; segment <= segments; ++segment)
+			{
+				const float u = static_cast<float>(segment) / segments;
+				const float theta = u * 2.0f * pi;
+				const float sinTheta = std::sin(theta);
+				const float cosTheta = std::cos(theta);
+
+				const FVector3 radial{ sinPhi * cosTheta, cosPhi, sinPhi * sinTheta };
+
+				// The dimple faces +Z, the side the default camera looks from.
+				const float alpha = std::acos(std::min(1.0f, std::max(-1.0f, radial.z)));
+				float radius = 1.0f;
+				float slope = 0.0f; // dR/dalpha
+				if (alpha < dentAngle)
+				{
+					const float t = alpha / dentAngle;
+					radius -= dentDepth * (0.5f + 0.5f * std::cos(pi * t));
+					// dR/dalpha: the bump's derivative changes sign with the minus above, so the
+					// slope is positive - the surface rises from the dimple's centre to its rim.
+					slope = dentDepth * (0.5f * pi / dentAngle) * std::sin(pi * t);
+				}
+
+				// Surface normal of a radially modulated sphere: R * e - R' * de/dalpha.
+				const FVector3 increasingAlpha{ cosPhi * cosTheta, -sinPhi, cosPhi * sinTheta };
+				const FVector3 normal = alpha < 1.0e-4f
+					? radial
+					: FVector3::Normalize(radial * radius - increasingAlpha * slope);
+
+				FVector3 tangent = sinPhi < 1.0e-4f
+					? FVector3{ 1.0f, 0.0f, 0.0f }
+					: FVector3{ -sinTheta, 0.0f, cosTheta };
+				tangent = FVector3::Normalize(tangent - normal * FVector3::Dot(normal, tangent));
+
+				addVertex(radial * radius + FVector3{ 0.0f, centerY, 0.0f }, normal, tangent, u, v);
+			}
+		}
+
+		for (uint32_t ring = 0; ring < rings; ++ring)
+		{
+			for (uint32_t segment = 0; segment < segments; ++segment)
+			{
+				const uint32_t a = ring * stride + segment;
+				const uint32_t b = a + stride;
+				p_indices.insert(p_indices.end(), { a, b, a + 1, a + 1, b, b + 1 });
+			}
+		}
+
+		// The pedestal: a profile revolved around Y, top face down to bottom face. The sphere's
+		// bottom point rests on the first profile point.
+		struct ProfilePoint
+		{
+			float radius;
+			float height;
+		};
+		static constexpr ProfilePoint profile[] = {
+			{ 0.00f, -0.90f }, { 0.40f, -0.90f }, { 0.44f, -0.93f }, { 0.44f, -1.00f },
+			{ 0.56f, -1.10f }, { 0.60f, -1.14f }, { 0.54f, -1.16f }, { 0.00f, -1.16f }
+		};
+		constexpr uint32_t baseRows = sizeof(profile) / sizeof(profile[0]);
+		constexpr uint32_t baseSegments = 64;
+		constexpr uint32_t baseStride = baseSegments + 1;
+		const uint32_t baseVertexStart = static_cast<uint32_t>(p_vertices.size());
+
+		for (uint32_t row = 0; row < baseRows; ++row)
+		{
+			const ProfilePoint& current = profile[row];
+			const ProfilePoint& previous = profile[row > 0 ? row - 1 : row];
+			const ProfilePoint& next = profile[row + 1 < baseRows ? row + 1 : row];
+
+			// The 2D profile normal, rotated so it points away from the axis.
+			float nr = -(next.height - previous.height);
+			float ny = next.radius - previous.radius;
+			const float length = std::sqrt(nr * nr + ny * ny);
+			if (length > 1.0e-6f)
+			{
+				nr /= length;
+				ny /= length;
+			}
+
+			for (uint32_t segment = 0; segment <= baseSegments; ++segment)
+			{
+				const float u = static_cast<float>(segment) / baseSegments;
+				const float theta = u * 2.0f * pi;
+				const float sinTheta = std::sin(theta);
+				const float cosTheta = std::cos(theta);
+
+				const FVector3 position{ current.radius * cosTheta, current.height, current.radius * sinTheta };
+				const FVector3 normal = FVector3::Normalize(FVector3{ nr * cosTheta, ny, nr * sinTheta });
+				const FVector3 tangent{ -sinTheta, 0.0f, cosTheta };
+
+				addVertex(position, normal, tangent, u,
+					static_cast<float>(row) / static_cast<float>(baseRows - 1));
+			}
+		}
+
+		// The visible faces follow the same winding convention as the sphere above (its
+		// geometric normal is opposite the surface normal). The pedestal's flat top and bottom
+		// turn a corner relative to its walls, so the order is picked per triangle.
+		const auto addBaseTriangle = [&](uint32_t p_a, uint32_t p_b, uint32_t p_c)
+		{
+			const auto& a = p_vertices[p_a];
+			const auto& b = p_vertices[p_b];
+			const auto& c = p_vertices[p_c];
+			const FVector3 positionA{ a.position[0], a.position[1], a.position[2] };
+			const FVector3 positionB{ b.position[0], b.position[1], b.position[2] };
+			const FVector3 positionC{ c.position[0], c.position[1], c.position[2] };
+			const FVector3 normalA{ a.normals[0], a.normals[1], a.normals[2] };
+			const FVector3 normalB{ b.normals[0], b.normals[1], b.normals[2] };
+			const FVector3 normalC{ c.normals[0], c.normals[1], c.normals[2] };
+
+			const FVector3 geometric = FVector3::Cross(positionB - positionA, positionC - positionA);
+			if (FVector3::Dot(geometric, geometric) < 1.0e-12f)
+			{
+				return; // the pole rows collapse to a point
+			}
+
+			if (FVector3::Dot(geometric, FVector3::Normalize(normalA + normalB + normalC)) > 0.0f)
+			{
+				const uint32_t swap = p_b;
+				p_b = p_c;
+				p_c = swap;
+			}
+			p_indices.insert(p_indices.end(), { p_a, p_b, p_c });
+		};
+
+		for (uint32_t row = 0; row + 1 < baseRows; ++row)
+		{
+			for (uint32_t segment = 0; segment < baseSegments; ++segment)
+			{
+				const uint32_t a = baseVertexStart + row * baseStride + segment;
+				const uint32_t b = a + baseStride;
+				addBaseTriangle(a, b, a + 1);
+				addBaseTriangle(a + 1, b, b + 1);
+			}
+		}
+	}
 }
 
 Editor::Panels::PreviewView::PreviewView(::Rendering::Context::Driver& p_driver) :
@@ -199,15 +393,32 @@ Editor::Panels::PreviewView::PreviewView(::Rendering::Context::Driver& p_driver)
 	// it in the scene. A difference on screen is then the material's, and not a second renderer's.
 	m_renderer = std::make_unique<::Core::Rendering::SceneRenderer>(p_driver);
 
+	// Distance fade is a scene-space effect (an LOD fade for far-away geometry). The preview
+	// camera is close enough to sit inside its range, and the shader's dither then punches the
+	// surface into a dot pattern; a preview shows the material, not the scene's distance.
+	m_renderer->SetExcludedFeatures(::Rendering::Data::FeatureSet{ "DISTANCE_FADE" });
+
 	// The passes a preview has nothing to feed, switched off so it does not pay for them:
-	//  - no sky: there is no environment to show, and the pass would load an HDR, capture a
-	//    cubemap and convolve it - a lot of GPU work and VRAM for a background. The view clears
-	//    to its own colour instead.
+	//  - the sky's environment capture (HDR load, cubemap capture, irradiance/prefilter
+	//    convolution): a preview only wants the backdrop, and the scene itself does not bind
+	//    _EnvironmentMap either (its reflection feature is off), so lighting stays the same.
 	//  - no G-buffer/SSAO: nothing in this build registers the SSAO feature, so the buffers are
 	//    rendered and never read.
 	//  - no HZB: the culler needs a scene BVH, and a preview scene has no reason to build one.
 	// What is left is the scene's own opaque (or transparent) path, plus its post-process.
-	m_renderer->GetPass<::Core::Rendering::SkyboxRenderPass>("SkyboxRenderPass").SetEnabled(false);
+	{
+		auto& skyPass = m_renderer->GetPass<::Core::Rendering::SkyboxRenderPass>("SkyboxRenderPass");
+		skyPass.SetEnabled(true);
+		skyPass.SetEnvironmentCapture(false);
+
+		// A neutral vignette behind the material: darker at the centre (where the mesh is) and
+		// lighter towards the corners, so the silhouette reads without a background plane.
+		::Core::Rendering::SkyBoxSetting& sky = skyPass.GetSetting();
+		sky.mode = ::Core::Rendering::SkyMode::Gradient;
+		sky.bottomColor = { 0.05f, 0.05f, 0.06f, 1.0f };
+		sky.topColor = { 0.17f, 0.17f, 0.19f, 1.0f };
+		sky.clearColor = { 0.09f, 0.09f, 0.11f, 1.0f };
+	}
 	m_renderer->GetPass<::Core::Rendering::GbufferPass>("Gbuffer").SetEnabled(false);
 	m_renderer->GetPass<::Core::Rendering::HzbBuildPass>("HZB").SetEnabled(false);
 
@@ -226,6 +437,10 @@ Editor::Panels::PreviewView::PreviewView(::Rendering::Context::Driver& p_driver)
 	// colour, and the post-process turns it into the grey the panel shows.
 	m_camera.SetClearColor({ 0.09f, 0.09f, 0.11f });
 
+	// The zoom step is proportional to the scene's extent, which is two units here - a wheel
+	// notch would barely move the camera. Give the preview a step a preview wants.
+	m_cameraController.SetZoomSpeed(6.0f);
+
 	UpdateLightRig();
 }
 
@@ -234,16 +449,34 @@ void Editor::Panels::PreviewView::BuildPreviewMesh()
 	std::vector<::Rendering::Geometry::Vertex> vertices;
 	std::vector<uint32_t> indices;
 
-	const char* name = ":Preview/Sphere";
+	std::unique_ptr<::Rendering::Resources::Model> model;
+
 	switch (m_previewMesh)
 	{
+	case EPreviewMesh::BALL:
+	{
+		// Filament's material sphere (assets/models/material_sphere in the filament repo,
+		// Apache-2.0). Loaded rather than approximated: the pedestal is what gives a material a
+		// second, flatter surface to read against.
+		const std::filesystem::path path =
+			std::filesystem::path(Tools::Utils::PathParser::GetExeDirectory())
+			/ "Moon" / "Data" / "Engine" / "Models" / "material_sphere.obj";
+		model = std::unique_ptr<::Rendering::Resources::Model>(
+			::Rendering::Resources::Loaders::ModelLoader::Create(path.string()));
+
+		if (model == nullptr)
+		{
+			// The asset is copied next to the executable by the build; without it the preview
+			// still works on the procedural approximation.
+			BuildMaterialBall(vertices, indices);
+		}
+		break;
+	}
 	case EPreviewMesh::CUBE:
 		BuildCube(vertices, indices);
-		name = ":Preview/Cube";
 		break;
 	case EPreviewMesh::PLANE:
 		BuildPlane(vertices, indices);
-		name = ":Preview/Plane";
 		break;
 	case EPreviewMesh::SPHERE:
 	default:
@@ -251,9 +484,12 @@ void Editor::Panels::PreviewView::BuildPreviewMesh()
 		break;
 	}
 
-	auto model = std::make_unique<::Rendering::Resources::Model>(name);
-	model->AddMesh(new ::Rendering::Resources::Mesh(vertices, indices));
-	model->computeBoxAndShpere();
+	if (model == nullptr)
+	{
+		model = std::make_unique<::Rendering::Resources::Model>(":Preview/Mesh");
+		model->AddMesh(new ::Rendering::Resources::Mesh(vertices, indices));
+		model->computeBoxAndShpere();
+	}
 
 	// Swap the model in before releasing the old one: the renderer's drawables point at its
 	// meshes, and the next parse is what moves them over.
@@ -262,6 +498,21 @@ void Editor::Panels::PreviewView::BuildPreviewMesh()
 
 	if (m_previewActor != nullptr)
 	{
+		// Normalize with the mesh's own bounds, not with numbers picked per mesh: a loaded asset
+		// is authored at whatever scale and origin it happens to have (Filament's sphere is
+		// ~1.35 units tall and not centred), and the preview's camera frames a 2-unit object.
+		m_previewModel->computeBoxAndShpere();
+		const ::Rendering::Geometry::bbox& bounds = m_previewModel->GetBoundingBox();
+		const Maths::FVector3 size = bounds.pmax - bounds.pmin;
+		const float extent = std::max({ size.x, size.y, size.z });
+		const float scale = extent > 1.0e-4f ? 2.0f / extent : 1.0f;
+		const Maths::FVector3 center = (bounds.pmin + bounds.pmax) * 0.5f;
+
+		m_previewActor->transform.SetLocalScale({ scale, scale, scale });
+		// Put the mesh's centre at the orbit centre, so orbiting turns around the object.
+		m_previewActor->transform.SetLocalPosition(
+			{ -center.x * scale, -center.y * scale, -center.z * scale });
+
 		if (auto* renderer = m_previewActor->GetComponent<::Core::ECS::Components::CModelRenderer>())
 		{
 			renderer->SetModel(m_previewModel.get());
@@ -305,11 +556,45 @@ void Editor::Panels::PreviewView::BuildScene()
 	m_headLight = addPointLight("Preview Head Light", kKeyIntensity / 1.5f * 5.0f);
 
 	// The directional light every viewport scene starts with, so the default shading direction
-	// matches the viewport's.
+	// matches the viewport's. It does not cast shadows here: the preview has no scene to receive
+	// them, and its shadow map only produced self-shadowing acne on the ball (black speckles).
 	m_scene.AddDefaultLights();
+	if (auto* defaultLight = m_scene.FindActorByTag("DirectionalLight"))
+	{
+		if (auto* light = defaultLight->GetComponent<CDirectionalLight>())
+		{
+			light->SetCastShadows(false);
+		}
+	}
 	// Tone mapping, gamma correction and the rest of the stack: without it the frame would
 	// leave the view linear, and the preview would not look like the viewport.
 	m_scene.AddDefaultPostProcessStack();
+
+	// ...but with a fixed tone curve, not the viewport's adaptive one. Bloom and auto exposure
+	// react to what is being shown (a bright metal would drive the exposure and make every
+	// material look the same), and the neutral tone curve clips a rough metal's environment to
+	// flat white. A preview needs one constant studio exposure, so the material is judged by its
+	// own values.
+	if (auto* stackActor = m_scene.FindActorByTag("PostProcessStack"))
+	{
+		if (auto* stack = stackActor->GetComponent<CPostProcessStack>())
+		{
+			auto bloom = stack->GetBloomSettings();
+			bloom.enabled = false;
+			stack->SetBloomSettings(bloom);
+
+			auto autoExposure = stack->GetAutoExposureSettings();
+			autoExposure.enabled = false;
+			stack->SetAutoExposureSettings(autoExposure);
+
+			auto tonemapping = stack->GetTonemappingSettings();
+			tonemapping.enabled = true;
+			tonemapping.mode = ::Core::Rendering::PostProcess::ETonemappingMode::ACES;
+			tonemapping.exposure = 0.2f;
+			tonemapping.gammaCorrection = true;
+			stack->SetTonemappingSettings(tonemapping);
+		}
+	}
 }
 
 void Editor::Panels::PreviewView::Update(float p_deltaTime)
@@ -385,11 +670,13 @@ void Editor::Panels::PreviewView::SetMaterial(::Core::Resources::Material* p_mat
 
 	if (p_material != nullptr)
 	{
-		materials->SetMaterialAtIndex(0, *p_material);
+		// Fill every slot: a loaded model (the material sphere) may split its geometry by
+		// material, and the preview shows the same material on all of it.
+		materials->FillWithMaterial(*p_material);
 	}
 	else
 	{
-		materials->RemoveMaterialAtIndex(0);
+		materials->RemoveAllMaterials();
 	}
 }
 

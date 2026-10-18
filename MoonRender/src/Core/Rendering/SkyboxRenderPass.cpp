@@ -66,7 +66,7 @@ void Core::Rendering::SkyboxRenderPass::Draw(::Rendering::Data::PipelineState p_
 {
 	ZoneScoped;
 	TracyGpuZone("SkyboxRenderPass");
-	if (needUpdateSkyTexture) {
+	if (needUpdateSkyTexture && m_captureEnvironment) {
 		needUpdateSkyTexture = false;
 		computeSkyTexture();
 	}	

@@ -142,6 +142,12 @@ namespace Core::Rendering
 		);
 
 		void Resize(int width,int height);
+
+		/** Features stripped from every parsed drawable, for a view that must not evaluate
+		 * scene-space effects. The material preview removes DISTANCE_FADE: the preview's camera
+		 * sits inside the fade range, and the shader dithers the surface into a dot pattern. */
+		void SetExcludedFeatures(::Rendering::Data::FeatureSet p_features);
+
 		SceneDrawablesDescriptor ParseScene(
 			const SceneParsingInput& p_input
 		);
@@ -179,5 +185,6 @@ namespace Core::Rendering
 		uint64_t m_parsedDrawablesHash = 0;
 		bool m_parsedDrawablesValid = false;
 		size_t m_lastParsedDrawableCount = 0;
+		::Rendering::Data::FeatureSet m_excludedFeatures;
 	};
 }

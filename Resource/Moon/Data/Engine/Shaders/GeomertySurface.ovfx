@@ -74,11 +74,6 @@ material {
         { type : samplerCube, name : _IrradianceCube },
         { type : samplerCube, name : _PrefilterCube },
         { type : sampler2D,   name : _BRDFLut },
-        // The sky is a world-fixed light: it lights the same faces whatever direction the camera
-        // is on, which is what leaves one side of a shape bright and the other dark however it is
-        // looked at. It stays a reflection here, not the main light - the camera-following rig
-        // does the lighting.
-        { type : float,       name : u_environmentIntensity, default : 0.2 },
         { type : sampler2D,   name : occlusionTex },
         { type : float,       name : u_AoStrength, default : 3.0 },
 
@@ -276,10 +271,6 @@ float clampNoV(float NoV) {
 
 
 // ----------------------------------------------------------------------------
-vec3 fresnelSchlickRoughness(float cosTheta, vec3 F0, float roughness)
-{
-    return F0 + (max(vec3(1.0 - roughness), F0) - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
-}   
 
 
 #if defined(NORMAL_MAPPING)
@@ -337,15 +328,20 @@ void main()
 
 
     vec2 texCoords = TileAndOffsetTexCoords(fs_in.TexCoords, u_TextureTiling, u_TextureOffset);
-    vec4 albedo = texture(u_AlbedoMap, texCoords) * u_Albedo;
+    vec4 albedoTexel = texture(u_AlbedoMap, texCoords);
+    vec4 albedo = albedoTexel * u_Albedo;
     albedo.a *= texture(u_MaskMap, texCoords).r;
     if (albedo.a < u_AlphaClippingThreshold)
     {
         discard;
     }
+
+    // The albedo map, the picker tint and the domain colour are all sRGB: decode each one and
+    // combine in linear. Decoding the product (the old path) darkens any tint that is not white.
+    vec3 linearAlbedo = pow(albedoTexel.rgb, vec3(2.2)) * pow(u_Albedo.rgb, vec3(2.2));
 #if !defined(DISABLE_DOMAIN_COLOR) 
     int domainIndex=int(round(fs_in.DomainId.x));
-    albedo.rgb*=texelFetch(domainColorTex,domainIndex).rgb;
+    linearAlbedo *= pow(texelFetch(domainColorTex,domainIndex).rgb, vec3(2.2));
 #endif
 
     if (u_AlphaDithering && Dithering(albedo.a, gl_FragCoord.xy) < 0)
@@ -411,10 +407,10 @@ void main()
     emix = mix(emix, max(emix, emix0), step(fs_in.edgeEqn[0].z, 0.01));
     emix = mix(emix, max(emix, emix2), step(fs_in.edgeEqn[2].z, 0.01));
     float opacityFactor = clamp(fs_in.screenLengthOutput / 50., 0.15, 1.0);
-    albedo.rgb = mix(albedo.rgb, edgeColor, emix*opacityFactor*edgeOpacity);
+    linearAlbedo = mix(linearAlbedo, pow(edgeColor, vec3(2.2)), emix*opacityFactor*edgeOpacity);
 #endif
    vec3 pbr = PBRLighting(
-        albedo.rgb,
+        linearAlbedo,
         metallic,
         roughness,
         ao,
@@ -423,6 +419,9 @@ void main()
         fs_in.FragPos,
         _ShadowMap,
         _LightSpaceMatrix,
+        _IrradianceCube,
+        _PrefilterCube,
+        _BRDFLut,
         u_Transmission,
         u_RefractionIndex
     );
@@ -436,35 +435,14 @@ void main()
     pbr = mix(pbr, pbr / (pbr + vec3(1.0)), bvec3(u_BuiltInToneMapping));
     pbr = mix(pbr, pow(pbr, vec3(1.0 / 2.2)), bvec3(u_BuiltInGammaCorrection));
 
-    // Albedo textures are stored as sRGB (RGBA8, no hardware decode), so decode to
-    // linear before using it for IBL, matching PBRLighting()'s internal handling.
-    const vec3 linearAlbedo = pow(albedo.rgb, vec3(2.2));
-    vec3 F0 = vec3(0.04); 
-    F0 = mix(F0, linearAlbedo, metallic);
-    
-    vec3 F = fresnelSchlickRoughness(max(dot(gnormal, VD), 0.0), F0, roughness);
-    vec3 kS = F;
-    vec3 kD = 1.0 - kS;
-    kD *= 1.0 - metallic;	
-
-    vec3 irradiance = texture(_IrradianceCube, gnormal).rgb;
-    vec3 diffuse      = irradiance * linearAlbedo;
-    
-    // sample both the pre-filter map and the BRDF lut and combine them together as per the Split-Sum approximation to get the IBL specular part.
-    const float MAX_REFLECTION_LOD = float(textureQueryLevels(_PrefilterCube) - 1);
-    vec3 R = reflect(-VD, gnormal); 
-    vec3 prefilteredColor = textureLod(_PrefilterCube, R,  roughness * MAX_REFLECTION_LOD).rgb;    
-    vec2 brdf  = texture(_BRDFLut, vec2(max(dot(gnormal, VD), 0.0), roughness)).rg;
-    vec3 sp = prefilteredColor * (F * brdf.x + brdf.y);
-
-    vec3 iblColor = (kD * diffuse+sp) * ao*u_environmentIntensity;
-
-
- 
-    const vec3 emissive = texture(u_EmissiveMap, texCoords).rgb * u_EmissiveColor * u_EmissiveIntensity;
-    pbr += emissive+iblColor;
-    //pbr=iblColor;
-    //pbr=diffuse;
+    // The emissive map is sRGB and the colour comes from the panel's colour picker, which is
+    // sRGB too: decode each separately, then scale by the (linear) intensity. Decoding the
+    // product instead would darken any tint that is not white or black.
+    const vec3 emissive =
+        pow(texture(u_EmissiveMap, texCoords).rgb, vec3(2.2))
+        * pow(u_EmissiveColor, vec3(2.2))
+        * u_EmissiveIntensity;
+    pbr += emissive;
     FRAGMENT_COLOR = vec4(pbr,albedo.a);
 
 }

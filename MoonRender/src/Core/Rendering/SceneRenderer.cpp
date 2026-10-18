@@ -669,6 +669,13 @@ void Core::Rendering::SceneRenderer::Resize(int width, int height)
 		}
 	}
 }
+
+void Core::Rendering::SceneRenderer::SetExcludedFeatures(::Rendering::Data::FeatureSet p_features)
+{
+	m_excludedFeatures = std::move(p_features);
+	// The cached drawables were parsed with the previous exclusions.
+	m_parsedDrawablesValid = false;
+}
 void Core::Rendering::SceneRenderer::DrawModelWithSingleMaterial(::Rendering::Data::PipelineState p_pso, ::Rendering::Resources::Model& p_model, ::Rendering::Data::Material& p_material, const Maths::FMatrix4& p_modelMatrix)
 {
 	auto stateMask = p_material.GenerateStateMask();
@@ -870,6 +877,26 @@ void Core::Rendering::SceneRenderer::UpdateParsedDrawables(Core::SceneSystem::Sc
 	}
 
 	m_parsedDrawables = ParseScene(SceneParsingInput{ .scene = p_scene });
+
+	// A view can strip features that make no sense for what it renders. The material preview
+	// removes distance fade: the fade is a scene-space LOD effect, and the preview's camera sits
+	// inside its range, so the shader's dither turned the whole ball into a dot pattern.
+	if (!m_excludedFeatures.empty())
+	{
+		for (auto& drawable : m_parsedDrawables.drawables)
+		{
+			if (drawable.material && !drawable.featureSetOverride.has_value())
+			{
+				::Rendering::Data::FeatureSet features = drawable.material->GetFeatures();
+				for (const std::string& excluded : m_excludedFeatures)
+				{
+					features.erase(excluded);
+				}
+				drawable.featureSetOverride = std::move(features);
+			}
+		}
+	}
+
 	m_parsedDrawablesHash = signature;
 	m_parsedDrawablesValid = true;
 }

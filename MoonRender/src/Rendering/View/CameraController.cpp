@@ -399,6 +399,11 @@ float Editor::Core::CameraController::GetSpeed() const
 	return m_cameraMoveSpeed;
 }
 
+void Editor::Core::CameraController::SetZoomSpeed(float p_speed)
+{
+	m_zoomSpeed = p_speed;
+}
+
 void Editor::Core::CameraController::SetPosition(const Maths::FVector3& p_position)
 {
 	m_camera.SetPosition(p_position);
@@ -531,15 +536,15 @@ void Editor::Core::CameraController::HandleCameraZoom()
 		// straight into the camera position, which blanks the viewport for good.
 		const float sceneSize = SceneExtentLength(m_view.GetScene());
 		if (sceneSize > 0.0f) {
-			m_camera.PersertiveZoom(verticalScroll * 0.1f * sceneSize);
+			m_camera.PersertiveZoom(verticalScroll * 0.1f * sceneSize * m_zoomSpeed);
 		}
 		else {
-			m_camera.PersertiveZoom(verticalScroll);
+			m_camera.PersertiveZoom(verticalScroll * m_zoomSpeed);
 		}
 	}
 	else
 	{
-		m_camera.OrthZoom(verticalScroll,x,y);
+		m_camera.OrthZoom(verticalScroll * m_zoomSpeed, x, y);
 	}
 }
 

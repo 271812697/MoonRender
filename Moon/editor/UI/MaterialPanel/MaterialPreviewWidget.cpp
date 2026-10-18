@@ -13,6 +13,7 @@
 
 #include "Core/Global/ServiceLocator.h"
 #include "renderer/Context.h"
+#include "renderer/SceneView.h"
 
 #include <Core/Resources/Material.h>
 #include <Rendering/Context/Driver.h>
@@ -91,14 +92,11 @@ void MOON::MaterialPreviewWidget::RequestThumbnail()
 
 void MOON::MaterialPreviewWidget::SetPreviewMesh(Editor::Panels::EPreviewMesh p_mesh)
 {
+	// Only remember it here. Rebuilding the mesh creates GL objects (VAOs, buffers, and for the
+	// loaded ball a whole model), which needs the render module's context current - this is a
+	// widget slot with Qt's context, not the module's. paintGL applies the pending mesh with the
+	// right context current (see there).
 	m_previewMesh = p_mesh;
-
-	// The view may not exist yet (it is created with the module's context on the first paint);
-	// EnsureView applies the stored choice then.
-	if (m_view != nullptr)
-	{
-		m_view->SetPreviewMesh(p_mesh);
-	}
 	update();
 }
 
@@ -171,6 +169,53 @@ void MOON::MaterialPreviewWidget::RefreshShader()
 	m_error.clear();
 }
 
+void MOON::MaterialPreviewWidget::BindEnvironmentTextures()
+{
+	// The viewport's faces get their IBL from the sky pass: TopoShapeActor points the face
+	// materials at the irradiance/prefilter cubes and the BRDF LUT (and Standard's PBR path at
+	// the prefilter cube as _EnvironmentMap). The preview shows the same material, so it has to
+	// point it at the same textures - otherwise a metallic material would look dark here and lit
+	// there. The textures are shared GPU resources; the sky pass builds them once for the scene.
+	auto& sceneView = ::Core::Global::ServiceLocator::Get<::Editor::Panels::SceneView>();
+	auto& renderer = sceneView.GetRenderer();
+
+	auto* irradiance = renderer.GetIrradianceCube();
+	auto* prefilter = renderer.GetPrefilterCube();
+	auto* brdf = renderer.GetBrdfTexture();
+	if (irradiance == nullptr || prefilter == nullptr || brdf == nullptr)
+	{
+		// The sky pass has not captured them yet (the viewport has not drawn). The preview may
+		// have painted first, so ask for another paint shortly instead of staying unlit.
+		QTimer::singleShot(200, this, [this] { update(); });
+		return;
+	}
+
+	const auto bind = [](::Core::Resources::Material* p_material, const char* p_name,
+		::Rendering::HAL::Texture* p_texture)
+	{
+		if (p_material == nullptr)
+		{
+			return;
+		}
+		if (const auto property = p_material->GetProperty(p_name))
+		{
+			if (const auto handle = std::get_if<::Rendering::HAL::TextureHandle*>(&property->value);
+				handle != nullptr && *handle == p_texture)
+			{
+				return; // already pointing at it; SetProperty would bump the upload version
+			}
+		}
+		p_material->TrySetProperty(p_name, p_texture);
+	};
+
+	for (::Core::Resources::Material* material : { m_shownMaterial, m_material.get() })
+	{
+		bind(material, "_IrradianceCube", irradiance);
+		bind(material, "_PrefilterCube", prefilter);
+		bind(material, "_BRDFLut", brdf);
+	}
+}
+
 void MOON::MaterialPreviewWidget::paintGL()
 {
 	auto& context = ::Core::Global::ServiceLocator::Get<::Editor::Core::Context>();
@@ -191,6 +236,16 @@ void MOON::MaterialPreviewWidget::paintGL()
 	}
 
 	RefreshShader();
+	BindEnvironmentTextures();
+
+	// Apply a mesh the panel picked since the last paint. It has to happen here: SetPreviewMesh
+	// itself runs on a Qt slot, where the module's context is not current, and building the mesh
+	// creates VAOs/buffers (and can load a model).
+	if (m_view->GetPreviewMesh() != m_previewMesh)
+	{
+		m_view->SetPreviewMesh(m_previewMesh);
+		m_thumbnailRequested = true;
+	}
 
 	// Physical pixels: the view renders at the surface's real resolution and is pasted 1:1.
 	const int frameWidth = std::max(1, static_cast<int>(width() * devicePixelRatioF()));

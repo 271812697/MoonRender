@@ -86,6 +86,10 @@ namespace MOON
 		bool EnsureView();
 		/** Builds the shader for the pending package, if it changed. Needs the context current. */
 		void RefreshShader();
+		/** Points the shown material at the viewport's IBL textures (the sky pass builds them;
+		 * TopoShapeActor binds them on the scene's face materials the same way). Needs the
+		 * module's context current, like any other material upload. */
+		void BindEnvironmentTextures();
 
 		std::string m_package;
 		std::string m_shaderKey;
