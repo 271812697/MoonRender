@@ -13,8 +13,9 @@ namespace MOON
 	 * shows up in the panel with the .ovfx line the driver complained about, because the
 	 * generated stages carry #line directives back into the file.
 	 *
-	 * The preview is rendered by the viewport (it owns the GL context) - see
-	 * ViewerWidget::RenderMaterialPreview - and comes back as an image this panel shows. */
+	 * The preview is a view of its own (PreviewView): the MaterialPreviewWidget inside this
+	 * panel renders it on the render module's context and pastes the frame, so the preview
+	 * goes through the same scene renderer, lights and post-process as the viewport. */
 	class MaterialEditorPanel : public QDockWidget
 	{
 		Q_OBJECT
@@ -23,9 +24,8 @@ namespace MOON
 		~MaterialEditorPanel();
 
 	protected:
-		/** The preview needs the viewport's GL context, which only exists once the panel (part
-		 * of the workspace) is shown - so the first preview happens here, not in the
-		 * constructor. */
+		/** The first preview happens here, not in the constructor: the dock may start in a hidden
+		 * tab, and the preview widget only builds its shader once it has been painted. */
 		void showEvent(QShowEvent* p_event) override;
 
 	private:

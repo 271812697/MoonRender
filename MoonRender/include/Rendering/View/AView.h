@@ -26,6 +26,15 @@ namespace Editor {
 
 			virtual void Update(float p_deltaTime);
 			virtual void InitFrame();
+
+			/** Hands one input event to the view.
+			 *
+			 * This is the only input entry point a surface needs: it translates whatever its window
+			 * toolkit produced into a neutral InputEvent and passes it here. The view stores it in
+			 * its InputState - which its camera controller reads on Update - and a subclass that
+			 * needs more (a scene view picking under the cursor, say) overrides this and calls the
+			 * base implementation first. */
+			virtual void ReceiveEvent(const InputEvent& p_event);
 			
 			/** Renders the frame into the module's present target.
 			 *
@@ -34,6 +43,9 @@ namespace Editor {
 			 * so they end up in the image the window pastes instead of being drawn on the window's
 			 * own context afterwards. */
 			void Render(const std::function<void()>& p_drawOverlays = {});
+
+			/** Turns the view's own frame into the image the window pastes: the scene renderer's
+			 * present pass. */
 			void Present();
 			/** The GL id of the colour texture holding the last rendered frame.
 			 *

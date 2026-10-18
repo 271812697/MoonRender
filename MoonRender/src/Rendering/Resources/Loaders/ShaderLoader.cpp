@@ -986,6 +986,36 @@ namespace Rendering::Resources::Loaders
 		}
 	}
 
+	bool ShaderLoader::RecompileFromPackage(Shader& p_shader, const void* p_data, uint32_t p_size,
+		std::string* p_error)
+	{
+		if (p_data == nullptr || p_size == 0)
+		{
+			if (p_error != nullptr) { *p_error = "empty package"; }
+			return false;
+		}
+
+		const Rendering::Resources::ShaderPackage package(p_data, p_size);
+		if (!package.IsValid())
+		{
+			if (p_error != nullptr) { *p_error = "not a valid shader package"; }
+			return false;
+		}
+
+		std::string error;
+		auto variants = AssembleFromPackage(package, &error);
+		if (variants.empty())
+		{
+			// Keep what the shader had: a broken edit must not blank out the preview or the scene.
+			if (p_error != nullptr) { *p_error = error.empty() ? "the package has no stages" : std::move(error); }
+			return false;
+		}
+
+		p_shader.SetVariants(std::move(variants));
+		if (p_error != nullptr) { p_error->clear(); }
+		return true;
+	}
+
 	bool ShaderLoader::Destroy(Shader*& p_shader)
 	{
 		if (p_shader)

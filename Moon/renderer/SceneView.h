@@ -46,7 +46,7 @@ namespace Editor::Panels
 		void SetGizmoOperation(Core::EGizmoOperation p_operation);
 		Core::EGizmoOperation GetGizmoOperation() const;
 		/** Takes an event the window layer already translated, see InputEvent. */
-		void ReceiveEvent(const InputEvent& p_event);
+		void ReceiveEvent(const InputEvent& p_event) override;
 		bool MouseHit(Maths::FVector3& out);
 		bool MouseClipHit(Maths::FVector3& out,const Maths::FVector4& clipPlane);
 		Editor::Rendering::PickingRenderPass::PickingResult GetPickResult();

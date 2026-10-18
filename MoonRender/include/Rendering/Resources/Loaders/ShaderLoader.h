@@ -40,6 +40,18 @@ namespace Rendering::Resources::Loaders
 			const std::string& p_name, std::string* p_error = nullptr);
 
 		static void	Recompile(Shader& p_shader, const std::string& p_filePath, FilePathParserCallback p_pathParser = nullptr);
+
+	/** Replaces p_shader's programs with the ones in p_data, in place.
+	 *
+	 * Hot reload has to keep the Shader object: materials hold a pointer to it, so swapping the
+	 * object out would leave every material pointing at a dead one - and the preview, the scene
+	 * and anything else showing that material would have to be found and rebound by hand. On
+	 * failure the current programs are kept untouched.
+	 *
+	 * Returns false and fills p_error when the package is invalid or a stage does not compile;
+	 * the message is the driver's, with the .ovfx line numbers the stages carry. */
+	static bool RecompileFromPackage(Shader& p_shader, const void* p_data, uint32_t p_size,
+		std::string* p_error = nullptr);
 		static bool Destroy(Shader*& p_shader);
 	};
 }

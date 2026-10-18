@@ -47,6 +47,11 @@ Editor::Panels::AView::AView
 	::Core::Rendering::FramebufferUtil::SetupFramebuffer(m_presentTarget, presentDesc, false, false);
 }
 
+void Editor::Panels::AView::ReceiveEvent(const InputEvent& p_event)
+{
+	input.ReceiveEvent(p_event);
+}
+
 void Editor::Panels::AView::Update(float p_deltaTime)
 {
 

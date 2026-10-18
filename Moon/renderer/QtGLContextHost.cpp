@@ -37,7 +37,7 @@ Editor::Core::QtGLContextHost::QtGLContextHost(QOpenGLContext* p_shareContext)
 		return;
 	}
 
-	CORE_INFO("[GL] the render module now has its own context, sharing objects with the viewport");
+	CORE_INFO("[GL] the render module now has its own context, sharing objects with the editor's windows");
 }
 
 Editor::Core::QtGLContextHost::~QtGLContextHost()

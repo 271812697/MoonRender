@@ -9,11 +9,11 @@ namespace Editor::Core
 {
 	/** The render module's GL context, on the Qt side.
 	 *
-	 * It is a context of its own, sharing objects with the viewport's QOpenGLWidget context:
-	 * sharing is what lets the module draw with the shaders, textures and buffers the rest of
-	 * the editor created, and what lets the viewport sample the frame the module rendered. It
-	 * still is a separate context, so the module never again renders on whatever context Qt
-	 * happened to leave current.
+	 * It is a context of its own, in the same share group as the editor's windows: sharing is
+	 * what lets the module draw with the shaders, textures and buffers the rest of the editor
+	 * created, and what lets a widget sample the frame the module rendered. It still is a
+	 * separate context, so the module never again renders on whatever context Qt happened to
+	 * leave current.
 	 *
 	 * Creation has one hard constraint, the same one a shared context always has on Windows:
 	 * wglShareLists fails with ERROR_BUSY while the context being shared from is current, so
@@ -22,7 +22,9 @@ namespace Editor::Core
 	class QtGLContextHost final : public ::Rendering::Context::IGLContextHost
 	{
 	public:
-		/** p_shareContext is the context whose objects the module will use (the viewport's). */
+		/** p_shareContext is the context whose share group the module joins: the viewport's, or
+		 * Qt's global share context when the application has one (see
+		 * ViewerWidget::CreateRenderContext). */
 		explicit QtGLContextHost(QOpenGLContext* p_shareContext);
 		~QtGLContextHost() override;
 

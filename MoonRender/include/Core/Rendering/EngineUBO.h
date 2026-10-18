@@ -13,11 +13,9 @@ namespace Core::Rendering
 	 *    component is followed immediately by ubo_CameraType, exactly as std140 places it),
 	 *  - every matrix is 64 bytes and self-aligned.
 	 * A field added here without the .ovfxh counterpart (or the other way round) silently
-	 * shifts every uniform after it - the static_asserts in the preview renderer pin the
-	 * offsets that matter.
+	 * shifts every uniform after it - the static_asserts below pin the offsets that matter.
 	 *
-	 * Two writers: EngineBufferRenderFeature uploads it per frame from the scene camera, and
-	 * MaterialPreviewRenderer uploads its own for the editor's preview sphere. */
+	 * Written per frame by EngineBufferRenderFeature from the view's camera. */
 	struct EngineUBO
 	{
 		Maths::FMatrix4 ubo_Model;

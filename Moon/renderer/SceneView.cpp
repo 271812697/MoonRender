@@ -460,7 +460,8 @@ Editor::Core::EGizmoOperation Editor::Panels::SceneView::GetGizmoOperation() con
 
 void Editor::Panels::SceneView::ReceiveEvent(const InputEvent& p_event)
 {
-	input.ReceiveEvent(p_event);
+	// Base first: the view owns the InputState its camera controller reads.
+	AView::ReceiveEvent(p_event);
 
 	if (p_event.type == InputEvent::EType::MouseButtonPress && p_event.button == MOUSE_BUTTON_RIGHT)
 	{

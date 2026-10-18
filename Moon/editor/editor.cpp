@@ -93,7 +93,13 @@ namespace MOON {
 			self->addDockWidget(Qt::LeftDockWidgetArea, settingPanel);
 			self->addDockWidget(Qt::RightDockWidgetArea,propertyPanel);
 			self->addDockWidget(Qt::RightDockWidgetArea, taskViewPanel);
+
+			// The material editor is a tool rather than part of the workspace layout: the View
+			// menu opens it, and it starts closed. It is still a dock, so it can sit next to the
+			// workspace or be undocked from its title bar when the comparison wants a whole
+			// screen.
 			self->addDockWidget(Qt::RightDockWidgetArea, materialPanel);
+			materialPanel->hide();
 
 			/*auto resourcePanelDock = new ResPanel(self);
 			self->addDockWidget(Qt::RightDockWidgetArea, resourcePanelDock);*/
@@ -103,7 +109,9 @@ namespace MOON {
 			//self->addDockWidget(Qt::LeftDockWidgetArea, debugWidget);
 			//self->tabifyDockWidget(HierarchypanelDock, debugWidget);
 
-			mDocks = { hierarchypanel, settingPanel, propertyPanel, taskViewPanel, materialPanel, logPanelDock };
+			// The panels that belong to the workspace. The material editor is not one of them: it
+			// is a tool toggled from the View menu, so it keeps its state across pages.
+			mDocks = { hierarchypanel, settingPanel, propertyPanel, taskViewPanel, logPanelDock };
 			QObject::connect(
 				pages, &QStackedWidget::currentChanged, self, [this](int p_index) {
 					// The panels are part of the workspace: there is no document to show

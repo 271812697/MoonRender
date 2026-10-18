@@ -15,6 +15,14 @@
 
 int main(int argc, char* argv[])
 {
+	// Every GL context in the editor has to be in one share group. The render module draws on a
+	// context of its own, and the material panel shows the preview by blitting the module's
+	// frame texture into a widget - a texture name only means something in the group that
+	// created it. This attribute is what makes Qt's QOpenGLWidget contexts (the viewport, the
+	// material preview) share Qt's global context, and the render module is created in that
+	// group too (see ViewerWidget::CreateRenderContext). It has to be set before the
+	// application exists.
+	QCoreApplication::setAttribute(Qt::AA_ShareOpenGLContexts);
 	QApplication app(argc, argv);
 	app.setStyle(new DarkStyle);
 	const int font_id = QFontDatabase::addApplicationFont(

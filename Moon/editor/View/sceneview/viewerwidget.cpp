@@ -1,5 +1,5 @@
 #include <QMouseEvent>
-#include <QImage>
+#include <QOpenGLContext>
 #include <QTimer>
 #include "renderer/QtGLContextHost.h"
 #include "viewerwidget.h"
@@ -27,8 +27,6 @@
 #include "core/log.h"
 #include "Core/Rendering/GbufferPass.h"
 #include "Core/Rendering/HzbBuildPass.h"
-// The material editor's offscreen preview (see RequestMaterialPreview).
-#include "Core/Rendering/MaterialPreviewRenderer.h"
 #include <ThirdParty/imgui/imgui/imgui.h>
 #include <Rendering/Overlay/Im2DRender.h>
 #include "Settings/DebugSetting.h"
@@ -319,9 +317,6 @@ namespace MOON {
 			if (traceFrame) {
 				CORE_INFO("[Viewer] frame drawn");
 			}
-			// Still on the module's context (the frame bound it and left it: see AView::Render):
-			// the material editor's preview is one more offscreen render belonging to the module.
-			mSelf->RenderPendingPreview();
 			if (moduleHost != nullptr) {
 				moduleHost->DoneCurrent();
 			}
@@ -553,23 +548,17 @@ namespace MOON {
 
 	ViewerWidget::~ViewerWidget()
 	{
-		// The preview renderer owns GL objects, so it has to go while the context is still
-		// current - on the way out that means here, not after the widget has lost it.
-		if (mPreviewRenderer != nullptr) {
-			makeCurrent();
-			mPreviewRenderer.reset();
-			doneCurrent();
-		}
 		delete mInternal;
 		// After the driver (owned by the context mInternal holds) is gone, the module context
 		// itself can go.
 		mRenderContextHost.reset();
 	}
 
-	// The render module gets a context of its own, sharing objects with this widget's context:
-	// the module renders there, this widget only pastes the result. Created from the event loop
-	// rather than from initializeGL because wglShareLists refuses to share from a context that
-	// is current, and this widget's context is current inside initializeGL.
+	// The render module gets a context of its own, in the same share group as this widget (and,
+	// with Qt::AA_ShareOpenGLContexts, the material preview's): the module renders there, the
+	// widgets only paste the result. Created from the event loop rather than from initializeGL
+	// because wglShareLists refuses to share from a context that is current, and this widget's
+	// context is current inside initializeGL.
 	void ViewerWidget::CreateRenderContext()
 	{
 		if (mRenderContextHost != nullptr && mRenderContextHost->IsValid()) {
@@ -583,7 +572,16 @@ namespace MOON {
 		// The whole module is built in this one call, before anything else runs: a service that is
 		// missing when a panel or a timer asks for it throws, and in a release build that is an
 		// uncaught exception that takes the process down without a word.
-		mRenderContextHost = std::make_unique<Editor::Core::QtGLContextHost>(context());
+		// The editor sets Qt::AA_ShareOpenGLContexts, so every QOpenGLWidget lives in Qt's global
+		// share group and the module joins the root of that group: the material panel's preview
+		// widget pastes a frame the module rendered, and a texture name only means something in
+		// the group that created it. Without a global share context (an application that did not
+		// set the attribute) the module shares this widget's context, as before.
+		QOpenGLContext* shareContext = QOpenGLContext::globalShareContext();
+		if (shareContext == nullptr) {
+			shareContext = context();
+		}
+		mRenderContextHost = std::make_unique<Editor::Core::QtGLContextHost>(shareContext);
 		const bool moduleReady = mRenderContextHost->IsValid() && mRenderContextHost->MakeCurrent();
 
 		if (moduleReady) {
@@ -749,61 +747,6 @@ namespace MOON {
 	{
 		mInternal->mRefreshTreeView = true;
 	}
-	// The material editor asks for a preview; it is rendered here, inside this widget's frame.
-	void ViewerWidget::RequestMaterialPreview(const std::string& p_key, int p_size)
-	{
-		mPreviewRequestKey = p_key;
-		mPreviewRequestSize = p_size;
-		this->update();
-	}
-
-	// Rendered with the frame's context already current, which is the whole point: a preview
-	// asked for from a timer or a button used to make a context current behind the render
-	// module's back, and in a release build that took the process down.
-	void ViewerWidget::RenderPendingPreview()
-	{
-		if (mPreviewRequestKey.empty() || mPreviewRequestSize <= 0) {
-			return;
-		}
-
-		const std::string key = mPreviewRequestKey;
-		const int size = mPreviewRequestSize;
-		mPreviewRequestKey.clear();
-		mPreviewRequestSize = 0;
-
-		auto& context = ::Core::Global::ServiceLocator::Get<Editor::Core::Context>();
-		if (context.driver == nullptr) {
-			return;
-		}
-
-		// The shader manager compiles on demand, so this also happens with the context current -
-		// which it is here.
-		Rendering::Data::Material material{ context.shaderManager[key] };
-		if (material.GetShader() == nullptr) {
-			CORE_WARN("[MaterialEditor] no shader for the preview: {0}", key);
-			emit materialPreviewReady(QImage());
-			return;
-		}
-
-		if (mPreviewRenderer == nullptr) {
-			mPreviewRenderer = std::make_unique<Core::Rendering::MaterialPreviewRenderer>(*context.driver);
-		}
-
-		std::vector<uint8_t> pixels;
-		std::string error;
-		if (!mPreviewRenderer->Render(material, static_cast<uint32_t>(size), static_cast<uint32_t>(size), pixels, error)) {
-			CORE_ERROR("[MaterialEditor] preview failed: {0}", error);
-			emit materialPreviewReady(QImage());
-			return;
-		}
-
-		const QImage image(pixels.data(), size, size, size * 4, QImage::Format_RGBA8888);
-		emit materialPreviewReady(image.mirrored(false, true));   // GL hands the rows back bottom-up
-	}
-	bool ViewerWidget::HasGLContext() const
-	{
-		return const_cast<ViewerWidget*>(this)->context() != nullptr;
-	}
 
 	void ViewerWidget::PasteFrame(uint32_t p_textureID, int p_width, int p_height)
 	{
@@ -831,21 +774,6 @@ namespace MOON {
 		glBindFramebuffer(GL_READ_FRAMEBUFFER, m_pasteFramebuffer);
 		glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
 		glBindFramebuffer(GL_FRAMEBUFFER, defaultFramebufferObject());
-	}
-
-	Rendering::Resources::Shader* ViewerWidget::CreateShaderFromPackage(const std::string& p_package,
-		const std::string& p_name, std::string& p_error)
-	{
-		if (this->context() == nullptr) {
-			p_error = "the viewport has no GL context yet";
-			return nullptr;
-		}
-
-		makeCurrent();
-		Rendering::Resources::Shader* shader = Rendering::Resources::Loaders::ShaderLoader::CreateFromPackage(
-			p_package.data(), static_cast<uint32_t>(p_package.size()), p_name, &p_error);
-		doneCurrent();
-		return shader;
 	}
 
 	void ViewerWidget::onActorSelected(::Core::ECS::Actor* actor) {
