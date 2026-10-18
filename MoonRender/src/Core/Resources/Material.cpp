@@ -119,6 +119,20 @@ void Core::Resources::Material::OnDeserialize(tinyxml2::XMLDocument& p_doc, tiny
 {
 	using namespace Core::Helpers;
 
+	/* The shader comes first: it is the definition, and SetShader resets the definition-owned
+	 * state (blending, culling, depth writing) to what its material block declares. The
+	 * <settings> below are the instance's overrides and have to win over that. */
+	const auto shader = Serializer::DeserializeShader(p_doc, p_node, "shader");
+
+	m_properties.clear();
+
+	/* We verify that the shader is valid (Not null) */
+	if (shader)
+	{
+		/* If the shader is valid, we set it to the material (Modify m_shader pointer + Query + FillUniforms) */
+		SetShader(shader);
+	}
+
 	tinyxml2::XMLNode* settingsNode = p_node->FirstChildElement("settings");
 	
 	if (settingsNode)
@@ -140,17 +154,8 @@ void Core::Resources::Material::OnDeserialize(tinyxml2::XMLDocument& p_doc, tiny
 		Serializer::DeserializeInt(p_doc, settingsNode, "draw_order", m_drawOrder);
 	}
 
-	/* We get the shader with Deserialize method */
-	const auto shader = Serializer::DeserializeShader(p_doc, p_node, "shader");
-
-	m_properties.clear();
-
-	/* We verify that the shader is valid (Not null) */
 	if (shader)
 	{
-		/* If the shader is valid, we set it to the material (Modify m_shader pointer + Query + FillUniforms) */
-		SetShader(shader);
-
 		const auto uniformsNode = p_node->FirstChildElement("uniforms"); // Access to "Uniforms" (Every uniform will be attached to "Uniforms")		
 
 		if (uniformsNode)

@@ -16,6 +16,7 @@
 #include <cctype>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -74,6 +75,45 @@ namespace
 		return std::string(p_text.substr(begin, end - begin));
 	}
 
+	/** A quoted material value ("Base Color") without its quotes; an unquoted one is returned
+	 * as it is. Labels have spaces in them, so they are the fields that get quoted. */
+	std::string Unquote(const std::string& p_text)
+	{
+		if (p_text.size() >= 2 && p_text.front() == '"' && p_text.back() == '"')
+		{
+			return p_text.substr(1, p_text.size() - 2);
+		}
+		return p_text;
+	}
+
+	/** A numeric value out of the material file. False when the text is not a whole number, in
+	 * which case the designer field keeps its default. */
+	bool ParseFloatText(const std::string& p_text, float& p_value)
+	{
+		if (p_text.empty())
+		{
+			return false;
+		}
+		char* end = nullptr;
+		p_value = std::strtof(p_text.c_str(), &end);
+		return end != p_text.c_str() && *end == '\0';
+	}
+
+	std::string JsonEscape(const std::string& p_text)
+	{
+		std::string out;
+		out.reserve(p_text.size());
+		for (const char c : p_text)
+		{
+			if (c == '"' || c == '\\')
+			{
+				out += '\\';
+			}
+			out += c;
+		}
+		return out;
+	}
+
 	std::string ToUpper(std::string p_text)
 	{
 		std::transform(p_text.begin(), p_text.end(), p_text.begin(),
@@ -120,13 +160,28 @@ namespace
 	 * is the SSAO kernel, which used to have to declare its uniform by hand. `default` is the
 	 * GLSL initializer the old hand-written uniforms had (`uniform float x = 0.5;`): it is
 	 * emitted as it is, so GL seeds the property with that value and a material whose uniforms
-	 * are never set keeps the number it always had. */
+	 * are never set keeps the number it always had.
+	 *
+	 * The designer fields are optional: `label`, `group`, `min`/`max`/`step`, `color` and
+	 * `ui`. A material that declares none of them gets the runtime's fallbacks (a label from
+	 * the name, groups by kind, a range from the value), which is what the shaders that have
+	 * not been annotated yet do. Filament's material designer reads the same kind of schema;
+	 * here it lives in the material file itself, next to the parameter it describes. */
 	struct Parameter
 	{
 		std::string type;
 		std::string name;
 		std::string count;
 		std::string defaultValue;
+		std::string label;
+		std::string group;
+		float min = 0.0f;
+		float max = 0.0f;
+		float step = 0.0f;
+		bool hasRange = false;
+		bool hasStep = false;
+		bool color = false;
+		bool ui = true;
 	};
 
 	/** The three stages a material can own. */
@@ -308,6 +363,18 @@ namespace
 						parameter.name = valueOf(object, "name");
 						parameter.count = valueOf(object, "count");
 						parameter.defaultValue = valueOf(object, "default");
+
+						// The designer fields. "min"/"max"/"step" are only ranges when both ends
+						// are numbers; "ui : false" hides engine-owned parameters (the shadow
+						// matrix, the environment map) from the material designer.
+						parameter.label = Unquote(valueOf(object, "label"));
+						parameter.group = Unquote(valueOf(object, "group"));
+						parameter.color = valueOf(object, "color") == "true";
+						parameter.ui = valueOf(object, "ui") != "false";
+						parameter.hasRange = ParseFloatText(valueOf(object, "min"), parameter.min)
+							&& ParseFloatText(valueOf(object, "max"), parameter.max);
+						parameter.hasStep = ParseFloatText(valueOf(object, "step"), parameter.step);
+
 						if (!parameter.name.empty())
 						{
 							p_out.parameters.push_back(parameter);
@@ -1246,6 +1313,30 @@ CompileResult CompileSource(const std::string& p_sourceText, const CompileOption
 		{
 			json << ", \"default\": \"" << parameter.defaultValue << "\"";
 		}
+		if (!parameter.label.empty())
+		{
+			json << ", \"label\": \"" << JsonEscape(parameter.label) << "\"";
+		}
+		if (!parameter.group.empty())
+		{
+			json << ", \"group\": \"" << JsonEscape(parameter.group) << "\"";
+		}
+		if (parameter.hasRange)
+		{
+			json << ", \"min\": " << parameter.min << ", \"max\": " << parameter.max;
+		}
+		if (parameter.hasStep)
+		{
+			json << ", \"step\": " << parameter.step;
+		}
+		if (parameter.color)
+		{
+			json << ", \"color\": true";
+		}
+		if (!parameter.ui)
+		{
+			json << ", \"ui\": false";
+		}
 		json << " }" << (i + 1 < material.parameters.size() ? "," : "") << "\n";
 	}
 	json << "  ],\n  \"attributes\": [\n";
@@ -1388,7 +1479,8 @@ CompileResult CompileSource(const std::string& p_sourceText, const CompileOption
 
 	// SHDRPROP: the material's properties as a panel needs them - name, the DSL type it was
 	// declared with, the GLSL type it becomes, whether it is a sampler (texture slot) or a plain
-	// uniform, its array size, and the GLSL initialiser it declared.
+	// uniform, its array size, the GLSL initialiser it declared, and the optional designer fields
+	// (label, group, range, step, colour, hidden).
 	//
 	// filament splits this into a UIB (uniform interface block: name, size, type, precision) and
 	// a SIB (sampler interface block: name, binding, type, format); we keep plain uniforms and
@@ -1408,6 +1500,13 @@ CompileResult CompileSource(const std::string& p_sourceText, const CompileOption
 			const uint32_t dslSize = static_cast<uint32_t>(parameter.type.size());
 			const uint32_t glslSize = static_cast<uint32_t>(glslType.size());
 			const uint32_t defaultSize = static_cast<uint32_t>(parameter.defaultValue.size());
+			const uint32_t labelSize = static_cast<uint32_t>(parameter.label.size());
+			const uint32_t groupSize = static_cast<uint32_t>(parameter.group.size());
+			const uint8_t flags =
+				(parameter.hasRange ? 0x01 : 0x00) |
+				(parameter.hasStep ? 0x02 : 0x00) |
+				(parameter.color ? 0x04 : 0x00) |
+				(parameter.ui ? 0x00 : 0x08);
 
 			payload.append(reinterpret_cast<const char*>(&nameSize), sizeof(nameSize));
 			payload.append(parameter.name);
@@ -1419,6 +1518,14 @@ CompileResult CompileSource(const std::string& p_sourceText, const CompileOption
 			payload.append(reinterpret_cast<const char*>(&sampler), sizeof(sampler));
 			payload.append(reinterpret_cast<const char*>(&defaultSize), sizeof(defaultSize));
 			payload.append(parameter.defaultValue);
+			payload.append(reinterpret_cast<const char*>(&labelSize), sizeof(labelSize));
+			payload.append(parameter.label);
+			payload.append(reinterpret_cast<const char*>(&groupSize), sizeof(groupSize));
+			payload.append(parameter.group);
+			payload.append(reinterpret_cast<const char*>(&parameter.min), sizeof(parameter.min));
+			payload.append(reinterpret_cast<const char*>(&parameter.max), sizeof(parameter.max));
+			payload.append(reinterpret_cast<const char*>(&parameter.step), sizeof(parameter.step));
+			payload.append(reinterpret_cast<const char*>(&flags), sizeof(flags));
 		}
 		AppendChunk(package, "SHDRPROP", payload);
 	}

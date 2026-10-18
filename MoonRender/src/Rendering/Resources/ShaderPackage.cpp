@@ -130,7 +130,45 @@ namespace Rendering::Resources
 						break;
 					}
 					parameter.isSampler = sampler != 0;
+
+					// The designer fields were added after the first packages were written; a
+					// package from before them simply ends here and keeps the fallbacks.
+					if (!payload.empty())
+					{
+						uint8_t flags = 0;
+						if (!TakeString(payload, parameter.label)
+							|| !TakeString(payload, parameter.group)
+							|| !Take(payload, parameter.min)
+							|| !Take(payload, parameter.max)
+							|| !Take(payload, parameter.step)
+							|| !Take(payload, flags))
+						{
+							break;
+						}
+						parameter.hasRange = (flags & 0x01) != 0;
+						parameter.hasStep = (flags & 0x02) != 0;
+						parameter.isColor = (flags & 0x04) != 0;
+						parameter.isUi = (flags & 0x08) == 0;
+					}
 					m_parameters.push_back(std::move(parameter));
+				}
+			}
+			else if (tag == "SHDRSTAT")
+			{
+				uint32_t count = 0;
+				if (!Take(payload, count))
+				{
+					continue;
+				}
+				for (uint32_t i = 0; i < count; ++i)
+				{
+					std::string key;
+					std::string value;
+					if (!TakeString(payload, key) || !TakeString(payload, value))
+					{
+						break;
+					}
+					m_states[std::move(key)] = std::move(value);
 				}
 			}
 			else if (tag == "SHDRATTR")

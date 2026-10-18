@@ -72,6 +72,23 @@ const std::string& MOON::MaterialPreviewWidget::GetError() const
 	return m_error;
 }
 
+void MOON::MaterialPreviewWidget::ShowMaterial(::Core::Resources::Material* p_material)
+{
+	m_shownMaterial = p_material;
+
+	if (m_view != nullptr)
+	{
+		m_view->SetMaterial(m_shownMaterial != nullptr ? m_shownMaterial : m_material.get());
+	}
+	update();
+}
+
+void MOON::MaterialPreviewWidget::RequestThumbnail()
+{
+	m_thumbnailRequested = true;
+	update();
+}
+
 bool MOON::MaterialPreviewWidget::EnsureView()
 {
 	if (m_view != nullptr)
@@ -87,7 +104,7 @@ bool MOON::MaterialPreviewWidget::EnsureView()
 
 	m_view = new ::Editor::Panels::PreviewView(*context.driver);
 	m_material = std::make_unique<::Core::Resources::Material>();
-	m_view->SetMaterial(m_material.get());
+	m_view->SetMaterial(m_shownMaterial != nullptr ? m_shownMaterial : m_material.get());
 	return true;
 }
 
@@ -179,6 +196,32 @@ void MOON::MaterialPreviewWidget::paintGL()
 	// No overlays on purpose: ImGui, the 2D draw list and the gizmos belong to the viewport's
 	// frame. What this view draws is its own scene (see PreviewView).
 	m_view->Render({});
+
+	// The material browser wants a small image of what is on the sphere. Reading the frame back
+	// is a synchronous read, so at most one per burst: a request that arrives while throttled
+	// keeps its flag and asks for another paint after the window.
+	if (m_thumbnailRequested)
+	{
+		if (nowMs - m_lastThumbnailMs >= 200.0)
+		{
+			m_lastThumbnailMs = nowMs;
+
+			int thumbnailWidth = 0;
+			int thumbnailHeight = 0;
+			if (m_view->ReadFrame(m_thumbnailPixels, thumbnailWidth, thumbnailHeight))
+			{
+				const QImage frame(m_thumbnailPixels.data(), thumbnailWidth, thumbnailHeight,
+					thumbnailWidth * 4, QImage::Format_RGBA8888);
+				emit thumbnailReady(frame.copy().scaled(
+					96, 96, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+			}
+			m_thumbnailRequested = false;
+		}
+		else
+		{
+			QTimer::singleShot(220, this, [this] { update(); });
+		}
+	}
 
 	const uint32_t frameTexture = m_view->GetFrameTextureID();
 

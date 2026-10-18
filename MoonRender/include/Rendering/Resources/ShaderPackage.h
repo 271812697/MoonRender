@@ -31,8 +31,17 @@ namespace Rendering::Resources
 			std::string type;       // the DSL name the material file declared ("float4")
 			std::string glslType;   // what it became ("vec4")
 			std::string defaultValue; // the GLSL initialiser it declared, empty when none
+			std::string label;      // the designer label ("Base Color"), empty when not declared
+			std::string group;      // the designer group ("Base"), empty when not declared
+			float min = 0.0f;       // the designer range, valid when hasRange
+			float max = 0.0f;
+			float step = 0.0f;      // the designer step, valid when hasStep
 			uint32_t count = 0;     // array size, 0 when the parameter is not an array
 			bool isSampler = false; // a texture slot rather than a plain uniform
+			bool hasRange = false;
+			bool hasStep = false;
+			bool isColor = false;   // force a colour picker rather than N number fields
+			bool isUi = true;       // false hides engine-owned parameters from the designer
 		};
 
 		/** One vertex attribute the material's stages read, as the build recorded it - the
@@ -72,6 +81,12 @@ namespace Rendering::Resources
 		const std::vector<Parameter>& Parameters() const { return m_parameters; }
 		const std::vector<Attribute>& Attributes() const { return m_attributes; }
 
+		/** The state the `material { }` block declared besides the name, domain and shading model:
+		 * `blending`, `culling`, `depthWrite`, ... as the text the material wrote. Filament bakes
+		 * the same fields into its own chunks (MAT_BLEN, MAT_CUMO, MAT_DWRIT); the runtime maps
+		 * them onto the material's render state. */
+		const std::map<std::string, std::string>& States() const { return m_states; }
+
 		/** The final GLSL of one variant's stage, empty when the package holds no such
 		 * combination (i.e. one the build did not make, or no geometry stage at all).
 		 *
@@ -101,6 +116,7 @@ namespace Rendering::Resources
 		std::vector<Variant> m_variants;
 		std::vector<Parameter> m_parameters;
 		std::vector<Attribute> m_attributes;
+		std::map<std::string, std::string> m_states;
 		std::vector<Blob> m_blobs;
 		/** Stage name ("vertex" / "fragment" / "geometry") -> the stage's whole text, with the
 		 * placeholder where the variant's #define lines go. Empty for a package written before

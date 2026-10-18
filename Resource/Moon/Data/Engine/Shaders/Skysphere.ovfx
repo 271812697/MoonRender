@@ -26,13 +26,13 @@ material {
     passes : [ OUTLINE_PASS, PICKING_PASS ],
 
     parameters : [
-        { type : float4,    name : u_Diffuse },
-        { type : sampler2D, name : u_DiffuseMap },
-        { type : float2,    name : u_TextureTiling },
-        { type : float2,    name : u_TextureOffset },
+        { type : float4,    name : u_Diffuse, label : "Diffuse Color", group : "Base", color : true },
+        { type : sampler2D, name : u_DiffuseMap, label : "Diffuse Map", group : "Maps" },
+        { type : float2,    name : u_TextureTiling, label : "Tiling", group : "UV" },
+        { type : float2,    name : u_TextureOffset, label : "Offset", group : "UV" },
         // Each extra pass reads only its own colour; the other one is dropped by the driver.
-        { type : float4,    name : _PickingColor },
-        { type : float4,    name : _OutlineColor }
+        { type : float4,    name : _PickingColor, ui : false },
+        { type : float4,    name : _OutlineColor, ui : false }
     ]
 }
 

@@ -17,11 +17,12 @@ material {
     passes   : [ SHADOW_PASS ],
 
     parameters : [
-        { type : sampler2D, name : u_DiffuseMap },
-        { type : float4,    name : u_Diffuse },
-        { type : float2,    name : u_TextureTiling },
-        { type : float2,    name : u_TextureOffset },
-        { type : float,     name : u_AlphaClippingThreshold }
+        { type : sampler2D, name : u_DiffuseMap, label : "Diffuse Map", group : "Maps" },
+        { type : float4,    name : u_Diffuse, label : "Diffuse Color", group : "Base", color : true },
+        { type : float2,    name : u_TextureTiling, label : "Tiling", group : "UV" },
+        { type : float2,    name : u_TextureOffset, label : "Offset", group : "UV" },
+        { type : float,     name : u_AlphaClippingThreshold,
+          label : "Alpha Clipping", group : "Base", min : 0.0, max : 1.0, step : 0.001 }
     ]
 }
 

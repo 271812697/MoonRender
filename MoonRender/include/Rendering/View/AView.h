@@ -4,7 +4,9 @@
 #include <Rendering/Entities/Camera.h>
 #include <Rendering/Core/CompositeRenderer.h>
 #include <Rendering/HAL/Framebuffer.h>
+#include <cstdint>
 #include <functional>
+#include <vector>
 #include <Rendering/View/InputState.h>
 namespace Rendering::Context {
 	class Driver;
@@ -53,6 +55,13 @@ namespace Editor {
 			 * its own framebuffer (textures are shared between the two contexts, framebuffers are
 			 * not). 0 when the view has not rendered yet. */
 			uint32_t GetFrameTextureID();
+			/** Reads the last frame back into p_pixels as RGBA8, top row first.
+			 *
+			 * Needs the module's context current (the frame lives on it). The window layer uses
+			 * this for the small images a material browser shows; it is a synchronous readback,
+			 * so callers do it once per change rather than once per frame. Returns false when
+			 * the view has not rendered yet. */
+			bool ReadFrame(std::vector<uint8_t>& p_pixels, int& p_width, int& p_height);
 			virtual void DrawFrame();
 			virtual ::Rendering::Entities::Camera* GetCamera() = 0;
 			virtual ::Core::SceneSystem::Scene* GetScene() = 0;

@@ -1,5 +1,6 @@
 #include "MaterialEditorPanel.h"
 #include "MaterialCodeEditor.h"
+#include "MaterialDesigner.h"
 #include "MaterialPreviewWidget.h"
 
 #include <algorithm>
@@ -10,6 +11,7 @@
 #include <string>
 #include <vector>
 
+#include <QButtonGroup>
 #include <QComboBox>
 #include <QFrame>
 #include <QHBoxLayout>
@@ -19,6 +21,7 @@
 #include <QScrollBar>
 #include <QShortcut>
 #include <QSplitter>
+#include <QStackedWidget>
 #include <QTextCharFormat>
 #include <QTextCursor>
 #include <QToolButton>
@@ -103,9 +106,10 @@ public:
 
 	void BuildUi()
 	{
-		// Side by side needs the width: below this the two halves stop being useful, so the
-		// dock asks for it instead of squeezing and eliding everything.
-		m_owner->setMinimumWidth(480);
+		// Side by side needs the width: below this the halves stop being useful, so the dock asks
+		// for it instead of squeezing and eliding everything. The Material page adds its browser
+		// column next to the form, so it asks for a little more than the source page alone.
+		m_owner->setMinimumWidth(600);
 
 		// The dock's own title bar, like the other panels of the workspace.
 		auto* titleBar = new DockWidgetTitleBar(m_owner);
@@ -124,6 +128,40 @@ public:
 		auto* layout = new QVBoxLayout(content);
 		layout->setContentsMargins(0, 0, 0, 0);
 		layout->setSpacing(0);
+
+		// --- the two pages: the shader source, and a material designed from it -------------
+		// The preview is shared by both, so the switch only chooses what sits next to it.
+		auto* modes = new QWidget(content);
+		modes->setObjectName("MaterialModeBar");
+		modes->setAttribute(Qt::WA_StyledBackground, true);
+		auto* modesLayout = new QHBoxLayout(modes);
+		modesLayout->setContentsMargins(6, 3, 6, 3);
+		modesLayout->setSpacing(2);
+
+		m_modeShader = new QToolButton(modes);
+		m_modeShader->setObjectName("MaterialModeButton");
+		m_modeShader->setText(QStringLiteral("Shader"));
+		m_modeShader->setCheckable(true);
+		m_modeShader->setChecked(true);
+		m_modeShader->setCursor(Qt::PointingHandCursor);
+		m_modeShader->setToolTip(QStringLiteral("Edit a shader's source and hot reload it into the editor"));
+
+		m_modeMaterial = new QToolButton(modes);
+		m_modeMaterial->setObjectName("MaterialModeButton");
+		m_modeMaterial->setText(QStringLiteral("Material"));
+		m_modeMaterial->setCheckable(true);
+		m_modeMaterial->setCursor(Qt::PointingHandCursor);
+		m_modeMaterial->setToolTip(QStringLiteral("Design a material instance and assign it to the selection"));
+
+		auto* modeGroup = new QButtonGroup(modes);
+		modeGroup->setExclusive(true);
+		modeGroup->addButton(m_modeShader);
+		modeGroup->addButton(m_modeMaterial);
+
+		modesLayout->addWidget(m_modeShader);
+		modesLayout->addWidget(m_modeMaterial);
+		modesLayout->addStretch(1);
+		layout->addWidget(modes);
 
 		// --- the file and the two actions ------------------------------------------------
 		auto* toolbar = new QWidget(content);
@@ -155,7 +193,7 @@ public:
 		toolbarLayout->addWidget(m_filePicker, 1);
 		toolbarLayout->addWidget(m_apply);
 		toolbarLayout->addWidget(m_reload);
-		layout->addWidget(toolbar);
+		// (the toolbar is added to the shader page below, under the mode bar)
 
 		// --- preview on the left, source and output on the right --------------------------
 		// Side by side on purpose: the panel exists to compare what the material looks like
@@ -185,7 +223,7 @@ public:
 
 		// The right hand side: the source with the output under it, so the log stays next to
 		// the code that produced it.
-		auto* rightColumn = new QSplitter(Qt::Vertical, columns);
+		auto* rightColumn = new QSplitter(Qt::Vertical);
 		rightColumn->setHandleWidth(4);
 		rightColumn->setChildrenCollapsible(false);
 
@@ -232,11 +270,25 @@ public:
 		rightColumn->setStretchFactor(1, 0);
 		rightColumn->setSizes({ 420, 130 });
 
+		// The shader page: the file toolbar and, under it, the source over the output.
+		auto* shaderPage = new QWidget(columns);
+		auto* shaderPageLayout = new QVBoxLayout(shaderPage);
+		shaderPageLayout->setContentsMargins(0, 0, 0, 0);
+		shaderPageLayout->setSpacing(0);
+		shaderPageLayout->addWidget(toolbar);
+		shaderPageLayout->addWidget(rightColumn, 1);
+
+		m_rightStack = new QStackedWidget(columns);
+		m_rightStack->addWidget(shaderPage);
+
+		m_designer = new ::MOON::MaterialDesigner(m_rightStack);
+		m_rightStack->addWidget(m_designer);
+
 		columns->addWidget(preview);
-		columns->addWidget(rightColumn);
+		columns->addWidget(m_rightStack);
 		columns->setStretchFactor(0, 1);
 		columns->setStretchFactor(1, 1);
-		columns->setSizes({ 260, 360 });
+		columns->setSizes({ 240, 400 });
 
 		layout->addWidget(columns, 1);
 		content->setLayout(layout);
@@ -268,6 +320,70 @@ public:
 				Log("[Shader] " + p_error.toStdString(), kLogError);
 				SetStatus(kLogError, QStringLiteral("Shader rejected"));
 			});
+
+		// --- the mode switch and the designer --------------------------------------------------
+		QObject::connect(m_modeShader, &QToolButton::clicked, m_owner, [this] { SetMode(false); });
+		QObject::connect(m_modeMaterial, &QToolButton::clicked, m_owner, [this] { SetMode(true); });
+
+		QObject::connect(m_designer, &::MOON::MaterialDesigner::materialShown, m_owner,
+			[this](Core::Resources::Material* p_material) {
+				if (m_rightStack->currentIndex() == 1)
+				{
+					m_preview->ShowMaterial(p_material);
+					if (p_material != nullptr)
+					{
+						// The browser wants a thumbnail of the material it just switched to.
+						m_preview->RequestThumbnail();
+					}
+				}
+			});
+		QObject::connect(m_designer, &::MOON::MaterialDesigner::materialEdited, m_owner, [this] {
+			// The designer changed the instance in place; the preview just has to paint it again,
+			// and the browser's thumbnail follows the edit.
+			if (m_rightStack->currentIndex() == 1)
+			{
+				m_preview->RequestThumbnail();
+			}
+		});
+		QObject::connect(m_designer, &::MOON::MaterialDesigner::statusMessage, m_owner,
+			[this](const QString& p_text, bool p_error) {
+				Log("[Material] " + p_text.toStdString(), p_error ? kLogError : kLogInfo);
+			});
+		QObject::connect(m_preview, &::MOON::MaterialPreviewWidget::thumbnailReady, m_owner,
+			[this](const QImage& p_image) {
+				if (m_designer != nullptr)
+				{
+					m_designer->SetThumbnail(p_image);
+				}
+			});
+	}
+
+	/** Switches what sits next to the preview. The preview widget is the same in both modes: it
+	 * shows the designed instance in Material mode and its own shader material in Shader mode. */
+	void SetMode(bool p_material)
+	{
+		if (m_rightStack == nullptr || m_designer == nullptr || m_preview == nullptr)
+		{
+			return;
+		}
+
+		m_rightStack->setCurrentIndex(p_material ? 1 : 0);
+
+		if (p_material)
+		{
+			// Rebuild the form first: the shader may have been hot reloaded in the other page,
+			// which changes the parameters the form is generated from.
+			m_designer->Refresh();
+			m_preview->ShowMaterial(m_designer->GetMaterial());
+			if (m_designer->GetMaterial() != nullptr)
+			{
+				m_preview->RequestThumbnail();
+			}
+		}
+		else
+		{
+			m_preview->ShowMaterial(nullptr);
+		}
 	}
 
 	/** The panel's own stylesheet: flat strips, a hairline between the areas, the gradient
@@ -278,6 +394,44 @@ public:
 		p_content->setStyleSheet(QString::fromLatin1(R"(
 			QWidget#MaterialEditorContent { background: #323234; }
 			QWidget#MaterialToolbar { background: #323234; border-bottom: 1px solid #1b1b1d; }
+			QWidget#MaterialModeBar { background: #2c2c2f; border-bottom: 1px solid #1b1b1d; }
+			QToolButton#MaterialModeButton {
+				color: #9aa0a6;
+				padding: 5px 16px;
+				border: none;
+				border-bottom: 2px solid transparent;
+				border-radius: 0;
+				background: transparent;
+			}
+			QToolButton#MaterialModeButton:hover { color: #e0e0e0; background: #343438; }
+			QToolButton#MaterialModeButton:checked { color: #e8e8e8; border-bottom: 2px solid #268bd2; }
+			QWidget#MaterialDesignerBar { background: #323234; border-bottom: 1px solid #1b1b1d; }
+			QWidget#MaterialDesigner, QWidget#MaterialDesignerForm { background: #2e2e32; }
+			QScrollArea#MaterialDesignerScroll { background: #2e2e32; border: none; }
+			QLabel#MaterialDesignerStatus {
+				color: #7d8288;
+				font-size: 11px;
+				padding: 3px 8px;
+				background: #2c2c2f;
+				border-top: 1px solid #1b1b1d;
+			}
+			QLabel#MaterialDesignerHint { color: #8a8f95; font-size: 12px; background: transparent; }
+			QLabel#MaterialTextureThumb { background: #2c2c2c; border: 1px solid #3a3a3e; border-radius: 3px; }
+			QListWidget#MaterialBrowser {
+				background: #2a2a2d;
+				border: none;
+				border-right: 1px solid #1b1b1d;
+				color: #c8ccd0;
+				outline: none;
+				padding: 2px;
+			}
+			QListWidget#MaterialBrowser::item { padding: 5px 8px; border-radius: 2px; }
+			QListWidget#MaterialBrowser::item:hover { background: #333338; }
+			QListWidget#MaterialBrowser::item:selected { background: #144c72; color: #e8e8e8; }
+			QLineEdit#NumberWidget { background: transparent; border: 1px solid transparent; color: #c8ccd0; }
+			QLineEdit#NumberWidget:hover,
+			QLineEdit#NumberWidget:focus { background: #47474b; border: 1px solid #268bd2; }
+			QLineEdit { color: #c8ccd0; }
 			QFrame#MaterialSectionHeader {
 				background: #3a3a3d;
 				border-top: 1px solid #1b1b1d;
@@ -518,12 +672,18 @@ public:
 	 * module's context current). */
 	void OnFirstShow()
 	{
-		if (m_ready)
+		if (!m_ready)
 		{
-			return;
+			m_ready = true;
+			Preview();
 		}
-		m_ready = true;
-		Preview();
+
+		// The designer loads its material when it is first shown, which compiles that material's
+		// shader: on the start page there is no context yet, so every show is a retry.
+		if (m_rightStack != nullptr && m_rightStack->currentIndex() == 1 && m_designer != nullptr)
+		{
+			m_designer->Refresh();
+		}
 	}
 
 	void SetStatus(const QColor& p_color, const QString& p_tooltip)
@@ -556,6 +716,10 @@ public:
 	bool m_ready = false;
 
 	QFrame* m_status = nullptr;
+	QToolButton* m_modeShader = nullptr;
+	QToolButton* m_modeMaterial = nullptr;
+	QStackedWidget* m_rightStack = nullptr;
+	::MOON::MaterialDesigner* m_designer = nullptr;
 	QComboBox* m_filePicker = nullptr;
 	QToolButton* m_apply = nullptr;
 	QToolButton* m_reload = nullptr;

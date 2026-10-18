@@ -1,4 +1,5 @@
 #include <tracy/Tracy.hpp>
+#include <algorithm>
 #include <Core/Rendering/FramebufferUtil.h>
 #include <Rendering/View/AView.h>
 #include <Rendering/HAL/Profiling.h>
@@ -188,6 +189,40 @@ uint32_t Editor::Panels::AView::GetFrameTextureID()
 	auto color = m_presentTarget.GetAttachment<::Rendering::HAL::Texture>(
 		::Rendering::Settings::EFramebufferAttachment::COLOR);
 	return color.has_value() ? static_cast<uint32_t>(color.value().GetID()) : 0u;
+}
+
+bool Editor::Panels::AView::ReadFrame(std::vector<uint8_t>& p_pixels, int& p_width, int& p_height)
+{
+	if (m_presentTarget.GetID() == 0)
+	{
+		return false;
+	}
+
+	const auto [width, height] = m_presentTarget.GetSize();
+	if (width == 0 || height == 0)
+	{
+		return false;
+	}
+
+	p_width = static_cast<int>(width);
+	p_height = static_cast<int>(height);
+	p_pixels.resize(static_cast<size_t>(p_width) * p_height * 4);
+
+	// ReadPixels binds the target for the read and unbinds it again.
+	m_presentTarget.ReadPixels(0, 0, width, height,
+		::Rendering::Settings::EPixelDataFormat::RGBA,
+		::Rendering::Settings::EPixelDataType::UNSIGNED_BYTE,
+		p_pixels.data());
+
+	// glReadPixels hands back the bottom row first; images go the other way.
+	for (int y = 0; y < p_height / 2; ++y)
+	{
+		auto* top = p_pixels.data() + static_cast<size_t>(y) * p_width * 4;
+		auto* bottom = p_pixels.data() + static_cast<size_t>(p_height - 1 - y) * p_width * 4;
+		std::swap_ranges(top, top + static_cast<size_t>(p_width) * 4, bottom);
+	}
+
+	return true;
 }
 
 void Editor::Panels::AView::DrawFrame()

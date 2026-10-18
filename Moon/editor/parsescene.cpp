@@ -158,11 +158,12 @@ namespace MOON {
 					tempMat = new Core::Resources::Material();
 					GetService(Core::ResourceManagement::MaterialManager).RegisterResource(sceneName, tempMat);
 
-					tempMat->SetBackfaceCulling(false);;
+					tempMat->SetShader(Core::Global::ServiceLocator::Get<Editor::Core::Context>().shaderManager[":Shaders\\Standard.ovfx"]);
+					// The shader's material block is the default state now, so the instance's
+					// overrides have to come after it.
+					tempMat->SetBackfaceCulling(false);
 					tempMat->SetCastShadows(false);
 					tempMat->SetReceiveShadows(false);
-
-					tempMat->SetShader(Core::Global::ServiceLocator::Get<Editor::Core::Context>().shaderManager[":Shaders\\Standard.ovfx"]);
 					// Enable the clip plane discard in Standard.ovfx.
 					tempMat->AddFeature("CLIP_PLANE");
 					// IBL: bind the skybox prefilter cube, the same environment
@@ -762,12 +763,13 @@ namespace MOON {
 
 				Core::Resources::Material* tempMat = new Core::Resources::Material();
 				Core::Global::ServiceLocator::Get<Core::ResourceManagement::MaterialManager>().RegisterResource(materilaMap[i], tempMat);
-				tempMat->SetBackfaceCulling(false);;
-				tempMat->SetCastShadows(false);
-				tempMat->SetReceiveShadows(false);
 				tempMat->AddFeature("NORMAL_MAPPING");
 				tempMat->AddFeature("CLIP_PLANE");
 				tempMat->SetShader(Core::Global::ServiceLocator::Get<Editor::Core::Context>().shaderManager[":Shaders\\Standard.ovfx"]);
+				// Overrides after the shader: SetShader now takes the state from the material block.
+				tempMat->SetBackfaceCulling(false);
+				tempMat->SetCastShadows(false);
+				tempMat->SetReceiveShadows(false);
 				tempMat->SetProperty("u_Albedo", Maths::FVector4{ (float)pbr.baseColorFactor[0], (float)pbr.baseColorFactor[1], (float)pbr.baseColorFactor[2], (float)pbr.baseColorFactor[3] });
 				// Albedo Texture
 				if (pbr.baseColorTexture.index > -1) {

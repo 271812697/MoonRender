@@ -23,11 +23,14 @@ material {
     passes : [ OUTLINE_PASS, PICKING_PASS ],
 
     parameters : [
-        { type : float3, name : u_SunPosition },
-        { type : float,  name : u_SunIntensity },
-        { type : float4, name : _PickingColor },
-        { type : float4, name : _OutlineColor },
-        { type : float,  name : u_MiePreferredScatteringDirection }
+        { type : float3, name : u_SunPosition,
+          label : "Sun Position", group : "Sun" },
+        { type : float,  name : u_SunIntensity,
+          label : "Sun Intensity", group : "Sun", min : 0.0, max : 100.0, step : 0.1 },
+        { type : float,  name : u_MiePreferredScatteringDirection,
+          label : "Mie Direction", group : "Scattering", min : -1.0, max : 1.0, step : 0.005 },
+        { type : float4, name : _PickingColor, ui : false },
+        { type : float4, name : _OutlineColor, ui : false }
     ]
 }
 

@@ -1,5 +1,11 @@
-﻿#include <format>
+﻿#include <algorithm>
+#include <array>
+#include <cctype>
+#include <cstdlib>
+#include <format>
 #include <ranges>
+#include <string_view>
+#include <vector>
 #include <tracy/Tracy.hpp>
 #include <Rendering/Data/Material.h>
 #include <Rendering/HAL/UniformBuffer.h>
@@ -53,6 +59,173 @@ namespace
 		return std::monostate{};
 	}
 
+	/** The text of a GLSL initialiser without the whitespace around it. */
+	std::string_view Trimmed(std::string_view p_text)
+	{
+		while (!p_text.empty() && std::isspace(static_cast<unsigned char>(p_text.front())))
+		{
+			p_text.remove_prefix(1);
+		}
+		while (!p_text.empty() && std::isspace(static_cast<unsigned char>(p_text.back())))
+		{
+			p_text.remove_suffix(1);
+		}
+		return p_text;
+	}
+
+	bool ParseFloat(std::string_view p_text, float& p_value)
+	{
+		const std::string text(p_text);
+		char* end = nullptr;
+		p_value = std::strtof(text.c_str(), &end);
+		return !text.empty() && end == text.c_str() + text.size();
+	}
+
+	/** The values of a GLSL constructor call: "vec4(1.0)" yields one value, "vec3(1.0, 0.5, 0)"
+	 * three. The caller decides whether one value broadcasts (the language says it does). */
+	bool ParseInitializerValues(std::string_view p_text, std::vector<float>& p_values)
+	{
+		const size_t open = p_text.find('(');
+		const size_t close = p_text.rfind(')');
+		if (open == std::string_view::npos || close == std::string_view::npos || close <= open)
+		{
+			return false;
+		}
+
+		std::string_view values = p_text.substr(open + 1, close - open - 1);
+		while (!values.empty())
+		{
+			const size_t comma = values.find(',');
+			const std::string_view token = Trimmed(values.substr(0, comma));
+
+			float value = 0.0f;
+			if (!ParseFloat(token, value))
+			{
+				return false;
+			}
+			p_values.push_back(value);
+
+			if (comma == std::string_view::npos)
+			{
+				break;
+			}
+			values.remove_prefix(comma + 1);
+		}
+
+		return !p_values.empty();
+	}
+
+	template<size_t N>
+	std::array<float, N> InitializerComponents(std::string_view p_text)
+	{
+		std::array<float, N> components{};
+
+		std::vector<float> values;
+		if (!ParseInitializerValues(p_text, values) || (values.size() != 1 && values.size() != N))
+		{
+			return components;
+		}
+
+		for (size_t i = 0; i < N; ++i)
+		{
+			components[i] = values[values.size() == 1 ? 0 : i];
+		}
+		return components;
+	}
+
+	/** Fills a row-major matrix from a GLSL constructor. "mat4(1.0)" is the diagonal matrix, and
+	 * a full constructor takes its arguments column by column. */
+	template<size_t N>
+	void FillMatrix(float* p_data, std::string_view p_text)
+	{
+		std::fill(p_data, p_data + N * N, 0.0f);
+
+		std::vector<float> values;
+		if (!ParseInitializerValues(p_text, values))
+		{
+			return;
+		}
+
+		if (values.size() == 1)
+		{
+			for (size_t i = 0; i < N; ++i)
+			{
+				p_data[i * N + i] = values[0];
+			}
+		}
+		else if (values.size() == N * N)
+		{
+			for (size_t i = 0; i < N * N; ++i)
+			{
+				p_data[(i % N) * N + i / N] = values[i];
+			}
+		}
+	}
+
+	/** The value a parameter starts with, from the initialiser the material declared.
+	 *
+	 * What the property model cannot hold (bvec/ivec/uvec/uint/mat2) is skipped, exactly as the
+	 * driver's reflection skips it: a property no upload path understands would only turn up in
+	 * the editor as a widget that does nothing. */
+	Rendering::Data::MaterialPropertyType ParameterDefaultValue(
+		const Rendering::Resources::Shader::Parameter& p_parameter)
+	{
+		using namespace Maths;
+		using namespace Rendering;
+
+		if (p_parameter.isSampler)
+		{
+			return static_cast<Resources::Texture*>(nullptr);
+		}
+
+		const std::string_view type = p_parameter.type;
+		const std::string_view initializer = Trimmed(p_parameter.defaultValue);
+
+		if (type == "bool")
+		{
+			return initializer == "true";
+		}
+		if (type == "int")
+		{
+			return static_cast<int>(std::strtol(std::string(initializer).c_str(), nullptr, 10));
+		}
+		if (type == "float")
+		{
+			float value = 0.0f;
+			ParseFloat(initializer, value);
+			return value;
+		}
+		if (type == "vec2")
+		{
+			const auto components = InitializerComponents<2>(initializer);
+			return FVector2{ components[0], components[1] };
+		}
+		if (type == "vec3")
+		{
+			const auto components = InitializerComponents<3>(initializer);
+			return FVector3{ components[0], components[1], components[2] };
+		}
+		if (type == "vec4")
+		{
+			const auto components = InitializerComponents<4>(initializer);
+			return FVector4{ components[0], components[1], components[2], components[3] };
+		}
+		if (type == "mat3")
+		{
+			FMatrix3 matrix;
+			FillMatrix<3>(matrix.data, initializer);
+			return matrix;
+		}
+		if (type == "mat4")
+		{
+			FMatrix4 matrix;
+			FillMatrix<4>(matrix.data, initializer);
+			return matrix;
+		}
+
+		return std::monostate{};
+	}
+
 	void BindTexture(
 		Rendering::HAL::ShaderProgram& p_shader,
 		const std::string& p_uniformName,
@@ -78,6 +251,11 @@ void Rendering::Data::Material::SetShader(Rendering::Resources::Shader* p_shader
 {
 	m_shader = p_shader;
 
+	// Rebinding to a shader re-creates the instance's state from the definition: the package's
+	// material block is the authority for blending / culling / depth writing, and whatever the
+	// call site (or a .ovmat's settings) sets afterwards is the override.
+	ResetStateToShader();
+
 	if (m_shader)
 	{
 		m_properties.clear();
@@ -87,6 +265,25 @@ void Rendering::Data::Material::SetShader(Rendering::Resources::Shader* p_shader
 	{
 		m_properties.clear();
 		InvalidatePropertySignature();
+	}
+}
+
+void Rendering::Data::Material::ResetStateToShader()
+{
+	// Engine defaults first; the material block then says what this material is.
+	m_blendable = false;
+	m_backfaceCulling = true;
+	m_frontfaceCulling = false;
+	m_depthWriting = true;
+
+	if (m_shader != nullptr && m_shader->HasState())
+	{
+		const Rendering::Resources::Shader::State& state = m_shader->GetState();
+
+		if (state.blendable.has_value()) { m_blendable = state.blendable.value(); }
+		if (state.backfaceCulling.has_value()) { m_backfaceCulling = state.backfaceCulling.value(); }
+		if (state.frontfaceCulling.has_value()) { m_frontfaceCulling = state.frontfaceCulling.value(); }
+		if (state.depthWriting.has_value()) { m_depthWriting = state.depthWriting.value(); }
 	}
 }
 
@@ -200,6 +397,43 @@ void Rendering::Data::Material::UploadProperties(bool uploadStableProperties, bo
 void Rendering::Data::Material::UpdateProperties()
 {
 	InvalidatePropertySignature();
+
+	// A shader that came out of a package knows its parameters: name, GLSL type, texture slot or
+	// not, array size, and the initialiser the material declared. Building the property set from
+	// that list keeps it independent of which uniforms a driver happened to keep active in a
+	// given variant - and it is the half of the package's reflection the runtime was not reading
+	// yet (see Shader::HasParameterTable).
+	if (m_shader != nullptr && m_shader->HasParameterTable())
+	{
+		for (const Rendering::Resources::Shader::Parameter& parameter : m_shader->GetParameters())
+		{
+			const MaterialPropertyType value = ParameterDefaultValue(parameter);
+			if (std::holds_alternative<std::monostate>(value))
+			{
+				continue;
+			}
+
+			if (parameter.count > 0)
+			{
+				// An array parameter is addressed one element at a time by the callers
+				// ("samples[17]"): the elements are the properties.
+				for (uint32_t i = 0; i < parameter.count; ++i)
+				{
+					m_properties.try_emplace(std::format("{}[{}]", parameter.name, i),
+						MaterialProperty{ .value = value, .singleUse = false });
+				}
+			}
+			else
+			{
+				m_properties.try_emplace(parameter.name,
+					MaterialProperty{ .value = value, .singleUse = false });
+			}
+		}
+		return;
+	}
+
+	// A shader built from source (the present pass, the blits) has no package behind it: the
+	// driver's list is the only description of its uniforms.
 	// Collect all uniform names currently used by the shader
 	std::unordered_set<std::string> usedUniforms;
 	auto variants_view = m_shader->GetVariants()

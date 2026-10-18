@@ -1,8 +1,11 @@
 #pragma once
+#include <QImage>
 #include <QOpenGLWidget>
 
+#include <cstdint>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include <Rendering/View/FramePaster.h>
 
@@ -44,10 +47,23 @@ namespace MOON
 		/** The last compile error, empty when the shader was accepted. */
 		const std::string& GetError() const;
 
+		/** Shows p_material instead of the material built from the panel's package - what the
+		 * material designer edits. Passing nullptr goes back to the package material. The
+		 * pointer is not owned; it has to outlive the widget's next paint. */
+		void ShowMaterial(::Core::Resources::Material* p_material);
+
+		/** Asks for one frame to be read back and emitted as thumbnailReady, on the next paint.
+		 * The browser calls this after a selection and after edits; the readback is throttled
+		 * inside the paint, so a slider drag does not read the frame on every event. */
+		void RequestThumbnail();
+
 	signals:
 		/** Emitted after a paint in which the shader failed to build, so the panel can log the
 		 * driver's message (it carries the .ovfx line numbers). */
 		void shaderFailed(const QString& p_error);
+
+		/** The last painted frame, downscaled for the material browser. */
+		void thumbnailReady(const QImage& p_image);
 
 	protected:
 		void paintGL() override;
@@ -77,10 +93,18 @@ namespace MOON
 		/** When the last frame was drawn, for the view's delta time. */
 		double m_lastPaintMs = 0.0;
 
+		/** The thumbnail requested for the next paint, when it was asked for, and when one was
+		 * last read back (a drag asks on every event; only one read per burst is needed). */
+		bool m_thumbnailRequested = false;
+		double m_lastThumbnailMs = 0.0;
+		std::vector<uint8_t> m_thumbnailPixels;
+
 		Editor::Panels::PreviewView* m_view = nullptr;
 		/** The material the preview sphere carries. The scene holds a pointer to it, so it
 		 * outlives the view (both are released together, view first). */
 		std::unique_ptr<::Core::Resources::Material> m_material;
+		/** The designer's material, when one is being shown; null means m_material. */
+		::Core::Resources::Material* m_shownMaterial = nullptr;
 		Rendering::View::FramePaster m_paster;
 	};
 }

@@ -33,61 +33,93 @@ material {
     // side calls SetProperty with them) and the initializer kept as `default`. A uniform the
     // old file guarded with `#if defined(FEATURE)` is declared for every variant: the one a
     // variant does not read is dropped by the driver.
+    //
+    // label / group / min / max / step / color / ui are the material designer's schema (see
+    // docs/ShaderPipeline.md): the panel builds its form from them, so a designer never has to
+    // guess a slider range or which vec4 is a colour. The engine-owned uniforms are marked
+    // `ui : false` and do not show up there at all.
     parameters : [
-        { type : sampler2D, name : u_AlbedoMap },
-        { type : float4,    name : u_Albedo, default : vec4(1.0) },
+        // --- base ---------------------------------------------------------------------------
+        { type : float4, name : u_Albedo, default : vec4(1.0),
+          label : "Base Color", group : "Base", color : true },
+        { type : float,  name : u_Roughness, default : 1.0,
+          label : "Roughness", group : "Base", min : 0.0, max : 1.0, step : 0.005 },
+        { type : float,  name : u_Metallic, default : 1.0,
+          label : "Metallic", group : "Base", min : 0.0, max : 1.0, step : 0.005 },
+        { type : float,  name : u_Specular, default : 1.0,
+          label : "Specular", group : "Base", min : 0.0, max : 1.0, step : 0.005 },
+        { type : float,  name : u_Glossiness, default : 1.0,
+          label : "Glossiness", group : "Base", min : 0.0, max : 1.0, step : 0.005 },
+        { type : float,  name : u_RefractionIndex, default : 1.5,
+          label : "Refraction Index", group : "Base", min : 1.0, max : 3.0, step : 0.01 },
+        { type : float,  name : u_Transmission, default : 0.0,
+          label : "Transmission", group : "Base", min : 0.0, max : 1.0, step : 0.005 },
+        { type : float,  name : u_AlphaClippingThreshold, default : 0.0,
+          label : "Alpha Clipping", group : "Base", min : 0.0, max : 1.0, step : 0.001 },
+        { type : bool,   name : u_AlphaDithering, default : false,
+          label : "Alpha Dithering", group : "Base" },
+
+        // --- emission -----------------------------------------------------------------------
+        { type : float3, name : u_EmissiveColor, default : vec3(1.0, 1.0, 1.0),
+          label : "Emissive Color", group : "Emission" },
+        { type : float,  name : u_EmissiveIntensity, default : 0.0,
+          label : "Emissive Intensity", group : "Emission", min : 0.0, max : 10.0, step : 0.01 },
+
+        // --- parallax -----------------------------------------------------------------------
+        { type : float, name : u_HeightScale, default : 0.05,
+          label : "Height Scale", group : "Parallax", min : 0.0, max : 0.2, step : 0.001 },
+        { type : bool,  name : u_ParallaxClipEdges, default : false,
+          label : "Clip Edges", group : "Parallax" },
+        { type : int,   name : u_MinLayers, default : 8,
+          label : "Min Layers", group : "Parallax", min : 1, max : 64, step : 1 },
+        { type : int,   name : u_MaxLayers, default : 64,
+          label : "Max Layers", group : "Parallax", min : 1, max : 128, step : 1 },
+
+        // --- distance fade ------------------------------------------------------------------
+        { type : float, name : u_DistanceFadeStart, default : 100.0,
+          label : "Fade Start", group : "Distance Fade", min : 0.0, max : 500.0, step : 0.5 },
+        { type : float, name : u_DistanceFadeLength, default : 10.0,
+          label : "Fade Length", group : "Distance Fade", min : 0.0, max : 200.0, step : 0.5 },
+
+        // --- uv transform -------------------------------------------------------------------
+        { type : float2, name : u_TextureTiling, default : vec2(1.0, 1.0),
+          label : "Tiling", group : "UV" },
+        { type : float2, name : u_TextureOffset, default : vec2(0.0, 0.0),
+          label : "Offset", group : "UV" },
+
+        // --- post ---------------------------------------------------------------------------
+        { type : bool, name : u_BuiltInToneMapping, default : false,
+          label : "Tone Mapping", group : "Built-in" },
+        { type : bool, name : u_BuiltInGammaCorrection, default : false,
+          label : "Gamma Correction", group : "Built-in" },
+
+        // --- maps ---------------------------------------------------------------------------
+        { type : sampler2D, name : u_AlbedoMap, label : "Albedo Map", group : "Maps" },
         // Declared (and unread - the ambient occlusion comes from occlusionTex) to keep the
         // property name alive for whoever still sets it.
-        { type : sampler2D, name : u_AmbientOcclusionMap },
-        { type : sampler2D, name : u_MaskMap },
-
-        { type : sampler2D, name : u_EmissiveMap },
-        { type : float3,    name : u_EmissiveColor, default : vec3(1.0, 1.0, 1.0) },
-        { type : float,     name : u_EmissiveIntensity, default : 0.0 },
-
+        { type : sampler2D, name : u_AmbientOcclusionMap, label : "AO Map", group : "Maps" },
+        { type : sampler2D, name : u_MaskMap, label : "Mask Map", group : "Maps" },
+        { type : sampler2D, name : u_EmissiveMap, label : "Emissive Map", group : "Maps" },
         // SPECULAR_WORKFLOW reads the specular/glossiness pair, every other variant the
         // metallic/roughness one. Both sets are here, the unused one is dropped.
-        { type : sampler2D, name : u_SpecularMap },
-        { type : float,     name : u_Specular, default : 1.0 },
-        { type : sampler2D, name : u_GlossinessMap },
-        { type : float,     name : u_Glossiness, default : 1.0 },
-        { type : sampler2D, name : u_MetallicMap },
-        { type : float,     name : u_Metallic, default : 1.0 },
-        { type : sampler2D, name : u_RoughnessMap },
-        { type : sampler2D, name : u_RoughnessMetallicMap },
-        { type : float,     name : u_Roughness, default : 1.0 },
+        { type : sampler2D, name : u_SpecularMap, label : "Specular Map", group : "Maps" },
+        { type : sampler2D, name : u_GlossinessMap, label : "Glossiness Map", group : "Maps" },
+        { type : sampler2D, name : u_MetallicMap, label : "Metallic Map", group : "Maps" },
+        { type : sampler2D, name : u_RoughnessMap, label : "Roughness Map", group : "Maps" },
+        { type : sampler2D, name : u_RoughnessMetallicMap, label : "Roughness/Metallic Map", group : "Maps" },
+        { type : sampler2D, name : u_NormalMap, label : "Normal Map", group : "Maps" },
+        { type : sampler2D, name : u_HeightMap, label : "Height Map", group : "Maps" },
 
-        { type : float, name : u_RefractionIndex, default : 1.5 }, // 1.0 = air, 1.33 = water, 1.5 = glass, etc.
-        { type : float, name : u_Transmission, default : 0.0 },    // 0.0 = opaque, 1.0 = fully transmissive
-
-        { type : sampler2D, name : u_NormalMap },
-
-        { type : sampler2D, name : u_HeightMap },
-        { type : float,     name : u_HeightScale, default : 0.05 },
-        { type : bool,      name : u_ParallaxClipEdges, default : false },
-        { type : int,       name : u_MinLayers, default : 8 },
-        { type : int,       name : u_MaxLayers, default : 64 },
-
+        // --- advanced -----------------------------------------------------------------------
         // SHADOW_PASS only: that variant drops the parallax path (see the #undef below).
-        { type : float, name : u_ShadowClippingThreshold, default : 0.5 },
+        { type : float, name : u_ShadowClippingThreshold, default : 0.5,
+          label : "Shadow Clipping", group : "Advanced", min : 0.0, max : 1.0, step : 0.001 },
 
-        { type : float, name : u_DistanceFadeStart, default : 100.0 },
-        { type : float, name : u_DistanceFadeLength, default : 10.0 },
-
-        { type : float2, name : u_TextureTiling, default : vec2(1.0, 1.0) },
-        { type : float2, name : u_TextureOffset, default : vec2(0.0, 0.0) },
-
-        { type : float, name : u_AlphaClippingThreshold, default : 0.0 },
-        { type : bool,  name : u_AlphaDithering, default : false },
-
-        // Useful when no post-processing is applied.
-        { type : bool, name : u_BuiltInToneMapping, default : false },
-        { type : bool, name : u_BuiltInGammaCorrection, default : false },
-
-        { type : sampler2D,   name : _ShadowMap },
-        { type : mat4,        name : _LightSpaceMatrix },
-        { type : samplerCube, name : _EnvironmentMap },
-        { type : sampler2D,   name : occlusionTex }
+        // The renderer owns these: it sets them per frame and they are not material design.
+        { type : sampler2D,   name : _ShadowMap, ui : false },
+        { type : mat4,        name : _LightSpaceMatrix, ui : false },
+        { type : samplerCube, name : _EnvironmentMap, ui : false },
+        { type : sampler2D,   name : occlusionTex, ui : false }
     ]
 }
 

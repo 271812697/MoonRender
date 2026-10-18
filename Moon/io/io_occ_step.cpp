@@ -164,10 +164,11 @@ namespace MOON {
 				auto tempMat = new Core::Resources::Material();
 
 
-				tempMat->SetBackfaceCulling(false);;
+				tempMat->SetShader(GetShaderService[":Shaders\\Standard.ovfx"]);
+				// Overrides after SetShader: the state now starts from the material block.
+				tempMat->SetBackfaceCulling(false);
 				tempMat->SetCastShadows(false);
 				tempMat->SetReceiveShadows(false);
-				tempMat->SetShader(GetShaderService[":Shaders\\Standard.ovfx"]);
 				tempMat->AddFeature("VERTEX_POS_NORMAL");
 				tempMat->SetProperty("_EnvironmentMap", GetSceneView.GetRenderer().GetPrefilterCube());					tempMat->SetProperty("u_Albedo", Maths::FVector4{ 1.0, 1.0, 1.0, 1.0 });
 

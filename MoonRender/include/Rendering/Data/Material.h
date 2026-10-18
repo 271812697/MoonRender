@@ -122,6 +122,12 @@ namespace Rendering::Data
 	protected:
 		void InvalidatePropertySignature();
 
+		/** Sets the definition-owned render state (blending, culling, depth writing) from the
+		 * shader's material block, or from the engine's defaults when the shader came from
+		 * source. Called when a material (re)binds to a shader, so the instance starts from the
+		 * definition and the Set* calls that follow are the instance's overrides. */
+		void ResetStateToShader();
+
 		MaterialSignatureSet CalculateSignature(
 			Rendering::HAL::ShaderProgram& p_selectedProgram,
 			Rendering::HAL::Texture* p_emptyTexture2D = nullptr,
