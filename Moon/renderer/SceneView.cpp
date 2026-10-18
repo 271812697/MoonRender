@@ -1,7 +1,8 @@
-﻿#include <Core/ECS/Components/CMaterialRenderer.h>
+#include <Core/ECS/Components/CMaterialRenderer.h>
 #include <Core/ECS/Components/CModelRenderer.h>
 #include <Core/SceneSystem/Intersection.h>
 #include "DebugSceneRenderer.h"
+#include "GridRenderPass.h"
 #include "PickingRenderPass.h"
 #include "Core/Global/ServiceLocator.h"
 #include <Core/SceneSystem/SceneManager.h>
@@ -10,14 +11,13 @@
 #include "Settings/DebugSetting.h"
 #include "renderer/GizmoRenderPass.h"
 #include "Interactive/Widgets/ClipPlane.h"
+#include "Interactive/Screen/ScreenOverlayRegistry.h"
 #include "core/component/CTopoShape.h"
 #include "Interactive/Im3DRenderer.h"
-#include "Interactive/Screen/ScreenOverlayRegistry.h"
 #include "core/log.h"
 #include <iostream>
 #include <algorithm>
 #include <cmath>
-#include <QMouseEvent>
 #include <tracy/Tracy.hpp>
 
 static Maths::FVector3 GetSpherePosition(float a, float b, float radius) {
@@ -76,10 +76,13 @@ namespace
 Editor::Panels::SceneView::SceneView
 (
 	const std::string& p_title)
-	: AViewControllable(p_title),
+	: AViewControllable(p_title, *::Core::Global::ServiceLocator::Get<Editor::Core::Context>().driver),
 	m_sceneManager(::Core::Global::ServiceLocator::Get<Editor::Core::Context>().sceneManager)
 {
 	RegService(Editor::Panels::SceneView, *this);
+	// The module's camera stays out of the mouse while an editor overlay is dragging something:
+	// the editor owns that state, so it installs the query (see CameraController).
+	m_cameraController.SetInputCaptureQuery([] { return MOON::ScreenOverlayRegistry::Instance().IsCapturing(); });
 	m_renderer = std::make_unique<Editor::Rendering::DebugSceneRenderer>(*::Core::Global::ServiceLocator::Get<Editor::Core::Context>().driver);
 	m_camera.SetFar(5000.0f);
 	m_fallbackMaterial.SetShader(::Core::Global::ServiceLocator::Get<Editor::Core::Context>().shaderManager[":Shaders\\Unlit.ovfx"]);
@@ -155,6 +158,17 @@ void Editor::Panels::SceneView::InitFrame()
 {
 	
 	AViewControllable::InitFrame();
+
+	// The grid: an editor feature, added here since the view base class does not know it.
+	{
+		auto mirrorPlane = m_cameraController.GetMirrorPlane();
+		m_renderer->AddDescriptor<Rendering::GridRenderPass::GridDescriptor>({
+			GetGridColor(),
+			m_camera.GetPosition(),
+			mirrorPlane.Normal,
+			mirrorPlane.Point
+			});
+	}
 
 	Tools::Utils::OptRef<::Core::ECS::Actor> selectedActor;
 
@@ -444,39 +458,32 @@ Editor::Core::EGizmoOperation Editor::Panels::SceneView::GetGizmoOperation() con
 	return m_currentOperation;
 }
 
-void Editor::Panels::SceneView::ReceiveEvent(QEvent* e)
+void Editor::Panels::SceneView::ReceiveEvent(const InputEvent& p_event)
 {
-	if (e == nullptr)
-		return;
-	input.ReceiveEvent(e);
-	const QEvent::Type t = e->type();
-    if (t == QEvent::MouseButtonPress) {
-		QMouseEvent* e2 = static_cast<QMouseEvent*>(e);
-		if(e2->button()== Qt::RightButton)
-		{ 
-			// The camera turns around the point under the cursor. That point is what
-			// the picking target writes next to the id of every pixel it draws, and it
-			// is already in the result the last hover or click pick left behind: there
-			// is no ray through the scene to cast, and nothing to read back here.
-			if (pickingResult.hasWorldPosition)
-			{
-				m_roaterCenter = pickingResult.worldPosition;
-			}
+	input.ReceiveEvent(p_event);
+
+	if (p_event.type == InputEvent::EType::MouseButtonPress && p_event.button == MOUSE_BUTTON_RIGHT)
+	{
+		// The camera turns around the point under the cursor. That point is what
+		// the picking target writes next to the id of every pixel it draws, and it
+		// is already in the result the last hover or click pick left behind: there
+		// is no ray through the scene to cast, and nothing to read back here.
+		if (pickingResult.hasWorldPosition)
+		{
+			m_roaterCenter = pickingResult.worldPosition;
 		}
 	}
-	if (!m_cameraController.IsRightMousePressed()) {
-		if (t == QEvent::KeyPress) {
-			QKeyEvent* e2 = static_cast<QKeyEvent*>(e);
-			Qt::Key key = static_cast<Qt::Key>(e2->key());
-			if (key == Qt::Key_W) {
-				m_currentOperation = Editor::Core::EGizmoOperation::TRANSLATE;
-			}
-			else if (key == Qt::Key_E) {
-				m_currentOperation = Editor::Core::EGizmoOperation::ROTATE;
-			}
-			else if (key == Qt::Key_R) {
-				m_currentOperation = Editor::Core::EGizmoOperation::SCALE;
-			}
+
+	if (!m_cameraController.IsRightMousePressed() && p_event.type == InputEvent::EType::KeyPress)
+	{
+		if (p_event.key == KEYW) {
+			m_currentOperation = Editor::Core::EGizmoOperation::TRANSLATE;
+		}
+		else if (p_event.key == KEYE) {
+			m_currentOperation = Editor::Core::EGizmoOperation::ROTATE;
+		}
+		else if (p_event.key == KEYR) {
+			m_currentOperation = Editor::Core::EGizmoOperation::SCALE;
 		}
 	}
 }
@@ -649,11 +656,7 @@ void Editor::Panels::SceneView::HandleActorPicking()
 	// something actually asks for a pick. Requests are throttled: hovering and
 	// camera motion refresh the target at most every kPickThrottleMs ms, while a
 	// click always requests one exact frame.
-	constexpr qint64 kPickThrottleMs = 33; // ~30 Hz for hover
-	if (!m_pickRequestTimer.isValid())
-	{
-		m_pickRequestTimer.start();
-	}
+	constexpr auto kPickThrottleMs = std::chrono::milliseconds(33); // ~30 Hz for hover
 
 	const bool mouseMoved = mousePos != m_lastPickingMouse;
 	const bool leftPressed = input.IsMouseButtonPressed(MouseButton::MOUSE_BUTTON_LEFT);
@@ -683,15 +686,16 @@ void Editor::Panels::SceneView::HandleActorPicking()
 		m_clickPickX = mouseX;
 		m_clickPickY = mouseY;
 		m_lastPickingMouse = mousePos;
-		m_pickRequestTimer.restart();
+		m_pickRequestTime = std::chrono::steady_clock::now();
 	}
 	else if ((mouseMoved || cameraMoved) && !cameraNavigation)
 	{
-		if (!leftDown && m_pickRequestTimer.elapsed() >= kPickThrottleMs)
+		const auto now = std::chrono::steady_clock::now();
+		if (!leftDown && now - m_pickRequestTime >= kPickThrottleMs)
 		{
 			actorPickingPass.RequestPick(static_cast<uint32_t>(mouseX), static_cast<uint32_t>(mouseY));
 			m_lastPickingMouse = mousePos;
-			m_pickRequestTimer.restart();
+			m_pickRequestTime = std::chrono::steady_clock::now();
 		}
 	}
 

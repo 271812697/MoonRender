@@ -1,7 +1,7 @@
-﻿#include "Interactive/Widgets/DrawSketchHandlerLine.h"
+#include "Interactive/Widgets/DrawSketchHandlerLine.h"
 #include "Interactive/Im3DRenderer.h"
 #include "renderer/SceneView.h"
-#include "Qtimgui/imgui/imgui.h"
+#include <ThirdParty/imgui/imgui/imgui.h>
 #include "Interactive/Interactive/Event.h"
 #include "Interactive/Interactive/ExecuteCommand.h"
 #include "Interactive/Interactive/WidgetCallbackMapper.h"
@@ -9,7 +9,7 @@
 #include "Interactive/Interactive/WidgetEventTranslator.h"
 #include "Interactive/Interactive/RenderWindowInteractor.h"
 #include "Geometry2d.h"
-#include "Qtimgui/implot/implotCustom.h"
+#include <ThirdParty/imgui/implot/implotCustom.h>
 #include <algorithm>
 #include <cmath>
 #include <cstdio>

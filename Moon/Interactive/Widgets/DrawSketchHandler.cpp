@@ -4,7 +4,7 @@
 #include "Sketcher/SketcherObjManager.h"
 #include "Sketcher/SketcherObj.h"
 #include "Interactive/SketchPicking.h"
-#include "Qtimgui/imgui/imgui.h"
+#include <ThirdParty/imgui/imgui/imgui.h>
 #include "renderer/SceneView.h"
 #include "Sketcher/SketcheTool2D.h"
 #include "feature/SketcherFeature.h"

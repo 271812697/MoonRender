@@ -1,9 +1,9 @@
-﻿#include <glad/glad.h>
+#include <glad/glad.h>
 #include "Qtimgui/imguiwidgets/QtImGui.h"
-#include "Qtimgui/imgui/imgui.h"
-#include "Qtimgui/imgui/imgui_internal.h"
-#include "Qtimgui/implot/implotCustom.h"
-#include "Qtimgui/implot/imGuizmo.h"
+#include <ThirdParty/imgui/imgui/imgui.h>
+#include <ThirdParty/imgui/imgui/imgui_internal.h>
+#include <ThirdParty/imgui/implot/implotCustom.h>
+#include <ThirdParty/imgui/implot/imGuizmo.h>
 #include "Im3DRenderer.h"
 #include "Interactive/MathUtil/MathUtil.h"
 #include "Settings/DebugSetting.h"
@@ -52,8 +52,6 @@ namespace MOON
 	static Eigen::Vector4<uint8_t> Color_GB = Eigen::Vector4<uint8_t>(255, 255, 255, 0);
 	static Eigen::Vector4<uint8_t> Color_AR = Eigen::Vector4<uint8_t>(255, 115, 115, 76);
 	static Eigen::Vector4<uint8_t> Color_ARB = Eigen::Vector4<uint8_t>(255, 232, 162, 0);
-	static unsigned int VertexArray;
-	static unsigned int VertexBuffer;
 	constexpr auto kWhite = std::to_array<uint8_t>({ 255, 255, 255, 255 });
 	constexpr auto kBlack = std::to_array<uint8_t, 6 * 4>({ 0 });
 	ImRenderer::ImRenderer()
@@ -84,9 +82,17 @@ namespace MOON
 		static ImRenderer ImRenderer;
 		return ImRenderer;
 	}
+	void ImRenderer::initGizmoGl()
+	{
+		// Vertex array, vertex buffer and the gizmo materials: the gizmo pass draws with them
+		// inside the render module's frame, so they belong to the module's context.
+		prepareGl();
+	}
+
 	void ImRenderer::init()
 	{
-		prepareGl();
+		// ImGui and ImPlot only: they draw after the frame has been pasted, on the viewport's
+		// context, and QtImGui::initialize creates the font texture that drawing uses.
 		registerDebugSettings();
 		// ResetId();
 		sortCalled = false;
@@ -168,20 +174,10 @@ namespace MOON
 		mLitMaterial->SetProperty("u_EmissiveIntensity", 1.0f);
 		mLitMaterial->SetProperty("u_EmissiveColor", Maths::FVector3{ 0.0f,0.0f,0.0f });
 
-		glGenBuffers(1, &VertexBuffer);
-		glGenVertexArrays(1, &VertexArray);
-		glBindVertexArray(VertexArray);
-		glBindBuffer(GL_ARRAY_BUFFER, VertexBuffer);
-		glEnableVertexAttribArray(0);
-		glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, sizeof(VertexFormat), (GLvoid*)offsetof(VertexFormat, positionSize));
-		glEnableVertexAttribArray(1);
-		glVertexAttribPointer(1, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(VertexFormat), (GLvoid*)offsetof(VertexFormat, color));
-		glEnableVertexAttribArray(2);
-		glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, sizeof(VertexFormat), (GLvoid*)offsetof(VertexFormat, normal));
-		glEnableVertexAttribArray(3);
-		glVertexAttribPointer(3, 2, GL_FLOAT, GL_FALSE, sizeof(VertexFormat), (GLvoid*)offsetof(VertexFormat, uv));
-		glBindVertexArray(0);
-		
+		// The vertex array, buffer and attribute layout are the render module's: it owns the
+		// upload and the draw (Rendering::Overlay::Im3DGLRenderer).
+		m_overlayGl.Initialize();
+
 		preStoreMesh();
 	}
 	void ImRenderer::registerDebugSettings()
@@ -3904,24 +3900,7 @@ namespace MOON
 
 	void ImRenderer::drawUnsort()
 	{
-		auto driver = Core::Global::ServiceLocator::Get<Editor::Core::Context>().driver.get();
-		auto p_pso = driver->CreatePipelineState();
-		p_pso.stencilTest = true;
-		p_pso.stencilWriteMask = 0xFF;
-		p_pso.stencilFuncRef = 1;
-		p_pso.stencilFuncMask = 0xFF;
-		p_pso.stencilOpFail = Rendering::Settings::EOperation::REPLACE;
-		p_pso.depthOpFail = Rendering::Settings::EOperation::REPLACE;
-		p_pso.bothOpFail = Rendering::Settings::EOperation::REPLACE;
-		p_pso.colorWriting.mask = 0x00;
-		p_pso.depthWriting = true;
-		p_pso.colorWriting.mask = 0xFF;
-		p_pso.blending = true;
-		p_pso.blendingEquation = Rendering::Settings::EBlendingEquation::FUNC_ADD;
-		p_pso.blendingSrcFactor = Rendering::Settings::EBlendingFactor::SRC_ALPHA;
-		p_pso.depthFunc = Rendering::Settings::EComparaisonAlgorithm::ALWAYS;
-		p_pso.culling = 0;
-		p_pso.depthTest = true;
+		auto* driver = Core::Global::ServiceLocator::Get<Editor::Core::Context>().driver.get();
 
 		drawLists.clear();
 		// draw unsorted primitives first
@@ -3937,11 +3916,9 @@ namespace MOON
 				dl.vertexCount = vertexData[0][i]->size();
 			}
 		}
-		driver->SetPipelineState(p_pso);
-		glEnable(GL_POINT_SPRITE);
-		glEnable(GL_PROGRAM_POINT_SIZE);
-
-		glViewport(0, 0, cameraParam.viewportWidth, cameraParam.viewportHeight);
+		// The overlay's pipeline state, viewport and point-sprite setup are the render module's
+		// (Rendering::Overlay::Im3DGLRenderer); this function keeps building the geometry.
+		m_overlayGl.Begin(*driver, cameraParam.viewportWidth, cameraParam.viewportHeight, true);
 
 		for (int i = 0, n = drawLists.size(); i < n; ++i)
 		{
@@ -3971,23 +3948,10 @@ namespace MOON
 				return;
 			};
 
-			glBindVertexArray(VertexArray);
-			glBindBuffer(GL_ARRAY_BUFFER, VertexBuffer);
-			glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)drawList.vertexCount * sizeof(VertexFormat),
-				(GLvoid*)drawList.vertexData, GL_STREAM_DRAW);
-			//mShader->setActiveVariant(passTag, {});
-			//mShader->bindActiveProgram();
-			//mShader->commitDescriptorSetToActiveProgram();
-			if (drawList.primType == DrawPrimitiveLines) {
-				mat->SetProperty("uViewport", Maths::FVector2{ cameraParam.viewportWidth,cameraParam.viewportHeight });
-
-			}
-			mat->SetProperty("uViewProjMatrix", ToFMatrix4(cameraParam.viewProj));
-			mat->Bind();
-			// Bind() only selects the program; this path bypasses
-			// ABaseRenderer::DrawEntity so the uniforms must be pushed here.
-			mat->UploadProperties(true, true);
-			glDrawArrays(prim, 0, (GLsizei)drawList.vertexCount);
+			const Eigen::Matrix4f viewProjT = cameraParam.viewProj.transpose();
+			m_overlayGl.Draw(*mat, prim, drawList.primType == DrawPrimitiveLines,
+				drawList.vertexData, drawList.vertexCount, sizeof(VertexFormat),
+				viewProjT.data(), cameraParam.viewportWidth, cameraParam.viewportHeight);
 		}
 	}
 
@@ -4057,18 +4021,10 @@ namespace MOON
 				return;
 			};
 
-			glBindVertexArray(VertexArray);
-			glBindBuffer(GL_ARRAY_BUFFER, VertexBuffer);
-			glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)drawList.vertexCount * sizeof(VertexFormat),
-				(GLvoid*)drawList.vertexData, GL_STREAM_DRAW);
-			if (drawList.primType == DrawPrimitiveLines) {
-				mat->SetProperty("uViewport", Maths::FVector2{ cameraParam.viewportWidth,cameraParam.viewportHeight });
-
-			}
-			mat->SetProperty("uViewProjMatrix", ToFMatrix4(cameraParam.viewProj));;
-			mat->Bind();
-			mat->UploadProperties(true, true);
-			glDrawArrays(prim, 0, (GLsizei)drawList.vertexCount);
+			const Eigen::Matrix4f viewProjT = cameraParam.viewProj.transpose();
+			m_overlayGl.Draw(*mat, prim, drawList.primType == DrawPrimitiveLines,
+				drawList.vertexData, drawList.vertexCount, sizeof(VertexFormat),
+				viewProjT.data(), cameraParam.viewportWidth, cameraParam.viewportHeight);
 			mat->Unbind();
 
 		}
@@ -4137,16 +4093,16 @@ namespace MOON
 			mCellMaterial->SetProperty("uViewPortStart", Maths::FVector2(viewCube.screenPos.startX, viewCube.screenPos.startY));
 			mCellMaterial->Bind(&mEmptyTexture2D, &mEmptyTextureCube);
 			mCellMaterial->UploadProperties(true, true, &mEmptyTexture2D, &mEmptyTextureCube);
-			glViewport(viewPortX,viewPortY, viewCube.screenPos.viewportSizeX, viewCube.screenPos.viewportSizeY);
 			viewCube.bind();
-			glDrawArrays(GL_TRIANGLES, 0, (GLsizei)viewCube.numVertex);
+			m_overlayGl.DrawBoundTriangles(viewCube.numVertex,
+				viewPortX, viewPortY, viewCube.screenPos.viewportSizeX, viewCube.screenPos.viewportSizeY);
 			auto& viewAxis = CoordAxis();
 			mCellMaterial->SetProperty("uModelMatrix", ToFMatrix4(viewAxis.model));
 			mCellMaterial->SetProperty("edgeTexture", viewAxis.edgeTexture);
 			mCellMaterial->Bind(&mEmptyTexture2D, &mEmptyTextureCube);
 			mCellMaterial->UploadProperties(true, true, &mEmptyTexture2D, &mEmptyTextureCube);
 			viewAxis.bind();
-			glDrawArrays(GL_TRIANGLES, 0, (GLsizei)viewAxis.numVertex);
+			m_overlayGl.DrawBoundTriangles(viewAxis.numVertex);
 			{
 
 			}
@@ -4154,25 +4110,9 @@ namespace MOON
 	}
 	void ImRenderer::drawMesh()
 	{
-		auto driver = Core::Global::ServiceLocator::Get<Editor::Core::Context>().driver.get();
-		auto p_pso = driver->CreatePipelineState();
-		p_pso.stencilTest = true;
-		p_pso.stencilWriteMask = 0xFF;
-		p_pso.stencilFuncRef = 1;
-		p_pso.stencilFuncMask = 0xFF;
-		p_pso.stencilOpFail = Rendering::Settings::EOperation::REPLACE;
-		p_pso.depthOpFail = Rendering::Settings::EOperation::REPLACE;
-		p_pso.bothOpFail = Rendering::Settings::EOperation::REPLACE;
-		p_pso.colorWriting.mask = 0x00;
-		p_pso.depthWriting = true;
-		p_pso.colorWriting.mask = 0xFF;
-		p_pso.blending = true;
-		p_pso.blendingEquation = Rendering::Settings::EBlendingEquation::FUNC_ADD;
-		p_pso.blendingSrcFactor = Rendering::Settings::EBlendingFactor::SRC_ALPHA;
-		p_pso.culling = 0;
-		p_pso.depthTest = true;
-		p_pso.depthFunc = Rendering::Settings::EComparaisonAlgorithm::GREATER_EQUAL;
-		driver->SetPipelineState(p_pso);
+		auto* driver = Core::Global::ServiceLocator::Get<Editor::Core::Context>().driver.get();
+		// The pipeline state the widget meshes draw with is the render module's.
+		m_overlayGl.BeginMeshes(*driver, true);
 		mCellMaterial->SetFeatures({"WITH_EDGE","FIXED_SCALE","BLOCK_COLOR"});
 		for (auto& drawMesh : drawMeshList)
 		{
@@ -4184,31 +4124,15 @@ namespace MOON
 				mCellMaterial->Bind(&mEmptyTexture2D, &mEmptyTextureCube);
 				mCellMaterial->UploadProperties(true, true, &mEmptyTexture2D, &mEmptyTextureCube);
 				polygon->bind();
-			glDrawArrays(GL_TRIANGLES, 0, (GLsizei)polygon->numVertex);
+			m_overlayGl.DrawBoundTriangles(polygon->numVertex);
 		}
 	}
 
 	void ImRenderer::drawMeshPick()
 	{
-		auto driver = Core::Global::ServiceLocator::Get<Editor::Core::Context>().driver.get();
-		auto p_pso = driver->CreatePipelineState();
-		p_pso.stencilTest = true;
-		p_pso.stencilWriteMask = 0xFF;
-		p_pso.stencilFuncRef = 1;
-		p_pso.stencilFuncMask = 0xFF;
-		p_pso.stencilOpFail = Rendering::Settings::EOperation::REPLACE;
-		p_pso.depthOpFail = Rendering::Settings::EOperation::REPLACE;
-		p_pso.bothOpFail = Rendering::Settings::EOperation::REPLACE;
-		p_pso.colorWriting.mask = 0x00;
-		p_pso.depthWriting = true;
-		p_pso.colorWriting.mask = 0xFF;
-		p_pso.blending = false;
-		p_pso.blendingEquation = Rendering::Settings::EBlendingEquation::FUNC_ADD;
-		p_pso.blendingSrcFactor = Rendering::Settings::EBlendingFactor::SRC_ALPHA;
-		p_pso.culling = 0;
-		p_pso.depthTest = true;
-		p_pso.depthFunc = Rendering::Settings::EComparaisonAlgorithm::GREATER_EQUAL;
-		driver->SetPipelineState(p_pso);
+		auto* driver = Core::Global::ServiceLocator::Get<Editor::Core::Context>().driver.get();
+		// The picking mesh pass draws with blending off; the state is the render module's.
+		m_overlayGl.BeginMeshes(*driver, false);
 		mCellMaterial->SetFeatures({ "WITH_EDGE","FIXED_SCALE","BLOCK_COLOR" });
 		
 		for (auto& drawMesh : drawMeshList)
@@ -4223,7 +4147,7 @@ namespace MOON
 			mCellMaterial->UploadProperties(true, true, &mEmptyTexture2D, &mEmptyTextureCube);
 			
 			polygon->bind();
-			glDrawArrays(GL_TRIANGLES, 0, (GLsizei)polygon->numVertex);
+			m_overlayGl.DrawBoundTriangles(polygon->numVertex);
 		}
 	}
 

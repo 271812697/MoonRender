@@ -1,8 +1,9 @@
-﻿#pragma once
+#pragma once
 #include <queue>
+#include <functional>
 #include <Rendering/Entities/Camera.h>
 
-#include "AView.h"
+#include <Rendering/View/AView.h>
 
 namespace Editor::Core
 {
@@ -10,10 +11,16 @@ namespace Editor::Core
 	class CameraController
 	{
 	public:
+		/** Whether something (a screen widget being dragged, say) has captured the mouse, which
+		 * keeps the camera out of it. The module cannot know that: the host installs the query. */
+		using InputCaptureQuery = std::function<bool()>;
+
 		CameraController(
 			Editor::Panels::AView& p_view,
 			::Rendering::Entities::Camera& p_camera
 		);
+
+		void SetInputCaptureQuery(InputCaptureQuery p_query);
 
 		void HandleInputs(float p_deltaTime);
 		void HandleFirstMouse();
@@ -56,6 +63,8 @@ namespace Editor::Core
 	private:
 		Editor::Panels::AView& m_view;
 		::Rendering::Entities::Camera& m_camera;
+		/** Installed by the host, see InputCaptureQuery. Empty means nothing captures the mouse. */
+		InputCaptureQuery m_isInputCaptured;
 		std::queue<std::tuple<Maths::FVector3, Maths::FQuaternion>> m_cameraDestinations;
 		bool m_leftMousePressed = false;
 		bool m_middleMousePressed = false;

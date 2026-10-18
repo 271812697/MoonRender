@@ -1,4 +1,4 @@
-﻿// MIT License
+// MIT License
 
 // Copyright (c) 2020-2024 Evan Pezent
 // Copyright (c) 2025-2026 Breno Cunha Queiroz
@@ -38,7 +38,7 @@
 
 #ifndef IMGUI_DISABLE
 #include <time.h>
-#include "Qtimgui/imgui/imgui_internal.h"
+#include <ThirdParty/imgui/imgui/imgui_internal.h>
 
 // Support for pre-1.84 versions. ImPool's GetSize() -> GetBufSize()
 #if (IMGUI_VERSION_NUM < 18303)

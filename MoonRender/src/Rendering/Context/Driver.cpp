@@ -1,4 +1,4 @@
-﻿
+
 #include <Rendering/Context/Driver.h>
 #include <Rendering/HAL/Backend.h>
 #include <Rendering/Utils/Conversions.h>
@@ -34,6 +34,23 @@ Rendering::Context::Driver::Driver(const Rendering::Settings::DriverSettings& p_
 
 Rendering::Context::Driver::~Driver()
 {
+}
+
+void Rendering::Context::Driver::SetContextHost(IGLContextHost* p_contextHost)
+{
+	m_contextHost = p_contextHost;
+}
+
+Rendering::Context::IGLContextHost* Rendering::Context::Driver::GetContextHost() const
+{
+	return m_contextHost;
+}
+
+void Rendering::Context::Driver::ReapplyGlobalState()
+{
+	// Init also (re)loads the GL entry points, which keeps the pointers valid for the context
+	// that is current now; the pipeline state it returns is the one we already have.
+	(void)m_gfxBackend->Init(false);
 }
 
 void Rendering::Context::Driver::OnFrameCompleted()

@@ -6,8 +6,8 @@
 #include "Interactive/Im3DRenderer.h"
 #include "Core/Global/ServiceLocator.h"
 #include "core/log.h"
-#include "Qtimgui/imgui/imgui.h"
-#include "Qtimgui/implot/implotCustom.h"
+#include <ThirdParty/imgui/imgui/imgui.h>
+#include <ThirdParty/imgui/implot/implotCustom.h>
 #include "Sketcher/SketcheTool2D.h"
 #include <QInputDialog>
 #include <limits>

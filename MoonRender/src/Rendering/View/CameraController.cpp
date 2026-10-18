@@ -1,11 +1,8 @@
-﻿
+
 #include <Core/ECS/Components/CAmbientBoxLight.h>
 #include <Core/ECS/Components/CAmbientSphereLight.h>
 
-#include "CameraController.h"
-#include "GizmoRenderPass.h"
-#include "Interactive/Screen/ScreenOverlayRegistry.h"
-#include "core/log.h"
+#include <Rendering/View/CameraController.h>
 #include <iostream>
 #include <algorithm>
 #include <cmath>
@@ -102,6 +99,11 @@ Editor::Core::CameraController::CameraController(
 {
 	m_camera.SetFov(60.0f);
 	mirrorPlane= { Maths::FVector3(0,1,0),Maths::FVector3(0,0,0),0 };
+}
+
+void Editor::Core::CameraController::SetInputCaptureQuery(InputCaptureQuery p_query)
+{
+	m_isInputCaptured = std::move(p_query);
 }
 
 float GetActorFocusDist(Core::ECS::Actor& p_actor)
@@ -217,13 +219,12 @@ void ::Editor::Core::CameraController::HandleInputs(float p_deltaTime)
 			else
 			{
 				// A degenerate target must never hold the camera: it is dropped and the
-				// pose the camera already has is kept.
-				CORE_WARN(
-					"[Camera] dropped a camera move whose target is not finite "
-					"(camera at {0}, {1}, {2} -> {3}, {4}, {5})",
-					m_camera.GetPosition().x, m_camera.GetPosition().y,
-					m_camera.GetPosition().z,
-					destPos.x, destPos.y, destPos.z);
+				// pose the camera already has is kept. The module has no logger of the editor's,
+				// so a diagnostic goes to stderr, which is where a host picks it up.
+				std::cerr << "[Camera] dropped a camera move whose target is not finite (camera at "
+					<< m_camera.GetPosition().x << ", " << m_camera.GetPosition().y << ", "
+					<< m_camera.GetPosition().z << " -> " << destPos.x << ", " << destPos.y << ", "
+					<< destPos.z << ")" << std::endl;
 			}
 			m_cameraDestinations.pop();
 		}
@@ -254,9 +255,8 @@ void ::Editor::Core::CameraController::HandleInputs(float p_deltaTime)
 					m_camera.GetRotation())) >= 1.0f;
 			if (stalled)
 			{
-				CORE_WARN(
-					"[Camera] a camera move stopped making progress; it was snapped "
-					"to its target");
+				std::cerr << "[Camera] a camera move stopped making progress; it was snapped to its target"
+					<< std::endl;
 				m_camera.SetPosition(destPos);
 				m_camera.SetRotation(destRotation);
 				m_cameraDestinations.pop();
@@ -266,8 +266,10 @@ void ::Editor::Core::CameraController::HandleInputs(float p_deltaTime)
 	else
 	{   
 		// A screen widget that captured the cursor (a dragged slider or handle)
-		// owns the mouse until it is released, so the camera stays out of it.
-		if (MOON::ScreenOverlayRegistry::Instance().IsCapturing())
+		// owns the mouse until it is released, so the camera stays out of it. Whether something
+		// captured it is the host's knowledge, not the module's: it is asked through the query the
+		// host installed (see SetInputCaptureQuery).
+		if (m_isInputCaptured && m_isInputCaptured())
 		{
 			HandleCameraZoom();
 			HandleCameraFPSKeyboard(p_deltaTime);
@@ -593,9 +595,8 @@ void Editor::Core::CameraController::HandleMousePressed()
 		{
 			// Say it once per press instead of silently ignoring the drag: the
 			// usual reason is a sketch that never handed rotation back.
-			CORE_WARN(
-				"[Camera] the right button was pressed while rotation is disabled "
-				"(a sketch that is still being edited?); the drag is ignored");
+			std::cerr << "[Camera] the right button was pressed while rotation is disabled "
+				"(a sketch that is still being edited?); the drag is ignored" << std::endl;
 		}
 	}
 }

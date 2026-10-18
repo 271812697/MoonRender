@@ -1,9 +1,10 @@
-﻿#pragma once
+#pragma once
 
 #include <QOpenGLExtraFunctions>
 #include <QObject>
 #include <QPoint>
-#include "Qtimgui/imgui/imgui.h"
+#include <ThirdParty/imgui/imgui/imgui.h>
+#include <Rendering/ImGui/ImGuiGLRenderer.h>
 #include <memory>
 
 class QMouseEvent;
@@ -48,22 +49,17 @@ private:
     void updateCursorShape(const ImGuiIO &io);
     void setCursorPos(const ImGuiIO &io);
 
-    void renderDrawList(ImDrawData *draw_data);
-    bool createFontsTexture();
-    bool createDeviceObjects();
-
     std::unique_ptr<WindowWrapper> m_window;
     double       g_Time = 0.0f;
     bool         g_MousePressed[3] = { false, false, false };
     float        g_MouseWheel;
     float        g_MouseWheelH;
-    GLuint       g_FontTexture = 0;
-    int          g_ShaderHandle = 0, g_VertHandle = 0, g_FragHandle = 0;
-    int          g_AttribLocationTex = 0, g_AttribLocationProjMtx = 0;
-    int          g_AttribLocationPosition = 0, g_AttribLocationUV = 0, g_AttribLocationColor = 0;
-    unsigned int g_VboHandle = 0, g_VaoHandle = 0, g_ElementsHandle = 0;
 
     ImGuiContext* g_ctx = nullptr;
+    /** Draws the draw data: the shader, buffers and font texture are the render module's - see
+     * Rendering::ImGui::ImGuiGLRenderer. This class is only the window's half of ImGui: input,
+     * clipboard, cursor shape, display size. */
+    ::Rendering::ImGui::ImGuiGLRenderer m_glRenderer;
 };
 
 } // namespace QtImGui

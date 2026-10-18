@@ -7,7 +7,7 @@
 #include <Core/Rendering/EngineDrawableDescriptor.h>
 #include <Core/Rendering/ReflectionRenderFeature.h>
 
-#include "AView.h"
+#include <Rendering/View/AView.h>
 
 #include "DebugModelRenderFeature.h"
 #include "DebugSceneRenderer.h"

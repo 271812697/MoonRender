@@ -119,8 +119,10 @@ list(
 endif()
 
 add_subdirectory(Extern)
+# Tools first: Moon links MoonMatcLib (the editor compiles materials in process), and the shader
+# archive (MoonShader) is what MoonRender links, so both have to exist before MoonRender/Moon.
+add_subdirectory(Tools)
 add_subdirectory(Moon)
 add_subdirectory(MoonRender)
 add_subdirectory(MoonGeomerty)
 add_subdirectory(MoonTracer)
-add_subdirectory(Tools)

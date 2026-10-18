@@ -1,5 +1,5 @@
-﻿#pragma once
-#include "Qtimgui/imgui/imgui.h"
+#pragma once
+#include <ThirdParty/imgui/imgui/imgui.h>
 namespace ImGizmo {
 
 	void SetRect(const float x, const float y, const float size);

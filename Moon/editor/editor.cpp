@@ -1,4 +1,4 @@
-﻿#include <qpushbutton.h>
+#include <qpushbutton.h>
 #include <qboxlayout.h>
 #include <QtWidgets/QApplication>
 #include <QMenuBar>
@@ -10,6 +10,7 @@
 #include "UI/TreeViewPanel/hierarchypanel.h"
 #include "UI/SettingPanel/SettingPanel.h"
 #include "UI/PropertyPanel/PropertyPanel.h"
+#include "UI/MaterialPanel/MaterialEditorPanel.h"
 #include "MulViewPanel.h"
 //#include "UI/ReousrcePanel/resourcePanel.h"
 #include "UI/LogPanel/LogPanel.h"
@@ -77,6 +78,13 @@ namespace MOON {
 			propertyPanel->setAllowedAreas(Qt::AllDockWidgetAreas);
 			propertyPanel->setWindowTitle(QApplication::translate("Propertypanel", "Property", nullptr));
 
+			// The material editor: pick a shader, edit it, apply, and watch the preview - it
+			// compiles the source in process (MoonMatcLib), so the pipeline is exercised end to
+			// end without a rebuild.
+			auto materialPanel = new MaterialEditorPanel(self);
+			materialPanel->setAllowedAreas(Qt::AllDockWidgetAreas);
+			materialPanel->setWindowTitle(QApplication::translate("MaterialEditorPanel", "Material", nullptr));
+
 			auto taskViewPanel = new TaskViewPanel(self);
 			taskViewPanel->setAllowedAreas(Qt::AllDockWidgetAreas);
 			taskViewPanel->setWindowTitle(QApplication::translate("TaskViewPanel", "Task View", nullptr));
@@ -85,6 +93,7 @@ namespace MOON {
 			self->addDockWidget(Qt::LeftDockWidgetArea, settingPanel);
 			self->addDockWidget(Qt::RightDockWidgetArea,propertyPanel);
 			self->addDockWidget(Qt::RightDockWidgetArea, taskViewPanel);
+			self->addDockWidget(Qt::RightDockWidgetArea, materialPanel);
 
 			/*auto resourcePanelDock = new ResPanel(self);
 			self->addDockWidget(Qt::RightDockWidgetArea, resourcePanelDock);*/
@@ -94,7 +103,7 @@ namespace MOON {
 			//self->addDockWidget(Qt::LeftDockWidgetArea, debugWidget);
 			//self->tabifyDockWidget(HierarchypanelDock, debugWidget);
 
-			mDocks = { hierarchypanel, settingPanel, propertyPanel, taskViewPanel, logPanelDock };
+			mDocks = { hierarchypanel, settingPanel, propertyPanel, taskViewPanel, materialPanel, logPanelDock };
 			QObject::connect(
 				pages, &QStackedWidget::currentChanged, self, [this](int p_index) {
 					// The panels are part of the workspace: there is no document to show

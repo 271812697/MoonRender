@@ -28,7 +28,22 @@ namespace Rendering::Resources
 		struct Parameter
 		{
 			std::string name;
-			std::string type;
+			std::string type;       // the DSL name the material file declared ("float4")
+			std::string glslType;   // what it became ("vec4")
+			std::string defaultValue; // the GLSL initialiser it declared, empty when none
+			uint32_t count = 0;     // array size, 0 when the parameter is not an array
+			bool isSampler = false; // a texture slot rather than a plain uniform
+		};
+
+		/** One vertex attribute the material's stages read, as the build recorded it - the
+		 * counterpart of filament's MaterialAttributeInfo chunk. A VAO can be checked against a
+		 * material without compiling it. Per material, not per variant: a stage that declares an
+		 * attribute inside a feature branch contributes whichever declarations are in the text. */
+		struct Attribute
+		{
+			uint32_t location = 0;
+			std::string glslType;
+			std::string name;
 		};
 
 		/** The stage a blob belongs to. Geometry is the engine's own extension: GLSL has a
@@ -50,7 +65,12 @@ namespace Rendering::Resources
 		bool IsValid() const { return m_valid; }
 		const std::string& Name() const { return m_name; }
 		const std::vector<Variant>& Variants() const { return m_variants; }
+
+		/** The material's reflection, straight out of the package: name, types, sampler flag,
+		 * array size and declared default per parameter, plus the vertex attributes. This is
+		 * what a material panel reads instead of asking the driver for active uniforms. */
 		const std::vector<Parameter>& Parameters() const { return m_parameters; }
+		const std::vector<Attribute>& Attributes() const { return m_attributes; }
 
 		/** The final GLSL of one variant's stage, empty when the package holds no such
 		 * combination (i.e. one the build did not make, or no geometry stage at all).
@@ -80,6 +100,7 @@ namespace Rendering::Resources
 		std::string m_name;
 		std::vector<Variant> m_variants;
 		std::vector<Parameter> m_parameters;
+		std::vector<Attribute> m_attributes;
 		std::vector<Blob> m_blobs;
 		/** Stage name ("vertex" / "fragment" / "geometry") -> the stage's whole text, with the
 		 * placeholder where the variant's #define lines go. Empty for a package written before

@@ -1,4 +1,4 @@
-﻿#include <ranges>
+#include <ranges>
 #include <Core/ECS/Components/CMaterialRenderer.h>
 #include <cstring>
 #include <glad/glad.h>
@@ -11,7 +11,7 @@
 #include "DebugSceneRenderer.h"
 #include "PickingRenderPass.h"
 #include "Interactive/Im3DRenderer.h"
-#include "Qtimgui/imgui/imgui.h"
+#include <ThirdParty/imgui/imgui/imgui.h>
 #include "core/log.h"
 #include <Rendering/HAL/Profiling.h>
 #include <Rendering/Settings/EAccessSpecifier.h>

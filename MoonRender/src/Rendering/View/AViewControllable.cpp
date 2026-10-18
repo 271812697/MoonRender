@@ -1,6 +1,4 @@
-﻿#include "AViewControllable.h"
-#include "DebugSceneRenderer.h"
-#include "GridRenderPass.h"
+#include <Rendering/View/AViewControllable.h>
 
 const Maths::FVector3 kDefaultGridColor{ 1.0f, 1.0f, 1.0f };
 const Maths::FVector3 kDefaultClearColor{ 0.0f, 0.0f, 0.0f };
@@ -8,8 +6,9 @@ const Maths::FVector3 kDefaultCameraPosition{ -10.0f, 3.0f, 10.0f };
 const Maths::FQuaternion kDefaultCameraRotation({ 0.0f, 135.0f, 0.0f });
 
 Editor::Panels::AViewControllable::AViewControllable(
-	const std::string& p_title) :
-	AView(p_title),
+	const std::string& p_title,
+	::Rendering::Context::Driver& p_driver) :
+	AView(p_title, p_driver),
 	m_cameraController(*this, m_camera)
 {
 	ResetCameraTransform();
@@ -25,22 +24,12 @@ void Editor::Panels::AViewControllable::Update(float p_deltaTime)
 
 void Editor::Panels::AViewControllable::InitFrame()
 {
-   
-
+	// The grid is an editor feature (its descriptor and pass live there), so the concrete view
+	// adds it after this call. What belongs here is only what a controllable view is: the camera
+	// and the frame it sets up.
 	m_camera.SetFrustumGeometryCulling(false);
 	m_camera.SetFrustumLightCulling(false);
 	AView::InitFrame();
-
-    
-    Maths::FVector3 cameraPos = m_camera.GetPosition();
-	auto mirrorPlane=m_cameraController.GetMirrorPlane();
-  
-	m_renderer->AddDescriptor<Rendering::GridRenderPass::GridDescriptor>({
-		m_gridColor,
-        cameraPos,
-		mirrorPlane.Normal,
-		mirrorPlane.Point
-		});
 }
 
 void Editor::Panels::AViewControllable::ResetCameraTransform()

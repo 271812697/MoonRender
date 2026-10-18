@@ -13,8 +13,8 @@
 #include "core/log.h"
 #include "editor/Toolbar/sketchToolbar.h"
 #include "renderer/SceneView.h"
-#include "Qtimgui/imgui/imgui.h"
-#include "Qtimgui/implot/implotCustom.h"
+#include <ThirdParty/imgui/imgui/imgui.h>
+#include <ThirdParty/imgui/implot/implotCustom.h>
 
 #include <QDialog>
 #include <QDoubleSpinBox>

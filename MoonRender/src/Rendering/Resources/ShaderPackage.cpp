@@ -106,8 +106,57 @@ namespace Rendering::Resources
 					m_variants.push_back(std::move(variant));
 				}
 			}
+			else if (tag == "SHDRPROP")
+			{
+				uint32_t count = 0;
+				if (!Take(payload, count))
+				{
+					continue;
+				}
+				m_parameters.clear();
+				for (uint32_t i = 0; i < count; ++i)
+				{
+					Parameter parameter;
+					if (!TakeString(payload, parameter.name)
+						|| !TakeString(payload, parameter.type)
+						|| !TakeString(payload, parameter.glslType)
+						|| !Take(payload, parameter.count))
+					{
+						break;
+					}
+					uint8_t sampler = 0;
+					if (!Take(payload, sampler) || !TakeString(payload, parameter.defaultValue))
+					{
+						break;
+					}
+					parameter.isSampler = sampler != 0;
+					m_parameters.push_back(std::move(parameter));
+				}
+			}
+			else if (tag == "SHDRATTR")
+			{
+				uint32_t count = 0;
+				if (!Take(payload, count))
+				{
+					continue;
+				}
+				for (uint32_t i = 0; i < count; ++i)
+				{
+					Attribute attribute;
+					if (!Take(payload, attribute.location)
+						|| !TakeString(payload, attribute.glslType)
+						|| !TakeString(payload, attribute.name))
+					{
+						break;
+					}
+					m_attributes.push_back(std::move(attribute));
+				}
+			}
 			else if (tag == "SHDRPARM")
 			{
+				// The old name/type table. A package also carries SHDRPROP, which is written
+				// after this chunk and replaces these entries with the full records; a package
+				// from before SHDRPROP existed just keeps what is here.
 				uint32_t count = 0;
 				if (!Take(payload, count))
 				{

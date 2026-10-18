@@ -6,7 +6,7 @@
 #include "Core/Rendering/EngineBufferRenderFeature.h"
 #include <Rendering/Features/DebugShapeRenderFeature.h>
 #include <Rendering/HAL/Profiling.h>
-#include "Qtimgui/imgui/imgui.h"
+#include <ThirdParty/imgui/imgui/imgui.h>
 
 
 

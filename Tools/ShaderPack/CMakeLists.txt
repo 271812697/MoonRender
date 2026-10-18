@@ -48,15 +48,48 @@ foreach(header ${SHADER_HEADERS})
   list(APPEND SHADER_HEADER_PATHS "${SHADER_SOURCE_DIR}/${header}")
 endforeach()
 
+# Build-time validation: every stage MoonMatc generates is handed to a real GLSL compiler, so a
+# broken shader stops the build instead of failing when the material is first loaded at run
+# time. filament gets this for free by linking glslang into filamat; the external validator is
+# the cheap equivalent, and optional: without it the pipeline behaves as before, with a note.
+#
+#   1. MoonMatc --dump-glsl  -> one .glsl per (pass, variant, stage)
+#   2. ValidateGlslStages.cmake -> glslangValidator -S vert|frag|geom on each of them
+find_program(GLSLANG_VALIDATOR NAMES glslangValidator glslang)
+if(GLSLANG_VALIDATOR)
+  message(STATUS "Shader stages are validated at build time with ${GLSLANG_VALIDATOR}")
+  set(SHADER_VALIDATE_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/ValidateGlslStages.cmake")
+  set(SHADER_GLSL_DIR "${SHADER_OUTPUT_DIR}/glsl")
+else()
+  message(STATUS "glslangValidator not found - shader stages will NOT be validated at build time")
+endif()
+
 # Step 1: one package per shader. Every header is a dependency - MoonMatc splices them in.
 set(SHADER_PACK_ARGS)
 set(SHADER_MATC_OUTPUTS)
 foreach(source ${SHADER_SOURCES})
   set(package "${SHADER_MATC_DIR}/${source}")
+  set(moonmatc_arguments -i "${SHADER_SOURCE_DIR}/${source}" -o "${package}" -I "${SHADER_SOURCE_DIR}")
+  set(rule_commands "")
+  if(GLSLANG_VALIDATOR)
+    set(dump_dir "${SHADER_GLSL_DIR}/${source}")
+    list(APPEND moonmatc_arguments --dump-glsl "${dump_dir}")
+    # Clear the dump first: a stage this build no longer produces must not be validated (a
+    # stale file could fail on something that is already fixed).
+    list(APPEND rule_commands COMMAND ${CMAKE_COMMAND} -E remove_directory "${dump_dir}")
+  endif()
+  list(APPEND rule_commands COMMAND MoonMatc ${moonmatc_arguments})
+  if(GLSLANG_VALIDATOR)
+    list(APPEND rule_commands
+      COMMAND ${CMAKE_COMMAND}
+              "-DGLSLANG=${GLSLANG_VALIDATOR}" "-DSTAGE_DIR=${dump_dir}" "-DSHADER=${source}"
+              -P "${SHADER_VALIDATE_SCRIPT}")
+  endif()
   add_custom_command(
     OUTPUT "${package}"
-    COMMAND MoonMatc -i "${SHADER_SOURCE_DIR}/${source}" -o "${package}" -I "${SHADER_SOURCE_DIR}"
+    ${rule_commands}
     DEPENDS MoonMatc "${SHADER_SOURCE_DIR}/${source}" ${SHADER_HEADER_PATHS}
+            ${SHADER_VALIDATE_SCRIPT}
     COMMENT "MoonMatc ${source}"
     VERBATIM)
   list(APPEND SHADER_MATC_OUTPUTS "${package}")

@@ -1,4 +1,4 @@
-﻿// MIT License
+// MIT License
 
 // Copyright (c) 2020-2024 Evan Pezent
 // Copyright (c) 2025-2026 Breno Cunha Queiroz
@@ -46,7 +46,7 @@
 // [SECTION] Obsolete API
 
 #pragma once
-#include "Qtimgui/imgui/imgui.h"
+#include <ThirdParty/imgui/imgui/imgui.h>
 #ifndef IMGUI_DISABLE
 
 //-----------------------------------------------------------------------------

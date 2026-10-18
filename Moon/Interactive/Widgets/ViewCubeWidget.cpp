@@ -1,9 +1,9 @@
-﻿#include "Interactive/Widgets/ViewCubeWidget.h"
+#include "Interactive/Widgets/ViewCubeWidget.h"
 #include "Interactive/Im3DType.h"
 #include "Interactive/Screen/ScreenPath.h"
 #include "Interactive/Screen/ShapeBuilder.h"
 #include "renderer/SceneView.h"
-#include "renderer/CameraController.h"
+#include <Rendering/View/CameraController.h>
 #include "core/log.h"
 #include <algorithm>
 #include <cmath>

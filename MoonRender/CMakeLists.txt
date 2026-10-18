@@ -7,6 +7,9 @@ add_library(${TARGET_NAME} STATIC ${${TARGET_NAME}_impl} ${${TARGET_NAME}_head})
 target_include_directories(${TARGET_NAME} PUBLIC 
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     ${EIGEN3_INCLUDE_DIR}
+    # The vendored ImGui (include/ThirdParty/imgui) builds its font texture with freetype;
+    # that is the font loader the editor's ImGui has always used.
+    "$<$<BOOL:${CMAKE_SOURCE_DIR}>:${CMAKE_SOURCE_DIR}/lib/freetype/include>"
     )
 target_link_libraries(${TARGET_NAME} PUBLIC
  glad

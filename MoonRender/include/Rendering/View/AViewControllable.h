@@ -1,6 +1,6 @@
-﻿#pragma once
-#include "AView.h"
-#include "CameraController.h"
+#pragma once
+#include <Rendering/View/AView.h>
+#include <Rendering/View/CameraController.h>
 
 namespace Editor {
 	namespace Panels
@@ -9,7 +9,8 @@ namespace Editor {
 		{
 		public:
 			AViewControllable(
-				const std::string& p_title);
+				const std::string& p_title,
+				::Rendering::Context::Driver& p_driver);
 			virtual void Update(float p_deltaTime) override;
 			virtual void InitFrame() override;
 			virtual void ResetCameraTransform();

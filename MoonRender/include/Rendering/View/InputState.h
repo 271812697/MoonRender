@@ -1,7 +1,8 @@
-﻿#pragma once
-#include "renderer/InpuKey.h"
+#pragma once
+#include <Rendering/View/InpuKey.h>
+#include <Rendering/View/InputEvent.h>
 #include <unordered_map>
-class QEvent;
+
 namespace Editor {
 	namespace Panels
 	{
@@ -25,7 +26,8 @@ namespace Editor {
 			std::pair<double, double> GetMouseScroll();
 
 			void ClearEvents();
-			void ReceiveEvent(QEvent* e);
+			/** Takes an event the window layer already translated, see InputEvent. */
+			void ReceiveEvent(const InputEvent& p_event);
 		private:
 
 			std::unordered_map<KeyBoard, KeyState> m_keyEvents;

@@ -792,13 +792,27 @@ void main()
 	 *
 	 * The package already holds the final GLSL of every (pass, variant, stage), so there is
 	 * nothing to parse and no macro to inject: this is the "read the chunks and hand them to
-	 * the driver" half of the pipeline, the one filament's MaterialParser does. */
+	 * the driver" half of the pipeline, the one filament's MaterialParser does.
+	 *
+	 * p_error, when given, collects what the driver said. The editor's hot reload needs that
+	 * text: a material being edited is compiled into a package and loaded here, and the failure
+	 * has to be shown - with the .ovfx line the #line directives point at. */
 	Rendering::Resources::Shader::Variants AssembleFromPackage(
-		const Rendering::Resources::ShaderPackage& p_package)
+		const Rendering::Resources::ShaderPackage& p_package,
+		std::string* p_error = nullptr)
 	{
 		using namespace Rendering::Settings;
 
 		Rendering::Resources::Shader::Variants variants;
+
+		const auto report = [p_error](const std::string& p_text) {
+			std::cout << p_text << std::endl;
+			if (p_error != nullptr)
+			{
+				if (!p_error->empty()) { *p_error += "\n"; }
+				*p_error += p_text;
+			}
+		};
 
 		for (const Rendering::Resources::ShaderPackage::Variant& variant : p_package.Variants())
 		{
@@ -827,8 +841,8 @@ void main()
 					{
 						continue;
 					}
-					std::cout << std::format("[Shader Package] {}<{}> (pass '{}'): no source",
-						p_package.Name(), spec.name, variant.pass) << std::endl;
+					report(std::format("[Shader Package] {}<{}> (pass '{}'): no source",
+						p_package.Name(), spec.name, variant.pass));
 					ok = false;
 					break;
 				}
@@ -837,8 +851,8 @@ void main()
 				stage->Upload(std::move(source));
 				if (const auto result = stage->Compile(); !result.success)
 				{
-					std::cout << std::format("[Shader Compile] {}<{}> (pass '{}'): {}",
-						p_package.Name(), spec.name, variant.pass, result.message) << std::endl;
+					report(std::format("[Shader Compile] {}<{}> (pass '{}'): {}",
+						p_package.Name(), spec.name, variant.pass, result.message));
 					ok = false;
 					break;
 				}
@@ -863,13 +877,18 @@ void main()
 
 			if (!linkResult.success)
 			{
-				std::cout << std::format("[Shader Linking] {} (pass '{}'): {}",
-					p_package.Name(), variant.pass, linkResult.message) << std::endl;
+				report(std::format("[Shader Linking] {} (pass '{}'): {}",
+					p_package.Name(), variant.pass, linkResult.message));
 				continue;
 			}
 
 			const Rendering::Data::FeatureSet features(variant.features.begin(), variant.features.end());
 			variants[variant.pass].emplace(features, std::move(program));
+		}
+
+		if (variants.empty() && p_error != nullptr && p_error->empty())
+		{
+			*p_error = "the package produced no usable variant";
 		}
 
 		return variants;
@@ -906,6 +925,34 @@ namespace Rendering::Resources::Loaders
 
 		auto result = CompileShaderFromFile(p_filePath, p_pathParser);
 		return new Shader(p_filePath, std::move(result.variants));
+	}
+
+	Shader* ShaderLoader::CreateFromPackage(const void* p_data, uint32_t p_size,
+		const std::string& p_name, std::string* p_error)
+	{
+		if (p_data == nullptr || p_size == 0)
+		{
+			if (p_error != nullptr) { *p_error = "empty package"; }
+			return nullptr;
+		}
+
+		const Rendering::Resources::ShaderPackage package(p_data, p_size);
+		if (!package.IsValid())
+		{
+			if (p_error != nullptr) { *p_error = "not a valid shader package"; }
+			return nullptr;
+		}
+
+		std::string error;
+		auto variants = AssembleFromPackage(package, &error);
+		if (variants.empty())
+		{
+			if (p_error != nullptr) { *p_error = std::move(error); }
+			return nullptr;
+		}
+
+		if (p_error != nullptr) { p_error->clear(); }
+		return new Shader(p_name, std::move(variants));
 	}
 
 	Shader* ShaderLoader::CreateFromSource(const std::string& p_vertexShader, const std::string& p_fragmentShader, const std::string& p_geomertyShader)
