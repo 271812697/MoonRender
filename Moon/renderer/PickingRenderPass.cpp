@@ -1,4 +1,4 @@
-﻿#include <ranges>
+#include <ranges>
 #include <Core/ECS/Components/CMaterialRenderer.h>
 #include <cstring>
 #include <glad/glad.h>
@@ -11,7 +11,8 @@
 #include "DebugSceneRenderer.h"
 #include "PickingRenderPass.h"
 #include "Interactive/Im3DRenderer.h"
-#include "Qtimgui/imgui/imgui.h"
+#include <ThirdParty/imgui/imgui/imgui.h>
+#include "core/log.h"
 #include <Rendering/HAL/Profiling.h>
 #include <Rendering/Settings/EAccessSpecifier.h>
 #include <Rendering/Settings/EBufferType.h>
@@ -44,6 +45,39 @@ Editor::Rendering::PickingRenderPass::PickingRenderPass(::Rendering::Core::Compo
 		m_actorPickingFramebuffer, 1, 1, true, false, false
 	);
 
+	// A second color attachment holds the world position of whatever is drawn: the pixel
+	// the user picks carries both the id of what is under it and where on that geometry it
+	// is. The camera turns around that point when the right button is pressed, so it comes
+	// from the very pixel that is on screen - no ray through the scene.
+	{
+		using namespace ::Rendering::Settings;
+		TextureDesc worldPositionDesc{
+			.width = 1,
+			.height = 1,
+			.minFilter = ETextureFilteringMode::LINEAR,
+			.magFilter = ETextureFilteringMode::LINEAR,
+			.horizontalWrap = ETextureWrapMode::CLAMP_TO_BORDER,
+			.verticalWrap = ETextureWrapMode::CLAMP_TO_BORDER,
+			.internalFormat = EInternalFormat::RGBA32F,
+			.mutableDesc = MutableTextureDesc{
+				.format = EFormat::RGBA,
+				.type = EPixelDataType::FLOAT,
+			},
+		};
+		auto worldPositionTexture = std::make_shared<::Rendering::HAL::Texture>(
+			ETextureType::TEXTURE_2D,
+			std::format("{}/WorldPosition", m_actorPickingFramebuffer.GetDebugName())
+		);
+		worldPositionTexture->Allocate(worldPositionDesc);
+		m_actorPickingFramebuffer.Attach(
+			worldPositionTexture, EFramebufferAttachment::COLOR, 1
+		);
+		// Every pick shader writes layout(location = 0) (the id) and location = 1 (the
+		// position), so both attachments are drawn to.
+		m_actorPickingFramebuffer.SetDrawBuffers({ 0, 1 });
+		m_actorPickingFramebuffer.Validate();
+	}
+
 	SetupPickReadbacks();
 	/* Picking Material */
 	m_actorPickingFallbackMaterial.SetShader(GetShaderService[":Shaders/PickingFallback.ovfx"]);
@@ -55,13 +89,14 @@ Editor::Rendering::PickingRenderPass::PickingRenderPass(::Rendering::Core::Compo
 	m_TopoShapePickingFallbackMaterial.SetLineWidth(8);
 }
 
-Editor::Rendering::PickingRenderPass::PickingResult Editor::Rendering::PickingRenderPass::ReadbackPickingResult(
+Editor::Rendering::PickingRenderPass::PickHit Editor::Rendering::PickingRenderPass::ReadbackPickingResult(
 	const ::Core::SceneSystem::Scene& p_scene,
 	uint32_t p_x,
 	uint32_t p_y,bool& isSelected
 )
 {
 	ZoneScoped;
+	PickHit hit;
 	uint8_t pixel[4];
 	m_actorPickingFramebuffer.ReadPixels(
 		p_x, p_y, 1, 1,
@@ -69,7 +104,36 @@ Editor::Rendering::PickingRenderPass::PickingResult Editor::Rendering::PickingRe
 		::Rendering::Settings::EPixelDataType::UNSIGNED_BYTE,
 		pixel
 	);
-	return DecodePickResult(p_scene, pixel, isSelected);
+	hit.result = DecodePickResult(p_scene, pixel, isSelected);
+	hit.hasWorldPosition = ReadbackWorldPosition(p_x, p_y, hit.worldPosition);
+	return hit;
+}
+
+bool Editor::Rendering::PickingRenderPass::ReadbackWorldPosition(
+	uint32_t p_x,
+	uint32_t p_y,
+	Maths::FVector3& p_out
+)
+{
+	// The second color attachment of the picking target, at the very pixel that was
+	// picked. A pixel nothing was drawn at is still the cleared zero.
+	m_actorPickingFramebuffer.SetTargetReadBuffer(1);
+	float position[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+	m_actorPickingFramebuffer.ReadPixels(
+		p_x, p_y, 1, 1,
+		::Rendering::Settings::EPixelDataFormat::RGBA,
+		::Rendering::Settings::EPixelDataType::FLOAT,
+		position
+	);
+	m_actorPickingFramebuffer.SetTargetReadBuffer(0);
+
+	// The shaders write w = 1; the clear leaves 0 behind. Nothing else can be "no
+	// position" - a position of (0, 0, 0) is a perfectly good one.
+	if (position[3] < 0.5f) {
+		return false;
+	}
+	p_out = Maths::FVector3{ position[0], position[1], position[2] };
+	return true;
 }
 
 Editor::Rendering::PickingRenderPass::PickingResult Editor::Rendering::PickingRenderPass::DecodePickResult(
@@ -185,6 +249,18 @@ void Editor::Rendering::PickingRenderPass::IssuePickReadback()
 		::Rendering::Settings::EPixelDataFormat::RGBA,
 		::Rendering::Settings::EPixelDataType::UNSIGNED_BYTE
 	);
+	// The world position of the same pixel, right behind the id in the same buffer.
+	m_actorPickingFramebuffer.SetTargetReadBuffer(1);
+	m_actorPickingFramebuffer.ReadPixelsToBuffer(
+		*freeSlot->buffer,
+		static_cast<uint32_t>(kPickReadbackPositionOffset),
+		m_pickRequestX,
+		m_pickRequestY,
+		1, 1,
+		::Rendering::Settings::EPixelDataFormat::RGBA,
+		::Rendering::Settings::EPixelDataType::FLOAT
+	);
+	m_actorPickingFramebuffer.SetTargetReadBuffer(0);
 	freeSlot->buffer->InsertFence();
 	freeSlot->x = m_pickRequestX;
 	freeSlot->y = m_pickRequestY;
@@ -193,7 +269,7 @@ void Editor::Rendering::PickingRenderPass::IssuePickReadback()
 
 bool Editor::Rendering::PickingRenderPass::TryConsumePick(
 	const ::Core::SceneSystem::Scene& p_scene,
-	PickingResult& p_outResult,
+	PickHit& p_outHit,
 	uint32_t& p_outX,
 	uint32_t& p_outY
 )
@@ -221,7 +297,13 @@ bool Editor::Rendering::PickingRenderPass::TryConsumePick(
 		}
 
 		uint8_t pixel[4];
-		std::memcpy(pixel, mapped, kPickReadbackBytes);
+		std::memcpy(pixel, mapped, kPickReadbackIdBytes);
+		float position[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+		std::memcpy(
+			position,
+			static_cast<const uint8_t*>(mapped) + kPickReadbackPositionOffset,
+			sizeof(position)
+		);
 		slot.buffer->Unmap();
 		slot.buffer->ClearFence();
 		slot.pending = false;
@@ -230,7 +312,12 @@ bool Editor::Rendering::PickingRenderPass::TryConsumePick(
 		p_outY = slot.y;
 
 		bool ignoredSelectionState = false;
-		p_outResult = DecodePickResult(p_scene, pixel, ignoredSelectionState);
+		p_outHit = PickHit{};
+		p_outHit.result = DecodePickResult(p_scene, pixel, ignoredSelectionState);
+		if (position[3] >= 0.5f) {
+			p_outHit.worldPosition = Maths::FVector3{ position[0], position[1], position[2] };
+			p_outHit.hasWorldPosition = true;
+		}
 		return true;
 	}
 

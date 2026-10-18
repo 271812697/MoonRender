@@ -1,4 +1,4 @@
-﻿#include <algorithm>
+#include <algorithm>
 #include <array>
 #include <filesystem>
 #include <format>
@@ -11,10 +11,14 @@
 #include <iostream>
 #include <unordered_set>
 #include<assert.h>
+#include <glad/glad.h>
 #include <Rendering/HAL/ShaderProgram.h>
 #include <Rendering/HAL/ShaderStage.h>
 #include <Rendering/Resources/Loaders/ShaderLoader.h>
 #include <Rendering/Resources/Shader.h>
+#include <Rendering/Resources/ShaderArchive.h>
+#include <Rendering/Resources/ShaderPackage.h>
+#include <Rendering/Settings/EBindingPoint.h>
 #include <Rendering/Utils/ShaderUtil.h>
 
 namespace
@@ -45,10 +49,25 @@ namespace
 		.compilationSuccess = false,
 	};
 
+	/** Where one line of the assembled shader source came from.
+	 *
+	 * The loader splices included files in line by line and the parser then cuts the
+	 * file into one source per shader stage, so the line a driver complains about has
+	 * nothing to do with the line the user wrote. Every assembled line keeps its origin
+	 * here, and the stage sources are annotated with #line directives taken from it, so
+	 * a compile error points at the file and line it really came from. */
+	struct SourceOrigin
+	{
+		std::string file;
+		uint32_t line = 0; // 1-based, as an editor counts them
+	};
+
 	struct ShaderLoadResult
 	{
 		const ShaderInputInfo inputInfo;
 		const std::string source;
+		/** One entry per line of `source`, in the same order. */
+		const std::vector<SourceOrigin> origins;
 	};
 
 	struct ShaderParseResult
@@ -59,6 +78,9 @@ namespace
 		const std::string geomertyShader;
 		const std::unordered_set<std::string> passes;
 		const Rendering::Data::FeatureSet features;
+		/** Every file the source was assembled from: the shader itself and everything
+		 * it includes. The hot reload watches these, not just the shader. */
+		const std::unordered_set<std::string> sourceFiles;
 	};
 
 	struct ShaderAssembleResult
@@ -178,6 +200,29 @@ namespace
 				{
 					// Version directive is on the last line (unusual case)
 					i = endOfLine+1;
+				}
+				// Step over the directives that carry no code before the guard this scan is
+				// after: the loader puts a #line anchor right behind #version, and the whole
+				// stage is usually wrapped in the #if defined(...) that follows it. Without
+				// this the scan saw the anchor, decided the stage had no guard, and compiled
+				// an empty geometry shader ("No input primitive type").
+				for (;;)
+				{
+					while (i < static_cast<int>(stageInput.source.size())
+						&& (stageInput.source[i] == ' ' || stageInput.source[i] == '\t'
+							|| stageInput.source[i] == '\n' || stageInput.source[i] == '\r'))
+					{
+						++i;
+					}
+					const bool isLineDirective = stageInput.source.compare(i, 5, "#line") == 0;
+					const bool isComment = stageInput.source.compare(i, 2, "//") == 0;
+					if (!isLineDirective && !isComment)
+					{
+						break;
+					}
+					const size_t eol = stageInput.source.find('\n', i);
+					i = (eol == std::string::npos) ? static_cast<int>(stageInput.source.size())
+						: static_cast<int>(eol) + 1;
 				}
 				while (i<stageInput.source.size())
 				{
@@ -381,17 +426,28 @@ void main()
 
 		return std::nullopt;
 	}
+	/** Splits one source into lines and appends it to the assembled source, recording
+	 * where every appended line came from. Used for the shader itself and, through the
+	 * recursion below, for every file it includes. */
 	ShaderLoadResult LoadShader(
 		const ShaderInputInfo& p_shaderInputInfo,
 		const std::string& p_filePath,
 		Rendering::Resources::Loaders::ShaderLoader::FilePathParserCallback p_pathParser
 	);
-	ShaderLoadResult LoadShader(const std::string& p_source, Rendering::Resources::Loaders::ShaderLoader::FilePathParserCallback p_pathParser)
-	{
 
-		std::istringstream iss(p_source);
+	ShaderLoadResult AssembleSource(
+		const ShaderInputInfo& p_shaderInputInfo,
+		const std::string& p_text,
+		const std::string& p_fileForOrigins,
+		Rendering::Resources::Loaders::ShaderLoader::FilePathParserCallback p_pathParser
+	)
+	{
 		std::stringstream buffer;
+		std::vector<SourceOrigin> origins;
+
+		std::istringstream iss(p_text);
 		std::string line;
+		uint32_t lineNumber = 1;
 
 		while (std::getline(iss, line))
 		{
@@ -404,23 +460,32 @@ void main()
 				{
 					// Recursively load the included file
 					const std::string realIncludeFilePath = p_pathParser ? p_pathParser(includeFilePath.value()) : includeFilePath.value();
-					const auto result = LoadShader(ShaderInputInfo{}, realIncludeFilePath, p_pathParser);
-					buffer << result.source << std::endl;
+					const auto included = LoadShader(p_shaderInputInfo, realIncludeFilePath, p_pathParser);
+					// The included lines keep the file and line they were written on: the
+					// parser turns that into #line directives, so an error inside the
+					// .ovfxh names the .ovfxh instead of the concatenation it ended up in.
+					buffer << included.source;
+					origins.insert(origins.end(), included.origins.begin(), included.origins.end());
 				}
 				else
 				{
-					std::cout << "[Shader Loading] Invalid #include directive in file: \"{}\"" << std::endl;;
+					std::cout << (std::format("[Shader Loading] Invalid #include directive in file: \"{}\"", p_fileForOrigins)) << std::endl;
 				}
 			}
 			else
 			{
 				// If the line does not contain #include, just append it to the buffer
-				buffer << line << std::endl;
+				buffer << line << '\n';
+				origins.push_back({ p_fileForOrigins, lineNumber });
 			}
+
+			++lineNumber;
 		}
+
 		return {
-			.inputInfo ={},
-			.source = buffer.str()
+			.inputInfo = p_shaderInputInfo,
+			.source = buffer.str(),
+			.origins = std::move(origins)
 		};
 	}
 
@@ -430,47 +495,28 @@ void main()
 		Rendering::Resources::Loaders::ShaderLoader::FilePathParserCallback p_pathParser
 	)
 	{
-		std::ifstream file(p_filePath);
-
-		if (!file.is_open())
+		// The source comes out of the archive the build packed it into; the disk is only
+		// the fallback for a checkout that has not been packed yet (see ShaderArchive.h).
+		std::string text;
+		std::string origin;
+		if (!Rendering::Resources::ReadShaderSource(p_filePath, text, &origin))
 		{
 			std::cout << (std::format("[Shader Loading] Could not open shader file: \"{}\"", p_filePath)) << std::endl;
 			return {};
 		}
 
-		std::stringstream buffer;
-		std::string line;
+		return AssembleSource(p_shaderInputInfo, text, origin, p_pathParser);
+	}
 
-		while (std::getline(file, line))
-		{
-			const std::string trimmedLine = Trim(line);
-
-			if (trimmedLine.starts_with(Grammar::kIncludeToken))
-			{
-				// If the line contains #include, process the included file
-				if (const auto includeFilePath = ParseIncludeDirective(line))
-				{
-					// Recursively load the included file
-					const std::string realIncludeFilePath = p_pathParser ? p_pathParser(includeFilePath.value()) : includeFilePath.value();
-					const auto result = LoadShader(p_shaderInputInfo, realIncludeFilePath, p_pathParser);
-					buffer << result.source << std::endl;
-				}
-				else
-				{
-					std::cout << (std::format("[Shader Loading] Invalid #include directive in file: \"{}\"", p_filePath)) << std::endl;;
-				}
-			}
-			else
-			{
-				// If the line does not contain #include, just append it to the buffer
-				buffer << line << std::endl;
-			}
-		}
-
-		return {
-			.inputInfo = p_shaderInputInfo,
-			.source = buffer.str()
-		};
+	/** The same for a source the caller already holds (the path tracing pass builds a
+	 * couple of them by editing the text of a file). There is no file to name, so the
+	 * lines are attributed to the shader's own name. */
+	ShaderLoadResult LoadShader(
+		const std::string& p_source,
+		Rendering::Resources::Loaders::ShaderLoader::FilePathParserCallback p_pathParser
+	)
+	{
+		return AssembleSource(ShaderInputInfo{}, p_source, std::string{ "{source}" }, p_pathParser);
 	}
 
 	/**
@@ -486,11 +532,35 @@ void main()
 		Rendering::Data::FeatureSet features;
 		std::unordered_set<std::string> passes;
 		passes.emplace(); // Default pass if none is specified (empty string)
+		std::unordered_set<std::string> sourceFiles;
 
 		auto currentType = EShaderType::NONE;
 
+		// The line numbers a driver reports are the numbers of the source it was handed -
+		// the stage alone, with the file's headers cut away and the includes spliced in.
+		// So every stage starts with a #line that puts the counter back where the text
+		// really lives, and one is emitted again wherever the origin jumps (the start of
+		// an included file, and its end).
+		//
+		// It can only go in after the stage's #version, though: GLSL wants that to be the
+		// first statement, so a #line in front of it is rejected outright. Stages that start
+		// with a blank line or a comment before their #version are why this waits for the
+		// directive instead of taking the first line it sees.
+		bool anchorPending = false;
+		bool versionPending = false;
+		SourceOrigin lastOrigin{};
+
+		size_t lineIndex = 0;
 		while (std::getline(stream, line))
 		{
+			// Falls back to the assembled numbering if the origins and the text ever
+			// disagree, which would be a bug in this file and not worth failing a load
+			// over.
+			const SourceOrigin origin = lineIndex < p_shaderLoadResult.origins.size()
+				? p_shaderLoadResult.origins[lineIndex]
+				: SourceOrigin{ p_shaderLoadResult.inputInfo.path, static_cast<uint32_t>(lineIndex + 1) };
+			++lineIndex;
+
 			const std::string trimmedLine = Trim(line);
 
 			if (trimmedLine.starts_with(Grammar::kPassToken))
@@ -526,17 +596,46 @@ void main()
 			else if (trimmedLine.starts_with(Grammar::kVertexShaderToken))
 			{
 				currentType = EShaderType::VERTEX;
+				anchorPending = true;
+				versionPending = true;
 			}
 			else if (trimmedLine.starts_with(Grammar::kFragmentShaderToken))
 			{
 				currentType = EShaderType::FRAGMENT;
+				anchorPending = true;
+				versionPending = true;
 			}
 			else if (trimmedLine.starts_with(Grammar::kGeomertyShaderToken)) {
 				currentType = EShaderType::GEOMERTY;
+				anchorPending = true;
+				versionPending = true;
 			}
 			else if (currentType != EShaderType::NONE)
 			{
-				shaderSources[currentType] << line << '\n';
+				auto& source = shaderSources[currentType];
+
+				const bool isVersionLine = trimmedLine.starts_with(Grammar::kVersionToken);
+				// #version has to be the first thing in the stage, so nothing is emitted in
+				// front of it - the anchor for a stage begins on the line after it. Everything
+				// else gets one when the origin is not simply the next line of the same file.
+				const bool jumps = origin.file != lastOrigin.file
+					|| origin.line != lastOrigin.line + 1;
+				if (!isVersionLine && !versionPending && (anchorPending || jumps))
+				{
+					source << "#line " << origin.line << " \"" << origin.file << "\"\n";
+					anchorPending = false;
+				}
+
+				source << line << '\n';
+				if (isVersionLine)
+				{
+					// The next line is where the counter has to be anchored.
+					versionPending = false;
+					anchorPending = true;
+				}
+
+				lastOrigin = origin;
+				sourceFiles.insert(origin.file);
 			}
 		}
 
@@ -546,7 +645,8 @@ void main()
 			.fragmentShader = shaderSources[EShaderType::FRAGMENT].str(),
 			.geomertyShader = shaderSources[EShaderType::GEOMERTY].str(),
 			.passes = passes,
-			.features = features
+			.features = features,
+			.sourceFiles = std::move(sourceFiles)
 		};
 	}
 
@@ -689,6 +789,298 @@ void main()
 
 		return AssembleShader(shaderParseResult);
 	}
+
+	/** Checks the driver's bindings against the package's, once per shader.
+	 *
+	 * The generated GLSL declares the engine's blocks and the material block at fixed binding
+	 * points (see Rendering/Settings/EBindingPoint.h) and each sampler on a fixed texture unit;
+	 * the runtime writes by those numbers. A mismatch would render every material wrong, so it
+	 * is reported here as one line instead of being debugged as a visual bug. Members a
+	 * particular variant does not read are dropped by the linker and are simply skipped. */
+	void ValidateBindings(
+		const Rendering::Resources::ShaderPackage& p_package,
+		Rendering::HAL::ShaderProgram& p_program)
+	{
+		const GLuint program = static_cast<GLuint>(p_program.GetID());
+
+		const auto checkBlock = [&](const char* p_name, GLint p_expected) -> GLuint
+		{
+			const GLuint index = glGetUniformBlockIndex(program, p_name);
+			if (index == GL_INVALID_INDEX)
+			{
+				return index; // the variant does not read this block
+			}
+
+			GLint binding = -1;
+			glGetActiveUniformBlockiv(program, index, GL_UNIFORM_BLOCK_BINDING, &binding);
+			if (binding != p_expected)
+			{
+				std::cout << std::format("[Shader Binding] {}: {} is bound to {}, expected {}",
+					p_package.Name(), p_name, binding, p_expected) << std::endl;
+			}
+			return index;
+		};
+
+		checkBlock("EngineUBO", Rendering::Settings::kEngineUBOBinding);
+		checkBlock("ObjectUBO", Rendering::Settings::kObjectUBOBinding);
+		const GLuint materialBlock =
+			checkBlock("MaterialParams", Rendering::Settings::kMaterialParameterBinding);
+
+		if (materialBlock != GL_INVALID_INDEX && p_package.ParameterBlockSize() > 0)
+		{
+			GLint blockSize = -1;
+			glGetActiveUniformBlockiv(program, materialBlock, GL_UNIFORM_BLOCK_DATA_SIZE, &blockSize);
+			if (blockSize > static_cast<GLint>(p_package.ParameterBlockSize()))
+			{
+				std::cout << std::format("[Shader Binding] {}: the driver's block is {} bytes, the package says {}",
+					p_package.Name(), blockSize, p_package.ParameterBlockSize()) << std::endl;
+			}
+
+			for (const Rendering::Resources::ShaderPackage::Parameter& parameter : p_package.Parameters())
+			{
+				if (parameter.isSampler || parameter.offset < 0)
+				{
+					continue;
+				}
+
+				std::string name = parameter.name;
+				if (parameter.count > 0)
+				{
+					name += "[0]";
+				}
+
+				const char* names[] = { name.c_str() };
+				GLuint index = GL_INVALID_INDEX;
+				glGetUniformIndices(program, 1, names, &index);
+				if (index == GL_INVALID_INDEX)
+				{
+					continue; // not read by this variant
+				}
+
+				GLint offset = -1;
+				glGetActiveUniformsiv(program, 1, &index, GL_UNIFORM_OFFSET, &offset);
+				if (offset != static_cast<GLint>(parameter.offset))
+				{
+					std::cout << std::format("[Shader Binding] {}: {} is at offset {}, the package says {}",
+						p_package.Name(), parameter.name, offset, parameter.offset) << std::endl;
+				}
+			}
+		}
+
+		// Samplers: layout(binding = N) should have put each one on the unit the runtime binds
+		// its texture to. The value is what the driver decided at link time.
+		for (const Rendering::Resources::ShaderPackage::Parameter& parameter : p_package.Parameters())
+		{
+			if (!parameter.isSampler)
+			{
+				continue;
+			}
+
+			const GLint location = glGetUniformLocation(program, parameter.name.c_str());
+			if (location < 0)
+			{
+				continue; // not read by this variant
+			}
+
+			GLint unit = -1;
+			glGetUniformiv(program, location, &unit);
+			if (unit != static_cast<GLint>(parameter.binding))
+			{
+				std::cout << std::format("[Shader Binding] {}: sampler {} is on unit {}, the package says {}",
+					p_package.Name(), parameter.name, unit, parameter.binding) << std::endl;
+			}
+		}
+	}
+
+	/** Compiles the variants a shader package lists (MoonMatc's output).
+	 *
+	 * The package already holds the final GLSL of every (pass, variant, stage), so there is
+	 * nothing to parse and no macro to inject: this is the "read the chunks and hand them to
+	 * the driver" half of the pipeline, the one filament's MaterialParser does.
+	 *
+	 * p_error, when given, collects what the driver said. The editor's hot reload needs that
+	 * text: a material being edited is compiled into a package and loaded here, and the failure
+	 * has to be shown - with the .ovfx line the #line directives point at. */
+	Rendering::Resources::Shader::Variants AssembleFromPackage(
+		const Rendering::Resources::ShaderPackage& p_package,
+		std::string* p_error = nullptr)
+	{
+		using namespace Rendering::Settings;
+
+		Rendering::Resources::Shader::Variants variants;
+		bool blockValidated = false;
+
+		const auto report = [p_error](const std::string& p_text) {
+			std::cout << p_text << std::endl;
+			if (p_error != nullptr)
+			{
+				if (!p_error->empty()) { *p_error += "\n"; }
+				*p_error += p_text;
+			}
+		};
+
+		for (const Rendering::Resources::ShaderPackage::Variant& variant : p_package.Variants())
+		{
+			std::vector<std::unique_ptr<Rendering::HAL::ShaderStage>> stages;
+			bool ok = true;
+
+			struct StageSpec
+			{
+				Rendering::Resources::ShaderPackage::Stage stage;
+				EShaderType type;
+				const char* name;
+				bool optional;   // a geometry stage only exists for the shaders that expand primitives
+			};
+			static constexpr StageSpec kStages[] = {
+				{ Rendering::Resources::ShaderPackage::Stage::Vertex,   EShaderType::VERTEX,   "vertex",   false },
+				{ Rendering::Resources::ShaderPackage::Stage::Fragment, EShaderType::FRAGMENT, "fragment", false },
+				{ Rendering::Resources::ShaderPackage::Stage::Geometry, EShaderType::GEOMERTY, "geometry", true },
+			};
+
+			for (const StageSpec& spec : kStages)
+			{
+				std::string source = p_package.Source(variant, spec.stage);
+				if (source.empty())
+				{
+					if (spec.optional)
+					{
+						continue;
+					}
+					report(std::format("[Shader Package] {}<{}> (pass '{}'): no source",
+						p_package.Name(), spec.name, variant.pass));
+					ok = false;
+					break;
+				}
+
+				auto stage = std::make_unique<Rendering::HAL::ShaderStage>(spec.type);
+				stage->Upload(std::move(source));
+				if (const auto result = stage->Compile(); !result.success)
+				{
+					report(std::format("[Shader Compile] {}<{}> (pass '{}'): {}",
+						p_package.Name(), spec.name, variant.pass, result.message));
+					ok = false;
+					break;
+				}
+				stages.push_back(std::move(stage));
+			}
+
+			if (!ok)
+			{
+				continue;
+			}
+
+			auto program = std::make_unique<Rendering::HAL::ShaderProgram>();
+			for (const auto& stage : stages)
+			{
+				program->Attach(*stage);
+			}
+			const auto linkResult = program->Link();
+			for (const auto& stage : stages)
+			{
+				program->Detach(*stage);
+			}
+
+			if (!linkResult.success)
+			{
+				report(std::format("[Shader Linking] {} (pass '{}'): {}",
+					p_package.Name(), variant.pass, linkResult.message));
+				continue;
+			}
+
+			// The descriptor layout is compile-time data; the driver is the one that has to
+			// agree. Check it once per shader, on the first linked variant, so a mismatch is a
+			// line in the log rather than a corrupted image.
+			if (!blockValidated)
+			{
+				ValidateBindings(p_package, *program);
+				blockValidated = true;
+			}
+
+			const Rendering::Data::FeatureSet features(variant.features.begin(), variant.features.end());
+			variants[variant.pass].emplace(features, std::move(program));
+		}
+
+		if (variants.empty() && p_error != nullptr && p_error->empty())
+		{
+			*p_error = "the package produced no usable variant";
+		}
+
+		return variants;
+	}
+
+	/** The package's parameter records, in the runtime's form.
+	 *
+	 * The package is the load-time format; Shader keeps this list so Material can describe its
+	 * properties from the material the package was built from instead of asking the driver
+	 * which uniforms stayed active (see Shader::HasParameterTable). */
+	std::vector<Rendering::Resources::Shader::Parameter> RuntimeParameters(
+		const Rendering::Resources::ShaderPackage& p_package)
+	{
+		std::vector<Rendering::Resources::Shader::Parameter> parameters;
+		parameters.reserve(p_package.Parameters().size());
+
+		for (const Rendering::Resources::ShaderPackage::Parameter& parameter : p_package.Parameters())
+		{
+			parameters.push_back(Rendering::Resources::Shader::Parameter{
+				.name = parameter.name,
+				.type = parameter.glslType,
+				.defaultValue = parameter.defaultValue,
+				.label = parameter.label,
+				.group = parameter.group,
+				.min = parameter.min,
+				.max = parameter.max,
+				.step = parameter.step,
+				.count = parameter.count,
+				.offset = parameter.offset,
+				.stride = parameter.stride,
+				.binding = parameter.binding,
+				.isSampler = parameter.isSampler,
+				.hasRange = parameter.hasRange,
+				.hasStep = parameter.hasStep,
+				.isColor = parameter.isColor,
+				.isUi = parameter.isUi });
+		}
+
+		return parameters;
+	}
+
+	/** The material block's state, as the runtime's optional overrides.
+	 *
+	 * The package keeps the values as the material's text ("back", "transparent", "false");
+	 * the runtime works in booleans. Leaving a field unset means the material did not declare
+	 * it, and the material instance keeps the engine's default for that field. */
+	Rendering::Resources::Shader::State RuntimeState(
+		const Rendering::Resources::ShaderPackage& p_package)
+	{
+		Rendering::Resources::Shader::State state;
+		const std::map<std::string, std::string>& states = p_package.States();
+
+		if (const auto it = states.find("blending"); it != states.end())
+		{
+			// filament's names: opaque | transparent | add | multiply | screen | fade. "masked"
+			// clips in the shader and blends like opaque, so it lands on OPAQUE too.
+			using Rendering::Settings::EBlendMode;
+			state.blendable = it->second != "opaque";
+			state.blendMode =
+				it->second == "transparent" ? EBlendMode::BLEND_TRANSPARENT :
+				it->second == "add" ? EBlendMode::BLEND_ADD :
+				it->second == "multiply" ? EBlendMode::BLEND_MULTIPLY :
+				it->second == "screen" ? EBlendMode::BLEND_SCREEN :
+				it->second == "fade" ? EBlendMode::BLEND_FADE :
+				EBlendMode::BLEND_OPAQUE;
+		}
+		if (const auto it = states.find("culling"); it != states.end())
+		{
+			state.backfaceCulling = it->second == "back";
+			state.frontfaceCulling = it->second == "front";
+		}
+		if (const auto it = states.find("depthWrite"); it != states.end())
+		{
+			state.depthWriting = it->second == "true";
+		}
+
+		return state;
+	}
 }
 
 namespace Rendering::Resources::Loaders
@@ -705,8 +1097,56 @@ namespace Rendering::Resources::Loaders
 
 	Shader* ShaderLoader::Create(const std::string& p_filePath, FilePathParserCallback p_pathParser)
 	{
+		// A shader the build already compiled (MoonMatc, see docs/ShaderPipeline.md) comes
+		// out of the archive as a package: nothing to parse, just compile what it lists.
+		if (const ShaderFile* file = Rendering::Resources::FindShaderFile(p_filePath))
+		{
+			if (Rendering::Resources::ShaderPackage::IsPackage(file->data, file->size))
+			{
+				const Rendering::Resources::ShaderPackage package(file->data, file->size);
+				if (package.IsValid())
+				{
+					Shader* shader = new Shader(p_filePath, AssembleFromPackage(package), RuntimeParameters(package));
+					shader->SetState(RuntimeState(package));
+					shader->SetParameterBlockSize(package.ParameterBlockSize());
+					return shader;
+				}
+			}
+		}
+
 		auto result = CompileShaderFromFile(p_filePath, p_pathParser);
 		return new Shader(p_filePath, std::move(result.variants));
+	}
+
+	Shader* ShaderLoader::CreateFromPackage(const void* p_data, uint32_t p_size,
+		const std::string& p_name, std::string* p_error)
+	{
+		if (p_data == nullptr || p_size == 0)
+		{
+			if (p_error != nullptr) { *p_error = "empty package"; }
+			return nullptr;
+		}
+
+		const Rendering::Resources::ShaderPackage package(p_data, p_size);
+		if (!package.IsValid())
+		{
+			if (p_error != nullptr) { *p_error = "not a valid shader package"; }
+			return nullptr;
+		}
+
+		std::string error;
+		auto variants = AssembleFromPackage(package, &error);
+		if (variants.empty())
+		{
+			if (p_error != nullptr) { *p_error = std::move(error); }
+			return nullptr;
+		}
+
+		if (p_error != nullptr) { p_error->clear(); }
+		Shader* shader = new Shader(p_name, std::move(variants), RuntimeParameters(package));
+		shader->SetState(RuntimeState(package));
+		shader->SetParameterBlockSize(package.ParameterBlockSize());
+		return shader;
 	}
 
 	Shader* ShaderLoader::CreateFromSource(const std::string& p_vertexShader, const std::string& p_fragmentShader, const std::string& p_geomertyShader)
@@ -738,6 +1178,39 @@ namespace Rendering::Resources::Loaders
 				result.inputInfo.name
 			)) << std::endl;;
 		}
+	}
+
+	bool ShaderLoader::RecompileFromPackage(Shader& p_shader, const void* p_data, uint32_t p_size,
+		std::string* p_error)
+	{
+		if (p_data == nullptr || p_size == 0)
+		{
+			if (p_error != nullptr) { *p_error = "empty package"; }
+			return false;
+		}
+
+		const Rendering::Resources::ShaderPackage package(p_data, p_size);
+		if (!package.IsValid())
+		{
+			if (p_error != nullptr) { *p_error = "not a valid shader package"; }
+			return false;
+		}
+
+		std::string error;
+		auto variants = AssembleFromPackage(package, &error);
+		if (variants.empty())
+		{
+			// Keep what the shader had: a broken edit must not blank out the preview or the scene.
+			if (p_error != nullptr) { *p_error = error.empty() ? "the package has no stages" : std::move(error); }
+			return false;
+		}
+
+		p_shader.SetVariants(std::move(variants));
+		p_shader.SetParameters(RuntimeParameters(package));
+		p_shader.SetState(RuntimeState(package));
+		p_shader.SetParameterBlockSize(package.ParameterBlockSize());
+		if (p_error != nullptr) { p_error->clear(); }
+		return true;
 	}
 
 	bool ShaderLoader::Destroy(Shader*& p_shader)

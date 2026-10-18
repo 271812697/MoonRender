@@ -1,4 +1,4 @@
-﻿#include <tracy/Tracy.hpp>
+#include <tracy/Tracy.hpp>
 #include <editor/UI/SettingPanel/RenderSettingWidget.h>
 #include <Core/ECS/Components/CPostProcessStack.h>
 #include "renderer/PathTraceRenderPass.h"
@@ -17,6 +17,7 @@
 #include <Rendering/HAL/Profiling.h>
 #include <Rendering/Settings/EPixelDataFormat.h>
 #include <Rendering/Settings/ETextureType.h>
+#include <Rendering/Resources/ShaderArchive.h>
 #include "Settings/DebugSetting.h"
 #include "Interactive/Widgets/SplitScreen.h"
 #include "Interactive/Im3DRenderer.h"
@@ -28,23 +29,17 @@ namespace Editor::Rendering {
 	// 加载shader的源码
 	std::string loadShaderSource(std::string path)
 	{
-		static bool isRecursiveCall = false;
-		std::string fullSourceCode = "";
-		std::ifstream file(path);
-		if (!file.is_open())
+		// Out of the archive the build packed the shaders into; the disk is only the
+		// fallback for a checkout that has not been packed (see ShaderArchive.h).
+		std::string source;
+		if (!::Rendering::Resources::ReadShaderSource(path, source))
 		{
 			CORE_ERROR("ERROR: could not open the shader at: {0}\n", path);
 
 			return "";
 		}
-		std::string lineBuffer;
-		while (std::getline(file, lineBuffer))
-		{
-			fullSourceCode += lineBuffer + '\n';
-		}
-		fullSourceCode += '\0';
-		file.close();
-		return fullSourceCode;
+		source += '\0';
+		return source;
 	}
 	static float Luminance(float r, float g, float b)
 	{
@@ -833,6 +828,14 @@ void main()
 		auto& view = GetService(Editor::Panels::SceneView);
 		auto camera=view.GetCamera();
 		auto bvhService = view.GetScene()->GetBvhService();
+		// The per-mesh BVHs and the buffers the shader traces are the ray tracing's own
+		// data: they are built here, on the first frame after the scene changed, rather
+		// than with the scene's BVHs - a load has no reason to pay for a feature that may
+		// never be turned on (see BvhService::BuildTracingData). Inside the render loop is
+		// where it has to run: the per-mesh domain palettes are read through the GL context.
+		if (bvhService->IsTracingDataStale()) {
+			bvhService->BuildTracingData();
+		}
 		static ::Rendering::Settings::EProjectionMode preCameraType=camera->GetProjectionMode();
 		::Rendering::Settings::EProjectionMode curCameraType = camera->GetProjectionMode();
 		if (preCameraType!=curCameraType) {

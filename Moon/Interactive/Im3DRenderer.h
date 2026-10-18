@@ -1,10 +1,11 @@
-﻿#pragma once
+#pragma once
 #include <math.h>
 #include <Eigen/Core>
 #include <vector>
 #include <unordered_map>
 #include "Interactive/Im3DType.h"
 #include "Rendering/Resources/Texture.h"
+#include <Rendering/Overlay/Im3DGLRenderer.h>
 namespace Editor {
 	namespace Panels {
 		class SceneView;
@@ -29,6 +30,13 @@ namespace MOON
 	public:
 		static ImRenderer& instance();
 		void init();
+		/** The gizmo geometry's GL objects (vertex array, vertex buffer, materials).
+		 *
+		 * Separate from init() because of which context each half belongs to: the gizmo pass draws
+		 * inside the render module's frame, on the module's own context, while ImGui draws after
+		 * that frame has been pasted, on the viewport's context. Vertex arrays are per context, so
+		 * this half has to be created on the module's, and init() on the viewport's. */
+		void initGizmoGl();
 		void preStoreMesh();
 		void prepareGl();
 		void registerDebugSettings();
@@ -262,6 +270,9 @@ namespace MOON
 		Rendering::Data::Material* mTriangleMaterial = nullptr;
 		Rendering::Data::Material* mCellMaterial = nullptr;
 		Rendering::Data::Material* mLitMaterial = nullptr;
+		/** Uploads and draws the geometry; the GL objects and the pipeline state are the render
+		 * module's (see Rendering::Overlay::Im3DGLRenderer). What stays here is building it. */
+		::Rendering::Overlay::Im3DGLRenderer m_overlayGl;
 		std::vector<Eigen::Vector4<uint8_t>> colorStack;
 		std::vector<float> alphaStack;
 		std::vector<float> sizeStack;

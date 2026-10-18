@@ -158,17 +158,20 @@ namespace MOON {
 					tempMat = new Core::Resources::Material();
 					GetService(Core::ResourceManagement::MaterialManager).RegisterResource(sceneName, tempMat);
 
-					tempMat->SetBackfaceCulling(false);;
+					tempMat->SetShader(Core::Global::ServiceLocator::Get<Editor::Core::Context>().shaderManager[":Shaders\\Standard.ovfx"]);
+					// The shader's material block is the default state now, so the instance's
+					// overrides have to come after it.
+					tempMat->SetBackfaceCulling(false);
 					tempMat->SetCastShadows(false);
 					tempMat->SetReceiveShadows(false);
-
-					tempMat->SetShader(Core::Global::ServiceLocator::Get<Editor::Core::Context>().shaderManager[":Shaders\\Standard.ovfx"]);
 					// Enable the clip plane discard in Standard.ovfx.
 					tempMat->AddFeature("CLIP_PLANE");
-					// IBL: bind the skybox prefilter cube, the same environment
-					// data used by the STEP materials. Standard.ovfx reads it
-					// through the _EnvironmentMap uniform.
-					tempMat->SetProperty("_EnvironmentMap", GetSceneView.GetRenderer().GetPrefilterCube());					tempMat->SetProperty("u_Albedo", Maths::FVector4{ 1.0, 1.0, 1.0, 1.0 });
+					// IBL: the three pieces Filament's standard model reads - irradiance
+					// (diffuse), prefiltered radiance (specular) and the DFG lookup table.
+					tempMat->SetProperty("_IrradianceCube", GetSceneView.GetRenderer().GetIrradianceCube());
+					tempMat->SetProperty("_PrefilterCube", GetSceneView.GetRenderer().GetPrefilterCube());
+					tempMat->SetProperty("_BRDFLut", GetSceneView.GetRenderer().GetBrdfTexture());
+					tempMat->SetProperty("u_Albedo", Maths::FVector4{ 1.0, 1.0, 1.0, 1.0 });
 
 					tempMat->SetProperty("u_AlphaClippingThreshold", 1.0f);
 					tempMat->SetProperty("u_Roughness", 0.1f);
@@ -762,12 +765,13 @@ namespace MOON {
 
 				Core::Resources::Material* tempMat = new Core::Resources::Material();
 				Core::Global::ServiceLocator::Get<Core::ResourceManagement::MaterialManager>().RegisterResource(materilaMap[i], tempMat);
-				tempMat->SetBackfaceCulling(false);;
-				tempMat->SetCastShadows(false);
-				tempMat->SetReceiveShadows(false);
 				tempMat->AddFeature("NORMAL_MAPPING");
 				tempMat->AddFeature("CLIP_PLANE");
 				tempMat->SetShader(Core::Global::ServiceLocator::Get<Editor::Core::Context>().shaderManager[":Shaders\\Standard.ovfx"]);
+				// Overrides after the shader: SetShader now takes the state from the material block.
+				tempMat->SetBackfaceCulling(false);
+				tempMat->SetCastShadows(false);
+				tempMat->SetReceiveShadows(false);
 				tempMat->SetProperty("u_Albedo", Maths::FVector4{ (float)pbr.baseColorFactor[0], (float)pbr.baseColorFactor[1], (float)pbr.baseColorFactor[2], (float)pbr.baseColorFactor[3] });
 				// Albedo Texture
 				if (pbr.baseColorTexture.index > -1) {

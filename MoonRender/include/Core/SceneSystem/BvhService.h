@@ -250,7 +250,23 @@ namespace Core::SceneSystem
 		int ProcessTLASNodes(const ::Rendering::Geometry::Bvh::Node* node);
 
 		void UpdateTLAS(const ::Rendering::Geometry::Bvh* topLevelBvh, const std::vector<MeshInstance>& instances);
-		void Process(const std::vector<::Rendering::Geometry::bbox>&boxs, const std::vector<::Rendering::Resources::Mesh*>& sceneMeshes, const std::vector<MeshInstance>& instances);
+		/** Builds the scene's own BVHs - the CPU side, which the ray queries walk - from
+		 * the boxes of the mesh instances.
+		 *
+		 * @param p_buildTracingData also build what the path tracer traces on the GPU: the
+		 *        per-mesh BVHs the node array is walked from, the nodes and materials, and
+		 *        the vertex, domain colour and transform buffers the shader reads. That
+		 *        part needs the GL context (the per-mesh domain palettes are read back
+		 *        through it), and the per-mesh BVHs are the expensive half of a load, so it
+		 *        is left out here and built by the ray tracing itself the first time it
+		 *        runs after a scene change (see BuildTracingData). */
+		void Process(const std::vector<::Rendering::Geometry::bbox>&boxs, const std::vector<::Rendering::Resources::Mesh*>& sceneMeshes, const std::vector<MeshInstance>& instances, bool p_buildTracingData);
+		/** Builds what the ray tracing needs on the GPU, for the scene Process() was last
+		 * given. Has to be called inside the render loop. */
+		void BuildTracingData();
+		/** True while the tracing data does not match the scene: a load or an edit has
+		 * happened since it was built. */
+		bool IsTracingDataStale() const { return m_tracingDataStale; }
 		void SaveAsObj(const std::string&path);
 		void Clear();
 		bool DirtyFlag();
@@ -284,6 +300,10 @@ namespace Core::SceneSystem
 		const ::Rendering::Geometry::Bvh* topLevelBvh;
 		std::vector<MeshInstance> mSceneMeshInstances;
 		std::vector<::Rendering::Resources::Mesh*> mSceneMeshes;
+		/** The instance boxes Process() was given: the tracing data is built from them
+		 * later, when the ray tracing asks for it (see BuildTracingData). */
+		std::vector<::Rendering::Geometry::bbox> mSceneBoxes;
+		bool m_tracingDataStale = true;
 		/** What the last Process() could not index, one line each: an instance that
 		 * names a mesh that is not in the scene, or a mesh whose index/vertex arrays
 		 * disagree with the triangles its BVH holds. They are collected here instead of

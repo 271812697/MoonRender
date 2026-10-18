@@ -1,4 +1,4 @@
-﻿set(TARGET_NAME Moon)
+set(TARGET_NAME Moon)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -19,6 +19,7 @@ set_target_properties(${TARGET_NAME}
 #get_target_property(TARGET_EXE_DIR ${TARGET_NAME} RUNTIME_OUTPUT_DIRECTORY)
 set(TARGET_EXE_DIR "$<TARGET_FILE_DIR:${TARGET_NAME}>")
 # Link dependencies    
+target_link_libraries(${TARGET_NAME} PUBLIC MoonMatcLib)
 
 target_link_libraries(${TARGET_NAME} PUBLIC
     Qt${QT_VERSION_MAJOR}::Core
@@ -58,24 +59,33 @@ target_link_libraries(${TARGET_NAME} PUBLIC ${OIDN_LIBRARIES}  ${FREETYPE_LIBRAR
 )
 
 add_custom_command(
-    TARGET ${TARGET_NAME}  # 替换成你的exe目标名，比如 main
-    POST_BUILD  # 编译前执行（可选：POST_BUILD 编译后执行）
+    TARGET ${TARGET_NAME}  # 鏇挎崲鎴愪綘鐨別xe鐩爣鍚嶏紝姣斿 main
+    POST_BUILD  # 缂栬瘧鍓嶆墽琛岋紙鍙€夛細POST_BUILD 缂栬瘧鍚庢墽琛岋級
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${LibDIR}/oidn/lib/OpenImageDenoise.dll" "${TARGET_EXE_DIR}"
     COMMENT "Copying OpenImageDenoise.dll"
 )
 add_custom_command(
-    TARGET ${TARGET_NAME}  # 替换成你的exe目标名，比如 main
-    POST_BUILD  # 编译前执行（可选：POST_BUILD 编译后执行）
+    TARGET ${TARGET_NAME}  # 鏇挎崲鎴愪綘鐨別xe鐩爣鍚嶏紝姣斿 main
+    POST_BUILD  # 缂栬瘧鍓嶆墽琛岋紙鍙€夛細POST_BUILD 缂栬瘧鍚庢墽琛岋級
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${LibDIR}/freetype/bin/freetype.dll" "${TARGET_EXE_DIR}"
     COMMENT "Copying freetype.dll"
 )
 add_custom_command(
-    TARGET ${TARGET_NAME}  # 替换成你的exe目标名，比如 main
-    POST_BUILD  # 编译前执行（可选：POST_BUILD 编译后执行）
+    TARGET ${TARGET_NAME}  # 鏇挎崲鎴愪綘鐨別xe鐩爣鍚嶏紝姣斿 main
+    POST_BUILD  # 缂栬瘧鍓嶆墽琛岋紙鍙€夛細POST_BUILD 缂栬瘧鍚庢墽琛岋級
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${LibDIR}/oidn/lib/tbb.dll" "${TARGET_EXE_DIR}"
     COMMENT "Copying tbb.dll"
 )
 file(GLOB_RECURSE RESOURCE_FILES "${ResDIR}/*")
+
+# The engine shaders are packed into the MoonShader archive (Tools/ShaderPack), so the runtime
+# does not read them from disk ("sources are read from the embedded archive"). They are still
+# copied into the run directory because two things do read them:
+#   - PathTraceRenderPass reads the PathTrace files itself and injects its option #defines
+#     before compiling them (the permanent exception in docs/ShaderPipeline.md section 8), and
+#   - the material editor edits this folder: it is the working copy it lists, reads, and
+#     recompiles in process, .ovfxh headers included.
+
 if(RESOURCE_FILES)  
     foreach(FILE ${RESOURCE_FILES})
         file(RELATIVE_PATH REL_FILE_PATH ${ResDIR} ${FILE})
@@ -83,8 +93,8 @@ if(RESOURCE_FILES)
         set(TARGET_DIR "${TARGET_EXE_DIR}/${FILE_DIR}")
         
         add_custom_command(
-            TARGET ${TARGET_NAME}  # 替换成你的exe目标名，比如 main
-            POST_BUILD  # 编译前执行（可选：POST_BUILD 编译后执行）
+            TARGET ${TARGET_NAME}  # 鏇挎崲鎴愪綘鐨別xe鐩爣鍚嶏紝姣斿 main
+            POST_BUILD  # 缂栬瘧鍓嶆墽琛岋紙鍙€夛細POST_BUILD 缂栬瘧鍚庢墽琛岋級
             COMMAND ${CMAKE_COMMAND} -E make_directory "${TARGET_DIR}"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${FILE}" "${TARGET_DIR}"
             COMMENT "Copying resource file: ${REL_FILE_PATH}"

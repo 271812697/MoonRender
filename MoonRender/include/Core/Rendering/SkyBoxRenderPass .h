@@ -29,6 +29,12 @@ namespace Core::Rendering
 		void updateSkyTexture(const std::string& path); 
 		SkyBoxSetting& GetSetting() { return mSetting; }
 
+		/** Enables/disables building the IBL environment (HDR load, cubemap capture, irradiance
+		 * and prefilter convolution, BRDF LUT). The material preview turns it off: it only wants
+		 * the background, and the capture is the expensive half of this pass. */
+		void SetEnvironmentCapture(bool p_enabled) { m_captureEnvironment = p_enabled; }
+		bool IsEnvironmentCaptureEnabled() const { return m_captureEnvironment; }
+
 	protected:
 		virtual void Draw(::Rendering::Data::PipelineState p_pso) override;
 	private:
@@ -51,5 +57,6 @@ namespace Core::Rendering
 		SkyBoxSetting mSetting;
 		std::string mPath = ":Textures/PureSky.hdr";
 		bool needUpdateSkyTexture = true;
+		bool m_captureEnvironment = true;
 	};
 }

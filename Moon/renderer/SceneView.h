@@ -1,10 +1,10 @@
-﻿#pragma once
+#pragma once
 #include "GizmoBehaviour.h"
-#include "AViewControllable.h"
+#include <Rendering/View/AViewControllable.h>
 #include "PickingRenderPass.h"
 #include "Rendering/Geometry/BoundingSphere.h"
 
-#include <QElapsedTimer>
+#include <chrono>
 namespace Core::SceneSystem
 {
 	class SceneManager;
@@ -45,10 +45,16 @@ namespace Editor::Panels
 		void BuildBvh();
 		void SetGizmoOperation(Core::EGizmoOperation p_operation);
 		Core::EGizmoOperation GetGizmoOperation() const;
-		void ReceiveEvent(QEvent* e);
+		/** Takes an event the window layer already translated, see InputEvent. */
+		void ReceiveEvent(const InputEvent& p_event) override;
 		bool MouseHit(Maths::FVector3& out);
 		bool MouseClipHit(Maths::FVector3& out,const Maths::FVector4& clipPlane);
 		Editor::Rendering::PickingRenderPass::PickingResult GetPickResult();
+		/** Where the last pick landed on the geometry: the world position the picking
+		 * target writes next to the id of every pixel it draws (see
+		 * PickingRenderPass::PickHit), for the pixel the cursor is over.
+		 * @return false when nothing with a position is under the cursor. */
+		bool GetPickWorldPosition(Maths::FVector3& p_out) const;
 		::Rendering::Geometry::Ray GetMouseRay();
 		virtual ::Core::ECS::Actor* GetSelectedActor()override;
 		virtual void SelectActor(::Core::ECS::Actor& actor)override;
@@ -84,12 +90,16 @@ namespace Editor::Panels
 		::Core::Resources::Material m_fallbackMaterial;
 		Tools::Utils::OptRef<::Core::ECS::Actor> m_highlightedActor;
 		std::optional<Editor::Core::GizmoBehaviour::EDirection> m_highlightedGizmoDirection;
-		Editor::Rendering::PickingRenderPass::PickingResult pickingResult;
+		/** What the picking target last said about the cursor: the actor (or gizmo
+		 * direction) that is drawn there, and the world position of that very pixel -
+		 * which is the point the camera turns around when the right button is pressed. */
+		Editor::Rendering::PickingRenderPass::PickHit pickingResult;
 		/** Last mouse position the picking readback was performed for. */
 		std::pair<double, double> m_lastPickingMouse{ -1.0, -1.0 };
 		/** Throttles hover picks: the picking pass is a full scene pass, so it is
-		 * rendered on demand at most every kPickThrottleMs milliseconds. */
-		QElapsedTimer m_pickRequestTimer;
+		 * rendered on demand at most every kPickThrottleMs milliseconds.
+		 * A clock of our own, not a window toolkit's: the view is the render module's. */
+		std::chrono::steady_clock::time_point m_pickRequestTime = std::chrono::steady_clock::now();
 		/** View projection of the last pick request (refreshes the target while
 		 * the camera moves). */
 		Maths::FMatrix4 m_lastPickViewProjection = Maths::FMatrix4::Identity;

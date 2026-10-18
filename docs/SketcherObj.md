@@ -156,13 +156,14 @@ solvedSketch.resetInitMove()
 
 网格吸附要点：
 
-- 网格步长与 `drawBackground()` 完全一致：两者都取 `SketcherObj::gridView()` 里的 `step`
-  （按当前相机算“约 40px 一条次网格线”的目标间距，再向上取到 1/2/5×10ⁿ 的“好看”步长），
-  所以画出来的格子和吸附到的点永远是同一个点阵；
+- 网格步长与 `drawBackground()` 完全一致：两者都取 `SketchPicking::gridView()` 里的 `step`
+  （按当前相机算“一格约 `SketcherObj::gridTargetPx()` 像素宽”的目标间距，默认 20px，
+  面板可调；再向上取到 `1/2×10ⁿ` 的步长，于是格子边长按 ×5、×2 交替为
+  1、0.2、0.1、0.02、0.01……），所以画出来的格子和吸附到的点永远是同一个点阵；
 - 候选点为 `round(pos / step) * step` 的交叉点，是否吸附只按该点与鼠标的屏幕像素距离判断，
   不随缩放改变手感；
 - 由草图面板的 **Snap To Grid** 开关控制（默认关），状态存于 `SketcherObj::m_snapToGrid`；
-- 实现位于 `SketcherObjDraw.cpp::snapToGridPoint()`，调用挂在 `snapPoint()` 所有既有规则之后。
+- 实现位于 `SketchPicking.cpp::snapToGridPoint()`，调用挂在 `snapPoint()` 所有既有规则之后。
 
 ---
 

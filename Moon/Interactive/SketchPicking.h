@@ -42,7 +42,9 @@ namespace MOON {
 			/** Viewport half extents, in view-space units. */
 			float hx = 0.0f;
 			float hy = 0.0f;
-			/** The adaptive grid step, in sketch units. */
+			/** The adaptive grid step, in sketch units: one minor cell is about
+			 * SketcherObj::gridTargetPx() pixels across, snapped up to a
+			 * 1 / 2 x 10^n value. */
 			float step = 0.0f;
 		};
 

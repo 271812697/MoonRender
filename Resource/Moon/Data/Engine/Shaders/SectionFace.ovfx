@@ -1,12 +1,79 @@
-#pass Transparents
-#feature WITH_EDGE
+// Section face: the striped face of a section (the plane cut through a solid), with the same
+// per-pixel edge feathering the topology faces use.
+//
+// Written in the material form MoonMatc consumes (see docs/ShaderPipeline.md), with all three
+// stages written by this file - the generated skeletons cannot host any of them. The vertex
+// stage builds the world normal with the inverse-transpose of the model matrix and carries a
+// fourth attribute (the domain id) the skeleton has no varying for; the geometry stage insets
+// each triangle and emits its edge equations; the fragment stage shades with those equations
+// and with the section plane it is handed. MoonMatc puts the prelude, the variant #defines and
+// the parameters in front of the blocks and generates nothing else.
 
-#shader vertex
-#version 450 core
+material {
+    name         : SectionFace,
+    shadingModel : unlit,
+    // No C++ draw site names this file any more, so the state is copied from the closest
+    // sibling (GeomertySurface's transparent face material): the Transparents depth-peel body
+    // it carries, culling off, depth still written.
+    blending     : transparent,
+    culling      : none,
+    depthWrite   : true,
 
-#include ":Shaders/Common/Buffers/EngineUBO.ovfxh"
-#include ":Shaders/Common/Utils.ovfxh"
+    features : [ WITH_EDGE ],
+    passes   : [ Transparents ],
 
+    parameters : [
+        // The edge expansion reads the width in the geometry stage and feathers with it in
+        // the fragment stage, so it is one parameter for both.
+        { type : float,     name : lineWidth, default : 1.0 },
+        { type : float3,    name : edgeColor },
+        { type : float,     name : edgeOpacity, default : 1.0 },
+
+        { type : sampler2D, name : u_AlbedoMap },
+        { type : float4,    name : u_Albedo, default : vec4(1.0) },
+        { type : sampler2D, name : u_NormalMap },
+        { type : sampler2D, name : u_AmbientOcclusionMap },
+        { type : sampler2D, name : u_MaskMap },
+
+        { type : sampler2D, name : u_EmissiveMap },
+        { type : float3,    name : u_EmissiveColor, default : vec3(1.0, 1.0, 1.0) },
+        { type : float,     name : u_EmissiveIntensity, default : 0.0 },
+
+        { type : float,     name : u_RefractionIndex, default : 1.5 },       // 1.0 = air, 1.33 = water, 1.5 = glass, etc.
+        { type : float,     name : u_Transmission, default : 0.0 },          // 0.0 = opaque, 1.0 = fully transmissive
+        { type : float2,    name : u_TextureTiling, default : vec2(1.0, 1.0) },
+        { type : float2,    name : u_TextureOffset, default : vec2(0.0, 0.0) },
+
+        { type : float,     name : u_AlphaClippingThreshold, default : 0.0 },
+        { type : bool,      name : u_AlphaDithering, default : false },
+
+        // Useful when no post-processing is applied.
+        { type : bool,      name : u_BuiltInToneMapping, default : false },
+        { type : bool,      name : u_BuiltInGammaCorrection, default : false },
+
+        // The Transparents pass: the depth peel this material is drawn with.
+        { type : sampler2D, name : DepthPeelTex },
+        { type : sampler2D, name : OpaqueDepthTex },
+
+        { type : sampler2D,   name : _ShadowMap },
+        { type : mat4,        name : _LightSpaceMatrix },
+
+        { type : samplerCube, name : _IrradianceCube },
+        { type : samplerCube, name : _PrefilterCube },
+        { type : sampler2D,   name : _BRDFLut },
+        { type : sampler2D,   name : occlusionTex },
+
+        // One colour per B-rep domain (declared by the old file, kept so that a draw site that
+        // sets it keeps finding it).
+        { type : samplerBuffer, name : domainColorTex },
+
+        // The section plane and the stripe pattern the face is painted with.
+        { type : float3,    name : lineNormal },
+        { type : float3,    name : planeOrigin }
+    ]
+}
+
+vertex {
 layout (location = 0) in vec3 geo_Pos;
 layout (location = 1) in vec2 geo_TexCoords;
 layout (location = 2) in vec3 geo_Normal;
@@ -31,12 +98,9 @@ void main()
     vs_out.DomainId=geo_DomainId;    
     gl_Position = ubo_Projection * ubo_View * worldPos;
 }
+}
 
-#shader geomerty
-#version 450 core
-
-#include ":Shaders/Common/Buffers/EngineUBO.ovfxh"
-
+geometry {
 in VS_OUT
 {
     vec3 FragPos;
@@ -59,12 +123,10 @@ out GS_OUT{
 layout(triangles) in;
 layout(triangle_strip, max_vertices = 3) out;
 
+// `lineWidth` is a material parameter now: it is read here to build the offsets and in the
+// fragment stage to feather the edge.
 //uniform samplerBuffer edgeTexture;
 // surface with edges
-#if defined(WITH_EDGE)
-uniform float lineWidth=1.0f;
-
-#endif
 
 void main() 
 {
@@ -136,15 +198,11 @@ void main()
     }
     EndPrimitive();
 }
+}
 
-
-#shader fragment
-#version 450 core
-
-
-
-#include ":Shaders/Common/Buffers/EngineUBO.ovfxh"
+fragment {
 #include ":Shaders/Lighting/PBR.ovfxh"
+
 in GS_OUT
 {
     vec3 FragPos;
@@ -158,55 +216,9 @@ in GS_OUT
 } fs_in;
 
 // surface with edges
-#if defined(WITH_EDGE)
-uniform float lineWidth=1.0f;
-uniform vec3 edgeColor;
-uniform float edgeOpacity=1.0f;
-#endif
-
-
-
-uniform sampler2D u_AlbedoMap;
-uniform vec4 u_Albedo = vec4(1.0);
-uniform sampler2D u_NormalMap;
-uniform sampler2D u_AmbientOcclusionMap;
-uniform sampler2D u_MaskMap;
-
-uniform sampler2D u_EmissiveMap;
-uniform vec3 u_EmissiveColor = vec3(1.0, 1.0, 1.0);
-uniform float u_EmissiveIntensity = 0.0;
-
-
-
-uniform float u_RefractionIndex = 1.5; // 1.0 = air, 1.33 = water, 1.5 = glass, etc.
-uniform float u_Transmission = 0.0; // 0.0 = opaque, 1.0 = fully transmissive
-uniform vec2 u_TextureTiling = vec2(1.0, 1.0);
-uniform vec2 u_TextureOffset = vec2(0.0, 0.0);
-
-uniform float u_AlphaClippingThreshold = 0.0;
-uniform bool u_AlphaDithering = false;
-
-// Useful when no post-processing is applied.
-uniform bool u_BuiltInToneMapping = false;
-uniform bool u_BuiltInGammaCorrection = false;
-
-
-#if defined(Transparents)
-uniform sampler2D DepthPeelTex;
-uniform sampler2D OpaqueDepthTex;
-#endif
-
-uniform sampler2D _ShadowMap;
-uniform mat4 _LightSpaceMatrix;
-
-uniform samplerCube _IrradianceCube;
-uniform samplerCube _PrefilterCube;
-uniform sampler2D _BRDFLut;
-uniform float u_environmentIntensity=0.5f;
-uniform sampler2D occlusionTex;
-
-
-uniform samplerBuffer domainColorTex;
+// `lineWidth`, `edgeColor` and `edgeOpacity` are material parameters now, so they are declared
+// by MoonMatc in front of this block (the same holds for every other uniform that used to be
+// declared here - see the parameters list above).
 
 #define MATERIAL_HAS_NORMAL
 #define HAS_ATTRIBUTE_TANGENTS
@@ -249,19 +261,7 @@ float clampNoV(float NoV) {
 
 
 
-// ----------------------------------------------------------------------------
-vec3 fresnelSchlickRoughness(float cosTheta, vec3 F0, float roughness)
-{
-    return F0 + (max(vec3(1.0 - roughness), F0) - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
-}   
-
-
-
-
-
 out vec4 FRAGMENT_COLOR;
-uniform vec3 lineNormal;
-uniform vec3 planeOrigin;
 
 void main()
 {
@@ -289,12 +289,17 @@ void main()
 
 
     vec2 texCoords = TileAndOffsetTexCoords(fs_in.TexCoords, u_TextureTiling, u_TextureOffset);
-    vec4 albedo = texture(u_AlbedoMap, texCoords) * u_Albedo;
+    vec4 albedoTexel = texture(u_AlbedoMap, texCoords);
+    vec4 albedo = albedoTexel * u_Albedo;
     albedo.a *= texture(u_MaskMap, texCoords).r;
     if (albedo.a < u_AlphaClippingThreshold)
     {
         discard;
     }
+
+    // The albedo map and the picker tint are both sRGB: decode them separately and combine in
+    // linear. Decoding the product (the old path) darkens any tint that is not white.
+    vec3 linearAlbedo = pow(albedoTexel.rgb, vec3(2.2)) * pow(u_Albedo.rgb, vec3(2.2));
 
     if (u_AlphaDithering && Dithering(albedo.a, gl_FragCoord.xy) < 0)
     {
@@ -313,9 +318,9 @@ void main()
     float center = kth * stripePeriod + stripePeriod * 0.5;
     float modDist = abs(dist - center);
     float t = smoothstep(stripeBandS, stripeBand, modDist);
-    vec3 faceColor=albedo.rgb;
-    albedo.rgb = mix(vec3(0,0,0), faceColor, t);
-    albedo.rgb = mix(albedo.rgb,faceColor, fade);
+    const vec3 faceColorLinear = linearAlbedo;
+    linearAlbedo = mix(vec3(0,0,0), faceColorLinear, t);
+    linearAlbedo = mix(linearAlbedo,faceColorLinear, fade);
     vec3 normal = normalize(fs_in.Normal);
   
     vec3 VD=normalize(ubo_ViewPos-fs_in.FragPos);
@@ -345,10 +350,10 @@ void main()
     emix = mix(emix, max(emix, emix0), step(fs_in.edgeEqn[0].z, 0.01));
     emix = mix(emix, max(emix, emix2), step(fs_in.edgeEqn[2].z, 0.01));
     float opacityFactor = clamp(fs_in.screenLengthOutput / 50., 0.15, 1.0);
-    albedo.rgb = mix(albedo.rgb, edgeColor, emix*opacityFactor*edgeOpacity);
+    linearAlbedo = mix(linearAlbedo, pow(edgeColor, vec3(2.2)), emix*opacityFactor*edgeOpacity);
 #endif
    vec3 pbr = PBRLighting(
-        albedo.rgb,
+        linearAlbedo,
         metallic,
         roughness,
         1.0,
@@ -357,6 +362,9 @@ void main()
         fs_in.FragPos,
         _ShadowMap,
         _LightSpaceMatrix,
+        _IrradianceCube,
+        _PrefilterCube,
+        _BRDFLut,
         u_Transmission,
         u_RefractionIndex
     );
@@ -364,37 +372,21 @@ void main()
     // Simple built-in tonemapping (Reinhard) and gamma correction for elements
     // not affected by post-processing (e.g. debug, UI, etc.), but still aiming
     // to approximate the final PBR look.
-    pbr = mix(pbr, pbr / (pbr + vec3(1.0)), u_BuiltInToneMapping);
-    pbr = mix(pbr, pow(pbr, vec3(1.0 / 2.2)), u_BuiltInGammaCorrection);
+    // The flag is broadcast with bvec3(): `mix(genType, genType, bool)` is not an overload the
+    // GLSL 4.50 spec has (the boolean selector is the genBType one), so the old spelling only
+    // compiled because the driver accepted it. Selecting per component is exactly what it did.
+    pbr = mix(pbr, pbr / (pbr + vec3(1.0)), bvec3(u_BuiltInToneMapping));
+    pbr = mix(pbr, pow(pbr, vec3(1.0 / 2.2)), bvec3(u_BuiltInGammaCorrection));
 
-    // Albedo textures are stored as sRGB (RGBA8, no hardware decode), so decode to
-    // linear before using it for IBL, matching PBRLighting()'s internal handling.
-    const vec3 linearAlbedo = pow(albedo.rgb, vec3(2.2));
-    vec3 F0 = vec3(0.04); 
-    F0 = mix(F0, linearAlbedo, metallic);
-    vec3 F = fresnelSchlickRoughness(max(dot(normal, VD), 0.0), F0, roughness);
-    vec3 kS = F;
-    vec3 kD = 1.0 - kS;
-    kD *= 1.0 - metallic;	
-
-    vec3 irradiance = texture(_IrradianceCube, normal).rgb;
-    vec3 diffuse      = irradiance * linearAlbedo;
-    
-    // sample both the pre-filter map and the BRDF lut and combine them together as per the Split-Sum approximation to get the IBL specular part.
-    const float MAX_REFLECTION_LOD = float(textureQueryLevels(_PrefilterCube) - 1);
-    vec3 R = reflect(-VD, normal); 
-    vec3 prefilteredColor = textureLod(_PrefilterCube, R,  roughness * MAX_REFLECTION_LOD).rgb;    
-    vec2 brdf  = texture(_BRDFLut, vec2(max(dot(normal, VD), 0.0), roughness)).rg;
-    vec3 sp = prefilteredColor * (F * brdf.x + brdf.y);
-
-    vec3 iblColor = (kD * diffuse+sp) *u_environmentIntensity;
-
-
- 
-    const vec3 emissive = texture(u_EmissiveMap, texCoords).rgb * u_EmissiveColor * u_EmissiveIntensity;
-    pbr += emissive+iblColor;
-    //pbr=iblColor;
-    //pbr=diffuse;
+    // The emissive map is sRGB and the colour comes from the panel's colour picker, which is
+    // sRGB too: decode each separately, then scale by the (linear) intensity. Decoding the
+    // product instead would darken any tint that is not white or black.
+    const vec3 emissive =
+        pow(texture(u_EmissiveMap, texCoords).rgb, vec3(2.2))
+        * pow(u_EmissiveColor, vec3(2.2))
+        * u_EmissiveIntensity;
+    pbr += emissive;
     FRAGMENT_COLOR = vec4(pbr,albedo.a);
 
+}
 }

@@ -1,4 +1,4 @@
-﻿#include <Core/ECS/Components/CCamera.h>
+#include <Core/ECS/Components/CCamera.h>
 #include <Core/ECS/Components/CDirectionalLight.h>
 #include <Core/ECS/Components/CMaterialRenderer.h>
 
@@ -7,8 +7,7 @@
 #include <Core/Rendering/EngineDrawableDescriptor.h>
 #include <Core/Rendering/ReflectionRenderFeature.h>
 
-#include "EditorResources.h"
-#include "AView.h"
+#include <Rendering/View/AView.h>
 
 #include "DebugModelRenderFeature.h"
 #include "DebugSceneRenderer.h"

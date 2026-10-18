@@ -164,12 +164,17 @@ namespace MOON {
 				auto tempMat = new Core::Resources::Material();
 
 
-				tempMat->SetBackfaceCulling(false);;
+				tempMat->SetShader(GetShaderService[":Shaders\\Standard.ovfx"]);
+				// Overrides after SetShader: the state now starts from the material block.
+				tempMat->SetBackfaceCulling(false);
 				tempMat->SetCastShadows(false);
 				tempMat->SetReceiveShadows(false);
-				tempMat->SetShader(GetShaderService[":Shaders\\Standard.ovfx"]);
 				tempMat->AddFeature("VERTEX_POS_NORMAL");
-				tempMat->SetProperty("_EnvironmentMap", GetSceneView.GetRenderer().GetPrefilterCube());					tempMat->SetProperty("u_Albedo", Maths::FVector4{ 1.0, 1.0, 1.0, 1.0 });
+				// IBL: the three pieces Filament's standard model reads.
+				tempMat->SetProperty("_IrradianceCube", GetSceneView.GetRenderer().GetIrradianceCube());
+				tempMat->SetProperty("_PrefilterCube", GetSceneView.GetRenderer().GetPrefilterCube());
+				tempMat->SetProperty("_BRDFLut", GetSceneView.GetRenderer().GetBrdfTexture());
+				tempMat->SetProperty("u_Albedo", Maths::FVector4{ 1.0, 1.0, 1.0, 1.0 });
 
 				tempMat->SetProperty("u_AlphaClippingThreshold", 1.0f);
 				tempMat->SetProperty("u_Roughness", 0.3f);

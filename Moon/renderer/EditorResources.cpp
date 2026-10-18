@@ -1,4 +1,4 @@
-﻿#include <filesystem>
+#include <filesystem>
 #include <Core/Helpers/GUIDrawer.h>
 #include "EditorResources.h"
 #include <Rendering/Settings/ETextureFilteringMode.h>
@@ -42,13 +42,6 @@ namespace
 		);
 	}
 
-	auto CreateShader(const std::filesystem::path& p_path)
-	{
-		return Rendering::Resources::Loaders::ShaderLoader::Create(
-			p_path.string()
-		);
-	}
-
 	template<typename T>
 	auto ValidateResources(const std::unordered_map<std::string, T>& p_resources)
 	{
@@ -76,7 +69,6 @@ Editor::Core::EditorResources::EditorResources(const std::string& p_editorAssets
 	const auto editorAssetsPath = std::filesystem::path{ p_editorAssetsPath };
 	const auto texturesFolder = editorAssetsPath / "Textures";
 	const auto modelsFolder = editorAssetsPath / "Models";
-	const auto shadersFolder = editorAssetsPath / "Shaders";
 
 	m_textures = {
 		{"Play", CreateTexture<LINEAR>(texturesFolder / "Play.png")},
@@ -120,18 +112,9 @@ Editor::Core::EditorResources::EditorResources(const std::string& p_editorAssets
 		{"Camera", CreateModel(modelsFolder / "Camera.fbx")}
 	};
 
-	m_shaders = {
-		{"Grid", CreateShader(shadersFolder / "Grid.ovfx")},
-		{"Gizmo", CreateShader(shadersFolder / "Gizmo.ovfx")},
-		{"Billboard", CreateShader(shadersFolder / "Billboard.ovfx")},
-		{"PickingFallback", CreateShader(shadersFolder / "PickingFallback.ovfx")},
-		{"OutlineFallback", CreateShader(shadersFolder / "OutlineFallback.ovfx")}
-	};
-
 	// Ensure that all resources have been loaded successfully
 	ValidateResources(m_textures);
 	ValidateResources(m_models);
-	ValidateResources(m_shaders);
 
 	// Register the empty texture for the GUIDrawer to use it when a texture is missing
 	::Core::Helpers::GUIDrawer::ProvideEmptyTexture(*m_textures["Empty_Texture"]);
@@ -147,11 +130,6 @@ Editor::Core::EditorResources::~EditorResources()
 	for (auto& [_, mesh] : m_models)
 	{
 		Rendering::Resources::Loaders::ModelLoader::Destroy(mesh);
-	}
-
-	for (auto& [_, shader] : m_shaders)
-	{
-		Rendering::Resources::Loaders::ShaderLoader::Destroy(shader);
 	}
 }
 
@@ -176,9 +154,4 @@ Rendering::Resources::Texture* Editor::Core::EditorResources::GetTexture(const s
 Rendering::Resources::Model* Editor::Core::EditorResources::GetModel(const std::string& p_id)
 {
 	return TryGetResource(m_models, p_id);
-}
-
-Rendering::Resources::Shader* Editor::Core::EditorResources::GetShader(const std::string& p_id)
-{
-	return TryGetResource(m_shaders, p_id);
 }

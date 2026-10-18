@@ -9,7 +9,7 @@
 #include "TopoShape.h"
 #include "core/component/TopoShapeActor.h"
 #include "Interactive/GizmoBehaviour.h"
-#include "Qtimgui/imgui/imgui.h"
+#include <ThirdParty/imgui/imgui/imgui.h>
 #include "core/ViewTool.h"
 
 #include <Core/ECS/Components/CMaterialRenderer.h>

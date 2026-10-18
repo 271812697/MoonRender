@@ -1,26 +1,23 @@
-#shader vertex
-#version 450 core
+// Straight copy of a texture into the output: the last stage of a post-process chain.
+//
+// A full-screen pass, so its domain is postProcess: MoonMatc generates the quad vertex stage
+// (clip space, no model matrix) and this file only says what one pixel comes out as.
 
-layout(location = 0) in vec2 geo_Pos;
-layout(location = 1) in vec2 geo_TexCoords;
+material {
+    name         : Blit,
+    shadingModel : unlit,
+    domain       : postProcess,
+    blending     : opaque,
+    culling      : none,
+    depthWrite   : false,
 
-out vec2 TexCoords;
-
-void main()
-{
-    TexCoords = geo_TexCoords;
-    gl_Position = vec4(geo_Pos, 0.0, 1.0);
+    parameters : [
+        { type : sampler2D, name : _InputTexture }
+    ]
 }
 
-#shader fragment
-#version 450 core
-
-in vec2 TexCoords;
-out vec4 FRAGMENT_COLOR;
-
-uniform sampler2D _InputTexture;
-
-void main()
-{
-    FRAGMENT_COLOR = texture(_InputTexture, TexCoords);
+fragment {
+    void material(inout MaterialInputs m) {
+        m.baseColor = texture(_InputTexture, TexCoords);
+    }
 }

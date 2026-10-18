@@ -154,6 +154,9 @@ template<>
 void Rendering::HAL::GLShaderProgram::QueryUniforms()
 {
 	m_context.uniforms.clear();
+	// A reloaded program has different locations: keeping the old ones would make SetUniform
+	// write through locations that no longer belong to this program.
+	m_context.uniformsLocationCache.clear();
 
 	std::array<GLchar, 256> nameBuffer;
 
@@ -173,6 +176,19 @@ void Rendering::HAL::GLShaderProgram::QueryUniforms()
 
 		// Skip reserved uniforms (e.g. ubo uniforms)
 		if (IsReservedUniform(name))
+		{
+			continue;
+		}
+
+		// Skip members of a uniform block (the per-material parameter block): they have no
+		// individual location (glGetUniformLocation returns -1), so asking for one - or trying
+		// to set one - is an invalid operation. The runtime writes them by std140 offset.
+		GLint blockIndex = -1;
+		{
+			const GLuint uniformIndex = static_cast<GLuint>(i);
+			glGetActiveUniformsiv(m_context.id, 1, &uniformIndex, GL_UNIFORM_BLOCK_INDEX, &blockIndex);
+		}
+		if (blockIndex != -1)
 		{
 			continue;
 		}

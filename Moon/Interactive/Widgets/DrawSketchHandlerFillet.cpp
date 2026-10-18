@@ -3,7 +3,7 @@
 #include "Interactive/Im3DRenderer.h"
 #include "core/log.h"
 #include "renderer/SceneView.h"
-#include "Qtimgui/imgui/imgui.h"
+#include <ThirdParty/imgui/imgui/imgui.h>
 #include "Interactive/Interactive/Event.h"
 #include "Interactive/Interactive/ExecuteCommand.h"
 #include "Interactive/Interactive/WidgetCallbackMapper.h"

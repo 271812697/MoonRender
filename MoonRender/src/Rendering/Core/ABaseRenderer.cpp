@@ -361,6 +361,38 @@ void Rendering::Core::ABaseRenderer::DrawEntity(
 	p_pso.depthWriting = p_drawable.stateMask.depthWriting;
 	p_pso.colorWriting.mask = p_drawable.stateMask.colorWriting ? 0xFF : 0x00;
 	p_pso.blending = p_drawable.stateMask.blendable;
+
+	// The state mask carries the material's blend mode: turn it into the factors the driver
+	// applies. Anything that is not opaque falls back to the standard alpha blend.
+	{
+		using Settings::EBlendMode;
+		using Settings::EBlendingFactor;
+		using Settings::EBlendingEquation;
+
+		p_pso.blendingSrcFactor = EBlendingFactor::SRC_ALPHA;
+		p_pso.blendingDestFactor = EBlendingFactor::ONE_MINUS_SRC_ALPHA;
+		p_pso.blendingEquation = EBlendingEquation::FUNC_ADD;
+
+		switch (p_drawable.stateMask.blendMode)
+		{
+		case EBlendMode::BLEND_ADD:
+			p_pso.blendingDestFactor = EBlendingFactor::ONE;
+			break;
+		case EBlendMode::BLEND_MULTIPLY:
+			p_pso.blendingSrcFactor = EBlendingFactor::DST_COLOR;
+			p_pso.blendingDestFactor = EBlendingFactor::ZERO;
+			break;
+		case EBlendMode::BLEND_SCREEN:
+			p_pso.blendingSrcFactor = EBlendingFactor::ONE;
+			p_pso.blendingDestFactor = EBlendingFactor::ONE_MINUS_SRC_COLOR;
+			break;
+		case EBlendMode::BLEND_FADE:
+		case EBlendMode::BLEND_TRANSPARENT:
+		case EBlendMode::BLEND_OPAQUE:
+		default:
+			break;
+		}
+	}
 	p_pso.culling = p_drawable.stateMask.frontfaceCulling || p_drawable.stateMask.backfaceCulling;
 	p_pso.depthTest = p_drawable.stateMask.depthTest;
 	p_pso.lineWidth = p_drawable.stateMask.lineWidth;

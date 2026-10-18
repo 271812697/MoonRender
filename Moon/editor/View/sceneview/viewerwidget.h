@@ -1,11 +1,16 @@
-﻿#pragma once
+#pragma once
 #include <QOpenGLWidget>
 #include <QOpenGLFunctions_4_5_Core>
+#include <memory>
+
 namespace Core::ECS {
 	class Actor;
 }
 namespace Editor::Panels {
 	class AView;
+}
+namespace Editor::Core {
+	class QtGLContextHost;
 }
 namespace MOON {
 	class ViewerWidget : public QOpenGLWidget, QOpenGLFunctions_4_5_Core
@@ -36,6 +41,10 @@ namespace MOON {
 		void addActorToTreeView(Core::ECS::Actor* actor);
 		void removeActorFromTreeView(Core::ECS::Actor* actor);
 		void modifyActorInTreeView(Core::ECS::Actor* actor);
+		/** Pastes a frame the render module produced (its colour texture) into this widget's
+		 * framebuffer. Must be called with this widget's context current: the texture is shared
+		 * between the two contexts, the framebuffer that reads it is this widget's own. */
+		void PasteFrame(uint32_t p_textureID, int p_width, int p_height);
 	public slots:
 		void onActorSelected(Core::ECS::Actor* actor);
 		void onActorHovered(Core::ECS::Actor* actor);
@@ -49,7 +58,16 @@ namespace MOON {
 		 * happens (asking for one only leaves the request behind). */
 		void documentOpened(const QString& p_path);
 	private:
+		/** Creates the render module's own GL context (shared with this widget's) and hands it to
+		 * the driver. Called from initializeGL right after releasing the widget's context: a
+		 * shared context cannot be created while the context it shares from is current. */
+		void CreateRenderContext();
+
 		class ViewerWindowInternal;
 		ViewerWindowInternal* mInternal = nullptr;
+		/** The render module's context; null until CreateRenderContext has succeeded. */
+		std::unique_ptr<::Editor::Core::QtGLContextHost> mRenderContextHost;
+		/** This widget's own read framebuffer, used to paste the module's frame. */
+		unsigned int m_pasteFramebuffer = 0;
 	};
 }

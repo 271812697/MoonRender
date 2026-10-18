@@ -625,6 +625,7 @@ namespace MOON
 			setText(*node, "normal", components(plane.normal));
 			node->SetAttribute("drawGrid", p_sketch->isDrawGrid() ? 1 : 0);
 			node->SetAttribute("snapGrid", p_sketch->isSnapToGrid() ? 1 : 0);
+			setNumber(*node, "gridTargetPx", p_sketch->gridTargetPx());
 			for (int i = 0; i <= p_sketch->getHighestCurveIndex(); ++i) {
 				const Part::Geometry* geo = p_sketch->getGeometry(i);
 				if (geo != nullptr) {
@@ -712,6 +713,7 @@ namespace MOON
 			p_sketch->setPlane(plane);
 			p_sketch->setDrawGrid(getFlag(p_node, "drawGrid", true));
 			p_sketch->setSnapToGrid(getFlag(p_node, "snapGrid", false));
+			p_sketch->setGridTargetPx(static_cast<float>(getNumber(p_node, "gridTargetPx", 20.0)));
 			p_sketch->solve();
 			p_sketch->makeDone();
 			// A sketch read from a file is not being edited: it has no editing widget,

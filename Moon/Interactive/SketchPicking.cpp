@@ -425,14 +425,27 @@ namespace MOON {
 
         // How big one sketch unit is on screen: one unit along an axis covers that
         // axis' view-space length, and the viewport is 2 * halfH high. Face on both
-        // lengths are 1, which is the plain zoom-based spacing; tilted, the axes are
-        // foreshortened by different amounts, and their geometric mean keeps the step
-        // near the 40 px target in both directions instead of letting one of them pile
-        // its lines up on screen.
+        // lengths are 1, which is the plain zoom-based spacing. Tilted, the axes are
+        // foreshortened by different amounts, and the step is sized by the *smaller*
+        // of the two: the family of lines running across the foreshortened axis is the
+        // one that piles up, so a cell measured against the smaller scale is what keeps
+        // that family at the target spacing and lets the other one spread out. (The
+        // geometric mean this replaced sized the product of the two spacings, so one of
+        // them always ended up at target^2 / the other: a dense band of lines as soon as
+        // the view was tilted.)
         const float scaleU = std::sqrt(uX * uX + uY * uY);
         const float scaleV = std::sqrt(vX * vX + vY * vY);
-        const float scale = std::max(std::sqrt(scaleU * scaleV), 1.0e-6f);
-        const float targetStep = 40.0f * 2.0f * halfH / (screenH * scale);
+        const float scale = std::max(std::min(scaleU, scaleV), 1.0e-6f);
+        // The spacing the sketch asks for, in screen pixels (the panel sets it); the
+        // same number drawBackground() draws its lattice with.
+        const float targetStep = sketch.gridTargetPx() * 2.0f * halfH / (screenH * scale);
+        // The step ladder is 1 / 2 x 10^n and nothing else: consecutive zoom levels
+        // divide the cell by 2, then by 5, so the cell side runs
+        //     1, 0.2, 0.1, 0.02, 0.01, 0.002, ...
+        // - every value a round decimal. The 1 / 2 / 5 ladder this replaced also
+        // stepped through 0.5 and 0.05, i.e. half values, which is what made the
+        // cells look irregular. The price of dropping them is that the coarsest jump
+        // is 5x, so the spacing on screen swings between the target and ~5x it.
         const float mag = std::pow(
             10.0f,
             std::floor(std::log10(std::max(targetStep, 1.0e-6f)))
@@ -440,9 +453,6 @@ namespace MOON {
         float step = mag;
         if (step < targetStep) {
             step = 2.0f * mag;
-        }
-        if (step < targetStep) {
-            step = 5.0f * mag;
         }
         if (step < targetStep) {
             step = 10.0f * mag;

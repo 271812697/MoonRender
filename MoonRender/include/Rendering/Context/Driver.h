@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <string>
 #include <array>
 #include <memory>
@@ -16,6 +16,7 @@
 #include "Rendering/Resources/IMesh.h"
 #include <Maths/FVector4.h>
 #include <Tools/Utils/OptRef.h>
+#include "Rendering/Context/IGLContextHost.h"
 namespace Rendering::Context
 {
 
@@ -25,6 +26,18 @@ namespace Rendering::Context
 		Driver(const Settings::DriverSettings& p_driverSettings);
 
 		~Driver();
+
+		/** Tells the driver which context the render module draws on. The window layer creates
+		 * it (sharing objects with the window's own context) and hands it over; before that is
+		 * set, GL calls go to whatever context the host left current - which is the coupling
+		 * this removes. */
+		void SetContextHost(IGLContextHost* p_contextHost);
+		IGLContextHost* GetContextHost() const;
+
+		/** Re-applies the global GL state the backend sets up (reversed-Z depth range, blend
+		 * func, seamless cubemap, debug output). That state is per context, so a freshly made
+		 * module context starts without it. Call with the module context current. */
+		void ReapplyGlobalState();
 
 		void OnFrameCompleted();
 		void SetViewport(
@@ -72,6 +85,7 @@ namespace Rendering::Context
 		void ResetPipelineState();
 
 	private:
+		IGLContextHost* m_contextHost = nullptr;
 		std::string m_vendor;
 		std::string m_hardware;
 		std::string m_version;

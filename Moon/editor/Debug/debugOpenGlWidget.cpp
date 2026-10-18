@@ -1,10 +1,10 @@
-﻿#include "debugOpenGlWidget.h"
+#include "debugOpenGlWidget.h"
 #include "Settings/DebugSetting.h"
 #include "Qtimgui/imguiwidgets/QtImGui.h"
-#include "Qtimgui/imgui/imgui.h"
-#include "Qtimgui/imgui/imgui_internal.h"
-#include "Qtimgui/implot/implotCustom.h"
-#include "Qtimgui/implot/imGuizmo.h"
+#include <ThirdParty/imgui/imgui/imgui.h>
+#include <ThirdParty/imgui/imgui/imgui_internal.h>
+#include <ThirdParty/imgui/implot/implotCustom.h>
+#include <ThirdParty/imgui/implot/imGuizmo.h>
 namespace MOON {
 	static QtImGui::RenderRef imref = nullptr;
 	static ImPlotContext* ctx = nullptr;
@@ -25,7 +25,7 @@ namespace MOON {
 		// opengl funcs
 		bool flag = initializeOpenGLFunctions();
 
-		//开启计时器
+		//寮€鍚鏃跺櫒
 		this->startTimer(0);
 		imref = QtImGui::initialize(this, false);
 		ctx = ImPlot::CreateContext();

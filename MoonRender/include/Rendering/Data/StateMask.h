@@ -1,5 +1,6 @@
 ﻿#pragma once
 #include <cstdint>
+#include <Rendering/Settings/EBlendMode.h>
 namespace Rendering::Data
 {
 	/**
@@ -22,6 +23,9 @@ namespace Rendering::Data
 
 			uint8_t mask;
 		};
+		/** Which blend factors the renderer picks for this drawable. Kept next to the packed
+		 * byte rather than inside it, so the packed flags keep their meaning. */
+		Settings::EBlendMode blendMode = Settings::EBlendMode::BLEND_OPAQUE;
 		float lineWidth = 1.0f;
 	};
 }

@@ -1,7 +1,7 @@
-﻿#include "Interactive/Widgets/Measurement.h"
+#include "Interactive/Widgets/Measurement.h"
 #include "Interactive/Im3DRenderer.h"
 #include "renderer/SceneView.h"
-#include "Qtimgui/imgui/imgui.h"
+#include <ThirdParty/imgui/imgui/imgui.h>
 #include "Interactive/Interactive/Event.h"
 #include "Interactive/Interactive/ExecuteCommand.h"
 #include "Interactive/Interactive/WidgetCallbackMapper.h"
@@ -53,8 +53,11 @@ namespace MOON {
 	}
 	void Measurement::onMouseClicked()
 	{
+		// The point under the cursor comes from the picking target, which carries the
+		// world position of every pixel next to the id of what is drawn there: no ray
+		// through the scene to cast, and nothing to build for it.
 		Maths::FVector3 out;
-		if (m_sceneView->MouseHit(out)) {
+		if (m_sceneView->GetPickWorldPosition(out)) {
 			Eigen::Vector3f pos = { out.x,out.y,out.z };
 			if (!selectingStart) {
 				Measure m;
@@ -76,7 +79,7 @@ namespace MOON {
 	{
 		if (selectingStart) {
 			Maths::FVector3 out;
-			if (m_sceneView->MouseHit(out)) {
+			if (m_sceneView->GetPickWorldPosition(out)) {
 				Eigen::Vector3f pos = { out.x,out.y,out.z };
 				if ( g_measures.size()) {
 					g_measures.back().end = pos;

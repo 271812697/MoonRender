@@ -1,7 +1,7 @@
 #include "Interactive/Widgets/DrawSketchHandlerOffset.h"
 #include "Interactive/Im3DRenderer.h"
 #include "renderer/SceneView.h"
-#include "Qtimgui/imgui/imgui.h"
+#include <ThirdParty/imgui/imgui/imgui.h>
 #include "Interactive/Interactive/ExecuteCommand.h"
 #include "Interactive/Interactive/WidgetEventTranslator.h"
 #include "Interactive/Interactive/RenderWindowInteractor.h"

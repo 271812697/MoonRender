@@ -1,30 +1,25 @@
-#shader vertex
-#version 450 core
+// Outline fallback: the flat colour the outline pass paints over the stencil-marked
+// silhouette of a selected object.
+//
+// Written in the material form MoonMatc consumes (see docs/ShaderPipeline.md): the state and
+// the parameters in `material { }`, the colour as the fragment entry point. The transform, the
+// uniforms and main() are put in by MoonMatc from the shader prelude, so the vertex stage is
+// the generated skeleton and this file carries no vertex block.
 
-layout(location = 0) in vec3 geo_Pos;
+material {
+    name         : OutlineFallback,
+    shadingModel : unlit,
+    blending     : opaque,
+    culling      : none,
+    depthWrite   : true,
 
-layout(std140) uniform EngineUBO
-{
-	mat4    ubo_Model;
-	mat4    ubo_View;
-	mat4    ubo_Projection;
-	vec3    ubo_ViewPos;
-	float   ubo_Time;
-};
-
-void main()
-{
-	gl_Position = ubo_Projection * ubo_View * ubo_Model * vec4(geo_Pos, 1.0);
+    parameters : [
+        { type : float4, name : _OutlineColor }
+    ]
 }
 
-#shader fragment
-#version 450 core
-
-uniform vec4 _OutlineColor = vec4(1.0);
-
-out vec4 FRAGMENT_COLOR;
-
-void main()
-{
-	FRAGMENT_COLOR = _OutlineColor;
+fragment {
+    void material(inout MaterialInputs m) {
+        m.baseColor = _OutlineColor;
+    }
 }

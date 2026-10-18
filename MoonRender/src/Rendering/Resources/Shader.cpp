@@ -40,10 +40,16 @@ const std::unordered_set<std::string>& Rendering::Resources::Shader::GetPasses()
 
 Rendering::Resources::Shader::Shader(
 	const std::string p_path,
-	Variants&& p_variants
+	Variants&& p_variants,
+	std::optional<std::vector<Parameter>> p_parameters
 ) : path(p_path)
 {
 	SetVariants(std::move(p_variants));
+
+	if (p_parameters.has_value())
+	{
+		SetParameters(std::move(p_parameters.value()));
+	}
 }
 
 void Rendering::Resources::Shader::SetVariants(Variants&& p_variants)
@@ -69,4 +75,51 @@ void Rendering::Resources::Shader::SetVariants(Variants&& p_variants)
 const Rendering::Resources::Shader::Variants& Rendering::Resources::Shader::GetVariants() const
 {
 	return m_variants;
+}
+
+const std::vector<Rendering::Resources::Shader::Parameter>& Rendering::Resources::Shader::GetParameters() const
+{
+	return m_parameters;
+}
+
+bool Rendering::Resources::Shader::HasParameterTable() const
+{
+	return m_hasParameterTable;
+}
+
+void Rendering::Resources::Shader::SetParameters(std::vector<Parameter>&& p_parameters)
+{
+	m_parameters = std::move(p_parameters);
+	m_hasParameterTable = true;
+}
+
+bool Rendering::Resources::Shader::HasParameterBlock() const
+{
+	return m_parameterBlockSize > 0;
+}
+
+uint32_t Rendering::Resources::Shader::GetParameterBlockSize() const
+{
+	return m_parameterBlockSize;
+}
+
+void Rendering::Resources::Shader::SetParameterBlockSize(uint32_t p_size)
+{
+	m_parameterBlockSize = p_size;
+}
+
+const Rendering::Resources::Shader::State& Rendering::Resources::Shader::GetState() const
+{
+	return m_state;
+}
+
+bool Rendering::Resources::Shader::HasState() const
+{
+	return m_hasState;
+}
+
+void Rendering::Resources::Shader::SetState(State p_state)
+{
+	m_state = std::move(p_state);
+	m_hasState = true;
 }

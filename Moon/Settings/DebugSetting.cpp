@@ -1,6 +1,6 @@
-﻿#include "DebugSetting.h"
+#include "DebugSetting.h"
 #include "dataDispatcher.h"
-#include "Qtimgui/imgui/imgui.h"
+#include <ThirdParty/imgui/imgui/imgui.h>
 #include "core/callbackManager.h"
 #include "Widgets/checkbox.h"
 #include <QSlider>
@@ -24,7 +24,7 @@ namespace MOON {
 		virtual QWidget* createWidget(QWidget* parent)override
 		{
 			QSlider* slider = new QSlider(Qt::Horizontal, parent);
-			slider->setRange(0, 100); // 整数范围
+			slider->setRange(0, 100); // 鏁存暟鑼冨洿
 			if (mMaxValue > mMinValue) {
 				slider->setValue(static_cast<int>(
 					(this->get() - mMinValue) / (mMaxValue - mMinValue) * 100.0f
@@ -47,7 +47,7 @@ namespace MOON {
 		virtual QWidget* createWidget(QWidget* parent)override
 		{
 			QSlider* slider = new QSlider(Qt::Horizontal, parent);
-			slider->setRange(mMinValue, mMaxValue); // 整数范围
+			slider->setRange(mMinValue, mMaxValue); // 鏁存暟鑼冨洿
 			QObject::connect(slider, &QSlider::valueChanged, [this](int v) {
 				this->setData<int>(v);
 			});

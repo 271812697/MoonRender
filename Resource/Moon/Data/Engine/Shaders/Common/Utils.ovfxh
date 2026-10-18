@@ -147,6 +147,12 @@ mat3 ConstructTBN(mat4 model, vec3 normal, vec3 tangent, vec3 bitangent)
         normalize(normalMatrix * normal)
     );
 }
+// Derivatives only exist in a fragment stage: a vertex or geometry stage that carries this
+// header (MoonMatc puts the prelude in every stage) would be a compile error, and the spec
+// is right - nothing outside a fragment stage can call it. MoonMatc defines the stage, so the
+// function simply is not there in the stages that cannot use it. A shader compiled the old way
+// (no such #define) keeps it, exactly as before.
+#if !defined(MOON_STAGE_VERTEX) && !defined(MOON_STAGE_GEOMETRY)
 mat3 ComputeTBN(const vec3 position, const vec3 normal, const vec2 uv) {
     vec3 dpx = dFdxFine(position);
     vec3 dpy = dFdyFine(position);
@@ -159,6 +165,7 @@ mat3 ComputeTBN(const vec3 position, const vec3 normal, const vec2 uv) {
 
     return mat3(T, B, N);
 }
+#endif
 
 
 vec3 ComputeNormal(vec2 texCoords, vec3 normal, sampler2D normalMap, mat3 TBN)

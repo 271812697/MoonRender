@@ -1,4 +1,4 @@
-﻿#include <ranges>
+#include <ranges>
 #include <Core/ECS/Components/CMaterialRenderer.h>
 #include <Core/Rendering/EngineDrawableDescriptor.h>
 #include "GizmoRenderPass.h"
@@ -37,7 +37,7 @@
 #include "Interactive/Widgets/PrimitiveCylinder.h"
 #include "Interactive/Widgets/PrimitiveCone.h"
 #include "Interactive/Widgets/ViewCubeWidget.h"
-#include "Qtimgui/imgui/imgui.h"
+#include <ThirdParty/imgui/imgui/imgui.h>
 
 struct GizmoRenderSettings
 {
