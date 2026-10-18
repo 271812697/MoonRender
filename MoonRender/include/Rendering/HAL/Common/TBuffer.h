@@ -70,6 +70,14 @@ namespace Rendering::HAL
 		void Bind(std::optional<uint32_t> p_index = std::nullopt) const;
 
 		/**
+		* Binds a byte range of the buffer to an indexed target (glBindBufferRange).
+		* @param p_index Binding point
+		* @param p_offset Offset of the range in the buffer
+		* @param p_size Size of the range
+		*/
+		void BindRange(uint32_t p_index, uint64_t p_offset, uint64_t p_size) const;
+
+		/**
 		* Unbinds the buffer
 		*/
 		void Unbind() const;

@@ -89,6 +89,19 @@ void MOON::MaterialPreviewWidget::RequestThumbnail()
 	update();
 }
 
+void MOON::MaterialPreviewWidget::SetPreviewMesh(Editor::Panels::EPreviewMesh p_mesh)
+{
+	m_previewMesh = p_mesh;
+
+	// The view may not exist yet (it is created with the module's context on the first paint);
+	// EnsureView applies the stored choice then.
+	if (m_view != nullptr)
+	{
+		m_view->SetPreviewMesh(p_mesh);
+	}
+	update();
+}
+
 bool MOON::MaterialPreviewWidget::EnsureView()
 {
 	if (m_view != nullptr)
@@ -103,6 +116,7 @@ bool MOON::MaterialPreviewWidget::EnsureView()
 	}
 
 	m_view = new ::Editor::Panels::PreviewView(*context.driver);
+	m_view->SetPreviewMesh(m_previewMesh);
 	m_material = std::make_unique<::Core::Resources::Material>();
 	m_view->SetMaterial(m_shownMaterial != nullptr ? m_shownMaterial : m_material.get());
 	return true;

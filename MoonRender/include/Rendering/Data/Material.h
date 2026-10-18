@@ -8,8 +8,8 @@
 #include <vector>
 #include <Maths/FMatrix3.h>
 #include <Rendering/Data/StateMask.h>
+#include <Rendering/Data/UniformBufferPool.h>
 #include <Rendering/HAL/TextureHandle.h>
-#include <Rendering/HAL/UniformBuffer.h>
 #include <Rendering/Resources/Shader.h>
 #include <Rendering/Resources/Texture.h>
 #include <Rendering/Settings/EProjectionMode.h>
@@ -53,6 +53,10 @@ namespace Rendering::Data
 		using PropertyMap = std::map<std::string, MaterialProperty>;
 
 		Material(Rendering::Resources::Shader* p_shader = nullptr);
+		/** Gives the parameter slice back to the pool. No GL call. */
+		~Material();
+		Material(const Material&) = delete;
+		Material& operator=(const Material&) = delete;
 		void SetShader(Rendering::Resources::Shader* p_shader);
 		Tools::Utils::OptRef<Rendering::HAL::ShaderProgram> GetVariant(
 			std::optional<const std::string_view> p_pass = std::nullopt,
@@ -101,6 +105,11 @@ namespace Rendering::Data
 		void SetGPUInstances(int p_instances);
 		int GetDrawOrder() const;
 		bool IsBlendable() const;
+		/** The blend factors the renderer uses for this material (opaque/transparent/add/...). */
+		Rendering::Settings::EBlendMode GetBlendMode() const;
+		/** Also keeps "blendable" and "transparent" in step: anything but opaque blends and is
+		 * routed through the transparent queue. */
+		void SetBlendMode(Rendering::Settings::EBlendMode p_blendMode);
 		bool IsTransparent() const;
 		bool IsUserInterface() const;
 		bool HasBackfaceCulling() const;
@@ -137,14 +146,14 @@ namespace Rendering::Data
 		 * definition and the Set* calls that follow are the instance's overrides. */
 		void ResetStateToShader();
 
-		/** Binds the per-material parameter UBO (creating it on first use). Called by Bind on
-		 * every draw: the binding is global GL state, so it has to be set again after another
-		 * material bound its own buffer. */
+		/** Binds the parameter slice (creating/reusing it on first use). Called by Bind on
+		 * every draw: the binding is per context, so it has to be set again after another
+		 * material bound its own range. */
 		void BindParameterBlock();
 
-		/** Fills the std140 block from the properties, uploads it, binds it and binds the
-		 * samplers to their declared texture units. Used instead of the per-name upload when the
-		 * shader has a parameter block. */
+		/** Fills the std140 block from the properties, uploads it into the pool, binds it and
+		 * binds the samplers to their declared texture units. Used instead of the per-name
+		 * upload when the shader has a parameter block. */
 		void UploadParameterBlock(
 			bool p_uploadStableProperties,
 			bool p_uploadSingleUseProperties,
@@ -152,8 +161,10 @@ namespace Rendering::Data
 			Rendering::HAL::Texture* p_emptyTextureCube
 		);
 
-		/** Creates or resizes the parameter buffer to the shader's block size. */
-		void EnsureParameterBuffer();
+		/** Acquires a slice sized to the shader's block, or releases it when the block is gone
+		 * or changed its size (a hot reloaded shader can). */
+		void EnsureParameterSlice();
+		void ReleaseParameterSlice();
 		/** Writes one value (a scalar, vector or matrix - not a whole array) at p_offset. */
 		void WriteBlockValue(const std::string& p_type, const MaterialPropertyType& p_value, uint32_t p_offset);
 
@@ -172,10 +183,10 @@ namespace Rendering::Data
 		size_t m_singleUsePropertySignatureVersion = 0ULL;
 		Tools::Utils::OptRef<Rendering::HAL::ShaderProgram> m_programInUse = std::nullopt;
 
-		/** The per-material descriptor: one std140 UBO filled from the properties by offset, and
-		 * the CPU staging buffer it is built in. Null until the shader has a parameter block. */
-		std::unique_ptr<Rendering::HAL::UniformBuffer> m_parameterBuffer;
-		uint32_t m_parameterBufferSize = 0;
+		/** The per-material descriptor: a range of the shared uniform buffer, filled from the
+		 * properties by offset, plus the CPU staging buffer it is built in. Invalid until the
+		 * shader has a parameter block. */
+		UniformBufferPool::Slice m_parameterSlice;
 		std::vector<uint8_t> m_parameterData;
 
 		bool m_supportOrthographic = true;
@@ -183,6 +194,7 @@ namespace Rendering::Data
 		bool m_userInterface = false;
 
 		bool m_blendable = false;
+		Rendering::Settings::EBlendMode m_blendMode = Rendering::Settings::EBlendMode::BLEND_OPAQUE;
 		bool m_transparent = false;
 		bool m_backfaceCulling = true;
 		bool m_frontfaceCulling = false;

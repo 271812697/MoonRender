@@ -56,6 +56,13 @@ void Rendering::HAL::GLBuffer::Bind(std::optional<uint32_t> p_index) const
 }
 
 template<>
+void Rendering::HAL::GLBuffer::BindRange(uint32_t p_index, uint64_t p_offset, uint64_t p_size) const
+{
+	assert(IsValid()&& "Cannot bind an invalid buffer");
+	glBindBufferRange(EnumToValue<GLenum>(m_buffer.type), p_index, m_buffer.id, p_offset, p_size);
+}
+
+template<>
 void Rendering::HAL::GLBuffer::Unbind() const
 {
 	assert(IsValid()&&"Cannot unbind an invalid buffer");

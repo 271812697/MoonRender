@@ -272,9 +272,18 @@ Rendering::Data::Material::Material(Rendering::Resources::Shader* p_shader)
 	SetShader(p_shader);
 }
 
+Rendering::Data::Material::~Material()
+{
+	// The pool keeps the byte range; it only lives as long as the material does.
+	ReleaseParameterSlice();
+}
+
 void Rendering::Data::Material::SetShader(Rendering::Resources::Shader* p_shader)
 {
 	m_shader = p_shader;
+
+	// The block layout (or the presence of a block) belongs to the shader.
+	ReleaseParameterSlice();
 
 	// Rebinding to a shader re-creates the instance's state from the definition: the package's
 	// material block is the authority for blending / culling / depth writing, and whatever the
@@ -297,6 +306,7 @@ void Rendering::Data::Material::ResetStateToShader()
 {
 	// Engine defaults first; the material block then says what this material is.
 	m_blendable = false;
+	m_blendMode = Rendering::Settings::EBlendMode::BLEND_OPAQUE;
 	m_backfaceCulling = true;
 	m_frontfaceCulling = false;
 	m_depthWriting = true;
@@ -306,6 +316,15 @@ void Rendering::Data::Material::ResetStateToShader()
 		const Rendering::Resources::Shader::State& state = m_shader->GetState();
 
 		if (state.blendable.has_value()) { m_blendable = state.blendable.value(); }
+		if (state.blendMode.has_value())
+		{
+			m_blendMode = state.blendMode.value();
+			// The definition decides how the colour is blended. Whether the material goes
+			// through the transparent (depth-peel) queue stays an instance decision: a
+			// transparent-by-DSL shader that does not implement the peel test (the grid, the
+			// gizmos) must not be peeled just because of its default.
+			m_blendable = m_blendMode != Rendering::Settings::EBlendMode::BLEND_OPAQUE;
+		}
 		if (state.backfaceCulling.has_value()) { m_backfaceCulling = state.backfaceCulling.value(); }
 		if (state.frontfaceCulling.has_value()) { m_frontfaceCulling = state.frontfaceCulling.value(); }
 		if (state.depthWriting.has_value()) { m_depthWriting = state.depthWriting.value(); }
@@ -444,25 +463,31 @@ void Rendering::Data::Material::UploadProperties(bool uploadStableProperties, bo
 	}
 }
 
-void Rendering::Data::Material::EnsureParameterBuffer()
+void Rendering::Data::Material::EnsureParameterSlice()
 {
 	const uint32_t blockSize = m_shader->GetParameterBlockSize();
 	if (blockSize == 0)
 	{
+		ReleaseParameterSlice();
 		return;
 	}
 
-	if (m_parameterBuffer == nullptr)
+	if (m_parameterSlice.size == blockSize)
 	{
-		m_parameterBuffer = std::make_unique<Rendering::HAL::UniformBuffer>();
-		m_parameterBuffer->Allocate(blockSize, Rendering::Settings::EAccessSpecifier::DYNAMIC_DRAW);
-		m_parameterBufferSize = blockSize;
+		return;
 	}
-	else if (m_parameterBufferSize != blockSize)
+
+	// A hot reloaded shader can change the block layout; a destroyed one leaves nothing to bind.
+	ReleaseParameterSlice();
+	m_parameterSlice = UniformBufferPool::Get().Acquire(blockSize);
+}
+
+void Rendering::Data::Material::ReleaseParameterSlice()
+{
+	if (m_parameterSlice.IsValid())
 	{
-		// A hot reloaded shader can change the block layout.
-		m_parameterBuffer->Allocate(blockSize, Rendering::Settings::EAccessSpecifier::DYNAMIC_DRAW);
-		m_parameterBufferSize = blockSize;
+		UniformBufferPool::Get().Release(m_parameterSlice);
+		m_parameterSlice = {};
 	}
 }
 
@@ -473,11 +498,8 @@ void Rendering::Data::Material::BindParameterBlock()
 		return;
 	}
 
-	EnsureParameterBuffer();
-	if (m_parameterBuffer)
-	{
-		m_parameterBuffer->Bind(kMaterialParameterBinding);
-	}
+	EnsureParameterSlice();
+	UniformBufferPool::Get().Bind(m_parameterSlice, kMaterialParameterBinding);
 }
 
 void Rendering::Data::Material::WriteBlockValue(const std::string& p_type, const MaterialPropertyType& p_value, uint32_t p_offset)
@@ -571,8 +593,8 @@ void Rendering::Data::Material::UploadParameterBlock(
 	Rendering::HAL::Texture* p_emptyTexture2D,
 	Rendering::HAL::Texture* p_emptyTextureCube)
 {
-	EnsureParameterBuffer();
-	if (m_parameterBuffer == nullptr)
+	EnsureParameterSlice();
+	if (!m_parameterSlice.IsValid())
 	{
 		return;
 	}
@@ -607,8 +629,8 @@ void Rendering::Data::Material::UploadParameterBlock(
 		}
 	}
 
-	m_parameterBuffer->Upload(m_parameterData.data());
-	m_parameterBuffer->Bind(kMaterialParameterBinding);
+	UniformBufferPool::Get().Write(m_parameterSlice, m_parameterData.data());
+	UniformBufferPool::Get().Bind(m_parameterSlice, kMaterialParameterBinding);
 
 	// Samplers: one fixed texture unit per declaration, set by the GLSL's layout(binding = N).
 	for (const Rendering::Resources::Shader::Parameter& parameter : m_shader->GetParameters())
@@ -859,6 +881,31 @@ void Rendering::Data::Material::SetDrawOrder(int p_order)
 void Rendering::Data::Material::SetBlendable(bool p_transparent)
 {
 	m_blendable = p_transparent;
+
+	// Keep the mode in step: the renderer derives its blend factors from it, and an alpha
+	// material that only flips "blendable" still means the standard alpha blend.
+	if (p_transparent && m_blendMode == Rendering::Settings::EBlendMode::BLEND_OPAQUE)
+	{
+		m_blendMode = Rendering::Settings::EBlendMode::BLEND_TRANSPARENT;
+	}
+	else if (!p_transparent)
+	{
+		m_blendMode = Rendering::Settings::EBlendMode::BLEND_OPAQUE;
+	}
+}
+
+Rendering::Settings::EBlendMode Rendering::Data::Material::GetBlendMode() const
+{
+	return m_blendMode;
+}
+
+void Rendering::Data::Material::SetBlendMode(Rendering::Settings::EBlendMode p_blendMode)
+{
+	// The blend mode is about factors only. Queue membership (the depth-peel pass) stays an
+	// explicit instance decision - SetTransparent - because not every shader implements the
+	// peel test.
+	m_blendMode = p_blendMode;
+	m_blendable = p_blendMode != Rendering::Settings::EBlendMode::BLEND_OPAQUE;
 }
 
 void Rendering::Data::Material::SetUserInterface(bool p_userInterface)
@@ -1001,6 +1048,7 @@ const Rendering::Data::StateMask Rendering::Data::Material::GenerateStateMask() 
 	stateMask.frontfaceCulling = m_frontfaceCulling;
 	stateMask.backfaceCulling = m_backfaceCulling;
 	stateMask.polygonOffsetFill = m_polygonOffsetFill;
+	stateMask.blendMode = m_blendMode;
 	stateMask.lineWidth = lineWitdh;
 	return stateMask;
 }

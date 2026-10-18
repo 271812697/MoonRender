@@ -3,6 +3,34 @@
 
 #include <Core/Resources/Material.h>
 
+namespace
+{
+	const char* BlendModeName(Rendering::Settings::EBlendMode p_mode)
+	{
+		using Rendering::Settings::EBlendMode;
+		switch (p_mode)
+		{
+		case EBlendMode::BLEND_TRANSPARENT: return "transparent";
+		case EBlendMode::BLEND_ADD: return "add";
+		case EBlendMode::BLEND_MULTIPLY: return "multiply";
+		case EBlendMode::BLEND_SCREEN: return "screen";
+		case EBlendMode::BLEND_FADE: return "fade";
+		default: return "opaque";
+		}
+	}
+
+	Rendering::Settings::EBlendMode BlendModeFromName(const std::string& p_name)
+	{
+		using Rendering::Settings::EBlendMode;
+		if (p_name == "transparent") { return EBlendMode::BLEND_TRANSPARENT; }
+		if (p_name == "add") { return EBlendMode::BLEND_ADD; }
+		if (p_name == "multiply") { return EBlendMode::BLEND_MULTIPLY; }
+		if (p_name == "screen") { return EBlendMode::BLEND_SCREEN; }
+		if (p_name == "fade") { return EBlendMode::BLEND_FADE; }
+		return EBlendMode::BLEND_OPAQUE;
+	}
+}
+
 void Core::Resources::Material::OnSerialize(tinyxml2::XMLDocument& p_doc, tinyxml2::XMLNode* p_node)
 {
 	using namespace Core::Helpers;
@@ -17,6 +45,10 @@ void Core::Resources::Material::OnSerialize(tinyxml2::XMLDocument& p_doc, tinyxm
 	Serializer::SerializeBoolean(p_doc, settingsNode, "support_orthographic", m_supportOrthographic);
 	Serializer::SerializeBoolean(p_doc, settingsNode, "support_perspective", m_supportPerspective);
 	Serializer::SerializeBoolean(p_doc, settingsNode, "blendable", m_blendable);
+	Serializer::SerializeString(p_doc, settingsNode, "blending", BlendModeName(m_blendMode));
+	// Queue membership, not just a blend factor: the depth-peel pass draws these drawables, so
+	// the instance has to remember whether it belongs there.
+	Serializer::SerializeBoolean(p_doc, settingsNode, "transparent", m_transparent);
 	Serializer::SerializeBoolean(p_doc, settingsNode, "backface_culling", m_backfaceCulling);
 	Serializer::SerializeBoolean(p_doc, settingsNode, "frontface_culling", m_frontfaceCulling);
 	Serializer::SerializeBoolean(p_doc, settingsNode, "depth_test", m_depthTest);
@@ -42,10 +74,28 @@ void Core::Resources::Material::OnSerialize(tinyxml2::XMLDocument& p_doc, tinyxm
 		return;
 	}
 
+	// Block members are not in the program's reflected uniform map (they have no individual
+	// location); the shader's parameter table is what says the material has them.
+	const auto isDeclaredParameter = [this](const std::string& p_name) {
+		if (m_shader == nullptr)
+		{
+			return false;
+		}
+		for (const Rendering::Resources::Shader::Parameter& parameter : m_shader->GetParameters())
+		{
+			if (parameter.name == p_name || p_name.starts_with(parameter.name + "["))
+			{
+				return true;
+			}
+		}
+		return false;
+	};
+
 	for (const auto& [name, prop] : m_properties)
 	{
-		// Skip serialization of this property if the current program isn't using its associated uniform
-		if (!program->GetUniformInfo(name))
+		// Skip serialization of this property if neither the parameter table nor the current
+		// program knows it.
+		if (!isDeclaredParameter(name) && !program->GetUniformInfo(name))
 		{
 			continue;
 		}
@@ -140,6 +190,18 @@ void Core::Resources::Material::OnDeserialize(tinyxml2::XMLDocument& p_doc, tiny
 		Serializer::DeserializeBoolean(p_doc, settingsNode, "support_orthographic", m_supportOrthographic);
 		Serializer::DeserializeBoolean(p_doc, settingsNode, "support_perspective", m_supportPerspective);
 		Serializer::DeserializeBoolean(p_doc, settingsNode, "blendable", m_blendable);
+		{
+			// Newer files carry the blend mode; older ones only had the blendable flag, which
+			// already means the standard alpha blend.
+			std::string blending;
+			Serializer::DeserializeString(p_doc, settingsNode, "blending", blending);
+			if (!blending.empty())
+			{
+				SetBlendMode(BlendModeFromName(blending));
+			}
+		}
+		// Explicit queue membership (absent in older files, which is the non-peeled default).
+		Serializer::DeserializeBoolean(p_doc, settingsNode, "transparent", m_transparent);
 		Serializer::DeserializeBoolean(p_doc, settingsNode, "backface_culling", m_backfaceCulling);
 		Serializer::DeserializeBoolean(p_doc, settingsNode, "frontface_culling", m_frontfaceCulling);
 		Serializer::DeserializeBoolean(p_doc, settingsNode, "depth_test", m_depthTest);

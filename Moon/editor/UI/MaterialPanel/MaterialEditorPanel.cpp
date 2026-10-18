@@ -210,7 +210,39 @@ public:
 		previewLayout->setSpacing(0);
 		auto* previewHint = new QLabel(QStringLiteral("Drag to orbit, wheel to zoom"), preview);
 		previewHint->setObjectName("MaterialSectionHint");
-		previewLayout->addWidget(MakeSectionHeader(QStringLiteral("PREVIEW"), preview, previewHint));
+
+		// What the material is shown on. The sphere is the default; the cube and the plane are
+		// for materials whose UV layout, tiling or planar orientation is what is being judged.
+		auto* previewHeader = new QWidget(preview);
+		auto* previewHeaderLayout = new QHBoxLayout(previewHeader);
+		previewHeaderLayout->setContentsMargins(0, 0, 0, 0);
+		previewHeaderLayout->setSpacing(6);
+		previewHeaderLayout->addWidget(previewHint, 1);
+
+		auto* meshPicker = new QComboBox(previewHeader);
+		meshPicker->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLength);
+		meshPicker->setMinimumContentsLength(6);
+		meshPicker->setToolTip(QStringLiteral("What the material is shown on"));
+		meshPicker->addItem(QStringLiteral("Sphere"),
+			static_cast<int>(::Editor::Panels::EPreviewMesh::SPHERE));
+		meshPicker->addItem(QStringLiteral("Cube"),
+			static_cast<int>(::Editor::Panels::EPreviewMesh::CUBE));
+		meshPicker->addItem(QStringLiteral("Plane"),
+			static_cast<int>(::Editor::Panels::EPreviewMesh::PLANE));
+		previewHeaderLayout->addWidget(meshPicker, 0);
+
+		QObject::connect(meshPicker, QOverload<int>::of(&QComboBox::currentIndexChanged), m_owner,
+			[this, meshPicker](int) {
+				if (m_preview == nullptr)
+				{
+					return;
+				}
+				m_preview->SetPreviewMesh(static_cast<::Editor::Panels::EPreviewMesh>(
+					meshPicker->currentData().toInt()));
+				m_preview->RequestThumbnail();
+			});
+
+		previewLayout->addWidget(MakeSectionHeader(QStringLiteral("PREVIEW"), preview, previewHeader));
 
 		auto* previewFrame = new QFrame(preview);
 		previewFrame->setObjectName("MaterialPreviewFrame");

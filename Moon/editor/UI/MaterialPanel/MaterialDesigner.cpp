@@ -344,10 +344,17 @@ namespace MOON
 					{
 						// The same rule the property panel applies to u_Albedo: alpha below 1
 						// makes the instance transparent, so the preview and the viewport agree.
-						const bool transparent = color.alphaF() < 0.999f;
-						m_material.SetTransparent(transparent);
-						m_material.SetBlendable(transparent);
-						m_material.SetDepthWriting(true);
+						// An explicit add/multiply/screen mode is the user's choice, though - the
+						// alpha of the colour must not drag it back to the plain alpha blend.
+						using Rendering::Settings::EBlendMode;
+						if (m_material.GetBlendMode() == EBlendMode::BLEND_OPAQUE
+							|| m_material.GetBlendMode() == EBlendMode::BLEND_TRANSPARENT)
+						{
+							const bool transparent = color.alphaF() < 0.999f;
+							m_material.SetTransparent(transparent);
+							m_material.SetBlendable(transparent);
+							m_material.SetDepthWriting(true);
+						}
 					}
 				}
 				else if (std::holds_alternative<bool>(current)) { m_material.SetProperty(name, p_value.toBool()); }
@@ -571,6 +578,60 @@ namespace MOON
 			std::function<void()> m_onChanged;
 			QComboBox* m_combo = nullptr;
 			QLabel* m_thumb = nullptr;
+		};
+
+		/** The material's blend mode, filament's BlendMode. A combo rather than a checkbox: the
+		 * renderer picks different factors for alpha, additive, multiply, screen and fade, and
+		 * reads the choice from the state mask. */
+		class BlendModeRow : public QWidget
+		{
+		public:
+			BlendModeRow(const QString& p_label, Material& p_material,
+				const std::function<void()>& p_onChanged, QWidget* p_parent)
+				: QWidget(p_parent),
+				m_material(p_material),
+				m_onChanged(p_onChanged)
+			{
+				using Rendering::Settings::EBlendMode;
+
+				auto* layout = new QHBoxLayout(this);
+				layout->setContentsMargins(0, 0, 0, 0);
+				layout->setSpacing(6);
+
+				auto* label = new QLabel(p_label, this);
+				label->setObjectName("PropertyLabel");
+				label->setMinimumWidth(110);
+				label->setMaximumWidth(170);
+				layout->addWidget(label);
+
+				m_combo = new QComboBox(this);
+				m_combo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLength);
+				m_combo->setMinimumContentsLength(10);
+				m_combo->addItem(QStringLiteral("Opaque"), static_cast<int>(EBlendMode::BLEND_OPAQUE));
+				m_combo->addItem(QStringLiteral("Transparent"), static_cast<int>(EBlendMode::BLEND_TRANSPARENT));
+				m_combo->addItem(QStringLiteral("Add"), static_cast<int>(EBlendMode::BLEND_ADD));
+				m_combo->addItem(QStringLiteral("Multiply"), static_cast<int>(EBlendMode::BLEND_MULTIPLY));
+				m_combo->addItem(QStringLiteral("Screen"), static_cast<int>(EBlendMode::BLEND_SCREEN));
+				m_combo->addItem(QStringLiteral("Fade"), static_cast<int>(EBlendMode::BLEND_FADE));
+				m_combo->setCurrentIndex(
+					m_combo->findData(static_cast<int>(p_material.GetBlendMode())));
+				layout->addWidget(m_combo, 1);
+
+				QObject::connect(m_combo, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+					[this](int) {
+						m_material.SetBlendMode(static_cast<Rendering::Settings::EBlendMode>(
+							m_combo->currentData().toInt()));
+						if (m_onChanged)
+						{
+							m_onChanged();
+						}
+					});
+			}
+
+		private:
+			Material& m_material;
+			std::function<void()> m_onChanged;
+			QComboBox* m_combo = nullptr;
 		};
 
 		/** ":Shaders\\Standard.ovfx" for "Standard.ovfx", the key the shader manager is keyed by. */
@@ -1058,7 +1119,6 @@ namespace MOON
 		{
 			const std::pair<const char*, const char*> states[] = {
 				{ "Backface Culling", "backfaceCulling" },
-				{ "Blendable", "blendable" },
 				{ "Cast Shadows", "castShadows" },
 				{ "Depth Writing", "depthWriting" },
 				{ "Receive Shadows", "receiveShadows" },
@@ -1207,9 +1267,17 @@ namespace MOON
 		}
 
 		// The state overrides last: they are instance-level, not part of the surface description.
-		if (!stateNames.empty())
 		{
 			auto* stateGroup = groupFor("Renderer State");
+
+			// The blend mode replaces the old "blendable" checkbox: it says both whether the
+			// material blends and which factors it uses.
+			auto* blendRow = new BlendModeRow(QStringLiteral("Blending"), *m_material,
+				[this] { MarkDirty(); }, stateGroup);
+			stateGroup->addSubWidget(blendRow);
+			++groupCounts["Renderer State"];
+			++parameterCount;
+
 			for (const auto& [label, state] : stateNames)
 			{
 				stateGroup->addProperty(new BoolProperty(label, m_component.get(), BoolProperty::Style::InviwoRect));
@@ -1604,6 +1672,8 @@ namespace MOON
 			snapshot.properties = m_material->GetProperties();
 			snapshot.features = m_material->GetFeatures();
 			snapshot.blendable = m_material->IsBlendable();
+			snapshot.blendMode = m_material->GetBlendMode();
+			snapshot.transparent = m_material->IsTransparent();
 			snapshot.backfaceCulling = m_material->HasBackfaceCulling();
 			snapshot.frontfaceCulling = m_material->HasFrontfaceCulling();
 			snapshot.depthTest = m_material->HasDepthTest();
@@ -1629,6 +1699,8 @@ namespace MOON
 		}
 		m_material->SetFeatures(p_snapshot.features);
 		m_material->SetBlendable(p_snapshot.blendable);
+		m_material->SetBlendMode(p_snapshot.blendMode);
+		m_material->SetTransparent(p_snapshot.transparent);
 		m_material->SetBackfaceCulling(p_snapshot.backfaceCulling);
 		m_material->SetFrontfaceCulling(p_snapshot.frontfaceCulling);
 		m_material->SetDepthTest(p_snapshot.depthTest);

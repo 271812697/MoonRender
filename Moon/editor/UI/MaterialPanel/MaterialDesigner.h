@@ -80,6 +80,8 @@ namespace MOON
 			Rendering::Data::Material::PropertyMap properties;
 			Rendering::Data::FeatureSet features;
 			bool blendable = false;
+			Rendering::Settings::EBlendMode blendMode = Rendering::Settings::EBlendMode::BLEND_OPAQUE;
+			bool transparent = false;
 			bool backfaceCulling = true;
 			bool frontfaceCulling = false;
 			bool depthTest = true;

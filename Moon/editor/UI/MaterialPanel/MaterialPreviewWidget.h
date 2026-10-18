@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include <Rendering/View/EPreviewMesh.h>
 #include <Rendering/View/FramePaster.h>
 
 namespace Editor::Panels {
@@ -51,6 +52,10 @@ namespace MOON
 		 * material designer edits. Passing nullptr goes back to the package material. The
 		 * pointer is not owned; it has to outlive the widget's next paint. */
 		void ShowMaterial(::Core::Resources::Material* p_material);
+
+		/** What the material is shown on (sphere, cube, plane). The view is created lazily on
+		 * the first paint, so the choice is remembered and applied when it exists. */
+		void SetPreviewMesh(Editor::Panels::EPreviewMesh p_mesh);
 
 		/** Asks for one frame to be read back and emitted as thumbnailReady, on the next paint.
 		 * The browser calls this after a selection and after edits; the readback is throttled
@@ -98,6 +103,9 @@ namespace MOON
 		bool m_thumbnailRequested = false;
 		double m_lastThumbnailMs = 0.0;
 		std::vector<uint8_t> m_thumbnailPixels;
+
+		/** What the material is shown on; applied to the view when it is created. */
+		Editor::Panels::EPreviewMesh m_previewMesh = Editor::Panels::EPreviewMesh::SPHERE;
 
 		Editor::Panels::PreviewView* m_view = nullptr;
 		/** The material the preview sphere carries. The scene holds a pointer to it, so it

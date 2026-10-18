@@ -26,14 +26,19 @@ Core::Rendering::EngineBufferRenderFeature::EngineBufferRenderFeature(
 {
 	m_engineBuffer = std::make_unique<::Rendering::HAL::UniformBuffer>();
 	m_engineBuffer->Allocate(kUBOSize, ::Rendering::Settings::EAccessSpecifier::STREAM_DRAW);
-	m_objectBuffer = std::make_unique<::Rendering::HAL::UniformBuffer>();
-	m_objectBuffer->Allocate(kObjectUBOSize, ::Rendering::Settings::EAccessSpecifier::STREAM_DRAW);
 	m_startTime = std::chrono::high_resolution_clock::now();
 	m_LateUboData = new LateUboData();
 }
 
 Core::Rendering::EngineBufferRenderFeature::~EngineBufferRenderFeature()
 {
+	// The object block is a range of the shared pool, not a buffer of its own.
+	if (m_objectSlice.IsValid())
+	{
+		::Rendering::Data::UniformBufferPool::Get().Release(m_objectSlice);
+		m_objectSlice = {};
+	}
+
 	if (m_LateUboData) {
 		delete m_LateUboData;
 	}
@@ -147,7 +152,6 @@ void Core::Rendering::EngineBufferRenderFeature::OnBeginFrame(const ::Rendering:
 		.offset = offsetof(EngineUBO, ubo_enableClip), .size = sizeof(enableClip) });
 
 	m_engineBuffer->Bind(kEngineUBOBinding);
-	m_objectBuffer->Bind(kObjectUBOBinding);
 }
 
 void Core::Rendering::EngineBufferRenderFeature::OnEndFrame()
@@ -163,14 +167,21 @@ void Core::Rendering::EngineBufferRenderFeature::OnBeforeDraw(::Rendering::Data:
 
 	if (p_drawable.TryGetDescriptor<EngineDrawableDescriptor>(descriptor))
 	{
-		// The per-renderable block: what changes between drawables. Bound to its own binding
-		// point instead of being rewritten into the per-view block, which is what filament's
-		// per-renderable descriptor set is for.
+		// The per-renderable block: what changes between drawables. It is a range of the shared
+		// uniform buffer, written and bound per draw - the GL form of filament's per-renderable
+		// descriptor set.
+		if (!m_objectSlice.IsValid())
+		{
+			m_objectSlice = ::Rendering::Data::UniformBufferPool::Get().Acquire(kObjectUBOSize);
+		}
+
 		ObjectUBO object{
 			.ubo_Model = Maths::FMatrix4::Transpose(descriptor->modelMatrix),
 			.ubo_UserMatrix = descriptor->userMatrix
 		};
 
-		m_objectBuffer->Upload(&object);
+		auto& pool = ::Rendering::Data::UniformBufferPool::Get();
+		pool.Write(m_objectSlice, &object);
+		pool.Bind(m_objectSlice, kObjectUBOBinding);
 	}
 }

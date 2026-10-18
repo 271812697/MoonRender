@@ -96,6 +96,100 @@ namespace
 			}
 		}
 	}
+
+	/** The cube: one quad per face, so each face keeps its own normal and tangent frame. The
+	 * material's UVs are 0..1 per face, which is what a tiling/clamp check wants to see. */
+	void BuildCube(
+		std::vector<::Rendering::Geometry::Vertex>& p_vertices,
+		std::vector<uint32_t>& p_indices)
+	{
+		struct Face
+		{
+			Maths::FVector3 normal;
+			Maths::FVector3 tangent;
+			Maths::FVector3 bitangent;
+		};
+
+		// tangent x bitangent == normal on every face keeps the counter-clockwise winding below
+		// consistent with the sphere's.
+		const Face faces[6] = {
+			{ { 1.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, -1.0f }, { 0.0f, 1.0f, 0.0f } },
+			{ { -1.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 1.0f }, { 0.0f, 1.0f, 0.0f } },
+			{ { 0.0f, 1.0f, 0.0f }, { 1.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, -1.0f } },
+			{ { 0.0f, -1.0f, 0.0f }, { 1.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 1.0f } },
+			{ { 0.0f, 0.0f, 1.0f }, { 1.0f, 0.0f, 0.0f }, { 0.0f, 1.0f, 0.0f } },
+			{ { 0.0f, 0.0f, -1.0f }, { -1.0f, 0.0f, 0.0f }, { 0.0f, 1.0f, 0.0f } },
+		};
+
+		for (const Face& face : faces)
+		{
+			const uint32_t base = static_cast<uint32_t>(p_vertices.size());
+
+			for (int corner = 0; corner < 4; ++corner)
+			{
+				const float u = (corner == 1 || corner == 2) ? 1.0f : 0.0f;
+				const float v = (corner >= 2) ? 1.0f : 0.0f;
+				const Maths::FVector3 position =
+					face.normal + face.tangent * (u * 2.0f - 1.0f) + face.bitangent * (v * 2.0f - 1.0f);
+
+				::Rendering::Geometry::Vertex vertex{};
+				vertex.position[0] = position.x;
+				vertex.position[1] = position.y;
+				vertex.position[2] = position.z;
+				vertex.texCoords[0] = u;
+				vertex.texCoords[1] = v;
+				vertex.normals[0] = face.normal.x;
+				vertex.normals[1] = face.normal.y;
+				vertex.normals[2] = face.normal.z;
+				vertex.tangent[0] = face.tangent.x;
+				vertex.tangent[1] = face.tangent.y;
+				vertex.tangent[2] = face.tangent.z;
+				vertex.bitangent[0] = face.bitangent.x;
+				vertex.bitangent[1] = face.bitangent.y;
+				vertex.bitangent[2] = face.bitangent.z;
+				p_vertices.push_back(vertex);
+			}
+
+			p_indices.insert(p_indices.end(), {
+				base, base + 1, base + 2, base, base + 2, base + 3 });
+		}
+	}
+
+	/** The plane: a 1x1 quad in the XY plane, facing +Z (the camera's side), UV 0..1. */
+	void BuildPlane(
+		std::vector<::Rendering::Geometry::Vertex>& p_vertices,
+		std::vector<uint32_t>& p_indices)
+	{
+		const Maths::FVector3 normal{ 0.0f, 0.0f, 1.0f };
+		const Maths::FVector3 tangent{ 1.0f, 0.0f, 0.0f };
+		const Maths::FVector3 bitangent{ 0.0f, 1.0f, 0.0f };
+
+		for (int corner = 0; corner < 4; ++corner)
+		{
+			const float u = (corner == 1 || corner == 2) ? 1.0f : 0.0f;
+			const float v = (corner >= 2) ? 1.0f : 0.0f;
+			const Maths::FVector3 position = tangent * (u * 2.0f - 1.0f) + bitangent * (v * 2.0f - 1.0f);
+
+			::Rendering::Geometry::Vertex vertex{};
+			vertex.position[0] = position.x;
+			vertex.position[1] = position.y;
+			vertex.position[2] = position.z;
+			vertex.texCoords[0] = u;
+			vertex.texCoords[1] = v;
+			vertex.normals[0] = normal.x;
+			vertex.normals[1] = normal.y;
+			vertex.normals[2] = normal.z;
+			vertex.tangent[0] = tangent.x;
+			vertex.tangent[1] = tangent.y;
+			vertex.tangent[2] = tangent.z;
+			vertex.bitangent[0] = bitangent.x;
+			vertex.bitangent[1] = bitangent.y;
+			vertex.bitangent[2] = bitangent.z;
+			p_vertices.push_back(vertex);
+		}
+
+		p_indices.insert(p_indices.end(), { 0, 1, 2, 0, 2, 3 });
+	}
 }
 
 Editor::Panels::PreviewView::PreviewView(::Rendering::Context::Driver& p_driver) :
@@ -117,7 +211,7 @@ Editor::Panels::PreviewView::PreviewView(::Rendering::Context::Driver& p_driver)
 	m_renderer->GetPass<::Core::Rendering::GbufferPass>("Gbuffer").SetEnabled(false);
 	m_renderer->GetPass<::Core::Rendering::HzbBuildPass>("HZB").SetEnabled(false);
 
-	BuildSphere();
+	BuildPreviewMesh();
 	BuildScene();
 
 	m_camera.SetFov(45.0f);
@@ -135,15 +229,46 @@ Editor::Panels::PreviewView::PreviewView(::Rendering::Context::Driver& p_driver)
 	UpdateLightRig();
 }
 
-void Editor::Panels::PreviewView::BuildSphere()
+void Editor::Panels::PreviewView::BuildPreviewMesh()
 {
 	std::vector<::Rendering::Geometry::Vertex> vertices;
 	std::vector<uint32_t> indices;
-	BuildUVSphere(vertices, indices);
 
-	m_sphere = std::make_unique<::Rendering::Resources::Model>(":Preview/Sphere");
-	m_sphere->AddMesh(new ::Rendering::Resources::Mesh(vertices, indices));
-	m_sphere->computeBoxAndShpere();
+	const char* name = ":Preview/Sphere";
+	switch (m_previewMesh)
+	{
+	case EPreviewMesh::CUBE:
+		BuildCube(vertices, indices);
+		name = ":Preview/Cube";
+		break;
+	case EPreviewMesh::PLANE:
+		BuildPlane(vertices, indices);
+		name = ":Preview/Plane";
+		break;
+	case EPreviewMesh::SPHERE:
+	default:
+		BuildUVSphere(vertices, indices);
+		break;
+	}
+
+	auto model = std::make_unique<::Rendering::Resources::Model>(name);
+	model->AddMesh(new ::Rendering::Resources::Mesh(vertices, indices));
+	model->computeBoxAndShpere();
+
+	// Swap the model in before releasing the old one: the renderer's drawables point at its
+	// meshes, and the next parse is what moves them over.
+	::Rendering::Resources::Model* previous = m_previewModel.release();
+	m_previewModel = std::move(model);
+
+	if (m_previewActor != nullptr)
+	{
+		if (auto* renderer = m_previewActor->GetComponent<::Core::ECS::Components::CModelRenderer>())
+		{
+			renderer->SetModel(m_previewModel.get());
+		}
+	}
+
+	delete previous;
 }
 
 void Editor::Panels::PreviewView::BuildScene()
@@ -152,9 +277,9 @@ void Editor::Panels::PreviewView::BuildScene()
 
 	// The actor that shows the material. The model renderer goes in first: the material renderer
 	// reads the model's material list while constructing.
-	m_sphereActor = &m_scene.CreateActor("Preview Sphere");
-	m_sphereActor->AddComponent<CModelRenderer>().SetModel(m_sphere.get());
-	m_sphereActor->AddComponent<CMaterialRenderer>();
+	m_previewActor = &m_scene.CreateActor("Preview Target");
+	m_previewActor->AddComponent<CModelRenderer>().SetModel(m_previewModel.get());
+	m_previewActor->AddComponent<CMaterialRenderer>();
 
 	// The rig the scene view builds around its focus (see SceneView::Update): a key, a fill and
 	// two rims, plus a head light on the camera. Only the intensities live here - the positions
@@ -250,8 +375,8 @@ void Editor::Panels::PreviewView::SetMaterial(::Core::Resources::Material* p_mat
 {
 	m_material = p_material;
 
-	auto* materials = m_sphereActor != nullptr
-		? m_sphereActor->GetComponent<::Core::ECS::Components::CMaterialRenderer>()
+	auto* materials = m_previewActor != nullptr
+		? m_previewActor->GetComponent<::Core::ECS::Components::CMaterialRenderer>()
 		: nullptr;
 	if (materials == nullptr)
 	{
@@ -266,6 +391,22 @@ void Editor::Panels::PreviewView::SetMaterial(::Core::Resources::Material* p_mat
 	{
 		materials->RemoveMaterialAtIndex(0);
 	}
+}
+
+void Editor::Panels::PreviewView::SetPreviewMesh(EPreviewMesh p_mesh)
+{
+	if (p_mesh == m_previewMesh)
+	{
+		return;
+	}
+
+	m_previewMesh = p_mesh;
+	BuildPreviewMesh();
+}
+
+Editor::Panels::EPreviewMesh Editor::Panels::PreviewView::GetPreviewMesh() const
+{
+	return m_previewMesh;
 }
 
 ::Core::Resources::Material* Editor::Panels::PreviewView::GetMaterial() const

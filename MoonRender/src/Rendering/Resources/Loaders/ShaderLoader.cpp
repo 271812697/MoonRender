@@ -1026,7 +1026,17 @@ void main()
 
 		if (const auto it = states.find("blending"); it != states.end())
 		{
+			// filament's names: opaque | transparent | add | multiply | screen | fade. "masked"
+			// clips in the shader and blends like opaque, so it lands on OPAQUE too.
+			using Rendering::Settings::EBlendMode;
 			state.blendable = it->second != "opaque";
+			state.blendMode =
+				it->second == "transparent" ? EBlendMode::BLEND_TRANSPARENT :
+				it->second == "add" ? EBlendMode::BLEND_ADD :
+				it->second == "multiply" ? EBlendMode::BLEND_MULTIPLY :
+				it->second == "screen" ? EBlendMode::BLEND_SCREEN :
+				it->second == "fade" ? EBlendMode::BLEND_FADE :
+				EBlendMode::BLEND_OPAQUE;
 		}
 		if (const auto it = states.find("culling"); it != states.end())
 		{

@@ -5,6 +5,7 @@
 #include <stack>
 #include <Rendering/Features/ARenderFeature.h>
 #include <Rendering/HAL/UniformBuffer.h>
+#include <Rendering/Data/UniformBufferPool.h>
 #include <Rendering/Entities/Camera.h>
 
 namespace Core::Rendering
@@ -36,9 +37,9 @@ namespace Core::Rendering
 	protected:
 		std::chrono::high_resolution_clock::time_point m_startTime;
 		std::unique_ptr<::Rendering::HAL::UniformBuffer> m_engineBuffer;
-		/** The per-renderable block: uploaded before every drawable, bound to
-		 * kObjectUBOBinding. */
-		std::unique_ptr<::Rendering::HAL::UniformBuffer> m_objectBuffer;
+		/** The per-renderable block: a range of the shared uniform buffer, rewritten before
+		 * every drawable and bound to kObjectUBOBinding. */
+		::Rendering::Data::UniformBufferPool::Slice m_objectSlice;
 
 		LateUboData* m_LateUboData;
 	};

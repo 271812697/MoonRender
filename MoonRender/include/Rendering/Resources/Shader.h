@@ -9,6 +9,7 @@
 
 #include <Rendering/Data/FeatureSet.h>
 #include <Rendering/HAL/ShaderProgram.h>
+#include <Rendering/Settings/EBlendMode.h>
 
 namespace Rendering::Resources
 {
@@ -76,6 +77,7 @@ namespace Rendering::Resources
 		struct State
 		{
 			std::optional<bool> blendable;        // blending: opaque = false, transparent = true
+			std::optional<Rendering::Settings::EBlendMode> blendMode; // opaque/transparent/add/...
 			std::optional<bool> backfaceCulling;  // culling: back
 			std::optional<bool> frontfaceCulling; // culling: front
 			std::optional<bool> depthWriting;     // depthWrite
