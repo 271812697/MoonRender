@@ -57,6 +57,9 @@ namespace Rendering::Resources
 			float max = 0.0f;
 			float step = 0.0f;        // the designer step, valid when hasStep
 			uint32_t count = 0;       // array size, 0 when the parameter is not an array
+			int32_t offset = -1;      // std140 offset in the material parameter block, -1 = no layout
+			uint32_t stride = 0;      // std140 element stride (arrays)
+			uint32_t binding = 0;     // texture unit of a sampler
 			bool isSampler = false;   // a texture slot rather than a plain uniform
 			bool hasRange = false;
 			bool hasStep = false;
@@ -117,6 +120,17 @@ namespace Rendering::Resources
 		 * to bring the list along, or materials would keep describing the old material. */
 		void SetParameters(std::vector<Parameter>&& p_parameters);
 
+		/** True when the parameters live in one std140 uniform block (the per-material
+		 * descriptor set: a UBO at binding point 2 plus one texture unit per sampler). Every
+		 * packaged shader has one once it has a non-sampler parameter. */
+		bool HasParameterBlock() const;
+
+		/** The std140 size of that block, 0 when there is none. */
+		uint32_t GetParameterBlockSize() const;
+
+		/** Sets the block size, taken from the package by the loader. */
+		void SetParameterBlockSize(uint32_t p_size);
+
 		/** The state the material block declared. Empty fields keep the engine's defaults. */
 		const State& GetState() const;
 
@@ -144,6 +158,7 @@ namespace Rendering::Resources
 		Variants m_variants;
 		std::vector<Parameter> m_parameters;
 		bool m_hasParameterTable = false;
+		uint32_t m_parameterBlockSize = 0;
 		State m_state;
 		bool m_hasState = false;
 	};

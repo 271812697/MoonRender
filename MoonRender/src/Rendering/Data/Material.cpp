@@ -2,6 +2,7 @@
 #include <array>
 #include <cctype>
 #include <cstdlib>
+#include <cstring>
 #include <format>
 #include <ranges>
 #include <string_view>
@@ -226,6 +227,30 @@ namespace
 		return std::monostate{};
 	}
 
+	/** A zero of the same kind as p_value, for a single-use property the shader does not declare
+	 * (they used to be reset to the program's reflected default). */
+	Rendering::Data::MaterialPropertyType ZeroOf(const Rendering::Data::MaterialPropertyType& p_value)
+	{
+		using namespace Maths;
+		using namespace Rendering;
+
+		return std::visit([](const auto& value) -> Rendering::Data::MaterialPropertyType {
+			using T = std::decay_t<decltype(value)>;
+
+			if constexpr (std::same_as<T, bool>) { return false; }
+			else if constexpr (std::same_as<T, int>) { return 0; }
+			else if constexpr (std::same_as<T, float>) { return 0.0f; }
+			else if constexpr (std::same_as<T, FVector2>) { return FVector2{}; }
+			else if constexpr (std::same_as<T, FVector3>) { return FVector3{}; }
+			else if constexpr (std::same_as<T, FVector4>) { return FVector4{}; }
+			else if constexpr (std::same_as<T, FMatrix3>) { return FMatrix3{}; }
+			else if constexpr (std::same_as<T, FMatrix4>) { return FMatrix4{}; }
+			else if constexpr (std::same_as<T, HAL::TextureHandle*>) { return static_cast<HAL::TextureHandle*>(nullptr); }
+			else if constexpr (std::same_as<T, Resources::Texture*>) { return static_cast<Resources::Texture*>(nullptr); }
+			else { return std::monostate{}; }
+		}, p_value);
+	}
+
 	void BindTexture(
 		Rendering::HAL::ShaderProgram& p_shader,
 		const std::string& p_uniformName,
@@ -306,6 +331,30 @@ Tools::Utils::OptRef<Rendering::HAL::ShaderProgram> Rendering::Data::Material::G
 void Rendering::Data::Material::UploadProperties(bool uploadStableProperties, bool uploadSingleUseProperties, Rendering::HAL::Texture* p_emptyTexture2D, Rendering::HAL::Texture* p_emptyTextureCube)
 {
 	ZoneScoped;
+
+	// Packaged shaders carry their parameters as one std140 block (the per-material descriptor):
+	// write the values by offset into it and bind it once, instead of resolving each name
+	// against the program's reflected uniforms.
+	const bool hasParameterBlock = m_shader != nullptr && m_shader->HasParameterBlock();
+	if (hasParameterBlock)
+	{
+		UploadParameterBlock(uploadStableProperties, uploadSingleUseProperties, p_emptyTexture2D, p_emptyTextureCube);
+	}
+
+	// Properties the shader does not declare (an include's own uniforms, like PBR.ovfxh's
+	// u_ReceiveShadows) are not in the block: they still go through the per-name path below,
+	// while the declared ones were written by UploadParameterBlock.
+	const auto isDeclaredParameter = [this](const std::string& p_name) {
+		for (const Rendering::Resources::Shader::Parameter& parameter : m_shader->GetParameters())
+		{
+			if (parameter.name == p_name || p_name.starts_with(parameter.name + "["))
+			{
+				return true;
+			}
+		}
+		return false;
+	};
+
 	using namespace Maths;
 	using enum Rendering::Settings::EUniformType;
 	auto& program = m_programInUse.value();
@@ -314,6 +363,7 @@ void Rendering::Data::Material::UploadProperties(bool uploadStableProperties, bo
 	{
 		if (!uploadStableProperties && !prop.singleUse) continue;
 		if (!uploadSingleUseProperties && prop.singleUse) continue;
+		if (hasParameterBlock && isDeclaredParameter(name)) continue;
 
 		const auto uniformData = program.GetUniformInfo(name);
 
@@ -390,6 +440,227 @@ void Rendering::Data::Material::UploadProperties(bool uploadStableProperties, bo
 		if (prop.singleUse)
 		{
 			value = UniformToPropertyValue(uniformData->defaultValue);
+		}
+	}
+}
+
+void Rendering::Data::Material::EnsureParameterBuffer()
+{
+	const uint32_t blockSize = m_shader->GetParameterBlockSize();
+	if (blockSize == 0)
+	{
+		return;
+	}
+
+	if (m_parameterBuffer == nullptr)
+	{
+		m_parameterBuffer = std::make_unique<Rendering::HAL::UniformBuffer>();
+		m_parameterBuffer->Allocate(blockSize, Rendering::Settings::EAccessSpecifier::DYNAMIC_DRAW);
+		m_parameterBufferSize = blockSize;
+	}
+	else if (m_parameterBufferSize != blockSize)
+	{
+		// A hot reloaded shader can change the block layout.
+		m_parameterBuffer->Allocate(blockSize, Rendering::Settings::EAccessSpecifier::DYNAMIC_DRAW);
+		m_parameterBufferSize = blockSize;
+	}
+}
+
+void Rendering::Data::Material::BindParameterBlock()
+{
+	if (m_shader == nullptr || !m_shader->HasParameterBlock())
+	{
+		return;
+	}
+
+	EnsureParameterBuffer();
+	if (m_parameterBuffer)
+	{
+		m_parameterBuffer->Bind(kMaterialParameterBinding);
+	}
+}
+
+void Rendering::Data::Material::WriteBlockValue(const std::string& p_type, const MaterialPropertyType& p_value, uint32_t p_offset)
+{
+	using namespace Maths;
+
+	if (m_parameterData.size() < p_offset)
+	{
+		return;
+	}
+
+	auto* data = m_parameterData.data() + p_offset;
+
+	if (p_type == "bool")
+	{
+		if (const auto* value = std::get_if<bool>(&p_value))
+		{
+			const int32_t stored = *value ? 1 : 0;
+			std::memcpy(data, &stored, sizeof(stored));
+		}
+	}
+	else if (p_type == "int")
+	{
+		if (const auto* value = std::get_if<int>(&p_value))
+		{
+			std::memcpy(data, value, sizeof(*value));
+		}
+	}
+	else if (p_type == "float")
+	{
+		if (const auto* value = std::get_if<float>(&p_value))
+		{
+			std::memcpy(data, value, sizeof(*value));
+		}
+	}
+	else if (p_type == "vec2")
+	{
+		if (const auto* value = std::get_if<FVector2>(&p_value))
+		{
+			std::memcpy(data, value, sizeof(float) * 2);
+		}
+	}
+	else if (p_type == "vec3")
+	{
+		if (const auto* value = std::get_if<FVector3>(&p_value))
+		{
+			std::memcpy(data, value, sizeof(float) * 3);
+		}
+	}
+	else if (p_type == "vec4")
+	{
+		if (const auto* value = std::get_if<FVector4>(&p_value))
+		{
+			std::memcpy(data, value, sizeof(float) * 4);
+		}
+	}
+	else if (p_type == "mat3")
+	{
+		if (const auto* value = std::get_if<FMatrix3>(&p_value))
+		{
+			// std140 stores a matrix as columns of a vec4; the engine's matrices are row-major.
+			for (uint32_t column = 0; column < 3; ++column)
+			{
+				for (uint32_t row = 0; row < 3; ++row)
+				{
+					const float element = value->data[row * 3 + column];
+					std::memcpy(data + column * 16 + row * 4, &element, sizeof(element));
+				}
+			}
+		}
+	}
+	else if (p_type == "mat4")
+	{
+		if (const auto* value = std::get_if<FMatrix4>(&p_value))
+		{
+			for (uint32_t column = 0; column < 4; ++column)
+			{
+				for (uint32_t row = 0; row < 4; ++row)
+				{
+					const float element = value->data[row * 4 + column];
+					std::memcpy(data + column * 16 + row * 4, &element, sizeof(element));
+				}
+			}
+		}
+	}
+}
+
+void Rendering::Data::Material::UploadParameterBlock(
+	bool p_uploadStableProperties,
+	bool p_uploadSingleUseProperties,
+	Rendering::HAL::Texture* p_emptyTexture2D,
+	Rendering::HAL::Texture* p_emptyTextureCube)
+{
+	EnsureParameterBuffer();
+	if (m_parameterBuffer == nullptr)
+	{
+		return;
+	}
+
+	const uint32_t blockSize = m_shader->GetParameterBlockSize();
+	m_parameterData.assign(blockSize, 0);
+
+	for (const Rendering::Resources::Shader::Parameter& parameter : m_shader->GetParameters())
+	{
+		if (parameter.isSampler || parameter.offset < 0)
+		{
+			continue;
+		}
+
+		if (parameter.count > 0)
+		{
+			// Arrays are addressed one element at a time ("samples[17]"), exactly how the
+			// property set stores them.
+			for (uint32_t i = 0; i < parameter.count; ++i)
+			{
+				const auto property = GetProperty(std::format("{}[{}]", parameter.name, i));
+				if (property)
+				{
+					WriteBlockValue(parameter.type, property->value,
+						static_cast<uint32_t>(parameter.offset) + parameter.stride * i);
+				}
+			}
+		}
+		else if (const auto property = GetProperty(parameter.name))
+		{
+			WriteBlockValue(parameter.type, property->value, static_cast<uint32_t>(parameter.offset));
+		}
+	}
+
+	m_parameterBuffer->Upload(m_parameterData.data());
+	m_parameterBuffer->Bind(kMaterialParameterBinding);
+
+	// Samplers: one fixed texture unit per declaration, set by the GLSL's layout(binding = N).
+	for (const Rendering::Resources::Shader::Parameter& parameter : m_shader->GetParameters())
+	{
+		if (!parameter.isSampler)
+		{
+			continue;
+		}
+
+		Rendering::HAL::TextureHandle* handle = nullptr;
+		if (const auto property = GetProperty(parameter.name))
+		{
+			if (auto textureHandle = std::get_if<Rendering::HAL::TextureHandle*>(&property->value))
+			{
+				handle = *textureHandle;
+			}
+			else if (auto texture = std::get_if<Rendering::Resources::Texture*>(&property->value);
+				texture != nullptr && *texture != nullptr)
+			{
+				handle = &(*texture)->GetTexture();
+			}
+		}
+
+		Rendering::HAL::TextureHandle* fallback =
+			parameter.type == "samplerCube" ? p_emptyTextureCube : p_emptyTexture2D;
+		if (auto* target = handle != nullptr ? handle : fallback)
+		{
+			target->Bind(parameter.binding);
+		}
+	}
+
+	// Single-use properties are per-frame scratch: put them back to their defaults, like the
+	// loose path did, so a value set for one draw never sticks to the material.
+	for (auto& [name, property] : m_properties)
+	{
+		if (!property.singleUse)
+		{
+			continue;
+		}
+
+		const auto parameter = std::ranges::find_if(m_shader->GetParameters(),
+			[&name](const Rendering::Resources::Shader::Parameter& p_parameter) {
+				return p_parameter.name == name
+					|| name.starts_with(p_parameter.name + "[");
+			});
+		if (parameter != m_shader->GetParameters().end())
+		{
+			property.value = ParameterDefaultValue(*parameter);
+		}
+		else
+		{
+			property.value = ZeroOf(property.value);
 		}
 	}
 }
@@ -487,6 +758,10 @@ Rendering::Data::MaterialSignatureSet Rendering::Data::Material::Bind(
 	}
 
 	m_programInUse = program;
+
+	// The parameter block is per material, not per program: bind it on every draw so it is the
+	// one bound even when another material uploaded its own buffer since the last draw.
+	BindParameterBlock();
 
 	return signature;
 }

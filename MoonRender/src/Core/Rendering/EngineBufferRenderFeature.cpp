@@ -11,6 +11,7 @@ namespace Core::Rendering
 	// uploads its own camera into a buffer of its own). The uploads below address fields by
 	// offsetof, so adding a field can no longer leave a hand-counted offset behind.
 	constexpr size_t kUBOSize = sizeof(EngineUBO);
+	constexpr size_t kObjectUBOSize = sizeof(ObjectUBO);
 
 	struct LateUboData {
 		bool enableClip = false;
@@ -25,6 +26,8 @@ Core::Rendering::EngineBufferRenderFeature::EngineBufferRenderFeature(
 {
 	m_engineBuffer = std::make_unique<::Rendering::HAL::UniformBuffer>();
 	m_engineBuffer->Allocate(kUBOSize, ::Rendering::Settings::EAccessSpecifier::STREAM_DRAW);
+	m_objectBuffer = std::make_unique<::Rendering::HAL::UniformBuffer>();
+	m_objectBuffer->Allocate(kObjectUBOSize, ::Rendering::Settings::EAccessSpecifier::STREAM_DRAW);
 	m_startTime = std::chrono::high_resolution_clock::now();
 	m_LateUboData = new LateUboData();
 }
@@ -40,7 +43,7 @@ void Core::Rendering::EngineBufferRenderFeature::SetViewPos(const Maths::FVector
 {
 
 	m_engineBuffer->Upload(&viewPos, ::Rendering::HAL::BufferMemoryRange{
-		.offset = sizeof(Maths::FMatrix4)*3, // Skip uploading the first matrix (Model matrix)
+		.offset = offsetof(EngineUBO, ubo_ViewPos),
 		.size = sizeof(Maths::FVector3) });
 }
 
@@ -143,7 +146,8 @@ void Core::Rendering::EngineBufferRenderFeature::OnBeginFrame(const ::Rendering:
 	m_engineBuffer->Upload(&enableClip, ::Rendering::HAL::BufferMemoryRange{
 		.offset = offsetof(EngineUBO, ubo_enableClip), .size = sizeof(enableClip) });
 
-	m_engineBuffer->Bind(0);
+	m_engineBuffer->Bind(kEngineUBOBinding);
+	m_objectBuffer->Bind(kObjectUBOBinding);
 }
 
 void Core::Rendering::EngineBufferRenderFeature::OnEndFrame()
@@ -159,18 +163,14 @@ void Core::Rendering::EngineBufferRenderFeature::OnBeforeDraw(::Rendering::Data:
 
 	if (p_drawable.TryGetDescriptor<EngineDrawableDescriptor>(descriptor))
 	{
-		const auto modelMatrix = Maths::FMatrix4::Transpose(descriptor->modelMatrix);
-		
-		// Upload model matrix (First matrix in the UBO)
-		m_engineBuffer->Upload(&modelMatrix, ::Rendering::HAL::BufferMemoryRange{
-			.offset = offsetof(EngineUBO, ubo_Model),
-			.size = sizeof(modelMatrix)
-		});
+		// The per-renderable block: what changes between drawables. Bound to its own binding
+		// point instead of being rewritten into the per-view block, which is what filament's
+		// per-renderable descriptor set is for.
+		ObjectUBO object{
+			.ubo_Model = Maths::FMatrix4::Transpose(descriptor->modelMatrix),
+			.ubo_UserMatrix = descriptor->userMatrix
+		};
 
-		// Upload user matrix (Last matrix in the UBO)
-		m_engineBuffer->Upload(&descriptor->userMatrix, ::Rendering::HAL::BufferMemoryRange{
-			.offset = kUBOSize - sizeof(modelMatrix),
-			.size = sizeof(modelMatrix)
-		});
+		m_objectBuffer->Upload(&object);
 	}
 }

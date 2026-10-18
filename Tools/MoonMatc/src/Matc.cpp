@@ -182,6 +182,13 @@ namespace
 		bool hasStep = false;
 		bool color = false;
 		bool ui = true;
+
+		// Where the parameter lives once the material is a descriptor: a std140 offset/stride
+		// for the non-samplers (the per-material uniform block), a texture unit for the samplers.
+		// Filled by LayoutParameters.
+		uint32_t offset = 0;
+		uint32_t stride = 0;
+		uint32_t binding = 0;
 	};
 
 	/** The three stages a material can own. */
@@ -220,6 +227,10 @@ namespace
 		std::string domain = "surface";
 		std::map<std::string, std::string> state; // blending, culling, depthWrite, ...
 		std::vector<Parameter> parameters;
+		/** The std140 size of the per-material uniform block: what the runtime allocates and
+		 * uploads, and what the generated GLSL's block must describe. 0 when every parameter is
+		 * a sampler (or there are none). */
+		uint32_t parameterBlockSize = 0;
 		std::vector<std::string> features;        // declared feature bits
 		std::vector<std::string> passes;          // extra passes, default pass implied
 		std::string vertexBody;                   // the vertex { ... } block, verbatim
@@ -983,28 +994,119 @@ namespace
 		return it != kTypes.end() ? it->second : p_type;
 	}
 
-	/** The material's parameters, as the uniforms the entry point reads.
+	/** The std140 size and base alignment of a parameter type. Samplers never reach this:
+	 * they are not allowed inside a uniform block and stay separate uniforms. */
+	struct TypeLayout
+	{
+		uint32_t size;
+		uint32_t alignment;
+	};
+
+	TypeLayout ParameterTypeLayout(const std::string& p_type)
+	{
+		static const std::map<std::string, TypeLayout> kTypes = {
+			{ "bool", { 4, 4 } }, { "bool2", { 8, 8 } }, { "bool3", { 12, 16 } }, { "bool4", { 16, 16 } },
+			{ "int", { 4, 4 } }, { "int2", { 8, 8 } }, { "int3", { 12, 16 } }, { "int4", { 16, 16 } },
+			{ "uint", { 4, 4 } }, { "uint2", { 8, 8 } }, { "uint3", { 12, 16 } }, { "uint4", { 16, 16 } },
+			{ "float", { 4, 4 } }, { "float2", { 8, 8 } }, { "float3", { 12, 16 } }, { "float4", { 16, 16 } },
+			{ "mat2", { 32, 8 } }, { "mat3", { 48, 16 } }, { "mat4", { 64, 16 } },
+		};
+		const auto it = kTypes.find(p_type);
+		return it != kTypes.end() ? it->second : TypeLayout{ 4, 4 };
+	}
+
+	uint32_t RoundUp(uint32_t p_value, uint32_t p_alignment)
+	{
+		return (p_value + p_alignment - 1) / p_alignment * p_alignment;
+	}
+
+	/** Assigns the std140 offsets of the parameter block and the texture units of the samplers.
 	 *
-	 * Filament packs them into a generated `materialParams` block; this engine keeps plain
-	 * `uniform` declarations, so the names stay the `u_...` the C++ side already sets and no
-	 * call site has to change (see docs/ShaderPipeline.md, section 8). Declared for both
-	 * stages - a parameter only one of them reads is dropped by the compiler. */
-	std::string ParametersPrelude(const std::vector<Parameter>& p_parameters)
+	 * The block holds every non-sampler parameter in declaration order (engine-owned `ui:false`
+	 * ones included: they are still uniforms). The generated GLSL declares the same block with
+	 * `binding = 2`, so the driver's std140 layout has to agree with this computation; the
+	 * runtime validates the offsets once when it links a program (see ShaderLoader). */
+	void LayoutParameters(MaterialFile& p_material)
+	{
+		uint32_t offset = 0;
+		uint32_t samplerBinding = 0;
+
+		for (Parameter& parameter : p_material.parameters)
+		{
+			if (IsSamplerType(parameter.type))
+			{
+				parameter.binding = samplerBinding++;
+				continue;
+			}
+
+			const TypeLayout layout = ParameterTypeLayout(parameter.type);
+			const uint32_t count = parameter.count.empty()
+				? 1u : static_cast<uint32_t>(std::stoul(parameter.count));
+
+			if (count > 1)
+			{
+				// std140 arrays round the element size (and therefore the stride) up to 16.
+				offset = RoundUp(offset, 16);
+				parameter.offset = offset;
+				parameter.stride = RoundUp(layout.size, 16);
+				offset += parameter.stride * count;
+			}
+			else
+			{
+				offset = RoundUp(offset, layout.alignment);
+				parameter.offset = offset;
+				parameter.stride = layout.size;
+				offset += layout.size;
+			}
+		}
+
+		p_material.parameterBlockSize = RoundUp(offset, 16);
+	}
+
+	/** The material's parameters, as the descriptors the entry point reads.
+	 *
+	 * The non-sampler parameters are one std140 uniform block - the engine's per-material
+	 * descriptor: a single UBO at binding point 2, which a material instance fills by offset.
+	 * Samplers cannot be block members, so they stay separate uniforms with a fixed texture unit
+	 * each (`layout(binding = N)`), the same idea applied to the sampler descriptors. Declared
+	 * for both stages - a parameter only one of them reads is dropped by the compiler.
+	 *
+	 * The declared initialisers move to the runtime: a block member cannot have one, and the
+	 * material's property defaults (parsed from the same declarations, see SHDRPROP) are what
+	 * fills the buffer. */
+	std::string ParametersPrelude(const std::vector<Parameter>& p_parameters, uint32_t p_blockSize)
 	{
 		std::ostringstream out;
+
+		if (p_blockSize > 0)
+		{
+			out << "layout(std140, binding = 2) uniform MaterialParams\n{\n";
+			for (const Parameter& parameter : p_parameters)
+			{
+				if (IsSamplerType(parameter.type))
+				{
+					continue;
+				}
+				out << "    " << GlslType(parameter.type) << " " << parameter.name;
+				if (!parameter.count.empty())
+				{
+					out << "[" << parameter.count << "]";
+				}
+				out << ";\n";
+			}
+			out << "};\n";
+		}
+
 		for (const Parameter& parameter : p_parameters)
 		{
-			out << "uniform " << GlslType(parameter.type) << " " << parameter.name;
-			if (!parameter.count.empty())
+			if (!IsSamplerType(parameter.type))
 			{
-				out << "[" << parameter.count << "]";
+				continue;
 			}
-			if (!parameter.defaultValue.empty())
-			{
-				out << " = " << parameter.defaultValue;
-			}
-			out << ";\n";
+			out << "layout(binding = " << parameter.binding << ") uniform "
+				<< GlslType(parameter.type) << " " << parameter.name << ";\n";
 		}
+
 		out << "\n";
 		return out.str();
 	}
@@ -1093,7 +1195,7 @@ namespace
 		{
 			out << VaryingsPrelude(p_stage == Stage::Vertex, p_material.domain);
 		}
-		out << ParametersPrelude(p_material.parameters)
+		out << ParametersPrelude(p_material.parameters, p_material.parameterBlockSize)
 			<< "\n#line " << entryLine << " \"" << p_fileName << "\"\n"
 			<< body
 			<< "\n#line 1 \"<generated>\"\n";
@@ -1171,6 +1273,11 @@ CompileResult CompileSource(const std::string& p_sourceText, const CompileOption
 		}
 		return result;
 	}
+
+	// The material's descriptors: std140 offsets for the parameter block and the sampler units.
+	// Done before code generation and before the package is written, so both sides use the same
+	// numbers.
+	LayoutParameters(material);
 
 	// Variants: the power set of the declared features, one entry per pass. (Filament uses a
 	// fixed enumeration instead - see docs/ShaderPipeline.md, this is the temporary shape.)
@@ -1337,9 +1444,17 @@ CompileResult CompileSource(const std::string& p_sourceText, const CompileOption
 		{
 			json << ", \"ui\": false";
 		}
+		if (IsSamplerType(parameter.type))
+		{
+			json << ", \"binding\": " << parameter.binding;
+		}
+		else
+		{
+			json << ", \"offset\": " << parameter.offset << ", \"stride\": " << parameter.stride;
+		}
 		json << " }" << (i + 1 < material.parameters.size() ? "," : "") << "\n";
 	}
-	json << "  ],\n  \"attributes\": [\n";
+	json << "  ],\n  \"parameterBlockSize\": " << material.parameterBlockSize << ",\n  \"attributes\": [\n";
 	for (size_t i = 0; i < attributes.size(); ++i)
 	{
 		json << "    { \"location\": " << attributes[i].location
@@ -1526,7 +1641,14 @@ CompileResult CompileSource(const std::string& p_sourceText, const CompileOption
 			payload.append(reinterpret_cast<const char*>(&parameter.max), sizeof(parameter.max));
 			payload.append(reinterpret_cast<const char*>(&parameter.step), sizeof(parameter.step));
 			payload.append(reinterpret_cast<const char*>(&flags), sizeof(flags));
+
+			// The descriptor layout: std140 offset/stride for the parameter block, the texture
+			// unit for a sampler.
+			payload.append(reinterpret_cast<const char*>(&parameter.offset), sizeof(parameter.offset));
+			payload.append(reinterpret_cast<const char*>(&parameter.stride), sizeof(parameter.stride));
+			payload.append(reinterpret_cast<const char*>(&parameter.binding), sizeof(parameter.binding));
 		}
+		payload.append(reinterpret_cast<const char*>(&material.parameterBlockSize), sizeof(material.parameterBlockSize));
 		AppendChunk(package, "SHDRPROP", payload);
 	}
 

@@ -93,6 +93,21 @@ void Rendering::Resources::Shader::SetParameters(std::vector<Parameter>&& p_para
 	m_hasParameterTable = true;
 }
 
+bool Rendering::Resources::Shader::HasParameterBlock() const
+{
+	return m_parameterBlockSize > 0;
+}
+
+uint32_t Rendering::Resources::Shader::GetParameterBlockSize() const
+{
+	return m_parameterBlockSize;
+}
+
+void Rendering::Resources::Shader::SetParameterBlockSize(uint32_t p_size)
+{
+	m_parameterBlockSize = p_size;
+}
+
 const Rendering::Resources::Shader::State& Rendering::Resources::Shader::GetState() const
 {
 	return m_state;

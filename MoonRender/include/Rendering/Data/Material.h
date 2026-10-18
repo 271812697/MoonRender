@@ -1,17 +1,26 @@
 ﻿#pragma once
 #include <any>
+#include <cstdint>
 #include <map>
+#include <memory>
 #include <optional>
 #include <variant>
+#include <vector>
 #include <Maths/FMatrix3.h>
 #include <Rendering/Data/StateMask.h>
 #include <Rendering/HAL/TextureHandle.h>
+#include <Rendering/HAL/UniformBuffer.h>
 #include <Rendering/Resources/Shader.h>
 #include <Rendering/Resources/Texture.h>
 #include <Rendering/Settings/EProjectionMode.h>
 
 namespace Rendering::Data
 {
+	/** GL uniform-buffer binding point of the per-material parameter block: filament's
+	 * PER_MATERIAL descriptor set, whose first binding is the material's uniform buffer. MoonMatc
+	 * generates `layout(std140, binding = 2)` for the block; keep the two in sync. */
+	constexpr uint32_t kMaterialParameterBinding = 2;
+
 	using MaterialPropertyType = std::variant<
 		std::monostate,
 		bool,
@@ -128,6 +137,26 @@ namespace Rendering::Data
 		 * definition and the Set* calls that follow are the instance's overrides. */
 		void ResetStateToShader();
 
+		/** Binds the per-material parameter UBO (creating it on first use). Called by Bind on
+		 * every draw: the binding is global GL state, so it has to be set again after another
+		 * material bound its own buffer. */
+		void BindParameterBlock();
+
+		/** Fills the std140 block from the properties, uploads it, binds it and binds the
+		 * samplers to their declared texture units. Used instead of the per-name upload when the
+		 * shader has a parameter block. */
+		void UploadParameterBlock(
+			bool p_uploadStableProperties,
+			bool p_uploadSingleUseProperties,
+			Rendering::HAL::Texture* p_emptyTexture2D,
+			Rendering::HAL::Texture* p_emptyTextureCube
+		);
+
+		/** Creates or resizes the parameter buffer to the shader's block size. */
+		void EnsureParameterBuffer();
+		/** Writes one value (a scalar, vector or matrix - not a whole array) at p_offset. */
+		void WriteBlockValue(const std::string& p_type, const MaterialPropertyType& p_value, uint32_t p_offset);
+
 		MaterialSignatureSet CalculateSignature(
 			Rendering::HAL::ShaderProgram& p_selectedProgram,
 			Rendering::HAL::Texture* p_emptyTexture2D = nullptr,
@@ -142,6 +171,12 @@ namespace Rendering::Data
 		size_t m_stablePropertySignatureVersion = 0ULL;
 		size_t m_singleUsePropertySignatureVersion = 0ULL;
 		Tools::Utils::OptRef<Rendering::HAL::ShaderProgram> m_programInUse = std::nullopt;
+
+		/** The per-material descriptor: one std140 UBO filled from the properties by offset, and
+		 * the CPU staging buffer it is built in. Null until the shader has a parameter block. */
+		std::unique_ptr<Rendering::HAL::UniformBuffer> m_parameterBuffer;
+		uint32_t m_parameterBufferSize = 0;
+		std::vector<uint8_t> m_parameterData;
 
 		bool m_supportOrthographic = true;
 		bool m_supportPerspective = true;

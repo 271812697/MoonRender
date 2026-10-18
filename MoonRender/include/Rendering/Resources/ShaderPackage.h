@@ -37,6 +37,9 @@ namespace Rendering::Resources
 			float max = 0.0f;
 			float step = 0.0f;      // the designer step, valid when hasStep
 			uint32_t count = 0;     // array size, 0 when the parameter is not an array
+			int32_t offset = -1;    // std140 offset in the material parameter block, -1 = no layout
+			uint32_t stride = 0;    // std140 element stride (arrays)
+			uint32_t binding = 0;   // texture unit of a sampler
 			bool isSampler = false; // a texture slot rather than a plain uniform
 			bool hasRange = false;
 			bool hasStep = false;
@@ -87,6 +90,10 @@ namespace Rendering::Resources
 		 * them onto the material's render state. */
 		const std::map<std::string, std::string>& States() const { return m_states; }
 
+		/** The std140 size of the per-material parameter block, 0 when the material has none
+		 * (every parameter is a sampler, or the package predates the block). */
+		uint32_t ParameterBlockSize() const { return m_parameterBlockSize; }
+
 		/** The final GLSL of one variant's stage, empty when the package holds no such
 		 * combination (i.e. one the build did not make, or no geometry stage at all).
 		 *
@@ -117,6 +124,7 @@ namespace Rendering::Resources
 		std::vector<Parameter> m_parameters;
 		std::vector<Attribute> m_attributes;
 		std::map<std::string, std::string> m_states;
+		uint32_t m_parameterBlockSize = 0;
 		std::vector<Blob> m_blobs;
 		/** Stage name ("vertex" / "fragment" / "geometry") -> the stage's whole text, with the
 		 * placeholder where the variant's #define lines go. Empty for a package written before

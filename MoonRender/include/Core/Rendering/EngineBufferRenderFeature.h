@@ -1,6 +1,7 @@
 ﻿#pragma once
 #include <chrono>
 #include <map>
+#include <memory>
 #include <stack>
 #include <Rendering/Features/ARenderFeature.h>
 #include <Rendering/HAL/UniformBuffer.h>
@@ -35,7 +36,10 @@ namespace Core::Rendering
 	protected:
 		std::chrono::high_resolution_clock::time_point m_startTime;
 		std::unique_ptr<::Rendering::HAL::UniformBuffer> m_engineBuffer;
-		
+		/** The per-renderable block: uploaded before every drawable, bound to
+		 * kObjectUBOBinding. */
+		std::unique_ptr<::Rendering::HAL::UniformBuffer> m_objectBuffer;
+
 		LateUboData* m_LateUboData;
 	};
 }

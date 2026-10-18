@@ -149,8 +149,26 @@ namespace Rendering::Resources
 						parameter.hasStep = (flags & 0x02) != 0;
 						parameter.isColor = (flags & 0x04) != 0;
 						parameter.isUi = (flags & 0x08) == 0;
+
+						// The descriptor layout came after the designer fields: packages from
+						// between the two carry none and keep the loose-uniform path.
+						if (payload.size() >= sizeof(uint32_t) * 3)
+						{
+							if (!Take(payload, parameter.offset)
+								|| !Take(payload, parameter.stride)
+								|| !Take(payload, parameter.binding))
+							{
+								break;
+							}
+						}
 					}
 					m_parameters.push_back(std::move(parameter));
+				}
+
+				// The chunk ends with the std140 size of the block (new packages only).
+				if (payload.size() >= sizeof(uint32_t))
+				{
+					Take(payload, m_parameterBlockSize);
 				}
 			}
 			else if (tag == "SHDRSTAT")

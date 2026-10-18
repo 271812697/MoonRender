@@ -11,6 +11,7 @@
 #include <iostream>
 #include <unordered_set>
 #include<assert.h>
+#include <glad/glad.h>
 #include <Rendering/HAL/ShaderProgram.h>
 #include <Rendering/HAL/ShaderStage.h>
 #include <Rendering/Resources/Loaders/ShaderLoader.h>
@@ -788,6 +789,78 @@ void main()
 		return AssembleShader(shaderParseResult);
 	}
 
+	/** Checks the driver's std140 layout against the package's, once per shader.
+	 *
+	 * The generated GLSL declares `layout(std140, binding = 2) uniform MaterialParams` and the
+	 * runtime writes that block by the package's offsets, so the two have to agree. A mismatch
+	 * would render every material with shifted values; reporting it here turns that into one
+	 * line in the log. Members a particular variant does not read are dropped by the linker and
+	 * are simply skipped. */
+	void ValidateParameterBlock(
+		const Rendering::Resources::ShaderPackage& p_package,
+		Rendering::HAL::ShaderProgram& p_program)
+	{
+		if (p_package.ParameterBlockSize() == 0)
+		{
+			return;
+		}
+
+		const GLuint program = static_cast<GLuint>(p_program.GetID());
+		const GLuint block = glGetUniformBlockIndex(program, "MaterialParams");
+		if (block == GL_INVALID_INDEX)
+		{
+			std::cout << std::format("[Shader Layout] {}: MaterialParams is not an active block",
+				p_package.Name()) << std::endl;
+			return;
+		}
+
+		GLint binding = -1;
+		glGetActiveUniformBlockiv(program, block, GL_UNIFORM_BLOCK_BINDING, &binding);
+		if (binding != 2)
+		{
+			std::cout << std::format("[Shader Layout] {}: MaterialParams is bound to {}, expected 2",
+				p_package.Name(), binding) << std::endl;
+		}
+
+		GLint blockSize = -1;
+		glGetActiveUniformBlockiv(program, block, GL_UNIFORM_BLOCK_DATA_SIZE, &blockSize);
+		if (blockSize > static_cast<GLint>(p_package.ParameterBlockSize()))
+		{
+			std::cout << std::format("[Shader Layout] {}: the driver's block is {} bytes, the package says {}",
+				p_package.Name(), blockSize, p_package.ParameterBlockSize()) << std::endl;
+		}
+
+		for (const Rendering::Resources::ShaderPackage::Parameter& parameter : p_package.Parameters())
+		{
+			if (parameter.isSampler || parameter.offset < 0)
+			{
+				continue;
+			}
+
+			std::string name = parameter.name;
+			if (parameter.count > 0)
+			{
+				name += "[0]";
+			}
+
+			const char* names[] = { name.c_str() };
+			GLuint index = GL_INVALID_INDEX;
+			glGetUniformIndices(program, 1, names, &index);
+			if (index == GL_INVALID_INDEX)
+			{
+				continue; // not read by this variant
+			}
+
+			GLint offset = -1;
+			glGetActiveUniformsiv(program, 1, &index, GL_UNIFORM_OFFSET, &offset);
+			if (offset != static_cast<GLint>(parameter.offset))
+			{
+				std::cout << std::format("[Shader Layout] {}: {} is at offset {}, the package says {}",
+					p_package.Name(), parameter.name, offset, parameter.offset) << std::endl;
+			}
+		}
+	}
+
 	/** Compiles the variants a shader package lists (MoonMatc's output).
 	 *
 	 * The package already holds the final GLSL of every (pass, variant, stage), so there is
@@ -804,6 +877,7 @@ void main()
 		using namespace Rendering::Settings;
 
 		Rendering::Resources::Shader::Variants variants;
+		bool blockValidated = false;
 
 		const auto report = [p_error](const std::string& p_text) {
 			std::cout << p_text << std::endl;
@@ -882,6 +956,15 @@ void main()
 				continue;
 			}
 
+			// The descriptor layout is compile-time data; the driver is the one that has to
+			// agree. Check it once per shader, on the first linked variant, so a mismatch is a
+			// line in the log rather than a corrupted image.
+			if (!blockValidated)
+			{
+				ValidateParameterBlock(p_package, *program);
+				blockValidated = true;
+			}
+
 			const Rendering::Data::FeatureSet features(variant.features.begin(), variant.features.end());
 			variants[variant.pass].emplace(features, std::move(program));
 		}
@@ -917,6 +1000,9 @@ void main()
 				.max = parameter.max,
 				.step = parameter.step,
 				.count = parameter.count,
+				.offset = parameter.offset,
+				.stride = parameter.stride,
+				.binding = parameter.binding,
 				.isSampler = parameter.isSampler,
 				.hasRange = parameter.hasRange,
 				.hasStep = parameter.hasStep,
@@ -981,6 +1067,7 @@ namespace Rendering::Resources::Loaders
 				{
 					Shader* shader = new Shader(p_filePath, AssembleFromPackage(package), RuntimeParameters(package));
 					shader->SetState(RuntimeState(package));
+					shader->SetParameterBlockSize(package.ParameterBlockSize());
 					return shader;
 				}
 			}
@@ -1017,6 +1104,7 @@ namespace Rendering::Resources::Loaders
 		if (p_error != nullptr) { p_error->clear(); }
 		Shader* shader = new Shader(p_name, std::move(variants), RuntimeParameters(package));
 		shader->SetState(RuntimeState(package));
+		shader->SetParameterBlockSize(package.ParameterBlockSize());
 		return shader;
 	}
 
@@ -1079,6 +1167,7 @@ namespace Rendering::Resources::Loaders
 		p_shader.SetVariants(std::move(variants));
 		p_shader.SetParameters(RuntimeParameters(package));
 		p_shader.SetState(RuntimeState(package));
+		p_shader.SetParameterBlockSize(package.ParameterBlockSize());
 		if (p_error != nullptr) { p_error->clear(); }
 		return true;
 	}
