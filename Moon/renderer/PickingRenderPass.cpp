@@ -80,8 +80,8 @@ Editor::Rendering::PickingRenderPass::PickingRenderPass(::Rendering::Core::Compo
 
 	SetupPickReadbacks();
 	/* Picking Material */
-	m_actorPickingFallbackMaterial.SetShader(GetShaderService[":Shaders/PickingFallback.ovfx"]);
-	m_TopoShapePickingFallbackMaterial.SetShader(GetShaderService[":Shaders\\GeomertySurfacePick.ovfx"]);
+	m_actorPickingFallbackMaterial.SetShader(GetShaderService[":Shaders/PickingFallback.mat"]);
+	m_TopoShapePickingFallbackMaterial.SetShader(GetShaderService[":Shaders\\GeomertySurfacePick.mat"]);
 	m_TopoShapePickingFallbackMaterial.SetBackfaceCulling(false);
 	// Lines and faces are coplanar in the picking buffer too: push the faces
 	// back in depth so the line IDs win over their own faces.

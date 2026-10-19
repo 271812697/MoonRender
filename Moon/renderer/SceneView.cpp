@@ -85,7 +85,7 @@ Editor::Panels::SceneView::SceneView
 	m_cameraController.SetInputCaptureQuery([] { return MOON::ScreenOverlayRegistry::Instance().IsCapturing(); });
 	m_renderer = std::make_unique<Editor::Rendering::DebugSceneRenderer>(*::Core::Global::ServiceLocator::Get<Editor::Core::Context>().driver);
 	m_camera.SetFar(5000.0f);
-	m_fallbackMaterial.SetShader(::Core::Global::ServiceLocator::Get<Editor::Core::Context>().shaderManager[":Shaders\\Unlit.ovfx"]);
+	m_fallbackMaterial.SetShader(::Core::Global::ServiceLocator::Get<Editor::Core::Context>().shaderManager[":Shaders\\Unlit.mat"]);
 	m_fallbackMaterial.SetProperty("u_Diffuse", Maths::FVector4{ 1.f, 0.f, 1.f, 1.0f });
 	m_fallbackMaterial.SetProperty("u_DiffuseMap", static_cast<::Rendering::Resources::Texture*>(nullptr));
 	::Core::ECS::Actor::DestroyedEvent += [this](const ::Core::ECS::Actor& actor)

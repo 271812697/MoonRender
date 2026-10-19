@@ -21,7 +21,7 @@ Core::Rendering::PostProcessRenderPass::PostProcessRenderPass(::Rendering::Core:
 		);
 	}
 
-	m_blitMaterial.SetShader(GetService(Core::ResourceManagement::ShaderManager)[":Shaders\\PostProcess\\Blit.ovfx"]);
+	m_blitMaterial.SetShader(GetService(Core::ResourceManagement::ShaderManager)[":Shaders\\PostProcess\\Blit.mat"]);
 
 	// Instantiate available effects
 	m_effects.reserve(4);

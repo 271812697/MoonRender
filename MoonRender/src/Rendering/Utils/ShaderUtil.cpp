@@ -10,7 +10,10 @@ namespace Rendering::Utils
 		{
 		case Rendering::Settings::EShaderType::VERTEX: return "Vertex";
 		case Rendering::Settings::EShaderType::FRAGMENT: return "Fragment";
-		case Rendering::Settings::EShaderType::GEOMERTY: return "Geomerty";
+		case Rendering::Settings::EShaderType::GEOMETRY: return "Geometry";
+		case Rendering::Settings::EShaderType::COMPUTE: return "Compute";
+		case Rendering::Settings::EShaderType::TESSELLATION_CONTROL: return "Tessellation Control";
+		case Rendering::Settings::EShaderType::TESSELLATION_EVALUATION: return "Tessellation Evaluation";
 		}
 
 		return "None";

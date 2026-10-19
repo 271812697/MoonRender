@@ -67,7 +67,7 @@ namespace Rendering::Resources
 			Geometry
 		};
 
-		/** True when the blob the archive holds is a package rather than a raw .ovfx, which
+		/** True when the blob the archive holds is a package rather than a raw .mat, which
 		 * is what a shader that has not been migrated yet still is. */
 		static bool IsPackage(const void* p_data, uint32_t p_size);
 

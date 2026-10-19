@@ -4,7 +4,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Two targets: the library the editor links (it compiles a material the user is editing, and
 # hands the package bytes straight to the runtime), and the command line tool the build drives
-# once per .ovfx.
+# once per .mat.
 add_library(MoonMatcLib STATIC ${CMAKE_CURRENT_SOURCE_DIR}/src/Matc.cpp)
 target_include_directories(MoonMatcLib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 set_target_properties(MoonMatcLib

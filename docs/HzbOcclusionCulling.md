@@ -141,7 +141,7 @@ if (drawables.transparents.size() > 0) {
 
 ### 5.2 reduce shader
 
-`Resource/Moon/Data/Engine/Shaders/PostProcess/HzbReduce.ovfx`：输出 texel 覆盖输入的 2×2 区块，取四者中**最远**的那个 —— Reversed-Z 下即**最小值**。
+`Resource/Moon/Data/Engine/Shaders/PostProcess/HzbReduce.mat`：输出 texel 覆盖输入的 2×2 区块，取四者中**最远**的那个 —— Reversed-Z 下即**最小值**。
 
 ```glsl
 vec2 halfTexel = 0.5 / _InputResolution;
@@ -162,7 +162,7 @@ FRAGMENT_COLOR = vec4(min(min(a, b), min(c, d)), 0.0, 0.0, 1.0);
 | 步骤 | 输入 | 用法 |
 |---|---|---|
 | 第 1 级 | **深度纹理**（不是 FBO 的颜色附件） | `m_renderer.Present(*m_resolveDepth, m_reduceMaterial)`：该重载会把纹理绑成 `_InputTexture`，再在当前绑定的目标上画全屏 quad |
-| 第 2..N 级 | 上一级的 **R32F 颜色** | `m_renderer.Blit(pso, 上一级, 本级, m_reduceMaterial, FILL_INPUT_TEXTURE \| UPDATE_VIEWPORT_SIZE)`——`Blit` 会把源的颜色附件绑成 `_InputTexture`（`BloomEffect` 降采样链的同一套写法，`BloomDownsampling.ovfx` 是最佳模板） |
+| 第 2..N 级 | 上一级的 **R32F 颜色** | `m_renderer.Blit(pso, 上一级, 本级, m_reduceMaterial, FILL_INPUT_TEXTURE \| UPDATE_VIEWPORT_SIZE)`——`Blit` 会把源的颜色附件绑成 `_InputTexture`（`BloomEffect` 降采样链的同一套写法，`BloomDownsampling.mat` 是最佳模板） |
 
 注意 `Blit` 的 `RESIZE_DST_TO_MATCH_SRC` 不能开（各级尺寸本就不同），所以显式传 flag 而非 `DEFAULT`；视口在绘制前用 `SetViewport(0,0,levelW,levelH)` 设为当前级尺寸。
 
@@ -483,7 +483,7 @@ hzbPass.SetCuller(&m_hzbCuller);
 | 文件 | 内容 |
 |---|---|
 | `MoonRender/include/Rendering/Settings/ERenderPassOrder.h` | 新增 `HzbBuild = 35000U` |
-| `Resource/Moon/Data/Engine/Shaders/PostProcess/HzbReduce.ovfx` | 2×2 取**最远**（本项目 Reversed-Z 下为 min）的降采样 shader |
+| `Resource/Moon/Data/Engine/Shaders/PostProcess/HzbReduce.mat` | 2×2 取**最远**（本项目 Reversed-Z 下为 min）的降采样 shader |
 | `MoonRender/include/Core/Rendering/HzbCuller.h` + `src/Core/Rendering/HzbCuller.cpp` | 网格存储、BVH 分层测试、`(Mesh*, actorID)` 实例 key、子树实例收集、偏置策略、统计 |
 | `MoonRender/include/Core/Rendering/HzbBuildPass.h` + `src/Core/Rendering/HzbBuildPass.cpp` | MSAA 深度解析、金字塔构建、回读、网格下发 |
 | `MoonRender/include/Core/Rendering/SceneRenderer.h` + `src/Core/Rendering/SceneRenderer.cpp` | pass 注册、`FilterDrawables` 接入、`GetHzbCuller` / `GetHzbStats` |

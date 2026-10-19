@@ -201,7 +201,7 @@ void main()
 }
 
 fragment {
-#include ":Shaders/Lighting/PBR.ovfxh"
+#include ":Shaders/Lighting/PBR.glsl"
 
 in GS_OUT
 {

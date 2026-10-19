@@ -5,7 +5,7 @@
 
 Core::Rendering::PostProcess::FXAAEffect::FXAAEffect(::Rendering::Core::CompositeRenderer& p_renderer) : AEffect(p_renderer)
 {
-	m_material.SetShader(GetService(Core::ResourceManagement::ShaderManager)[":Shaders\\PostProcess\\FXAA.ovfx"]);
+	m_material.SetShader(GetService(Core::ResourceManagement::ShaderManager)[":Shaders\\PostProcess\\FXAA.mat"]);
 }
 
 void Core::Rendering::PostProcess::FXAAEffect::Draw(

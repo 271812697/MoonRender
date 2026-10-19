@@ -3,7 +3,7 @@
 // hot reload a material; this file is the argument parser and the exit code.
 //
 // Usage:
-//   MoonMatc -i <file.ovfx> -o <file.ovshader> [-I <include dir>]...
+//   MoonMatc -i <file.mat> -o <file.ovshader> [-I <include dir>]...
 //            [--dump-glsl <dir>] [--dump-json <file>] [-E]
 //
 // A file with no material { } block is copied through untouched, so the shaders could be moved
@@ -43,7 +43,7 @@ int main(int argc, char* argv[])
 
 	if (inputPath.empty() || (options.outputPath.empty() && !options.preprocessOnly))
 	{
-		std::cerr << "Usage: MoonMatc -i <file.ovfx> -o <file.ovshader> "
+		std::cerr << "Usage: MoonMatc -i <file.mat> -o <file.ovshader> "
 			<< "[-I dir]... [--dump-glsl dir] [--dump-json file] [-E]" << std::endl;
 		return 1;
 	}

@@ -1,4 +1,4 @@
-#include ":Shaders/Common/Buffers/ReflectionUBO.ovfxh"
+#include ":Shaders/Common/Buffers/ReflectionUBO.glsl"
 
 // Image based lighting, following Filament's standard model (surface_light_indirect.fs):
 // a split-sum prefiltered cubemap for the specular term, an irradiance cubemap for the diffuse

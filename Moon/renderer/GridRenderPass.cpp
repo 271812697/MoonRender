@@ -15,19 +15,19 @@ Editor::Rendering::GridRenderPass::GridRenderPass(::Rendering::Core::CompositeRe
 	::Rendering::Core::ARenderPass(p_renderer)
 {
 	/* Grid Material */
-	m_gridMaterial.SetShader(GetShaderService[":Shaders/Grid.ovfx"]);
+	m_gridMaterial.SetShader(GetShaderService[":Shaders/Grid.mat"]);
 	m_gridMaterial.SetBlendable(true);
 	m_gridMaterial.SetBackfaceCulling(true);
 	m_gridMaterial.SetDepthWriting(false);
 	m_gridMaterial.SetDepthTest(true);
 
-	m_ShadowMaterial.SetShader(GetShaderService[":Shaders\\MirrorPlaneShadow.ovfx"]);
+	m_ShadowMaterial.SetShader(GetShaderService[":Shaders\\MirrorPlaneShadow.mat"]);
 	m_ShadowMaterial.SetBackfaceCulling(true);
 	m_ShadowMaterial.SetDepthTest(false);
 	m_ShadowMaterial.SetDepthWriting(false);
 
 
-	m_BlurMaterial.SetShader(GetShaderService[":Shaders\\PostProcess\\blur.ovfx"]);
+	m_BlurMaterial.SetShader(GetShaderService[":Shaders\\PostProcess\\blur.mat"]);
 	//m_BlurMaterial.AddFeature("k15x15");
 
 

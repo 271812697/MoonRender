@@ -152,14 +152,14 @@ namespace MOON
 		//shader leak
 		std::string shaderPath =Tools::Utils::PathParser::GetExeDirectory()+"/Moon/Data/Engine/Shaders/";
 		
-		mLineMaterial = new Rendering::Data::Material(Rendering::Resources::Loaders::ShaderLoader::Create(shaderPath + "/GizmoLine.ovfx"));
-		mPointMaterial = new Rendering::Data::Material(Rendering::Resources::Loaders::ShaderLoader::Create(shaderPath + "/GizmoPoint.ovfx"));
-		mTriangleMaterial = new Rendering::Data::Material(Rendering::Resources::Loaders::ShaderLoader::Create(shaderPath + "/GizmoTriangle.ovfx"));
-		mCellMaterial = new Rendering::Data::Material(Core::Global::ServiceLocator::Get<Editor::Core::Context>().shaderManager[":Shaders\\GizmoCell.ovfx"]);
+		mLineMaterial = new Rendering::Data::Material(Rendering::Resources::Loaders::ShaderLoader::Create(shaderPath + "/GizmoLine.mat"));
+		mPointMaterial = new Rendering::Data::Material(Rendering::Resources::Loaders::ShaderLoader::Create(shaderPath + "/GizmoPoint.mat"));
+		mTriangleMaterial = new Rendering::Data::Material(Rendering::Resources::Loaders::ShaderLoader::Create(shaderPath + "/GizmoTriangle.mat"));
+		mCellMaterial = new Rendering::Data::Material(Core::Global::ServiceLocator::Get<Editor::Core::Context>().shaderManager[":Shaders\\GizmoCell.mat"]);
 		mCellMaterial->AddFeature("WITH_EDGE");
 		mCellMaterial->AddFeature("CUSTOM_PROJECT");
 		mCellMaterial->AddFeature("CUSTOM_VIEWPORT");
-		mLitMaterial = new Rendering::Data::Material(Core::Global::ServiceLocator::Get<Editor::Core::Context>().shaderManager[":Shaders\\Standard.ovfx"]);
+		mLitMaterial = new Rendering::Data::Material(Core::Global::ServiceLocator::Get<Editor::Core::Context>().shaderManager[":Shaders\\Standard.mat"]);
 		mLitMaterial->SetBackfaceCulling(false);;
 		mLitMaterial->SetCastShadows(false);
 		mLitMaterial->SetReceiveShadows(false);

@@ -18,7 +18,7 @@ fragment {
     // Kept from the old fragment stage: nothing here uses it yet, but the material has always
     // been compiled with the PBR helpers in scope, and MoonMatc now expands the include (the
     // two headers the prelude already carries are dropped for us).
-    #include ":Shaders/Lighting/PBR.ovfxh"
+    #include ":Shaders/Lighting/PBR.glsl"
 
     void material(inout MaterialInputs m) {
         m.baseColor = vec4(1, 1, 1, 1);

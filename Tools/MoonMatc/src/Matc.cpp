@@ -1,6 +1,6 @@
 // MoonMatc - the offline half of the shader pipeline, the counterpart of Filament's matc.
 //
-// One .ovfx in, one .ovshader package out. The package holds what the runtime used to work
+// One .mat in, one .ovshader package out. The package holds what the runtime used to work
 // out on every launch: the final GLSL of every (pass, variant, stage), the reflection of the
 // material's parameters, and the variant list. A file that has not been migrated yet (no
 // material { } block) is copied through untouched, so the pipeline can take the shaders one
@@ -245,7 +245,7 @@ namespace
 	};
 
 	/** The 1-based line a fragment of the source starts on: the #line directives handed to
-	 * the driver point back here, so an error names the .ovfx line the user wrote. */
+	 * the driver point back here, so an error names the .mat line the user wrote. */
 	uint32_t LineOf(const std::string& p_text, const std::string& p_fragment)
 	{
 		const size_t at = p_text.find(p_fragment);
@@ -491,8 +491,8 @@ namespace
 	 * would declare the same UBO or helper twice. */
 	bool IsPreludeHeader(const std::string& p_relative)
 	{
-		return p_relative == "Common/Buffers/EngineUBO.ovfxh"
-			|| p_relative == "Common/Utils.ovfxh";
+		return p_relative == "Common/Buffers/EngineUBO.glsl"
+			|| p_relative == "Common/Utils.glsl";
 	}
 
 	struct ResolvedInclude
@@ -542,8 +542,8 @@ namespace
 	 * included file opens with its own "#line 1", and the line after it goes back to the file
 	 * (and the line) the #include was written on.
 	 *
-	 * Each file is expanded once per stage - the headers have no include guards, and PBR.ovfxh
-	 * reaches Utils.ovfxh a second time - and the two the prelude already carries are dropped
+	 * Each file is expanded once per stage - the headers have no include guards, and PBR.glsl
+	 * reaches Utils.glsl a second time - and the two the prelude already carries are dropped
 	 * instead of duplicated. */
 	bool ExpandIncludes(
 		const std::string& p_text,
@@ -874,7 +874,7 @@ namespace
 	}
 
 	/** The vertex main: the transform the entry point is not allowed to touch. Copied from
-	 * what Unlit/Standard.ovfx do by hand today, and from filament's post_process_main.vs for
+	 * what Unlit/Standard.mat do by hand today, and from filament's post_process_main.vs for
 	 * the full-screen case.
 	 *
 	 * Only generated for a stage that does not own its main() - see BuildStage. */
@@ -1112,7 +1112,7 @@ namespace
 	}
 
 	/** The `#define`s one variant is compiled with: the stage, then the pass, then the
-	 * features. The stage one is what lets Common/Utils.ovfxh keep its derivative helper out
+	 * features. The stage one is what lets Common/Utils.glsl keep its derivative helper out
 	 * of the stages that cannot call it (see ComputeTBN there). */
 	std::string VariantDefines(const PassVariant& p_variant, Stage p_stage)
 	{
@@ -1141,7 +1141,7 @@ namespace
 
 	/** One complete stage source: version, defines, prelude, the entry point, main.
 	 *
-	 * The #line directives point back into the .ovfx the user wrote, so a compile error names
+	 * The #line directives point back into the .mat the user wrote, so a compile error names
 	 * the file and the line it came from rather than a line of this concatenation - the same
 	 * job filament's Includes.cpp does for #include.
 	 *
@@ -1306,7 +1306,7 @@ CompileResult CompileSource(const std::string& p_sourceText, const CompileOption
 	// Prelude: the buffer and utility headers the engine already has, then the generated
 	// MaterialInputs. Everything the shader used to #include by hand.
 	std::string commonPrelude;
-	for (const std::string& relative : { "Common/Buffers/EngineUBO.ovfxh", "Common/Utils.ovfxh" })
+	for (const std::string& relative : { "Common/Buffers/EngineUBO.glsl", "Common/Utils.glsl" })
 	{
 		for (const std::string& dir : includeDirs)
 		{

@@ -360,7 +360,7 @@ void Rendering::Data::Material::UploadProperties(bool uploadStableProperties, bo
 		UploadParameterBlock(uploadStableProperties, uploadSingleUseProperties, p_emptyTexture2D, p_emptyTextureCube);
 	}
 
-	// Properties the shader does not declare (an include's own uniforms, like PBR.ovfxh's
+	// Properties the shader does not declare (an include's own uniforms, like PBR.glsl's
 	// u_ReceiveShadows) are not in the block: they still go through the per-name path below,
 	// while the declared ones were written by UploadParameterBlock.
 	const auto isDeclaredParameter = [this](const std::string& p_name) {

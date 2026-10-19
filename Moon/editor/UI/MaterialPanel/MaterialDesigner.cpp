@@ -634,7 +634,7 @@ namespace MOON
 			QComboBox* m_combo = nullptr;
 		};
 
-		/** ":Shaders\\Standard.ovfx" for "Standard.ovfx", the key the shader manager is keyed by. */
+		/** ":Shaders\\Standard.mat" for "Standard.mat", the key the shader manager is keyed by. */
 		std::string ToShaderKey(const std::string& p_relative)
 		{
 			std::string key = ":Shaders\\";
@@ -1324,7 +1324,7 @@ namespace MOON
 		std::error_code error;
 		for (const auto& entry : std::filesystem::recursive_directory_iterator(m_shadersRoot, error))
 		{
-			if (!entry.is_regular_file() || entry.path().extension() != ".ovfx")
+			if (!entry.is_regular_file() || entry.path().extension() != ".mat")
 			{
 				continue;
 			}

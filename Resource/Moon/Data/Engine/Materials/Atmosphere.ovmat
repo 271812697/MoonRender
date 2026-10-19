@@ -1,5 +1,5 @@
 <root>
-    <shader>:Shaders\Atmosphere.ovfx</shader>
+    <shader>:Shaders\Atmosphere.mat</shader>
     <settings>
         <support_orthographic>false</support_orthographic>
         <support_perspective>true</support_perspective>

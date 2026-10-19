@@ -10,7 +10,7 @@
 #include "Interactive/ViewData.h"
 #include <cmath>
 namespace MOON {
-		// Same FIXED_SCALE ratio as GizmoCell.ovfx (see ClipPlane.cpp for the full
+		// Same FIXED_SCALE ratio as GizmoCell.mat (see ClipPlane.cpp for the full
 	// derivation): the widget is scaled by ratio / refRatio so it keeps a
 	// constant screen size as the camera moves. The reference ratio is captured
 	// on the first frame, locking the gizmo to the size it had when it appeared.

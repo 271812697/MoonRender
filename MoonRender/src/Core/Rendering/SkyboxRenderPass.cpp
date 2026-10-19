@@ -30,14 +30,14 @@ namespace
 Core::Rendering::SkyboxRenderPass::SkyboxRenderPass(::Rendering::Core::CompositeRenderer& p_renderer) :
 	::Rendering::Core::ARenderPass(p_renderer)
 {
-	m_skyboxMaterial.SetShader(GetShaderService[":Shaders\\SkyboxConvert.ovfx"]);
+	m_skyboxMaterial.SetShader(GetShaderService[":Shaders\\SkyboxConvert.mat"]);
 	m_skyboxMaterial.SetBackfaceCulling(false);
-	m_skyboxIrrandianceMaterial.SetShader(GetShaderService[":Shaders\\SkyboxIrrandiance.ovfx"]);
+	m_skyboxIrrandianceMaterial.SetShader(GetShaderService[":Shaders\\SkyboxIrrandiance.mat"]);
 	m_skyboxIrrandianceMaterial.SetBackfaceCulling(false);
-	m_skyboxPrefilterMaterial.SetShader(GetShaderService[":Shaders\\SkyboxPrefilter.ovfx"]);
+	m_skyboxPrefilterMaterial.SetShader(GetShaderService[":Shaders\\SkyboxPrefilter.mat"]);
 	m_skyboxPrefilterMaterial.SetBackfaceCulling(false);
-	m_brdfMaterial.SetShader(GetShaderService[":Shaders\\BrdfLut.ovfx"]);
-	m_clearMaterial.SetShader(GetShaderService[":Shaders\\ClearBackground.ovfx"]);
+	m_brdfMaterial.SetShader(GetShaderService[":Shaders\\BrdfLut.mat"]);
+	m_clearMaterial.SetShader(GetShaderService[":Shaders\\ClearBackground.mat"]);
 }
 
 ::Rendering::HAL::Texture* Core::Rendering::SkyboxRenderPass::GetSkyBoxCube()

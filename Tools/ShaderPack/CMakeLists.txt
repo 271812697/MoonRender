@@ -23,11 +23,11 @@ set_target_properties(${TARGET_NAME} PROPERTIES CXX_STANDARD 20)
 #
 # Two steps, the same split filament uses (matc, then resgen):
 #
-#   1. MoonMatc, once per .ovfx: parse the material file, resolve the prelude, validate and
+#   1. MoonMatc, once per .mat: parse the material file, resolve the prelude, validate and
 #      emit one .ovshader package per shader (every variant, every stage, plus reflection).
-#      A .ovfx that has not been migrated yet (no material { } block) is copied through as
+#      A .mat that has not been migrated yet (no material { } block) is copied through as
 #      it is, so the shaders can move over one at a time.
-#   2. ShaderPack, once: concatenate every package - and the .ovfxh the not-yet-migrated
+#   2. ShaderPack, once: concatenate every package - and the .glsl the not-yet-migrated
 #      shaders still #include at run time - into one blob compiled into the MoonShader
 #      library, which MoonRender links.
 #
@@ -39,9 +39,9 @@ set(SHADER_MATC_DIR "${SHADER_OUTPUT_DIR}/matc")
 file(MAKE_DIRECTORY "${SHADER_OUTPUT_DIR}")
 
 file(GLOB_RECURSE SHADER_SOURCES CONFIGURE_DEPENDS RELATIVE "${SHADER_SOURCE_DIR}"
-     "${SHADER_SOURCE_DIR}/*.ovfx")
+     "${SHADER_SOURCE_DIR}/*.mat")
 file(GLOB_RECURSE SHADER_HEADERS CONFIGURE_DEPENDS RELATIVE "${SHADER_SOURCE_DIR}"
-     "${SHADER_SOURCE_DIR}/*.ovfxh")
+     "${SHADER_SOURCE_DIR}/*.glsl")
 
 set(SHADER_HEADER_PATHS)
 foreach(header ${SHADER_HEADERS})
@@ -120,7 +120,7 @@ set_target_properties(MoonShader PROPERTIES CXX_STANDARD 20)
 
 # The shader sources in the IDE.
 #
-# What this target builds is a generated shader.cpp, so without this the .ovfx/.ovfxh tree -
+# What this target builds is a generated shader.cpp, so without this the .mat/.glsl tree -
 # the thing that actually gets edited - is invisible in the solution: VS only shows what a
 # target lists. They are attached header-only, so no compiler ever looks at them; they are
 # there to be opened, and to be visible as the inputs the custom commands above rebuild from.

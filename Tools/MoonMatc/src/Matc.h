@@ -12,7 +12,7 @@ namespace Moon::Matc
 {
 	struct CompileOptions
 	{
-		/** The name that goes into `#line` directives and messages, e.g. "Grid.ovfx". */
+		/** The name that goes into `#line` directives and messages, e.g. "Grid.mat". */
 		std::string displayName;
 		/** Where to write the package. Empty keeps it only in CompileResult::package. */
 		std::string outputPath;

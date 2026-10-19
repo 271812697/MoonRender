@@ -187,7 +187,7 @@ namespace
 
 		for (const auto& stageInput : p_stages)
 		{
-			if (stageInput.type == Rendering::Settings::EShaderType::GEOMERTY) {
+			if (stageInput.type == Rendering::Settings::EShaderType::GEOMETRY) {
 				int i = 0;
 				bool startWithIf = false;
 				std::string define = "";
@@ -463,7 +463,7 @@ void main()
 					const auto included = LoadShader(p_shaderInputInfo, realIncludeFilePath, p_pathParser);
 					// The included lines keep the file and line they were written on: the
 					// parser turns that into #line directives, so an error inside the
-					// .ovfxh names the .ovfxh instead of the concatenation it ended up in.
+					// .glsl names the .glsl instead of the concatenation it ended up in.
 					buffer << included.source;
 					origins.insert(origins.end(), included.origins.begin(), included.origins.end());
 				}
@@ -606,7 +606,7 @@ void main()
 				versionPending = true;
 			}
 			else if (trimmedLine.starts_with(Grammar::kGeomertyShaderToken)) {
-				currentType = EShaderType::GEOMERTY;
+				currentType = EShaderType::GEOMETRY;
 				anchorPending = true;
 				versionPending = true;
 			}
@@ -643,7 +643,7 @@ void main()
 			.inputInfo = p_shaderLoadResult.inputInfo,
 			.vertexShader = shaderSources[EShaderType::VERTEX].str(),
 			.fragmentShader = shaderSources[EShaderType::FRAGMENT].str(),
-			.geomertyShader = shaderSources[EShaderType::GEOMERTY].str(),
+			.geomertyShader = shaderSources[EShaderType::GEOMETRY].str(),
 			.passes = passes,
 			.features = features,
 			.sourceFiles = std::move(sourceFiles)
@@ -668,7 +668,7 @@ void main()
 			  { p_parseResult.fragmentShader, Rendering::Settings::EShaderType::FRAGMENT }
 			});
 		if (p_parseResult.geomertyShader != "") {
-			stages.push_back({ p_parseResult.geomertyShader, Rendering::Settings::EShaderType::GEOMERTY });
+			stages.push_back({ p_parseResult.geomertyShader, Rendering::Settings::EShaderType::GEOMETRY });
 		}
 		// We create as many additional shader programs (variants) as there are passes
 		for (const auto& pass : p_parseResult.passes)
@@ -900,7 +900,7 @@ void main()
 	 *
 	 * p_error, when given, collects what the driver said. The editor's hot reload needs that
 	 * text: a material being edited is compiled into a package and loaded here, and the failure
-	 * has to be shown - with the .ovfx line the #line directives point at. */
+	 * has to be shown - with the .mat line the #line directives point at. */
 	Rendering::Resources::Shader::Variants AssembleFromPackage(
 		const Rendering::Resources::ShaderPackage& p_package,
 		std::string* p_error = nullptr)
@@ -934,7 +934,7 @@ void main()
 			static constexpr StageSpec kStages[] = {
 				{ Rendering::Resources::ShaderPackage::Stage::Vertex,   EShaderType::VERTEX,   "vertex",   false },
 				{ Rendering::Resources::ShaderPackage::Stage::Fragment, EShaderType::FRAGMENT, "fragment", false },
-				{ Rendering::Resources::ShaderPackage::Stage::Geometry, EShaderType::GEOMERTY, "geometry", true },
+				{ Rendering::Resources::ShaderPackage::Stage::Geometry, EShaderType::GEOMETRY, "geometry", true },
 			};
 
 			for (const StageSpec& spec : kStages)

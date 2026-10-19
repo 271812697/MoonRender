@@ -11,7 +11,7 @@ static ::Rendering::Resources::Model* sphere = nullptr;
 Editor::Rendering::PointRenderPass::PointRenderPass(::Rendering::Core::CompositeRenderer& p_renderer)
 	: ::Rendering::Core::ARenderPass(p_renderer)
 {
-	m_PointMaterial.SetShader(::Core::Global::ServiceLocator::Get<Editor::Core::Context>().shaderManager[":Shaders\\Point.ovfx"]);
+	m_PointMaterial.SetShader(::Core::Global::ServiceLocator::Get<Editor::Core::Context>().shaderManager[":Shaders\\Point.mat"]);
 	m_PointMaterial.SetDepthTest(true);
 	sphere= ::Core::Global::ServiceLocator::Get<Editor::Core::Context>().modelManager[":Models/Sphere.fbx"];
 
@@ -47,7 +47,7 @@ void Editor::Rendering::PointRenderPass::Draw(::Rendering::Data::PipelineState p
 			glEnableVertexAttribArray(5);
 			glVertexAttribPointer(
 				5, 3, GL_FLOAT, GL_FALSE, selectMesh->GetVertexStride(), (void*)0);
-			glVertexAttribDivisor(5, 1);  // 每个实例更新一次
+			glVertexAttribDivisor(5, 1);  // ????????
 			sphereVao.Unbind();
 			instanceVBO.Unbind();
 			m_PointMaterial.SetGPUInstances(selectMesh->GetVertexCount());

@@ -18,8 +18,8 @@ namespace
 	/** The key the archive holds a source under: lower case, '/'-separated, and relative to
 	 * the shader folder.
 	 *
-	 * That makes a resource key (":Shaders\\Common\\Utils.ovfxh"), a path under the engine
-	 * assets ("D:/.../Engine/Shaders/Common/Utils.ovfxh") and a bare name ("utils.ovfxh")
+	 * That makes a resource key (":Shaders\\Common\\Utils.glsl"), a path under the engine
+	 * assets ("D:/.../Engine/Shaders/Common/Utils.glsl") and a bare name ("utils.glsl")
 	 * all resolve to the same entry, which is what the call sites need: they disagree on
 	 * separators, on case, and on how much of the path they build. */
 	std::string ArchiveKey(std::string p_name)

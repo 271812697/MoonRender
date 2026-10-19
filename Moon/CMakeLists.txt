@@ -84,7 +84,7 @@ file(GLOB_RECURSE RESOURCE_FILES "${ResDIR}/*")
 #   - PathTraceRenderPass reads the PathTrace files itself and injects its option #defines
 #     before compiling them (the permanent exception in docs/ShaderPipeline.md section 8), and
 #   - the material editor edits this folder: it is the working copy it lists, reads, and
-#     recompiles in process, .ovfxh headers included.
+#     recompiles in process, .glsl headers included.
 
 if(RESOURCE_FILES)  
     foreach(FILE ${RESOURCE_FILES})

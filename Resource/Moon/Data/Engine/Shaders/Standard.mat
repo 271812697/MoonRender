@@ -1,4 +1,4 @@
-// Standard: the shaded surface material - PBR from Lighting/PBR.ovfxh, with the two metalness
+// Standard: the shaded surface material - PBR from Lighting/PBR.glsl, with the two metalness
 // workflows, parallax and normal mapping, distance fade and the edge expansion on top.
 //
 // Written in the material form MoonMatc consumes (see docs/ShaderPipeline.md). All three stages
@@ -315,7 +315,7 @@ fragment {
     #define DISABLE_IMAGE_BASED_LIGHTING
 #endif
 
-    #include ":Shaders/Lighting/PBR.ovfxh"
+    #include ":Shaders/Lighting/PBR.glsl"
 
     // The geometry stage hands the edge equations on with the surface varyings; without the
     // edge expansion the vertex stage writes the plain VS_OUT block.

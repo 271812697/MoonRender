@@ -13,7 +13,7 @@ constexpr uint8_t kMaxShadowMaps = 1;
 Core::Rendering::ShadowRenderPass::ShadowRenderPass(::Rendering::Core::CompositeRenderer& p_renderer) :
 	::Rendering::Core::ARenderPass(p_renderer)
 {
-	const auto shadowShader = GetService(Core::ResourceManagement::ShaderManager).GetResource(":Shaders\\ShadowFallback.ovfx");
+	const auto shadowShader = GetService(Core::ResourceManagement::ShaderManager).GetResource(":Shaders\\ShadowFallback.mat");
 	assert(shadowShader&& "Cannot find the shadow shader");
 
 	m_shadowMaterial.SetShader(shadowShader);

@@ -132,7 +132,7 @@ void MOON::MaterialPreviewWidget::RefreshShader()
 		return;
 	}
 
-	// The shader belongs to the resource manager, keyed by the .ovfx path - the same instance the
+	// The shader belongs to the resource manager, keyed by the .mat path - the same instance the
 	// scene's materials point at when the file is in use. A hot reload replaces its programs in
 	// place (ShaderLoader::RecompileFromPackage), so the preview and the viewport switch together
 	// and nothing is created twice.

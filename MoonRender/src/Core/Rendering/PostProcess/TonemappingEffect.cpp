@@ -5,7 +5,7 @@
 
 Core::Rendering::PostProcess::TonemappingEffect::TonemappingEffect(::Rendering::Core::CompositeRenderer& p_renderer) : AEffect(p_renderer)
 {
-	m_tonemappingMaterial.SetShader(GetService(Core::ResourceManagement::ShaderManager)[":Shaders\\PostProcess\\Tonemapping.ovfx"]);
+	m_tonemappingMaterial.SetShader(GetService(Core::ResourceManagement::ShaderManager)[":Shaders\\PostProcess\\Tonemapping.mat"]);
 }
 
 void Core::Rendering::PostProcess::TonemappingEffect::Draw(

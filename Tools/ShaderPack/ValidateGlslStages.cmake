@@ -2,7 +2,7 @@
 #
 # Run in script mode, from the MoonMatc custom command (see CMakeLists.txt in this directory):
 #
-#   cmake -DGLSLANG=<glslangValidator> -DSTAGE_DIR=<dir> -DSHADER=<name.ovfx> -P ValidateGlslStages.cmake
+#   cmake -DGLSLANG=<glslangValidator> -DSTAGE_DIR=<dir> -DSHADER=<name.mat> -P ValidateGlslStages.cmake
 #
 # This is the build-time half that filament's matc gets for free by linking glslang: a shader
 # that does not compile stops the build instead of failing at run time when the material is
@@ -11,7 +11,7 @@
 #
 # The dumped stage names end in _vertex / _fragment / _geometry, and the file's own #line
 # directives (plus the GL_GOOGLE_cpp_style_line_directive extension MoonMatc emits) make any
-# error point back at the .ovfx / .ovfxh line that caused it.
+# error point back at the .mat / .glsl line that caused it.
 
 if(NOT GLSLANG OR NOT STAGE_DIR)
   message(FATAL_ERROR "ValidateGlslStages.cmake: GLSLANG and STAGE_DIR are required")
@@ -68,5 +68,5 @@ endforeach()
 if(failed GREATER 0)
   message(FATAL_ERROR
     "${SHADER}: ${failed} stage(s) do not compile (glslangValidator). "
-    "The dump is under ${STAGE_DIR} - the numbers in the messages are .ovfx / .ovfxh lines.")
+    "The dump is under ${STAGE_DIR} - the numbers in the messages are .mat / .glsl lines.")
 endif()

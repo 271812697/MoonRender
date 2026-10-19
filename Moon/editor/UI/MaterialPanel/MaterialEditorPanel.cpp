@@ -46,7 +46,7 @@ namespace
 	const QColor kLogError(0xe0, 0x6c, 0x75);
 	const QColor kStatusIdle(0x6f, 0x75, 0x7e);
 
-	/** ":Shaders\\PostProcess\\Blur.ovfx" for "PostProcess/Blur.ovfx", which is what the archive
+	/** ":Shaders\\PostProcess\\Blur.mat" for "PostProcess/Blur.mat", which is what the archive
 	 * and the shader manager are keyed by. */
 	std::string ToShaderKey(const std::string& p_relative)
 	{
@@ -544,7 +544,7 @@ public:
 		std::error_code error;
 		for (const auto& entry : std::filesystem::recursive_directory_iterator(m_shaderRoot, error))
 		{
-			if (!entry.is_regular_file() || entry.path().extension() != ".ovfx")
+			if (!entry.is_regular_file() || entry.path().extension() != ".mat")
 			{
 				continue;
 			}

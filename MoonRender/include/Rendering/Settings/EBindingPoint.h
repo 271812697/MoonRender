@@ -6,12 +6,12 @@ namespace Rendering::Settings
 	/** GL binding points of the engine's uniform blocks - filament's descriptor sets, flattened
 	 * into GL's single binding-point namespace.
 	 *
-	 *  - 0 per view (EngineUBO.ovfxh: camera and frame data, written once per view)
+	 *  - 0 per view (EngineUBO.glsl: camera and frame data, written once per view)
 	 *  - 1 per view (the reflection probe's own block)
 	 *  - 2 per material (the parameter block MoonMatc generates, one range per material)
-	 *  - 3 per renderable (ObjectUBO.ovfxh: model and user matrices, written before each draw)
+	 *  - 3 per renderable (ObjectUBO.glsl: model and user matrices, written before each draw)
 	 *
-	 * The .ovfxh headers and the C++ writers both use these numbers, and ShaderLoader checks the
+	 * The .glsl headers and the C++ writers both use these numbers, and ShaderLoader checks the
 	 * driver's actual block bindings against them when it links a program (see
 	 * ValidateParameterBlock), so a drift shows up as one log line at load instead of a wrong
 	 * image.

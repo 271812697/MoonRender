@@ -90,7 +90,7 @@ namespace MOON {
 				faceMat->SetPolygonOffsetFill(true);
 				//tempMat->SetBlendable(true);
 				//tempMat->SetDepthWriting(false);
-				faceMat->SetShader(GetShaderService[":Shaders\\GeomertySurface.ovfx"]);
+				faceMat->SetShader(GetShaderService[":Shaders\\GeomertySurface.mat"]);
 				faceMat->SetProperty("u_Albedo",Maths::FVector4(1,1,1,1));
 				faceMat->SetProperty("u_AlphaClippingThreshold", 0.0f);
 				faceMat->SetProperty("u_Roughness", 0.25f);
@@ -106,7 +106,7 @@ namespace MOON {
 				faceTransparentMat->SetReceiveShadows(false);
 				//tempMat->SetBlendable(true);
 				//tempMat->SetDepthWriting(false);
-				faceTransparentMat->SetShader(GetShaderService[":Shaders\\GeomertySurface.ovfx"]);
+				faceTransparentMat->SetShader(GetShaderService[":Shaders\\GeomertySurface.mat"]);
 				faceTransparentMat->SetProperty("u_Albedo", Maths::FVector4(1, 0, 0, 0.5));
 				faceTransparentMat->SetProperty("u_AlphaClippingThreshold", 0.0f);
 				faceTransparentMat->SetProperty("u_Roughness", 0.25f);
@@ -122,7 +122,7 @@ namespace MOON {
 				faceTransparentMat->SetDepthWriting(true);
 			}
 			{
-				lineMat->SetShader(Core::Global::ServiceLocator::Get<Editor::Core::Context>().shaderManager[":Shaders\\GeomertyLine.ovfx"]);
+				lineMat->SetShader(Core::Global::ServiceLocator::Get<Editor::Core::Context>().shaderManager[":Shaders\\GeomertyLine.mat"]);
 				lineMat->SetBackfaceCulling(false);
 				lineMat->SetCastShadows(false);
 				lineMat->SetReceiveShadows(false);
@@ -138,7 +138,7 @@ namespace MOON {
 				// on the corner it belongs to instead of z-fighting with the faces
 				// that meet there. Both the colour and the size are material
 				// properties: they are what the material panel of this actor edits.
-				vertexMat->SetShader(Core::Global::ServiceLocator::Get<Editor::Core::Context>().shaderManager[":Shaders\\GeomertyPoint.ovfx"]);
+				vertexMat->SetShader(Core::Global::ServiceLocator::Get<Editor::Core::Context>().shaderManager[":Shaders\\GeomertyPoint.mat"]);
 				vertexMat->SetBackfaceCulling(false);
 				vertexMat->SetCastShadows(false);
 				vertexMat->SetReceiveShadows(false);

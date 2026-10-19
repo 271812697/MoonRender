@@ -15,7 +15,7 @@ namespace MOON
 	 * Qt's plain text edit plus what a source file needs, in the shape Inviwo's code editor has
 	 * it: a line-number gutter that scrolls with the text, the current line marked, Tab indenting
 	 * (Shift+Tab unindenting) four spaces instead of moving the focus, no wrapping, and a Monokai
-	 * palette for the .ovfx material DSL and the GLSL inside it.
+	 * palette for the .mat material DSL and the GLSL inside it.
 	 *
 	 * The colours are the editor's own and not the application's: source reads best on the
 	 * darker, slightly warm background Inviwo uses for code, whatever the panels around it look

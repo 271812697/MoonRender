@@ -177,7 +177,7 @@ geometry {
 }
 
 fragment {
-    #include ":Shaders/Lighting/PBR.ovfxh"
+    #include ":Shaders/Lighting/PBR.glsl"
 
 #if defined(WITH_EDGE)
     in GS_OUT{

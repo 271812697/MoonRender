@@ -35,7 +35,7 @@ material {
 }
 
 vertex {
-#include ":Shaders/Common/Buffers/LightsSSBO.ovfxh"
+#include ":Shaders/Common/Buffers/LightsSSBO.glsl"
 
 layout (location = 0) in vec3 geo_Pos;
 

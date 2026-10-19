@@ -1,8 +1,8 @@
-#include ":Shaders/Common/Buffers/LightsSSBO.ovfxh"
-#include ":Shaders/Common/Constants.ovfxh"
-#include ":Shaders/Common/Utils.ovfxh"
-#include ":Shaders/Lighting/Light.ovfxh"
-#include ":Shaders/Lighting/IBL.ovfxh"
+#include ":Shaders/Common/Buffers/LightsSSBO.glsl"
+#include ":Shaders/Common/Constants.glsl"
+#include ":Shaders/Common/Utils.glsl"
+#include ":Shaders/Lighting/Light.glsl"
+#include ":Shaders/Lighting/IBL.glsl"
 
 // Whether this material takes part in shadowing. The engine only hands a shadow map
 // to a material that receives shadows; one that never gets a map would otherwise read

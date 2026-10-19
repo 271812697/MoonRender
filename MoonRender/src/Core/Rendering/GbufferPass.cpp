@@ -24,11 +24,11 @@ static float ourLerp(float a, float b, float f)
 Core::Rendering::GbufferPass::GbufferPass(::Rendering::Core::CompositeRenderer& p_renderer) :
 	::Rendering::Core::ARenderPass(p_renderer)
 {
-	gbufferMaterial.SetShader(GetShaderService[":Shaders\\gbuffer.ovfx"]);
+	gbufferMaterial.SetShader(GetShaderService[":Shaders\\gbuffer.mat"]);
 	gbufferMaterial.SetBackfaceCulling(false);
-	ssaoMaterial.SetShader(GetShaderService[":Shaders\\ssao.ovfx"]);
+	ssaoMaterial.SetShader(GetShaderService[":Shaders\\ssao.mat"]);
 	ssaoMaterial.SetBackfaceCulling(false);
-	ssaoblurMaterial.SetShader(GetShaderService[":Shaders\\ssaoblur.ovfx"]);
+	ssaoblurMaterial.SetShader(GetShaderService[":Shaders\\ssaoblur.mat"]);
 	//ssaoblurMaterial.AddFeature("k15x15");
 
 	{

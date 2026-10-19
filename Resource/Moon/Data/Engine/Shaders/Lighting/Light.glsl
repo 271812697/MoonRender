@@ -1,5 +1,5 @@
-#include ":Shaders/Common/Physics.ovfxh"
-#include ":Shaders/Lighting/Shadow.ovfxh"
+#include ":Shaders/Common/Physics.glsl"
+#include ":Shaders/Lighting/Shadow.glsl"
 
 struct Light
 {
