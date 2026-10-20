@@ -59,6 +59,10 @@ namespace Editor::Panels
 		 * around the sphere in the camera's frame, so orbiting never walks the sphere into the
 		 * dark. */
 		void Update(float p_deltaTime) override;
+		/** Moves the camera back to the preview's default 3/4 pose. */
+		void ResetCameraTransform() override;
+		/** True while the reset/light-rig animation is still moving the camera. */
+		bool IsCameraMoving() const;
 
 	private:
 		/** Builds the mesh the preview shows: radius/edge one at the origin, unit normals, a 0..1

@@ -147,34 +147,49 @@ void Core::Rendering::SkyboxRenderPass::computeIrradianceSH()
 			break;
 		}
 	}
-	if (resolved.empty()) { return; }
+	if (resolved.empty()) { std::cout << "[Skybox] cannot resolve " << mPath << " for SH" << std::endl; return; }
 
 	int width = 0;
 	int height = 0;
 	int channels = 0;
+	// The sky texture reaches the GPU through TextureLoader, which leaves stb's global vertical
+	// flip enabled: the uploaded texture's first row is the bottom of the equirect. Read the
+	// projection from the same rows, or the SH lights the scene from an upside-down sky.
+	stbi_set_flip_vertically_on_load(true);
 	float* pixels = stbi_loadf(resolved.c_str(), &width, &height, &channels, 4);
-	if (pixels == nullptr || width <= 0 || height <= 0) { return; }
+	if (pixels == nullptr || width <= 0 || height <= 0) { std::cout << "[Skybox] cannot load " << resolved << " for SH" << std::endl; return; }
 
 	// Orthonormal SH9 basis, the same order EvaluateIrradianceSH uses.
 	constexpr float kPi = 3.14159265358979323846f;
-	Maths::FVector3 sh[9]{};
-	const float dPhi = 2.0f * kPi / width;
-	const float dTheta = kPi / height;
+	// FVector3 has a user-provided default constructor, so `{}` does not zero it here:
+	// the coefficients must start at exactly zero.
+	Maths::FVector3 sh[9];
+	for (int i = 0; i < 9; ++i) { sh[i] = Maths::FVector3{ 0.0f, 0.0f, 0.0f }; }
 	for (int y = 0; y < height; ++y)
 	{
-		const float theta = (0.5f - (y + 0.5f) / height) * kPi;
-		const float sinTheta = std::sin(theta);
-		const float cosTheta = std::cos(theta);
+		// Row 0 is the bottom of the equirect (stb's flip; see above), so latitude runs from
+		// -PI/2 at row 0 to +PI/2 at the last row. Azimuth is Filament's toEquirect() mapping,
+		// u = 0.5 + atan2(x, z) / 2PI.
+		const float yf = 2.0f * ((y + 0.5f) / height) - 1.0f;
+		const float lat = yf * 0.5f * kPi;
+		const float sinLat = std::sin(lat);
+		const float cosLat = std::cos(lat);
 		for (int x = 0; x < width; ++x)
 		{
-			const float phi = ((x + 0.5f) / width - 0.5f) * 2.0f * kPi;
-			const float px = cosTheta * std::cos(phi);
-			const float py = sinTheta;
-			const float pz = cosTheta * std::sin(phi);
+			const float xf = 2.0f * ((x + 0.5f) / width) - 1.0f;
+			const float phi = xf * kPi;
+			// Filament's IBL cube is mirrored on X (see SkyboxConvert.mat): the texel whose
+			// equirect direction is (px, py, pz) is stored at (-px, py, pz). Project that
+			// direction, so the SH describes the same environment the specular cube holds.
+			const float px = -cosLat * std::sin(phi);
+			const float py = sinLat;
+			const float pz = cosLat * std::cos(phi);
 
 			const float* texel = pixels + (y * width + x) * 4;
-			const Maths::FVector3 radiance{ texel[0], texel[1], texel[2] };
-			const float dOmega = sinTheta * dTheta * dPhi;
+			// An environment cannot have negative radiance; a decoded HDR that does is treated
+			// as black there instead of letting it cancel the positive samples.
+			const Maths::FVector3 radiance{ std::max(texel[0], 0.0f), std::max(texel[1], 0.0f), std::max(texel[2], 0.0f) };
+			const float dOmega = cosLat * (kPi / height) * (2.0f * kPi / width);
 
 			const float basis[9] = {
 				0.282095f,
@@ -189,12 +204,14 @@ void Core::Rendering::SkyboxRenderPass::computeIrradianceSH()
 			}
 		}
 	}
+
 	stbi_image_free(pixels);
 
-	// Cosine-convolved irradiance divided by PI: band scales 1, 2/3, 1/4.
+	// Cosine-convolved irradiance E (the same convention as SkyboxIrrandiance.mat and
+	// therefore the existing IBL brightness): band scales PI, 2PI/3, PI/4.
 	for (int i = 0; i < 9; ++i)
 	{
-		sh[i] *= (i == 0) ? 1.0f : (i < 4 ? 2.0f / 3.0f : 0.25f);
+		sh[i] *= (i == 0) ? kPi : (i < 4 ? (2.0f * kPi / 3.0f) : (kPi / 4.0f));
 	}
 
 	if (!m_irradianceSHBuffer)
@@ -420,6 +437,11 @@ void Core::Rendering::SkyboxRenderPass::computeSkyTexture()
 				auto stateMask = m_skyboxIrrandianceMaterial.GenerateStateMask();
 				skyboxDrawable.stateMask = stateMask;
 				skyboxDrawable.material.value().SetProperty("SkyboxCube", skyBoxCube.get());
+				skyboxDrawable.material.value().SetProperty("u_CaptureAxis", static_cast<int>(faceIndex / 2));
+				skyboxDrawable.material.value().SetProperty("u_CaptureSide", (faceIndex % 2 == 0) ? 1.0f : -1.0f);
+				skyboxDrawable.material.value().SetProperty("u_CaptureViewport",
+					Maths::FVector2{ static_cast<float>(irradianceCube->GetDesc().width),
+						static_cast<float>(irradianceCube->GetDesc().height) });
 				m_renderer.DrawEntity(p_pso, skyboxDrawable);
 			}
 			irradianceBuffer.Unbind();
@@ -485,6 +507,18 @@ void Core::Rendering::SkyboxRenderPass::computeSkyTexture()
 					skyboxDrawable.stateMask = stateMask;
 					skyboxDrawable.material.value().SetProperty("SkyboxCube", skyBoxCube.get());
 					skyboxDrawable.material.value().SetProperty("roughness", roughness);
+					// Filament's per-level lodOffset: 1.0 (2.0 on the last level) minus the
+					// solid angle of an output texel, so the sample LOD lands in output-texel
+					// units rather than sample-density units.
+					constexpr float kPi = 3.14159265358979323846f;
+					const float omegaP = 4.0f * kPi / (6.0f * float(mipWidth) * float(mipWidth));
+					const float lodOffset =
+						((mip == maxMipLevels - 1) ? 2.0f : 1.0f) - 0.5f * std::log2(omegaP);
+					skyboxDrawable.material.value().SetProperty("lodOffset", lodOffset);
+					skyboxDrawable.material.value().SetProperty("u_CaptureAxis", static_cast<int>(faceIndex / 2));
+					skyboxDrawable.material.value().SetProperty("u_CaptureSide", (faceIndex % 2 == 0) ? 1.0f : -1.0f);
+					skyboxDrawable.material.value().SetProperty("u_CaptureViewport",
+						Maths::FVector2{ static_cast<float>(mipWidth), static_cast<float>(mipHeight) });
 					m_renderer.DrawEntity(p_pso, skyboxDrawable);
 				}
 			}

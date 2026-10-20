@@ -5,7 +5,9 @@
 float D_GGX(float roughness, float NoH)
 {
     const float a = NoH * roughness;
-    const float k = roughness / (1.0 - NoH * NoH + a * a);
+    // Filament clamps k rather than d: 453.5 is the largest value that still fits fp16, so a
+    // mid-range GPU does not overflow into a black/orange pixel in the brightest highlight.
+    const float k = min(roughness / (1.0 - NoH * NoH + a * a), 453.5);
     return k * k * (1.0 / PI);
 }
 
@@ -18,6 +20,11 @@ float V_SmithGGXCorrelated(float roughness, float NoV, float NoL)
 }
 
 vec3 F_Schlick(vec3 f0, float f90, float VoH)
+{
+    return f0 + (f90 - f0) * pow5(1.0 - VoH);
+}
+
+float F_Schlick(float f0, float f90, float VoH)
 {
     return f0 + (f90 - f0) * pow5(1.0 - VoH);
 }

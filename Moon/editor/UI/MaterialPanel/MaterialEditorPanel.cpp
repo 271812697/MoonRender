@@ -1,4 +1,4 @@
-﻿#include "MaterialEditorPanel.h"
+#include "MaterialEditorPanel.h"
 #include "MaterialCodeEditor.h"
 #include "MaterialDesigner.h"
 #include "MaterialPreviewWidget.h"
@@ -232,6 +232,19 @@ public:
 		meshPicker->addItem(QStringLiteral("Plane"),
 			static_cast<int>(::Editor::Panels::EPreviewMesh::PLANE));
 		previewHeaderLayout->addWidget(meshPicker, 0);
+
+		auto* resetView = new QToolButton(previewHeader);
+		resetView->setObjectName("MaterialLinkButton");
+		resetView->setText(QStringLiteral("Reset View"));
+		resetView->setCursor(Qt::PointingHandCursor);
+		resetView->setToolTip(QStringLiteral("Return the preview camera to its default pose"));
+		previewHeaderLayout->addWidget(resetView, 0);
+		QObject::connect(resetView, &QToolButton::clicked, m_owner, [this] {
+			if (m_preview != nullptr)
+			{
+				m_preview->ResetView();
+			}
+		});
 
 		QObject::connect(meshPicker, QOverload<int>::of(&QComboBox::currentIndexChanged), m_owner,
 			[this, meshPicker](int) {

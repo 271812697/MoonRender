@@ -19,9 +19,9 @@
         <uniform>
             <name>u_Albedo</name>
             <value>
-                <x>1</x>
-                <y>1</y>
-                <z>1</z>
+                <x>0.7216</x>
+                <y>0.7216</y>
+                <z>0.7216</z>
                 <w>1</w>
             </value>
         </uniform>
@@ -59,7 +59,31 @@
         </uniform>
         <uniform>
             <name>u_Roughness</name>
+            <value>0.4</value>
+        </uniform>
+        <uniform>
+            <name>u_Reflectance</name>
             <value>0.5</value>
+        </uniform>
+        <uniform>
+            <name>u_SpecularFactor</name>
+            <value>1</value>
+        </uniform>
+        <uniform>
+            <name>u_SpecularColorFactor</name>
+            <value>
+                <x>1</x>
+                <y>1</y>
+                <z>1</z>
+            </value>
+        </uniform>
+        <uniform>
+            <name>u_ClearCoat</name>
+            <value>0</value>
+        </uniform>
+        <uniform>
+            <name>u_ClearCoatRoughness</name>
+            <value>0</value>
         </uniform>
         <uniform>
             <name>u_RoughnessMap</name>
@@ -68,6 +92,22 @@
         <uniform>
             <name>u_Transmission</name>
             <value>0</value>
+        </uniform>
+        <uniform>
+            <name>u_Absorption</name>
+            <value>
+                <x>0</x>
+                <y>0</y>
+                <z>0</z>
+            </value>
+        </uniform>
+        <uniform>
+            <name>u_RefractionIndex</name>
+            <value>1.5</value>
+        </uniform>
+        <uniform>
+            <name>u_Thickness</name>
+            <value>1</value>
         </uniform>
         <uniform>
             <name>_IrradianceCube</name>

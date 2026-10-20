@@ -30,6 +30,11 @@ material {
         { type : float,     name : u_Metallic, default : 0.0 },
         { type : sampler2D, name : u_RoughnessMap },
         { type : float,     name : u_Roughness, default : 0.5 },
+        { type : float,     name : u_Reflectance, default : 0.5, label : "Reflectance", group : "Base", min : 0.0, max : 1.0, step : 0.005 },
+        { type : float,     name : u_SpecularFactor, default : 1.0, label : "Specular Factor", group : "Base", min : 0.0, max : 1.0, step : 0.005 },
+        { type : float3,    name : u_SpecularColorFactor, default : vec3(1.0), label : "Specular Color Factor", group : "Base" },
+        { type : float,     name : u_ClearCoat, default : 0.0, label : "Clear Coat", group : "Base", min : 0.0, max : 1.0, step : 0.005 },
+        { type : float,     name : u_ClearCoatRoughness, default : 0.0, label : "Clear Coat Roughness", group : "Base", min : 0.0, max : 1.0, step : 0.005 },
         { type : sampler2D, name : u_AmbientOcclusionMap },
         { type : sampler2D, name : u_NormalMap },
         // A uniform rather than a feature on purpose: the editor builds its texture list
@@ -40,6 +45,9 @@ material {
         { type : float3,    name : u_EmissiveColor, default : vec3(1.0) },
         { type : float,     name : u_EmissiveIntensity, default : 0.0 },
         { type : float,     name : u_Transmission, default : 0.0 },
+        { type : float3,    name : u_Absorption, default : vec3(0.0), label : "Absorption", group : "Parameters" },
+        { type : float,     name : u_RefractionIndex, default : 1.5, label : "Refraction Index", group : "Parameters", min : 1.0, max : 3.0, step : 0.01 },
+        { type : float,     name : u_Thickness, default : 1.0, label : "Thickness", group : "Parameters", min : 0.0, max : 10.0, step : 0.01 },
 
         { type : samplerCube, name : _IrradianceCube, ui : false },
         { type : samplerCube, name : _PrefilterCube, ui : false },
@@ -101,8 +109,16 @@ fragment {
         material.baseColor = pow(albedoTexel.rgb, vec3(2.2)) * pow(u_Albedo.rgb, vec3(2.2));
         material.metallic = metallic;
         material.roughness = roughness;
+        material.reflectance = u_Reflectance;
+        material.specularFactor = u_SpecularFactor;
+        material.specularColorFactor = u_SpecularColorFactor;
+        material.refractionIndex = u_RefractionIndex;
+        material.thickness = u_Thickness;
+        material.clearCoat = u_ClearCoat;
+        material.clearCoatRoughness = u_ClearCoatRoughness;
         material.ambientOcclusion = ao;
         material.transmission = u_Transmission;
+        material.absorption = u_Absorption;
         material.emissive = emissive;
 
         vec3 n = normalize(fs_in.Normal);
@@ -115,10 +131,15 @@ fragment {
             n = normalize(fs_in.TBN * tangentNormal);
         }
 
-        const PixelParams pixel = preparePixelParams(material, n, v, _BRDFLut);
+        // Filament's specular AA: widen the roughness by how fast the normal changes across
+        // this pixel, which keeps glossy silhouettes and normal seams from sparkling.
+        FilamentMaterialInputs filteredMaterial = material;
+        filteredMaterial.roughness = normalFiltering(material.roughness, n);
+
+        const PixelParams pixel = preparePixelParams(filteredMaterial, n, v, _BRDFLut);
         vec3 color = evaluateFilamentSurface(
             material, pixel, fs_in.FragPos, n, v,
-            _IrradianceCube, _PrefilterCube, _ShadowMap, _LightSpaceMatrix);
+            _IrradianceCube, _PrefilterCube, _ShadowMap, _LightSpaceMatrix, _BRDFLut);
         color += emissive;
 
         FRAGMENT_COLOR = vec4(color, albedo.a);

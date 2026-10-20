@@ -1,6 +1,7 @@
 #pragma once
 #include <QImage>
 #include <QOpenGLWidget>
+#include <Rendering/HAL/Texture.h>
 
 #include <cstdint>
 #include <memory>
@@ -60,6 +61,8 @@ namespace MOON
 		/** Asks for one frame to be read back and emitted as thumbnailReady, on the next paint.
 		 * The browser calls this after a selection and after edits; the readback is throttled
 		 * inside the paint, so a slider drag does not read the frame on every event. */
+		/** Returns the preview camera to its default pose. */
+		void ResetView();
 		void RequestThumbnail();
 
 	signals:
@@ -112,6 +115,9 @@ namespace MOON
 		Editor::Panels::EPreviewMesh m_previewMesh = Editor::Panels::EPreviewMesh::SPHERE;
 
 		Editor::Panels::PreviewView* m_view = nullptr;
+		// A 1x1 cubemap of the preview's backdrop, bound as _RefractionCube: a transmissive
+		// material then sees the dark surround instead of the studio IBL.
+		std::unique_ptr<::Rendering::HAL::Texture> m_refractionCube;
 		/** The material the preview sphere carries. The scene holds a pointer to it, so it
 		 * outlives the view (both are released together, view first). */
 		std::unique_ptr<::Core::Resources::Material> m_material;

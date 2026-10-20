@@ -136,7 +136,11 @@ Maths::FMatrix4 Rendering::Entities::Light::GenerateMatrix() const
 	result.data[3] = constant;
 	result.data[7] = linear;
 	result.data[9] = castShadows ? 1.0f : 0.0f;
-	result.data[10] = CalculateEffectRange(); // cutoff length for Filament's windowed falloff
+	const float effectRange = CalculateEffectRange();
+	// A light without a finite range (the preview''s constant-attenuation lights) keeps the
+	// legacy attenuation; writing inf here would make the windowed falloff divide by it and
+	// turn the light into 1/d^2.
+	result.data[10] = std::isfinite(effectRange) ? effectRange : 0.0f;
 	result.data[11] = quadratic;
 	result.data[15] = intensity;
 

@@ -84,6 +84,15 @@ void MOON::MaterialPreviewWidget::ShowMaterial(::Core::Resources::Material* p_ma
 	update();
 }
 
+void MOON::MaterialPreviewWidget::ResetView()
+{
+	if (m_view != nullptr)
+	{
+		m_view->ResetCameraTransform();
+	}
+	update();
+}
+
 void MOON::MaterialPreviewWidget::RequestThumbnail()
 {
 	m_thumbnailRequested = true;
@@ -171,13 +180,10 @@ void MOON::MaterialPreviewWidget::RefreshShader()
 
 void MOON::MaterialPreviewWidget::BindEnvironmentTextures()
 {
-	// The viewport's faces get their IBL from the sky pass: TopoShapeActor points the face
-	// materials at the irradiance/prefilter cubes and the BRDF LUT (and Standard's PBR path at
-	// the prefilter cube as _EnvironmentMap). The preview shows the same material, so it has to
-	// point it at the same textures - otherwise a metallic material would look dark here and lit
-	// there. The textures are shared GPU resources; the sky pass builds them once for the scene.
-	auto& sceneView = ::Core::Global::ServiceLocator::Get<::Editor::Panels::SceneView>();
-	auto& renderer = sceneView.GetRenderer();
+	// The preview has its own scene and sky pass (a studio HDR, see PreviewView): bind that
+	// renderer's irradiance/prefilter cubes, not the viewport's, or the preview would show the
+	// scene's sky instead of its own environment.
+	auto& renderer = m_view->GetRenderer();
 
 	auto* irradiance = renderer.GetIrradianceCube();
 	auto* prefilter = renderer.GetPrefilterCube();
@@ -208,11 +214,30 @@ void MOON::MaterialPreviewWidget::BindEnvironmentTextures()
 		p_material->TrySetProperty(p_name, p_texture);
 	};
 
+	if (!m_refractionCube)
+	{
+		// One dark texel per face: the preview backdrop, used as the refraction source.
+		m_refractionCube = std::make_unique<::Rendering::HAL::Texture>(
+			::Rendering::Settings::ETextureType::TEXTURE_CUBE, "PreviewRefraction");
+		m_refractionCube->Allocate(::Rendering::Settings::TextureDesc{
+			.width = 1, .height = 1,
+			.minFilter = ::Rendering::Settings::ETextureFilteringMode::NEAREST,
+			.magFilter = ::Rendering::Settings::ETextureFilteringMode::NEAREST,
+			.horizontalWrap = ::Rendering::Settings::ETextureWrapMode::CLAMP_TO_EDGE,
+			.verticalWrap = ::Rendering::Settings::ETextureWrapMode::CLAMP_TO_EDGE,
+			.internalFormat = ::Rendering::Settings::EInternalFormat::RGBA32F,
+			.useMipMaps = false });
+		const float backdrop[4] = { 0.032f, 0.032f, 0.034f, 1.0f };
+		m_refractionCube->Upload(backdrop, ::Rendering::Settings::EFormat::RGBA,
+			::Rendering::Settings::EPixelDataType::FLOAT);
+	}
+
 	for (::Core::Resources::Material* material : { m_shownMaterial, m_material.get() })
 	{
 		bind(material, "_IrradianceCube", irradiance);
 		bind(material, "_PrefilterCube", prefilter);
 		bind(material, "_BRDFLut", brdf);
+		bind(material, "_RefractionCube", m_refractionCube.get());
 	}
 }
 
@@ -258,6 +283,12 @@ void MOON::MaterialPreviewWidget::paintGL()
 	const float deltaTime = m_lastPaintMs > 0.0 ? static_cast<float>((nowMs - m_lastPaintMs) / 1000.0) : 0.016f;
 	m_lastPaintMs = nowMs;
 	m_view->Update(deltaTime);
+	// A camera move is an animation: keep repainting until it lands, otherwise the
+	// lerp advances one frame per button click and appears not to reset at all.
+	if (m_view->IsCameraMoving())
+	{
+		QTimer::singleShot(16, this, [this] { update(); });
+	}
 	// The pressed/released edges the controller just read belong to this frame only; without
 	// this a press would look pressed forever and a release would never arrive.
 	m_view->ClearEvents();

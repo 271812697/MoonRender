@@ -178,7 +178,7 @@ void ::Editor::Core::CameraController::HandleInputs(float p_deltaTime)
 
 	if (!m_cameraDestinations.empty())
 	{
-		m_currentMovementSpeed = 0.0f;
+			m_currentMovementSpeed = 0.0f;
 
 		while (m_cameraDestinations.size() != 1)
 			m_cameraDestinations.pop();
@@ -382,6 +382,22 @@ void Editor::Core::CameraController::MoveToTarget(::Core::ECS::Actor& p_target)
 		GetActorFocusDist(p_target),
 		m_camera.GetRotation()
 		});
+}
+
+void Editor::Core::CameraController::ClearMovement()
+{
+	while (!m_cameraDestinations.empty())
+	{
+		m_cameraDestinations.pop();
+	}
+	m_leftMousePressed = false;
+	m_middleMousePressed = false;
+	m_rightMousePressed = false;
+}
+
+bool Editor::Core::CameraController::HasPendingMovement() const
+{
+	return !m_cameraDestinations.empty();
 }
 
 void Editor::Core::CameraController::MoveToPose(const Maths::FVector3& pos, const Maths::FQuaternion& quat)

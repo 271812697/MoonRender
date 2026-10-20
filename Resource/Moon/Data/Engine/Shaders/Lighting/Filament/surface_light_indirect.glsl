@@ -55,23 +55,67 @@ vec3 evaluateIBL(
     vec3 v,
     float ao,
     samplerCube irradianceCube,
-    samplerCube prefilterCube)
+    samplerCube prefilterCube,
+    sampler2D dfgLut)
 {
-    const vec3 E = specularDFG(pixel.f0, pixel.dfg);
+    // Filament specularDFG(): with specularFactor/specularColorFactor the DFG result is scaled
+    // by specularFactor as well (f0 already carries the color factor).
+    const vec3 E = specularDFG(pixel.f0, pixel.dfg) * pixel.specular;
     const vec3 r = getSpecularDominantDirection(n, reflect(-v, n), pixel.perceptualRoughness);
     const float NoV = max(dot(n, v), 1.0e-4);
 
-    const vec3 Fr = E * prefilteredRadiance(prefilterCube, r, pixel.perceptualRoughness)
+    vec3 Fr = E * prefilteredRadiance(prefilterCube, r, pixel.perceptualRoughness)
         * pixel.energyCompensation * specularAO(NoV, ao, pixel.perceptualRoughness);
     vec3 Fd = pixel.diffuseColor * diffuseIrradiance(irradianceCube, n) * (1.0 - E) * multiBounceAO(ao, pixel.diffuseColor);
+
+    // Filament isEvaluateClearCoatIBL(): the clear coat is its own specular layer with
+    // F0 = 0.04, evaluated at clearCoatPerceptualRoughness (its own DFG lookup), and the
+    // base lobes are attenuated by (1 - Fc).
+    if (pixel.clearCoat > 0.0)
+    {
+        const float ccRoughness = pixel.clearCoatRoughness;
+        vec2 ccDfg = textureLod(dfgLut, vec2(NoV, ccRoughness), 0.0).rg;
+        ccDfg = clamp(ccDfg, 0.0, 1.0);
+        const vec3 Ecc = specularDFG(vec3(0.04), ccDfg);
+        const vec3 ccEnergy = vec3(1.0) + vec3(0.04)
+            * (1.0 / max(ccDfg.x + ccDfg.y, 1.0e-4) - 1.0);
+        const float Fc = F_Schlick(0.04, 1.0, NoV) * pixel.clearCoat;
+        const vec3 cc = prefilteredRadiance(prefilterCube, r, ccRoughness);
+        Fd *= (1.0 - Fc);
+        Fr *= (1.0 - Fc);
+        Fr += Ecc * cc * ccEnergy * specularAO(NoV, ao, ccRoughness) * pixel.clearCoat;
+    }
 
     vec3 Ft = vec3(0.0);
     if (pixel.transmission > 0.0)
     {
-        // Refraction of the environment, tinted by the base colour, as Filament does.
-        const vec3 T = refract(-v, n, 1.0 / 1.5);
-        Ft = prefilteredRadiance(prefilterCube, T, pixel.perceptualRoughness)
-            * pixel.diffuseColor * pixel.transmission * (1.0 - E) * ao;
+        // Filament's solid-sphere cubemap refraction: bend into the sphere, hit the back
+        // interface, bend again, and sample the prefiltered environment along that ray.
+        const float etaIR = 1.0 / max(pixel.refractionIndex, 1.0);
+        const float etaRI = max(pixel.refractionIndex, 1.0);
+        vec3 r = refract(-v, n, etaIR);
+        const float NoR = dot(n, r);
+        const float d = pixel.thickness * max(-NoR, 0.0);
+        const vec3 n1 = normalize(NoR * r - n * 0.5);
+        vec3 rayDirection = refract(r, n1, etaRI);
+        // Total internal reflection at the second interface: refract() returns 0, which
+        // would sample one fixed cubemap texel; Filament keeps the internally reflected ray.
+        if (dot(rayDirection, rayDirection) < 1.0e-6)
+        {
+            rayDirection = reflect(r, n1);
+        }
+        const float refractionRoughness = mix(pixel.perceptualRoughness, 0.0,
+            saturate(etaIR * 3.0 - 2.0));
+        // Filament evaluateRefraction(): Beer-Lambert extinction over the distance the ray
+        // travels inside the medium, using the same thickness/ray distance as the refraction.
+        const vec3 transmittance = min(vec3(1.0), exp(-pixel.absorption * d));
+        // Filament's cubemap refraction samples the environment seen through the surface.
+        // The preview binds its background here (a dark studio surround), which is why a
+        // fully transmissive ball reads as black instead of the bright IBL.
+        // Filament samples the same prefiltered IBL the reflections use; there is no
+        // separate refraction cube.
+        Ft = prefilteredRadiance(prefilterCube, rayDirection, refractionRoughness)
+            * pixel.diffuseColor * pixel.transmission * (1.0 - E) * ao * transmittance;
         Fd *= (1.0 - pixel.transmission);
     }
 
