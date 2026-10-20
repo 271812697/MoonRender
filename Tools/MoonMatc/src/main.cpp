@@ -13,6 +13,7 @@
 
 #include <iostream>
 #include <string>
+#include <sstream>
 #include <vector>
 
 #include "Matc.h"
@@ -33,6 +34,18 @@ int main(int argc, char* argv[])
 		else if (argument == "-I") { std::string dir; value(dir); options.includeDirs.push_back(dir); }
 		else if (argument == "--dump-glsl") { value(options.dumpGlslDir); }
 		else if (argument == "--dump-json") { value(options.dumpJsonPath); }
+		else if (argument == "--dump-variants") { value(options.dumpVariantsPath); }
+		else if (argument == "--features")
+		{
+			std::string list;
+			value(list);
+			std::istringstream stream(list);
+			std::string item;
+			while (std::getline(stream, item, ','))
+			{
+				if (!item.empty()) { options.enabledFeatures.push_back(item); }
+			}
+		}
 		else if (argument == "-E") { options.preprocessOnly = true; }
 		else if (!argument.empty() && argument[0] == '-')
 		{
@@ -44,7 +57,7 @@ int main(int argc, char* argv[])
 	if (inputPath.empty() || (options.outputPath.empty() && !options.preprocessOnly))
 	{
 		std::cerr << "Usage: MoonMatc -i <file.mat> -o <file.ovshader> "
-			<< "[-I dir]... [--dump-glsl dir] [--dump-json file] [-E]" << std::endl;
+			<< "[-I dir]... [--dump-glsl dir] [--dump-json file] [--dump-variants file] [-E]" << std::endl;
 		return 1;
 	}
 

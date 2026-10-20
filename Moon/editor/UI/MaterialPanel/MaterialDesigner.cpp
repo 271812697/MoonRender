@@ -49,6 +49,11 @@
 #include "Core/SceneSystem/SceneManager.h"
 #include "Rendering/Context/Driver.h"
 #include "Rendering/Resources/Shader.h"
+#include "Rendering/Resources/Loaders/ShaderLoader.h"
+#include "Matc.h"
+#include <iostream>
+#include <QCoreApplication>
+#include <QDir>
 #include "Rendering/Resources/Texture.h"
 #include "Tools/Utils/PathParser.h"
 #include "Widgets/BoolProperty.h"
@@ -229,9 +234,11 @@ namespace MOON
 				std::map<QString, std::string> p_featureNames,
 				std::map<QString, std::string> p_stateNames,
 				std::set<std::string> p_colorNames,
-				std::function<void()> p_onChanged)
+				std::function<void()> p_onChanged,
+				std::function<void()> p_onFeatureChanged)
 				: m_material(p_material),
 				m_onChanged(std::move(p_onChanged)),
+				m_onFeatureChanged(std::move(p_onFeatureChanged)),
 				m_uniformNames(std::move(p_uniformNames)),
 				m_featureNames(std::move(p_featureNames)),
 				m_stateNames(std::move(p_stateNames)),
@@ -301,6 +308,9 @@ namespace MOON
 					{
 						m_material.RemoveFeature(it->second);
 					}
+					// Both directions recompile: the enabled set is what the package is built
+					// with now, so a checked feature has to produce a new shader too.
+					if (m_onFeatureChanged) { m_onFeatureChanged(); }
 					if (m_onChanged) { m_onChanged(); }
 					return;
 				}
@@ -454,6 +464,7 @@ namespace MOON
 
 			Material& m_material;
 			std::function<void()> m_onChanged;
+			std::function<void()> m_onFeatureChanged;
 			std::map<QString, std::string> m_uniformNames;
 			std::map<QString, std::string> m_featureNames;
 			std::map<QString, std::string> m_stateNames;
@@ -1098,7 +1109,28 @@ namespace MOON
 		// which is why they sit above the parameters (PARALLAX_MAPPING adds the parallax ones).
 		std::map<QString, std::string> featureNames;
 		{
-			std::vector<std::string> features(shader->GetFeatures().begin(), shader->GetFeatures().end());
+			// The form keeps offering every feature the shader was built with, even after a
+			// fixed-feature recompile shrinks the package to the enabled set (see
+			// RecompileMaterialFeatures).
+			std::vector<std::string> features;
+			if (const auto cached = m_declaredFeatures.find(shader->path); cached != m_declaredFeatures.end())
+			{
+				features = cached->second;
+			}
+			else
+			{
+				// The package's declared feature list survives a fixed-feature compile; the
+				// variant union would only list the enabled ones.
+				if (!shader->GetDeclaredFeatures().empty())
+				{
+					features = shader->GetDeclaredFeatures();
+				}
+				else
+				{
+					features.assign(shader->GetFeatures().begin(), shader->GetFeatures().end());
+				}
+				m_declaredFeatures.emplace(shader->path, features);
+			}
 			std::ranges::sort(features);
 			for (const std::string& feature : features)
 			{
@@ -1136,7 +1168,7 @@ namespace MOON
 		}
 
 		m_component = std::make_unique<DesignerMaterialComponent>(
-			*m_material, labelToUniform, featureNames, stateNames, colorNames, [this] { MarkDirty(); });
+			*m_material, labelToUniform, featureNames, stateNames, colorNames, [this] { MarkDirty(); }, [this] { RecompileMaterialFeatures(); });
 
 		// Groups: the group the material declared, else Parameters / Textures; created in
 		// declaration order so the form reads the way the material file does.
@@ -1168,6 +1200,53 @@ namespace MOON
 				featuresGroup->addProperty(new BoolProperty(label, m_component.get(), BoolProperty::Style::InviwoRect));
 				++groupCounts["Features"];
 				++parameterCount;
+			}
+		}
+
+		// Engine variants: chosen per draw by the renderer (lights, shadows, passes), not by the
+		// material. Shown read-only so the compiled set is visible; the toggles above are the
+		// material features only.
+		{
+			std::size_t variantCount = 0;
+			std::set<std::string> variantBits;
+			std::set<std::string> variantPasses;
+			for (const auto& [pass, variants] : shader->GetVariants())
+			{
+				variantCount += variants.size();
+				variantPasses.insert(pass.empty() ? "Default" : pass);
+				for (const auto& [features, program] : variants)
+				{
+					for (const std::string& feature : features)
+					{
+						if (feature.starts_with("VARIANT_")) { variantBits.insert(feature); }
+					}
+				}
+			}
+
+			if (variantCount > 0)
+			{
+				QString summary = QStringLiteral("%1 compiled variant(s)").arg(static_cast<qulonglong>(variantCount));
+				if (!variantBits.empty())
+				{
+					QStringList bits;
+					for (const std::string& bit : variantBits)
+					{
+						QString label = QString::fromStdString(bit);
+						label.remove(QStringLiteral("VARIANT_HAS_"));
+						label.remove(QStringLiteral("VARIANT_"));
+						label.replace(QLatin1Char('_'), QLatin1Char(' '));
+						if (!label.isEmpty()) { label[0] = label[0].toUpper(); }
+						bits << label;
+					}
+					summary += QStringLiteral("\nEngine bits: ") + bits.join(QStringLiteral(", "));
+				}
+				if (!variantPasses.empty())
+				{
+					QStringList names;
+					for (const std::string& pass : variantPasses) { names << QString::fromStdString(pass); }
+					summary += QStringLiteral("\nPasses: ") + names.join(QStringLiteral(", "));
+				}
+				makeHint(summary);
 			}
 		}
 
@@ -1664,6 +1743,124 @@ namespace MOON
 		emit materialEdited();
 	}
 
+	void MaterialDesigner::RecompileMaterialFeatures()
+	{
+		if (m_material == nullptr) { return; }
+
+		Rendering::Resources::Shader* currentShader = m_material->GetShader();
+		if (currentShader == nullptr) { return; }
+
+		// Resolve what the package's key points at: the deployed engine shaders first, then the
+		// source tree, so the designer works both in a build tree run and in the editor's usual
+		// cwd.
+		std::string key = currentShader->path;
+		std::replace(key.begin(), key.end(), '\\', '/');
+		if (!key.empty() && key.front() == ':') { key.erase(key.begin()); }
+		if (key.rfind("Shaders/", 0) == 0) { key = key.substr(8); }
+
+		std::filesystem::path sourcePath;
+		std::filesystem::path includeDir;
+		const std::filesystem::path direct(key);
+		if (direct.is_absolute() && std::filesystem::exists(direct))
+		{
+			sourcePath = direct;
+			includeDir = direct.parent_path();
+		}
+		else
+		{
+			const std::filesystem::path roots[] = {
+				std::filesystem::path(QCoreApplication::applicationDirPath().toStdString()) / "Moon/Data/Engine/Shaders",
+				std::filesystem::path(QDir::currentPath().toStdString()) / "Resource/Moon/Data/Engine/Shaders",
+				std::filesystem::path(QDir::currentPath().toStdString()) / "Moon/Data/Engine/Shaders",
+			};
+			for (const auto& root : roots)
+			{
+				const std::filesystem::path candidate = root / key;
+				if (std::filesystem::exists(candidate))
+				{
+					sourcePath = candidate;
+					includeDir = root;
+					break;
+				}
+			}
+		}
+		if (sourcePath.empty())
+		{
+			SetStatus(QStringLiteral("Cannot find the shader source for ") + QString::fromStdString(currentShader->path), true);
+			return;
+		}
+
+		const Rendering::Data::FeatureSet& features = m_material->GetFeatures();
+		std::vector<std::string> sortedFeatures(features.begin(), features.end());
+		std::sort(sortedFeatures.begin(), sortedFeatures.end());
+
+		std::string cacheKey = sourcePath.string();
+		for (const std::string& feature : sortedFeatures) { cacheKey += "|" + feature; }
+
+		// Recompiling is not free: the same (source, feature set) pair is reused across toggles.
+		static std::map<std::string, Rendering::Resources::Shader*> s_cache;
+		static std::vector<std::unique_ptr<Rendering::Resources::Shader>> s_owned;
+
+		Rendering::Resources::Shader* compiled = nullptr;
+		if (const auto cached = s_cache.find(cacheKey); cached != s_cache.end())
+		{
+			compiled = cached->second;
+		}
+		else
+		{
+			Moon::Matc::CompileOptions options;
+			options.displayName = sourcePath.filename().string();
+			options.includeDirs.push_back(includeDir.string());
+			options.enabledFeatures = sortedFeatures;
+
+			const Moon::Matc::CompileResult result = Moon::Matc::CompileFile(sourcePath.string(), options);
+			if (!result.success || result.package.empty())
+			{
+				SetStatus(QString::fromStdString(result.error), true);
+				return;
+			}
+
+			// Compiling a package creates GL objects, and a property callback runs with no
+			// context current: use the render module's context, like the shader page's Apply().
+			auto& context = ::Core::Global::ServiceLocator::Get<::Editor::Core::Context>();
+			auto* host = context.driver != nullptr ? context.driver->GetContextHost() : nullptr;
+			if (host == nullptr || !host->MakeCurrent())
+			{
+				SetStatus(QStringLiteral("The render module has no GL context yet."), true);
+				return;
+			}
+
+			std::string error;
+			compiled = Rendering::Resources::Loaders::ShaderLoader::CreateFromPackage(
+				result.package.data(), static_cast<uint32_t>(result.package.size()),
+				sourcePath.filename().string(), &error);
+			host->DoneCurrent();
+
+			if (compiled == nullptr)
+			{
+				SetStatus(error.empty() ? QStringLiteral("The recompiled material produced no usable shader.") : QString::fromStdString(error), true);
+				return;
+			}
+
+			// Materials may outlive this panel, so the compiled shaders are kept for the session.
+			s_owned.emplace_back(compiled);
+			s_cache.emplace(cacheKey, compiled);
+		}
+
+		if (compiled == m_material->GetShader())
+		{
+			return; // already using the program for this feature set
+		}
+
+		// SetShader rebuilds the property list and the state from the new definition; the
+		// instance's values are the designer's, so put them back.
+		const Snapshot snapshot = Capture();
+		m_material->SetShader(compiled);
+		ApplySnapshot(snapshot);
+		MarkDirty();
+		SetStatus(QStringLiteral("Recompiled ") + QString::fromStdString(sourcePath.filename().string()) + QStringLiteral(" for the enabled features."));
+	}
+
 	MaterialDesigner::Snapshot MaterialDesigner::Capture() const
 	{
 		Snapshot snapshot;
@@ -1729,6 +1926,7 @@ namespace MOON
 		m_redo.push_back(Capture());
 		ApplySnapshot(m_undo.back());
 		m_undo.pop_back();
+		RecompileMaterialFeatures();
 
 		m_baseline = Capture();
 		m_hasBaseline = true;
@@ -1750,6 +1948,7 @@ namespace MOON
 		m_undo.push_back(Capture());
 		ApplySnapshot(m_redo.back());
 		m_redo.pop_back();
+		RecompileMaterialFeatures();
 
 		m_baseline = Capture();
 		m_hasBaseline = true;

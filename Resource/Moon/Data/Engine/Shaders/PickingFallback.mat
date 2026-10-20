@@ -14,6 +14,8 @@ material {
     culling      : none,           // the picking pass draws with culling off
     depthWrite   : true,
 
+    vertexAttributes : [POSITION],
+
     parameters : [
         // Set per actor by the picking pass, right before the draw.
         { type : float4, name : _PickingColor }
@@ -21,7 +23,6 @@ material {
 }
 
 vertex {
-layout (location = 0) in vec3 geo_Pos;
 out vec3 VSOUT_World;
 void main()
 {

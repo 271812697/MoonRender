@@ -1,4 +1,4 @@
-﻿#include <format>
+#include <format>
 #include <Rendering/Entities/Light.h>
 #include <Rendering/HAL/Renderbuffer.h>
 #include <assert.h>
@@ -136,6 +136,7 @@ Maths::FMatrix4 Rendering::Entities::Light::GenerateMatrix() const
 	result.data[3] = constant;
 	result.data[7] = linear;
 	result.data[9] = castShadows ? 1.0f : 0.0f;
+	result.data[10] = CalculateEffectRange(); // cutoff length for Filament's windowed falloff
 	result.data[11] = quadratic;
 	result.data[15] = intensity;
 

@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <Rendering/Core/ARenderPass.h>
 #include <Rendering/HAL/Framebuffer.h>
 #include <Core/Rendering/PostProcess/AEffect.h>
@@ -39,6 +39,9 @@ namespace Core::Rendering
 		virtual void Draw(::Rendering::Data::PipelineState p_pso) override;
 	private:
 		void computeSkyTexture();
+		/** Projects the sky's equirect HDR into the SH9 irradiance coefficients the IBL
+		 * shaders read at binding point 4 (Filament's IndirectLight SH). */
+		void computeIrradianceSH();
 		
 	private:
 		::Core::Resources::Material m_skyboxMaterial;
@@ -54,6 +57,7 @@ namespace Core::Rendering
 		std::shared_ptr<::Rendering::HAL::Texture> skyBoxCube;
 		std::shared_ptr<::Rendering::HAL::Texture> irradianceCube;
 		std::shared_ptr<::Rendering::HAL::Texture> prefilterCube;
+		std::unique_ptr<::Rendering::HAL::UniformBuffer> m_irradianceSHBuffer;
 		SkyBoxSetting mSetting;
 		std::string mPath = ":Textures/PureSky.hdr";
 		bool needUpdateSkyTexture = true;

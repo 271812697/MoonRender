@@ -2,8 +2,9 @@
 // workflows, parallax and normal mapping, distance fade and the edge expansion on top.
 //
 // Written in the material form MoonMatc consumes (see docs/ShaderPipeline.md). All three stages
-// own their main(): the vertex stage declares the attributes in the two orders the
-// VERTEX_POS_NORMAL variant swaps them to and passes a TBN basis and the parallax pair of its
+// own their main(): the vertex stage uses the attributes MoonMatc declares from
+// vertexAttributes (POSITION, UV0, NORMAL, TANGENT, BITANGENT) and passes a TBN basis and
+// the parallax pair of its
 // own, the geometry stage expands each triangle so it carries the edge equations, and the
 // fragment stage declares the matching input block (GS_OUT with the edges, VS_OUT without) and
 // its own output. MoonMatc puts the prelude, the variant #defines and the parameters in front of
@@ -19,14 +20,22 @@ material {
     culling      : back,
     depthWrite   : true,
 
+    vertexAttributes : [POSITION, UV0, NORMAL, TANGENT, BITANGENT],
+
     features : [
-        VERTEX_POS_NORMAL,
         PARALLAX_MAPPING,
         NORMAL_MAPPING,
         DISTANCE_FADE,
         SPECULAR_WORKFLOW,
         WITH_EDGE
     ],
+    // The archive compiles no optional feature (same as an .ovmat with an empty feature set);
+    // the designer recompiles with whatever set the user enables.
+    defaultFeatures : [],
+
+    // Engine state variants; the renderer selects one per draw (scene lights / shadows).
+    variantFilter : [DIRECTIONAL_LIGHTING, DYNAMIC_LIGHTING, SHADOWING],
+
     passes : [ SHADOW_PASS, REFLECTION_PASS ],
 
     // One entry per uniform the fragment stage used to declare by hand, same names (the C++
@@ -95,8 +104,7 @@ material {
 
         // --- maps ---------------------------------------------------------------------------
         { type : sampler2D, name : u_AlbedoMap, label : "Albedo Map", group : "Maps" },
-        // Declared (and unread - the ambient occlusion comes from occlusionTex) to keep the
-        // property name alive for whoever still sets it.
+        // The material's AO map; the fragment multiplies it with the screen-space occlusionTex.
         { type : sampler2D, name : u_AmbientOcclusionMap, label : "AO Map", group : "Maps" },
         { type : sampler2D, name : u_MaskMap, label : "Mask Map", group : "Maps" },
         { type : sampler2D, name : u_EmissiveMap, label : "Emissive Map", group : "Maps" },
@@ -116,6 +124,11 @@ material {
           label : "Shadow Clipping", group : "Advanced", min : 0.0, max : 1.0, step : 0.001 },
 
         // The renderer owns these: it sets them per frame and they are not material design.
+        // The edge expansion reads it in the geometry stage: the width, in pixels, of the
+        // dark rim it draws. It used to be a commented-out uniform, so the rim was zero wide.
+        { type : float, name : lineWidth, default : 1.0,
+          label : "Edge Width", group : "Edges", min : 0.0, max : 4.0, step : 0.1 },
+
         { type : sampler2D,   name : _ShadowMap, ui : false },
         { type : mat4,        name : _LightSpaceMatrix, ui : false },
         { type : samplerCube, name : _IrradianceCube, ui : false },
@@ -126,19 +139,6 @@ material {
 }
 
 vertex {
-#if defined(VERTEX_POS_NORMAL)
-    layout (location = 0) in vec3 geo_Pos;
-    layout (location = 1) in vec3 geo_Normal;
-    layout (location = 2) in vec2 geo_TexCoords;
-    layout (location = 3) in vec3 geo_Tangent;
-    layout (location = 4) in vec3 geo_Bitangent;
-#else
-    layout (location = 0) in vec3 geo_Pos;
-    layout (location = 1) in vec2 geo_TexCoords;
-    layout (location = 2) in vec3 geo_Normal;
-    layout (location = 3) in vec3 geo_Tangent;
-    layout (location = 4) in vec3 geo_Bitangent;
-#endif
 
 
     out VS_OUT
@@ -222,7 +222,7 @@ geometry {
             vec2 tmp = normalize(pos[i+1] - pos[i]);
             tmp = ccw*vec2(-tmp.y, tmp.x);
             float d = dot(pos[i], tmp);
-            gs_out.edgeEqn[i] = vec4(tmp.x, tmp.y, 0.0, -d);
+            gs_out.edgeEqn[i] = vec4(tmp.x, tmp.y, lineWidth, -d);
         }
 
         //float edgeValues = 255.0*texelFetch(edgeTexture, gl_PrimitiveIDIn + PrimitiveIDOffset).r;
@@ -440,8 +440,12 @@ fragment {
         vec4 ndcpos= ubo_Projection * ubo_View * vec4(fs_in.FragPos, 1.0);
         ndcpos.xyz=ndcpos.xyz/ndcpos.w;
         ndcpos.xy=(ndcpos.xy+1.0)/2.0;
-        const float ao =texture(occlusionTex, ndcpos.xy).r;
-        //const float ao = texture(u_AmbientOcclusionMap, texCoords).r;
+        // The material's AO map and the engine's screen-space AO both occlude: the map
+        // carries the baked detail, the screen-space term the larger crevices. The shader
+        // used to read only occlusionTex, so assigning an AO Map in the designer did nothing.
+        const float materialAO = texture(u_AmbientOcclusionMap, texCoords).r;
+        const float screenAO = texture(occlusionTex, ndcpos.xy).r;
+        const float ao = materialAO * screenAO;
 
     #if defined(WITH_EDGE)
         float edist[3];
@@ -451,10 +455,11 @@ fragment {
         if (edist[0] < -0.5 && fs_in.edgeEqn[0].z > 0.0) discard;
         if (edist[1] < -0.5 && fs_in.edgeEqn[1].z > 0.0) discard;
         if (edist[2] < -0.5 && fs_in.edgeEqn[2].z > 0.0) discard;
-        edist[0] += fs_in.edgeEqn[0].z;
-        edist[1] += fs_in.edgeEqn[1].z;
-        edist[2] += fs_in.edgeEqn[2].z;
-        float emix = clamp(0.5 + 0.5*1.0 - min( min( edist[0], edist[1]), edist[2]), 0.0, 1.0);
+        // The width is the band, not an offset added to the distance: adding it pushed
+        // every interior pixel's distance above 1, so any width above zero removed the
+        // edges instead of widening them (width 0 was the only visible setting).
+        const float edgeWidth = fs_in.edgeEqn[0].z;
+        float emix = clamp(0.5 + 0.5 * edgeWidth - min(min(edist[0], edist[1]), edist[2]), 0.0, 1.0);
         linearAlbedo = mix(linearAlbedo, vec3(0.0), emix);
     #endif
        vec3 pbr = PBRLighting(

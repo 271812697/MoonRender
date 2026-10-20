@@ -19,6 +19,8 @@ material {
     culling      : none,
     depthWrite   : true,
 
+    vertexAttributes : [POSITION, UV0, NORMAL, DOMAIN_ID],
+
     features : [ WITH_EDGE ],
     passes   : [ Transparents ],
 
@@ -74,10 +76,6 @@ material {
 }
 
 vertex {
-layout (location = 0) in vec3 geo_Pos;
-layout (location = 1) in vec2 geo_TexCoords;
-layout (location = 2) in vec3 geo_Normal;
-layout (location = 3) in vec2 geo_DomainId;
 
 out VS_OUT
 {

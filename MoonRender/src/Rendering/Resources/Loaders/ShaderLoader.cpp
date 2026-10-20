@@ -1,4 +1,4 @@
-#include <algorithm>
+﻿#include <algorithm>
 #include <array>
 #include <filesystem>
 #include <format>
@@ -171,7 +171,7 @@ namespace
 		return result;
 	}
 
-	std::unique_ptr<Rendering::HAL::ShaderProgram> CreateProgram(
+	std::shared_ptr<Rendering::HAL::ShaderProgram> CreateProgram(
 		const ShaderInputInfo& p_shaderInputInfo,
 		std::span<const ShaderStageDesc> p_stages,
 		const std::string_view p_pass,
@@ -322,7 +322,7 @@ namespace
 		}
 
 		// Link the program
-		auto program = std::make_unique<Rendering::HAL::ShaderProgram>();
+		auto program = std::make_shared<Rendering::HAL::ShaderProgram>();
 
 		// Attach all stages
 		for (const auto& processedStage : processedStages)
@@ -370,7 +370,7 @@ namespace
 		}
 	}
 
-	std::unique_ptr<Rendering::HAL::ShaderProgram> CreateDefaultProgram()
+	std::shared_ptr<Rendering::HAL::ShaderProgram> CreateDefaultProgram()
 	{
 		const std::string vertex = R"(
 #version 450 core
@@ -910,6 +910,12 @@ void main()
 		Rendering::Resources::Shader::Variants variants;
 		bool blockValidated = false;
 
+		// Keyed packages have many feature sets whose composed stage text is identical (the
+		// unused variant bits are pruned by MoonMatc). Compile each distinct stage once and
+		// link each distinct stage combination once, instead of once per feature set.
+		std::unordered_map<std::string, std::shared_ptr<Rendering::HAL::ShaderStage>> stageCache;
+		std::unordered_map<std::string, std::shared_ptr<Rendering::HAL::ShaderProgram>> programCache;
+
 		const auto report = [p_error](const std::string& p_text) {
 			std::cout << p_text << std::endl;
 			if (p_error != nullptr)
@@ -921,7 +927,8 @@ void main()
 
 		for (const Rendering::Resources::ShaderPackage::Variant& variant : p_package.Variants())
 		{
-			std::vector<std::unique_ptr<Rendering::HAL::ShaderStage>> stages;
+			std::vector<std::shared_ptr<Rendering::HAL::ShaderStage>> stages;
+			std::string programKey;
 			bool ok = true;
 
 			struct StageSpec
@@ -952,16 +959,26 @@ void main()
 					break;
 				}
 
-				auto stage = std::make_unique<Rendering::HAL::ShaderStage>(spec.type);
-				stage->Upload(std::move(source));
-				if (const auto result = stage->Compile(); !result.success)
+				const std::string stageKey =
+					std::to_string(static_cast<int>(spec.type)) + '\n' + source;
+				auto& cachedStage = stageCache[stageKey];
+				if (cachedStage == nullptr)
 				{
-					report(std::format("[Shader Compile] {}<{}> (pass '{}'): {}",
-						p_package.Name(), spec.name, variant.pass, result.message));
-					ok = false;
-					break;
+					auto stage = std::make_shared<Rendering::HAL::ShaderStage>(spec.type);
+					stage->Upload(std::move(source));
+					if (const auto result = stage->Compile(); !result.success)
+					{
+						report(std::format("[Shader Compile] {}<{}> (pass '{}'): {}",
+							p_package.Name(), spec.name, variant.pass, result.message));
+						ok = false;
+						break;
+					}
+					cachedStage = std::move(stage);
 				}
-				stages.push_back(std::move(stage));
+
+				stages.push_back(cachedStage);
+				programKey += stageKey;
+				programKey.push_back('\x1f');
 			}
 
 			if (!ok)
@@ -969,35 +986,41 @@ void main()
 				continue;
 			}
 
-			auto program = std::make_unique<Rendering::HAL::ShaderProgram>();
-			for (const auto& stage : stages)
+			auto& program = programCache[programKey];
+			if (program == nullptr)
 			{
-				program->Attach(*stage);
-			}
-			const auto linkResult = program->Link();
-			for (const auto& stage : stages)
-			{
-				program->Detach(*stage);
-			}
+				auto candidate = std::make_shared<Rendering::HAL::ShaderProgram>();
+				for (const auto& stage : stages)
+				{
+					candidate->Attach(*stage);
+				}
+				const auto linkResult = candidate->Link();
+				for (const auto& stage : stages)
+				{
+					candidate->Detach(*stage);
+				}
 
-			if (!linkResult.success)
-			{
-				report(std::format("[Shader Linking] {} (pass '{}'): {}",
-					p_package.Name(), variant.pass, linkResult.message));
-				continue;
-			}
+				if (!linkResult.success)
+				{
+					report(std::format("[Shader Linking] {} (pass '{}'): {}",
+						p_package.Name(), variant.pass, linkResult.message));
+					continue;
+				}
 
-			// The descriptor layout is compile-time data; the driver is the one that has to
-			// agree. Check it once per shader, on the first linked variant, so a mismatch is a
-			// line in the log rather than a corrupted image.
-			if (!blockValidated)
-			{
-				ValidateBindings(p_package, *program);
-				blockValidated = true;
+				// The descriptor layout is compile-time data; the driver is the one that has to
+				// agree. Check it once per shader, on the first linked program, so a mismatch is
+				// a line in the log rather than a corrupted image.
+				if (!blockValidated)
+				{
+					ValidateBindings(p_package, *candidate);
+					blockValidated = true;
+				}
+
+				program = std::move(candidate);
 			}
 
 			const Rendering::Data::FeatureSet features(variant.features.begin(), variant.features.end());
-			variants[variant.pass].emplace(features, std::move(program));
+			variants[variant.pass].emplace(features, program);
 		}
 
 		if (variants.empty() && p_error != nullptr && p_error->empty())
@@ -1109,6 +1132,7 @@ namespace Rendering::Resources::Loaders
 					Shader* shader = new Shader(p_filePath, AssembleFromPackage(package), RuntimeParameters(package));
 					shader->SetState(RuntimeState(package));
 					shader->SetParameterBlockSize(package.ParameterBlockSize());
+					shader->SetDeclaredFeatures(std::vector<std::string>(package.DeclaredFeatures().begin(), package.DeclaredFeatures().end()));
 					return shader;
 				}
 			}
@@ -1146,6 +1170,7 @@ namespace Rendering::Resources::Loaders
 		Shader* shader = new Shader(p_name, std::move(variants), RuntimeParameters(package));
 		shader->SetState(RuntimeState(package));
 		shader->SetParameterBlockSize(package.ParameterBlockSize());
+		shader->SetDeclaredFeatures(std::vector<std::string>(package.DeclaredFeatures().begin(), package.DeclaredFeatures().end()));
 		return shader;
 	}
 
@@ -1209,6 +1234,7 @@ namespace Rendering::Resources::Loaders
 		p_shader.SetParameters(RuntimeParameters(package));
 		p_shader.SetState(RuntimeState(package));
 		p_shader.SetParameterBlockSize(package.ParameterBlockSize());
+		p_shader.SetDeclaredFeatures(std::vector<std::string>(package.DeclaredFeatures().begin(), package.DeclaredFeatures().end()));
 		if (p_error != nullptr) { p_error->clear(); }
 		return true;
 	}

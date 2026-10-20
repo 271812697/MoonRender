@@ -1,4 +1,4 @@
-#include "MaterialEditorPanel.h"
+﻿#include "MaterialEditorPanel.h"
 #include "MaterialCodeEditor.h"
 #include "MaterialDesigner.h"
 #include "MaterialPreviewWidget.h"
@@ -486,7 +486,7 @@ public:
 				border: 1px solid #268bd2;
 			}
 			QComboBox::drop-down { border: none; width: 18px; }
-			QComboBox::down-arrow { image: url(:/icons/arrow_down.svg); width: 10px; height: 10px; }
+			QComboBox::down-arrow { image: url(:/widgets/icons/arrow_down.svg); width: 10px; height: 10px; }
 			QComboBox QAbstractItemView {
 				background: #3a3a3d;
 				color: #c8ccd0;

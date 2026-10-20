@@ -22,6 +22,8 @@ material {
     culling      : none,
     depthWrite   : false,
 
+    vertexAttributes : [POSITION],
+
     parameters : [
         // Both keep the initializer they were declared with: nothing in the draw site sets
         // u_DepthBias, so the GLSL declaration-time value is the only thing that gives it one.
@@ -31,7 +33,6 @@ material {
 }
 
 vertex {
-    layout (location = 0) in vec3 geo_Pos;
 
     out vec3 FragPos;
 

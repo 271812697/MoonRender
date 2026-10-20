@@ -6,7 +6,10 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # hands the package bytes straight to the runtime), and the command line tool the build drives
 # once per .mat.
 add_library(MoonMatcLib STATIC ${CMAKE_CURRENT_SOURCE_DIR}/src/Matc.cpp)
-target_include_directories(MoonMatcLib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_include_directories(MoonMatcLib PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/MoonRender/include
+)
 set_target_properties(MoonMatcLib
   PROPERTIES
     ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib

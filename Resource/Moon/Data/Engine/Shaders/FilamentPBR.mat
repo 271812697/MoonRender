@@ -1,0 +1,126 @@
+// FilamentPBR: the Filament standard model, ported line by line.
+//
+// This is the experimental material used to align the real-time result with Filament
+// (shaders/src/surface_*.fs). Its includes live in Lighting/Filament/; the engine's
+// Standard material is left untouched so the two can be compared on the material ball.
+
+material {
+    name : FilamentPBR,
+    shadingModel : unlit,
+    blending : opaque,
+    culling : back,
+    depthWrite : true,
+
+    vertexAttributes : [POSITION, UV0, NORMAL, TANGENT, BITANGENT],
+
+    variantFilter : [
+        DIRECTIONAL_LIGHTING,
+        DYNAMIC_LIGHTING,
+        SHADOWING,
+        FOG,
+        PICKING,
+        SSR,
+        DEPTH
+    ],
+
+    parameters : [
+        { type : sampler2D, name : u_AlbedoMap },
+        { type : float4,    name : u_Albedo, default : vec4(1.0) },
+        { type : sampler2D, name : u_MetallicMap },
+        { type : float,     name : u_Metallic, default : 0.0 },
+        { type : sampler2D, name : u_RoughnessMap },
+        { type : float,     name : u_Roughness, default : 0.5 },
+        { type : sampler2D, name : u_AmbientOcclusionMap },
+        { type : sampler2D, name : u_NormalMap },
+        // A uniform rather than a feature on purpose: the editor builds its texture list
+        // from the variant's parameters, and a map only read under a feature is optimized
+        // out of the default variant, so it never showed up in the panel.
+        { type : bool,      name : u_UseNormalMap, default : false },
+        { type : sampler2D, name : u_EmissiveMap },
+        { type : float3,    name : u_EmissiveColor, default : vec3(1.0) },
+        { type : float,     name : u_EmissiveIntensity, default : 0.0 },
+        { type : float,     name : u_Transmission, default : 0.0 },
+
+        { type : samplerCube, name : _IrradianceCube, ui : false },
+        { type : samplerCube, name : _PrefilterCube, ui : false },
+        { type : sampler2D,   name : _BRDFLut, ui : false },
+        { type : sampler2D,   name : _ShadowMap, ui : false },
+        { type : mat4,        name : _LightSpaceMatrix, ui : false }
+    ]
+}
+
+vertex {
+    // The engine's Geometry::Vertex layout (Mesh::Upload): position, texCoords, normal,
+    // tangent, bitangent. The earlier order (normal at 1) fed the UVs in as normals, which
+    // turned the sphere's shading into concentric bands.
+
+    out VS_OUT
+    {
+        vec3 FragPos;
+        vec2 TexCoords;
+        vec3 Normal;
+        mat3 TBN;
+    } vs_out;
+
+    void main()
+    {
+        vs_out.FragPos = vec3(ubo_Model * vec4(geo_Pos, 1.0));
+        vs_out.TexCoords = geo_TexCoords;
+        vs_out.Normal = normalize(mat3(transpose(inverse(ubo_Model))) * geo_Normal);
+        vs_out.TBN = ConstructTBN(ubo_Model, geo_Normal, geo_Tangent, cross(geo_Normal, geo_Tangent));
+        gl_Position = ubo_Projection * ubo_View * vec4(vs_out.FragPos, 1.0);
+    }
+}
+
+fragment {
+    #include ":Shaders/Lighting/Filament/surface_lighting.glsl"
+
+    in VS_OUT
+    {
+        vec3 FragPos;
+        vec2 TexCoords;
+        vec3 Normal;
+        mat3 TBN;
+    } fs_in;
+
+    out vec4 FRAGMENT_COLOR;
+
+    void main()
+    {
+        const vec4 albedoTexel = texture(u_AlbedoMap, fs_in.TexCoords);
+        const vec4 albedo = albedoTexel * u_Albedo;
+        const float metallic = texture(u_MetallicMap, fs_in.TexCoords).r * u_Metallic;
+        const float roughness = texture(u_RoughnessMap, fs_in.TexCoords).r * u_Roughness;
+        const float ao = texture(u_AmbientOcclusionMap, fs_in.TexCoords).r;
+
+        // sRGB sources are decoded once each; lighting works in linear.
+        const vec3 emissive = pow(texture(u_EmissiveMap, fs_in.TexCoords).rgb, vec3(2.2))
+            * pow(u_EmissiveColor, vec3(2.2)) * u_EmissiveIntensity;
+
+        FilamentMaterialInputs material;
+        material.baseColor = pow(albedoTexel.rgb, vec3(2.2)) * pow(u_Albedo.rgb, vec3(2.2));
+        material.metallic = metallic;
+        material.roughness = roughness;
+        material.ambientOcclusion = ao;
+        material.transmission = u_Transmission;
+        material.emissive = emissive;
+
+        vec3 n = normalize(fs_in.Normal);
+        const vec3 v = normalize(ubo_ViewPos - fs_in.FragPos);
+
+        if (u_UseNormalMap)
+        {
+            const vec3 tangentNormal =
+                normalize(texture(u_NormalMap, fs_in.TexCoords).rgb * 2.0 - 1.0);
+            n = normalize(fs_in.TBN * tangentNormal);
+        }
+
+        const PixelParams pixel = preparePixelParams(material, n, v, _BRDFLut);
+        vec3 color = evaluateFilamentSurface(
+            material, pixel, fs_in.FragPos, n, v,
+            _IrradianceCube, _PrefilterCube, _ShadowMap, _LightSpaceMatrix);
+        color += emissive;
+
+        FRAGMENT_COLOR = vec4(color, albedo.a);
+    }
+}

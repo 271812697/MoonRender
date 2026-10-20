@@ -1,4 +1,12 @@
-﻿#include <ranges>
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <filesystem>
+#include <ranges>
+#include <stb_image/stb_image.h>
+#include <Maths/FVector4.h>
+#include <Tools/Utils/PathParser.h>
+#include <Rendering/Settings/EBindingPoint.h>
 #include <Core/ECS/Components/CMaterialRenderer.h>
 #include <Core/Global/ServiceLocator.h>
 #include <Core/Rendering/EngineBufferRenderFeature.h>
@@ -66,6 +74,10 @@ void Core::Rendering::SkyboxRenderPass::Draw(::Rendering::Data::PipelineState p_
 {
 	ZoneScoped;
 	TracyGpuZone("SkyboxRenderPass");
+	if (m_irradianceSHBuffer)
+	{
+		m_irradianceSHBuffer->Bind(::Rendering::Settings::kIrradianceSHUBOBinding);
+	}
 	if (needUpdateSkyTexture && m_captureEnvironment) {
 		needUpdateSkyTexture = false;
 		computeSkyTexture();
@@ -111,6 +123,93 @@ void Core::Rendering::SkyboxRenderPass::Draw(::Rendering::Data::PipelineState p_
 		m_clearMaterial.SetProperty("uBottomColor", mSetting.bottomColor);
 		m_renderer.Present(m_clearMaterial);
 	}
+}
+
+void Core::Rendering::SkyboxRenderPass::computeIrradianceSH()
+{
+	// Resolve the equirect sky the bake came from (the resource key mPath).
+	std::string key = mPath;
+	if (!key.empty() && key.front() == ':') { key.erase(key.begin()); }
+	std::replace(key.begin(), key.end(), '\\', '/');
+
+	const std::string roots[] = {
+		Tools::Utils::PathParser::GetExeDirectory() + "/Moon/Data/Engine/",
+		"Resource/Moon/Data/Engine/",
+		"Moon/Data/Engine/"
+	};
+	std::string resolved;
+	for (const std::string& root : roots)
+	{
+		const std::string candidate = root + key;
+		if (std::filesystem::exists(candidate))
+		{
+			resolved = candidate;
+			break;
+		}
+	}
+	if (resolved.empty()) { return; }
+
+	int width = 0;
+	int height = 0;
+	int channels = 0;
+	float* pixels = stbi_loadf(resolved.c_str(), &width, &height, &channels, 4);
+	if (pixels == nullptr || width <= 0 || height <= 0) { return; }
+
+	// Orthonormal SH9 basis, the same order EvaluateIrradianceSH uses.
+	constexpr float kPi = 3.14159265358979323846f;
+	Maths::FVector3 sh[9]{};
+	const float dPhi = 2.0f * kPi / width;
+	const float dTheta = kPi / height;
+	for (int y = 0; y < height; ++y)
+	{
+		const float theta = (0.5f - (y + 0.5f) / height) * kPi;
+		const float sinTheta = std::sin(theta);
+		const float cosTheta = std::cos(theta);
+		for (int x = 0; x < width; ++x)
+		{
+			const float phi = ((x + 0.5f) / width - 0.5f) * 2.0f * kPi;
+			const float px = cosTheta * std::cos(phi);
+			const float py = sinTheta;
+			const float pz = cosTheta * std::sin(phi);
+
+			const float* texel = pixels + (y * width + x) * 4;
+			const Maths::FVector3 radiance{ texel[0], texel[1], texel[2] };
+			const float dOmega = sinTheta * dTheta * dPhi;
+
+			const float basis[9] = {
+				0.282095f,
+				0.488603f * py, 0.488603f * pz, 0.488603f * px,
+				1.092548f * px * py, 1.092548f * py * pz,
+				0.315392f * (3.0f * pz * pz - 1.0f),
+				1.092548f * px * pz, 0.546274f * (px * px - py * py)
+			};
+			for (int i = 0; i < 9; ++i)
+			{
+				sh[i] += radiance * (basis[i] * dOmega);
+			}
+		}
+	}
+	stbi_image_free(pixels);
+
+	// Cosine-convolved irradiance divided by PI: band scales 1, 2/3, 1/4.
+	for (int i = 0; i < 9; ++i)
+	{
+		sh[i] *= (i == 0) ? 1.0f : (i < 4 ? 2.0f / 3.0f : 0.25f);
+	}
+
+	if (!m_irradianceSHBuffer)
+	{
+		m_irradianceSHBuffer = std::make_unique<::Rendering::HAL::UniformBuffer>();
+		m_irradianceSHBuffer->Allocate(9 * sizeof(Maths::FVector4), ::Rendering::Settings::EAccessSpecifier::STATIC_DRAW);
+	}
+
+	Maths::FVector4 data[9];
+	for (int i = 0; i < 9; ++i)
+	{
+		data[i] = Maths::FVector4{ sh[i].x, sh[i].y, sh[i].z, i == 0 ? 1.0f : 0.0f };
+	}
+	m_irradianceSHBuffer->Upload(data);
+	m_irradianceSHBuffer->Bind(::Rendering::Settings::kIrradianceSHUBOBinding);
 }
 
 void Core::Rendering::SkyboxRenderPass::computeSkyTexture()
@@ -327,6 +426,7 @@ void Core::Rendering::SkyboxRenderPass::computeSkyTexture()
 			// The irradiance cube is sampled with implicit LOD (mipmapped min filter),
 			// so the mip chain must be generated after the convolution.
 			irradianceCube->GenerateMipmaps();
+			computeIrradianceSH();
 			m_renderer.SetViewport(0, 0, frameDescriptor.renderWidth, frameDescriptor.renderHeight);
 		}
 		//prefilter
@@ -345,7 +445,12 @@ void Core::Rendering::SkyboxRenderPass::computeSkyTexture()
 				uint32_t mipWidth = static_cast<uint32_t>(width * std::pow(0.5f, mip));
 				uint32_t mipHeight = static_cast<uint32_t>(height * std::pow(0.5f, mip));
 				m_renderer.SetViewport(0, 0, mipWidth, mipHeight);
-				float roughness = (float)mip / (float)(maxMipLevels - 1);
+				// Filament's prefilter bakes level/maxLod with the inverse of
+				// perceptualRoughnessToLod(): p = 1 - sqrt(1 - level/maxLod). The shaders sample
+				// with the forward curve, so a surface of perceptual roughness p lands on a mip
+				// that was baked for exactly that roughness.
+				const float levelFraction = (float)mip / (float)(maxMipLevels - 1);
+				const float roughness = 1.0f - std::sqrt(std::max(0.0f, 1.0f - levelFraction));
 
 				// Depth buffer must match the current mip size, otherwise the FBO is incomplete.
 				const auto renderbuffer = std::make_shared<::Rendering::HAL::Renderbuffer>(false);

@@ -17,6 +17,8 @@ material {
     culling      : none,          // SetBackfaceCulling(false) at the TopoActor draw site
     depthWrite   : true,          // both face materials keep depth writing on
 
+    vertexAttributes : [POSITION, UV0, NORMAL, DOMAIN_ID],
+
     features : [ SPECULAR_WORKFLOW, WITH_EDGE, SSAO, DISABLE_DOMAIN_COLOR, NORMAL_MAPPING ],
     passes   : [ Transparents ],
 
@@ -83,10 +85,6 @@ material {
 }
 
 vertex {
-layout (location = 0) in vec3 geo_Pos;
-layout (location = 1) in vec2 geo_TexCoords;
-layout (location = 2) in vec3 geo_Normal;
-layout (location = 3) in vec2 geo_DomainId;
 
 out VS_OUT
 {

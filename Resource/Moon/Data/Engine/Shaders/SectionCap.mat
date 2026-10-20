@@ -118,7 +118,8 @@ fragment {
 
         const float MAX_REFLECTION_LOD = float(textureQueryLevels(_PrefilterCube) - 1);
         vec3 R = reflect(-VD, n);
-        vec3 prefilteredColor = textureLod(_PrefilterCube, R, roughness * MAX_REFLECTION_LOD).rgb;
+        const float lod = MAX_REFLECTION_LOD * roughness * (2.0 - roughness);
+        vec3 prefilteredColor = textureLod(_PrefilterCube, R, lod).rgb;
         vec2 brdf = texture(_BRDFLut, vec2(NoV, roughness)).rg;
         vec3 spec = prefilteredColor * (F * brdf.x + brdf.y);
 

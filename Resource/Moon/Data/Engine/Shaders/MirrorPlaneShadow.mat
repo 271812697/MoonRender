@@ -15,17 +15,14 @@ material {
     culling      : back,     // the pass draws with SetBackfaceCulling(true)
     depthWrite   : false,    // ... and with depth testing and depth writing off
 
+    vertexAttributes : [POSITION, UV0, NORMAL, TANGENT, BITANGENT],
+
     parameters : [
         { type : float4, name : uMirroPlane }
     ]
 }
 
 vertex {
-    layout (location = 0) in vec3 geo_Pos;
-    layout (location = 1) in vec2 geo_TexCoords;
-    layout (location = 2) in vec3 geo_Normal;
-    layout (location = 3) in vec3 geo_Tangent;
-    layout (location = 4) in vec3 geo_Bitangent;
 
     void main()
     {

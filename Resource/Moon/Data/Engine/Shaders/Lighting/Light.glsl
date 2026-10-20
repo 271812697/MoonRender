@@ -17,6 +17,7 @@ struct PointLight
     float constant;
     float linear;
     float quadratic;
+    float range;
 };
 
 struct DirectionalLight
@@ -38,6 +39,7 @@ struct SpotLight
     float constant;
     float linear;
     float quadratic;
+    float range;
 };
 
 struct AmbientBoxLight
@@ -75,6 +77,7 @@ PointLight ExtractPointLight(Light light)
     pointLight.constant = light.data[0][3];
     pointLight.linear = light.data[1][3];
     pointLight.quadratic = light.data[2][3];
+    pointLight.range = light.data[2][2];
     return pointLight;
 }
 
@@ -100,6 +103,7 @@ SpotLight ExtractSpotLight(Light light)
     spotLight.constant = light.data[0][3];
     spotLight.linear = light.data[1][3];
     spotLight.quadratic = light.data[2][3];
+    spotLight.range = light.data[2][2];
     return spotLight;
 }
 
@@ -129,9 +133,17 @@ struct LightContribution
     vec3 L;
 };
 
-float CalculateAttenuation(vec3 lightPos, vec3 fragPos, float constant, float linear, float quadratic)
+float CalculateAttenuation(vec3 lightPos, vec3 fragPos, float constant, float linear, float quadratic, float range)
 {
     const float distance = length(lightPos - fragPos);
+    if (range > 0.0)
+    {
+        // Filament's windowed inverse-square falloff: the same 1/d^2 curve, multiplied by
+        // a smooth window that reaches zero at the effect range instead of popping.
+        const float invCutoff = 1.0 / range;
+        const float smoothFactor = clamp(1.0 - distance * distance * invCutoff * invCutoff, 0.0, 1.0);
+        return smoothFactor * smoothFactor / max(distance * distance, 1e-4);
+    }
     const float attenuation = constant + linear * distance + quadratic * (distance * distance);
     return 1.0 / attenuation;
 }
@@ -139,7 +151,7 @@ float CalculateAttenuation(vec3 lightPos, vec3 fragPos, float constant, float li
 LightContribution CalculatePointLightContribution(PointLight light, vec3 fragPos)
 {
     const vec3 L = normalize(light.position - fragPos);
-    const float attenuation = CalculateAttenuation(light.position, fragPos, light.constant, light.linear, light.quadratic);
+    const float attenuation = CalculateAttenuation(light.position, fragPos, light.constant, light.linear, light.quadratic, light.range);
     const vec3 radiance = light.color * light.intensity * attenuation;
     
     return LightContribution(radiance, L);
@@ -167,7 +179,7 @@ LightContribution CalculateDirectionalLightContribution(DirectionalLight light, 
 LightContribution CalculateSpotLightContribution(SpotLight light, vec3 fragPos)
 {
     const vec3 L = normalize(light.position - fragPos);
-    const float attenuation = CalculateAttenuation(light.position, fragPos, light.constant, light.linear, light.quadratic);
+    const float attenuation = CalculateAttenuation(light.position, fragPos, light.constant, light.linear, light.quadratic, light.range);
     
     // Calculate spot intensity
     const float cutOff = cos(radians(light.innerCutoff));

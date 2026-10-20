@@ -169,7 +169,6 @@ namespace MOON {
 				tempMat->SetBackfaceCulling(false);
 				tempMat->SetCastShadows(false);
 				tempMat->SetReceiveShadows(false);
-				tempMat->AddFeature("VERTEX_POS_NORMAL");
 				// IBL: the three pieces Filament's standard model reads.
 				tempMat->SetProperty("_IrradianceCube", GetSceneView.GetRenderer().GetIrradianceCube());
 				tempMat->SetProperty("_PrefilterCube", GetSceneView.GetRenderer().GetPrefilterCube());
@@ -191,7 +190,28 @@ namespace MOON {
 
 					auto& modelRender = actor.AddComponent<Core::ECS::Components::CModelRenderer>();
 					modelRender.SetModel(faceModel);
-					auto mesh = new ::Rendering::Resources::Mesh(domains[i].vertex,
+					std::vector<::Rendering::Geometry::Vertex> meshVertices;
+					meshVertices.reserve(domains[i].vertex.size());
+					for (const auto& source : domains[i].vertex)
+					{
+						::Rendering::Geometry::Vertex vertex{};
+						vertex.position[0] = source.position.x;
+						vertex.position[1] = source.position.y;
+						vertex.position[2] = source.position.z;
+						vertex.normals[0] = source.normals.x;
+						vertex.normals[1] = source.normals.y;
+						vertex.normals[2] = source.normals.z;
+						vertex.texCoords[0] = 0.0f;
+						vertex.texCoords[1] = 0.0f;
+						vertex.tangent[0] = 1.0f;
+						vertex.tangent[1] = 0.0f;
+						vertex.tangent[2] = 0.0f;
+						vertex.bitangent[0] = 0.0f;
+						vertex.bitangent[1] = 1.0f;
+						vertex.bitangent[2] = 0.0f;
+						meshVertices.push_back(vertex);
+					}
+					auto mesh = new ::Rendering::Resources::Mesh(meshVertices,
 						domains[i].indices,
 						0,
 						::Rendering::Settings::EPrimitiveMode::TRIANGLES);

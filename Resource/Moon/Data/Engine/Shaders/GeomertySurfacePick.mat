@@ -15,6 +15,8 @@ material {
     culling      : none,           // the picking pass draws with culling off
     depthWrite   : true,
 
+    vertexAttributes : [POSITION, UV0, NORMAL, DOMAIN_ID],
+
     parameters : [
         // The topology vertices are point sprites, and they are picked through this same
         // material: without a size they would be picked as one pixel dots wherever the
@@ -24,8 +26,6 @@ material {
 }
 
 vertex {
-layout (location = 0) in vec3 geo_Pos;
-layout (location = 3) in vec2 geo_DomainID;
 
 out vec3 VSOUT_World;
 out vec2 VSDomainId;
@@ -34,7 +34,7 @@ void main()
 {
     vec4 worldPos = ubo_Model * vec4(geo_Pos, 1.0);
     VSOUT_World=worldPos.xyz;
-    VSDomainId = geo_DomainID;
+    VSDomainId = geo_DomainId;
     gl_Position = ubo_Projection * ubo_View * worldPos;
     gl_PointSize = u_PointSize;
 }

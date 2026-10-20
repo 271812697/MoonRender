@@ -1,9 +1,12 @@
-﻿#include <ranges>
+#include <ranges>
 #include <tracy/Tracy.hpp>
 #include <algorithm>
 #include <glad/glad.h>
 #include <cstdint>
 #include <cstring>
+#include <Core/ECS/Components/CDirectionalLight.h>
+#include <Core/ECS/Components/CPointLight.h>
+#include <Core/ECS/Components/CSpotLight.h>
 #include <Core/ECS/Components/CModelRenderer.h>
 #include <Core/ECS/Components/CMaterialRenderer.h>
 #include <Core/Global/ServiceLocator.h>
@@ -796,6 +799,34 @@ void Core::Rendering::SceneRenderer::UpdateParsedDrawables(Core::SceneSystem::Sc
 	uint64_t signature = 0xcbf29ce484222325ULL;
 	HashCombine(signature, renderers.size());
 
+	// The variant key of a keyed material depends on which lights exist and on whether a
+	// directional light casts shadows. A light added after the first parse (the material
+	// preview builds its lights that way) must re-run ParseScene, or the drawable keeps a
+	// key without the light bits and the shader compiles those lights out.
+	uint32_t directionalLights = 0;
+	uint32_t punctualLights = 0;
+	uint32_t shadowCastingDirectionals = 0;
+	for (::Core::ECS::Actor* actor : p_scene.GetActors())
+	{
+		if (actor == nullptr || !actor->IsActive())
+		{
+			continue;
+		}
+		if (auto* light = actor->GetComponent<::Core::ECS::Components::CDirectionalLight>())
+		{
+			++directionalLights;
+			if (light->GetCastShadows()) { ++shadowCastingDirectionals; }
+		}
+		if (actor->GetComponent<::Core::ECS::Components::CPointLight>() != nullptr
+			|| actor->GetComponent<::Core::ECS::Components::CSpotLight>() != nullptr)
+		{
+			++punctualLights;
+		}
+	}
+	HashCombine(signature, directionalLights);
+	HashCombine(signature, punctualLights);
+	HashCombine(signature, shadowCastingDirectionals);
+
 	for (const auto modelRenderer : renderers)
 	{
 		const auto& owner = modelRenderer->owner;
@@ -829,6 +860,24 @@ void Core::Rendering::SceneRenderer::UpdateParsedDrawables(Core::SceneSystem::Sc
 		for (const auto material : materials)
 		{
 			HashCombine(signature, HashPointer(material));
+			if (material == nullptr)
+			{
+				continue;
+			}
+
+			// The designer swaps a material's shader when its feature set is recompiled, and
+			// the variant key of a keyed shader is part of the drawable's feature override.
+			// Both have to re-run ParseScene, otherwise the cached drawables keep the old
+			// (feature-only) override and the draw falls back to a variant without the key.
+			HashCombine(signature, HashPointer(material->GetShader()));
+			for (const std::string& feature : material->GetFeatures())
+			{
+				for (const char c : feature)
+				{
+					HashCombine(signature, static_cast<uint64_t>(static_cast<unsigned char>(c)));
+				}
+				HashCombine(signature, 0xFFULL);
+			}
 		}
 
 		for (const auto mesh : model->GetMeshes())
@@ -881,20 +930,42 @@ void Core::Rendering::SceneRenderer::UpdateParsedDrawables(Core::SceneSystem::Sc
 	// A view can strip features that make no sense for what it renders. The material preview
 	// removes distance fade: the fade is a scene-space LOD effect, and the preview's camera sits
 	// inside its range, so the shader's dither turned the whole ball into a dot pattern.
-	if (!m_excludedFeatures.empty())
+	// Variant keys: the engine-side state keyed materials are compiled per draw for. The scene's
+	// lights decide the base bits here; passes (picking/depth) layer their own bit on top later.
+	::Rendering::Data::FeatureSet variantFeatures;
 	{
-		for (auto& drawable : m_parsedDrawables.drawables)
+		bool directional = false;
+		bool dynamic = false;
+		bool shadows = false;
+		for (::Core::ECS::Actor* actor : p_scene.GetActors())
 		{
-			if (drawable.material && !drawable.featureSetOverride.has_value())
+			if (actor == nullptr || !actor->IsActive()) { continue; }
+			if (auto* light = actor->GetComponent<::Core::ECS::Components::CDirectionalLight>())
 			{
-				::Rendering::Data::FeatureSet features = drawable.material->GetFeatures();
-				for (const std::string& excluded : m_excludedFeatures)
-				{
-					features.erase(excluded);
-				}
-				drawable.featureSetOverride = std::move(features);
+				directional = true;
+				shadows = shadows || light->GetCastShadows();
+			}
+			if (actor->GetComponent<::Core::ECS::Components::CPointLight>() != nullptr
+				|| actor->GetComponent<::Core::ECS::Components::CSpotLight>() != nullptr)
+			{
+				dynamic = true;
 			}
 		}
+		if (directional) { variantFeatures.insert("VARIANT_HAS_DIRECTIONAL_LIGHTING"); }
+		if (dynamic) { variantFeatures.insert("VARIANT_HAS_DYNAMIC_LIGHTING"); }
+		if (shadows) { variantFeatures.insert("VARIANT_HAS_SHADOWING"); }
+	}
+
+	for (auto& drawable : m_parsedDrawables.drawables)
+	{
+		if (!drawable.material) { continue; }
+		const bool keyed = drawable.material->GetShader() != nullptr
+			&& drawable.material->GetShader()->UsesVariantKeys();
+		if (!keyed && m_excludedFeatures.empty()) { continue; }
+		::Rendering::Data::FeatureSet features = drawable.material->GetFeatures();
+		for (const std::string& excluded : m_excludedFeatures) { features.erase(excluded); }
+		if (keyed) { features.insert(variantFeatures.begin(), variantFeatures.end()); }
+		drawable.featureSetOverride = std::move(features);
 	}
 
 	m_parsedDrawablesHash = signature;

@@ -23,4 +23,6 @@ namespace Rendering::Settings
 	constexpr uint32_t kReflectionUBOBinding = 1;
 	constexpr uint32_t kMaterialParameterBinding = 2;
 	constexpr uint32_t kObjectUBOBinding = 3;
+	/** The irradiance SH9 coefficients baked from the sky (Filament's IndirectLight SH). */
+	constexpr uint32_t kIrradianceSHUBOBinding = 4;
 }

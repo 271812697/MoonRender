@@ -1,4 +1,5 @@
 #include ":Shaders/Common/Buffers/ReflectionUBO.glsl"
+#include ":Shaders/Common/Buffers/IrradianceSH.glsl"
 
 // Image based lighting, following Filament's standard model (surface_light_indirect.fs):
 // a split-sum prefiltered cubemap for the specular term, an irradiance cubemap for the diffuse
@@ -78,6 +79,14 @@ vec3 EnergyCompensation(vec3 f0, vec2 dfg)
     return vec3(1.0) + f0 * (1.0 / max(dfg.x + dfg.y, 1.0e-4) - 1.0);
 }
 
+// Filament's specularAO(): ambient occlusion attenuates the specular environment less than the
+// diffuse one, because the specular lobe only covers a small cone.
+float specularAO(float NoV, float ao, float perceptualRoughness)
+{
+    const float roughness = perceptualRoughness * perceptualRoughness;
+    return clamp(pow(NoV + ao, exp2(-16.0 * roughness - 1.0)) - 1.0 + ao, 0.0, 1.0);
+}
+
 vec3 CalculateImageBasedLighting(
     samplerCube irradianceCube,
     samplerCube prefilterCube,
@@ -89,7 +98,8 @@ vec3 CalculateImageBasedLighting(
     vec3 diffuseColor,
     vec3 f0,
     float transmission,
-    float refractionIndex
+    float refractionIndex,
+    float ao
 )
 {
     // A local probe only lights what is inside its box.
@@ -106,6 +116,9 @@ vec3 CalculateImageBasedLighting(
     const vec3 v = normalize(V);
     const float NoV = max(dot(n, v), 1.0e-4);
     const float maxLod = float(textureQueryLevels(prefilterCube) - 1);
+    // Filament's perceptualRoughnessToLod(): the prefilter cube bakes each mip with the
+    // inverse of this curve, so sampling here lands on the requested perceptual roughness.
+    const float lod = maxLod * perceptualRoughness * (2.0 - perceptualRoughness);
 
     // The DFG LUT is indexed by (NdotV, perceptualRoughness) and stores scale in R, bias in G.
     // A NaN texel would make the energy compensation below infinite and the pixel black.
@@ -122,19 +135,19 @@ vec3 CalculateImageBasedLighting(
     // as the surface gets rougher, then sample the roughness level.
     vec3 R = ParallaxCorrect(reflect(-v, n), fragPos);
     R = normalize(mix(R, n, perceptualRoughness * perceptualRoughness));
-    vec3 prefiltered = textureLod(prefilterCube, R, perceptualRoughness * maxLod).rgb;
+    vec3 prefiltered = textureLod(prefilterCube, R, lod).rgb;
     if (any(isnan(prefiltered)) || any(isinf(prefiltered)))
     {
         prefiltered = vec3(0.0);
     }
-    const vec3 Fr = E * prefiltered * energyCompensation;
+    const vec3 Fr = E * prefiltered * energyCompensation * specularAO(NoV, ao, perceptualRoughness);
 
-    vec3 irradiance = texture(irradianceCube, n).rgb;
+    vec3 irradiance = HasIrradianceSH() ? EvaluateIrradianceSH(n) : texture(irradianceCube, n).rgb;
     if (any(isnan(irradiance)) || any(isinf(irradiance)))
     {
         irradiance = vec3(0.0);
     }
-    vec3 Fd = diffuseColor * irradiance * (1.0 - E);
+    vec3 Fd = diffuseColor * irradiance * (1.0 - E) * multiBounceAO(ao, diffuseColor);
 
     vec3 Ft = vec3(0.0);
     if (transmission > 0.0)
@@ -143,8 +156,8 @@ vec3 CalculateImageBasedLighting(
         // base colour and attenuated by transmission; the diffuse part stops where the surface
         // transmits.
         vec3 T = ParallaxCorrect(refract(-v, n, 1.0 / max(refractionIndex, 1.0)), fragPos);
-        const vec3 refracted = textureLod(prefilterCube, T, perceptualRoughness * maxLod).rgb;
-        Ft = refracted * diffuseColor * transmission * (1.0 - E);
+        const vec3 refracted = textureLod(prefilterCube, T, lod).rgb;
+        Ft = refracted * diffuseColor * transmission * (1.0 - E) * ao;
         Fd *= (1.0 - transmission);
     }
 

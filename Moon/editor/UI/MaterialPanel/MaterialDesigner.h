@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <QIcon>
 #include <QImage>
 #include <QString>
@@ -112,6 +112,16 @@ namespace MOON
 
 		void MarkDirty();
 		void SetStatus(const QString& p_text, bool p_error = false);
+
+		/** Recompiles the current material''s shader with exactly its feature set (filament''s
+		 * model: features are fixed at compile time) and hot swaps the result into the instance.
+		 * The material''s properties and state are captured and restored across the swap. */
+		void RecompileMaterialFeatures();
+
+		/** Feature names per shader path, captured from the first package the designer saw. A
+		 * fixed-feature recompile shrinks the package''s variant union, and the form must keep
+		 * offering every declared feature, not just the enabled ones. */
+		std::map<std::string, std::vector<std::string>> m_declaredFeatures;
 
 		QListWidget* m_browser = nullptr;
 		QToolButton* m_new = nullptr;

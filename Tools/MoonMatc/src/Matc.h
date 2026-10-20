@@ -20,6 +20,12 @@ namespace Moon::Matc
 		std::string dumpGlslDir;
 		/** Where to write the reflection JSON. Empty means no JSON. */
 		std::string dumpJsonPath;
+		/** Where to write the Filament-style variant enumeration (build-time diagnostic). */
+		std::string dumpVariantsPath;
+		/** When non-empty, compile exactly this feature set instead of the material''s feature
+		 * power set. The material designer uses it to recompile a material after a feature
+		 * toggle (filament''s model: features are fixed at compile time). */
+		std::vector<std::string> enabledFeatures;
 		/** The shader roots: `#include ":Shaders/..."` and plain relative includes resolve
 		 * against these, in order. */
 		std::vector<std::string> includeDirs;

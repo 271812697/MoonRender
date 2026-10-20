@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <cstdint>
 #include <map>
 #include <set>
@@ -78,6 +78,11 @@ namespace Rendering::Resources
 		const std::string& Name() const { return m_name; }
 		const std::vector<Variant>& Variants() const { return m_variants; }
 
+		/** The features the material declared (material { features : [...] }), independent of
+		 * which ones this package was compiled with. The designer's feature toggles come from
+		 * here: a fixed-feature package's variant union only lists the enabled ones. */
+		const std::vector<std::string>& DeclaredFeatures() const { return m_declaredFeatures; }
+
 		/** The material's reflection, straight out of the package: name, types, sampler flag,
 		 * array size and declared default per parameter, plus the vertex attributes. This is
 		 * what a material panel reads instead of asking the driver for active uniforms. */
@@ -130,6 +135,7 @@ namespace Rendering::Resources
 		 * placeholder where the variant's #define lines go. Empty for a package written before
 		 * the shared-stage chunk existed: then the blobs are whole stages, as they used to be. */
 		std::map<std::string, std::string_view> m_stageTexts;
+		std::vector<std::string> m_declaredFeatures;
 	};
 
 	/** Where the per-variant defines are spliced into a stage's shared text. Kept in one place

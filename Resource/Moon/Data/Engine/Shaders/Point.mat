@@ -17,17 +17,14 @@ material {
     depthWrite   : true,
 
     // The point pass has no uniforms of its own: the engine UBO comes from the prelude.
+    vertexAttributes : [POSITION, UV0, NORMAL, TANGENT, BITANGENT],
+
     parameters : [ ]
 }
 
 vertex {
     // Mesh vertex plus the two instancing attributes the pass feeds: location 5 is a vertex
     // position of the selected mesh (one instance per vertex), 6 its colour.
-    layout (location = 0) in vec3 geo_Pos;
-    layout (location = 1) in vec2 geo_TexCoords;
-    layout (location = 2) in vec3 geo_Normal;
-    layout (location = 3) in vec3 geo_Tangent;
-    layout (location = 4) in vec3 geo_Bitangent;
     //instance data
     layout (location = 5) in vec3 aInstanceOffset;
     layout (location = 6) in vec3 aInstanceColor;

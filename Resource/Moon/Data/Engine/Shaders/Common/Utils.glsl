@@ -170,10 +170,27 @@ mat3 ComputeTBN(const vec3 position, const vec3 normal, const vec2 uv) {
 
 vec3 ComputeNormal(vec2 texCoords, vec3 normal, sampler2D normalMap, mat3 TBN)
 {
-    normal = texture(normalMap, texCoords).rgb;
-    normal = normalize(normal * 2.0 - 1.0);
-    normal = normalize(TBN * normal);
-    return normal;
+    vec3 sampled = texture(normalMap, texCoords).rgb;
+    // The engine binds its white 1x1 texture when the material has no normal map. White
+    // decodes to (1,1,1), a normal tilted 45 degrees, which darkens the whole surface; a
+    // flat tangent-space normal is (0.5, 0.5, 1).
+    if (all(greaterThan(sampled, vec3(0.99))))
+    {
+        sampled = vec3(0.5, 0.5, 1.0);
+    }
+    const vec3 tangentNormal = normalize(sampled * 2.0 - 1.0);
+    return normalize(TBN * tangentNormal);
+}
+
+// Filament's multiBounceAO (Jimenez 2016, "Practical Strategies for Managing Lighting in
+// Games"): a plain ao factor darkens cavities too much because it ignores the light that
+// bounces back into them. This approximation restores it from the diffuse colour.
+vec3 multiBounceAO(float ao, vec3 diffuseColor)
+{
+    vec3 a = 2.0404 * diffuseColor - 0.3324;
+    vec3 b = -4.7951 * diffuseColor + 0.6417;
+    vec3 c = 2.7552 * diffuseColor + 0.6903;
+    return max(vec3(ao), ((ao * a + b) * ao + c) * ao);
 }
 
 // [Deprecated] Kept for backward compatibility. Prefer using `ComputeNormal()` without the `enableNormalMapping` parameter,
