@@ -19,68 +19,60 @@ material {
 
     vertexAttributes : [POSITION, UV0, NORMAL, DOMAIN_ID],
 
-    features : [ SPECULAR_WORKFLOW, WITH_EDGE, SSAO, DISABLE_DOMAIN_COLOR, NORMAL_MAPPING ],
+    features : [ WITH_EDGE, DISABLE_DOMAIN_COLOR ],
     passes   : [ Transparents ],
 
     parameters : [
+        // label / group / min / max / step / color are the designer schema, read by the
+        // material designer and the actor inspector instead of guessing from the name.
         // The edge expansion reads the width in the geometry stage and feathers with it in
         // the fragment stage, so it is one parameter for both.
-        { type : float,     name : lineWidth, default : 1.0 },
-        { type : float3,    name : edgeColor },
-        { type : float,     name : edgeOpacity, default : 1.0 },
+        { type : float,     name : lineWidth, default : 1.0, label : "Line Width", group : "Edge", min : 0.0, max : 10.0, step : 0.1 },
+        { type : float3,    name : edgeColor, label : "Edge Color", group : "Edge", color : true },
+        { type : float,     name : edgeOpacity, default : 1.0, label : "Edge Opacity", group : "Edge", min : 0.0, max : 1.0, step : 0.005 },
 
-        { type : sampler2D, name : u_AlbedoMap },
-        { type : float4,    name : u_Albedo, default : vec4(1.0) },
-        { type : sampler2D, name : u_NormalMap },
-        { type : sampler2D, name : u_AmbientOcclusionMap },
-        { type : sampler2D, name : u_MaskMap },
+        { type : sampler2D, name : u_AlbedoMap, label : "Albedo Map", group : "Textures" },
+        { type : float4,    name : u_Albedo, default : vec4(1.0), label : "Base Color", group : "Base", color : true },
+        { type : sampler2D, name : u_NormalMap, label : "Normal Map", group : "Textures" },
+        { type : bool,      name : u_UseNormalMap, default : false, label : "Use Normal Map", group : "Base" },
+        { type : sampler2D, name : u_AmbientOcclusionMap, label : "Ambient Occlusion Map", group : "Textures" },
 
-        { type : sampler2D, name : u_EmissiveMap },
-        { type : float3,    name : u_EmissiveColor, default : vec3(1.0, 1.0, 1.0) },
-        { type : float,     name : u_EmissiveIntensity, default : 0.0 },
+        { type : sampler2D, name : u_EmissiveMap, label : "Emissive Map", group : "Textures" },
+        { type : float3,    name : u_EmissiveColor, default : vec3(0.0, 0.0, 0.0), label : "Emissive Color", group : "Base", color : true },
+        { type : float,     name : u_EmissiveIntensity, default : 1.0, label : "Emissive Intensity", group : "Base", min : 0.0, max : 10.0, step : 0.01 },
 
-        // The two work flows share one shader: SPECULAR_WORKFLOW picks these, the default
-        // variant (metallic/roughness) picks the four below. All of them are declared for
-        // every variant; the driver drops the ones a variant does not read.
-        { type : sampler2D, name : u_SpecularMap },
-        { type : float,     name : u_Specular, default : 1.0 },
-        { type : sampler2D, name : u_GlossinessMap },
-        { type : float,     name : u_Glossiness, default : 1.0 },
+        { type : sampler2D, name : u_MetallicMap, label : "Metallic Map", group : "Textures" },
+        { type : float,     name : u_Metallic, default : 0.8, label : "Metallic", group : "Base", min : 0.0, max : 1.0, step : 0.005 },
+        { type : sampler2D, name : u_RoughnessMap, label : "Roughness Map", group : "Textures" },
+        { type : float,     name : u_Roughness, default : 0.4, label : "Roughness", group : "Base", min : 0.0, max : 1.0, step : 0.005 },
 
-        { type : sampler2D, name : u_MetallicMap },
-        { type : float,     name : u_Metallic, default : 1.0 },
-        { type : sampler2D, name : u_RoughnessMap },
-        { type : sampler2D, name : u_RoughnessMetallicMap },
-        { type : float,     name : u_Roughness, default : 1.0 },
+        // Filament standard model inputs, the same set FilamentPBR.mat exposes. Defaults are
+        // the material values used by the CAD face baseline.
+        { type : float,     name : u_Reflectance, default : 0.42, label : "Reflectance", group : "Base", min : 0.0, max : 1.0, step : 0.005 },
+        { type : float,     name : u_ClearCoat, default : 1.0, label : "Clear Coat", group : "Base", min : 0.0, max : 1.0, step : 0.005 },
+        { type : float,     name : u_ClearCoatRoughness, default : 0.53, label : "Clear Coat Roughness", group : "Base", min : 0.0, max : 1.0, step : 0.005 },
+        { type : float,     name : u_Thickness, default : 10.0, label : "Thickness", group : "Parameters", min : 0.0, max : 10.0, step : 0.01 },
+        { type : float,     name : u_SpecularFactor, default : 0.0, label : "Specular Factor", group : "Base", min : 0.0, max : 1.0, step : 0.005 },
+        { type : float3,    name : u_SpecularColorFactor, default : vec3(1.0, 0.8117647, 0.7490196), label : "Specular Color Factor", group : "Base", color : true },
+        { type : float3,    name : u_Absorption, default : vec3(0.0), label : "Absorption", group : "Parameters", color : true },
 
-        { type : float,     name : u_RefractionIndex, default : 1.5 },       // 1.0 = air, 1.33 = water, 1.5 = glass, etc.
-        { type : float,     name : u_Transmission, default : 0.0 },          // 0.0 = opaque, 1.0 = fully transmissive
-        { type : float2,    name : u_TextureTiling, default : vec2(1.0, 1.0) },
-        { type : float2,    name : u_TextureOffset, default : vec2(0.0, 0.0) },
-
-        { type : float,     name : u_AlphaClippingThreshold, default : 0.0 },
-        { type : bool,      name : u_AlphaDithering, default : false },
-
-        // Useful when no post-processing is applied.
-        { type : bool,      name : u_BuiltInToneMapping, default : false },
-        { type : bool,      name : u_BuiltInGammaCorrection, default : false },
+        { type : float,     name : u_RefractionIndex, default : 2.94, label : "Refraction Index", group : "Parameters", min : 1.0, max : 3.0, step : 0.01 },       // 1.0 = air, 1.33 = water, 1.5 = glass, etc.
+        { type : float,     name : u_Transmission, default : 0.0, label : "Transmission", group : "Parameters", min : 0.0, max : 1.0, step : 0.005 },          // 0.0 = opaque, 1.0 = fully transmissive
 
         // The Transparents pass: the depth peel this material is drawn with when it is the
-        // transparent instance of the face material.
-        { type : sampler2D, name : DepthPeelTex },
-        { type : sampler2D, name : OpaqueDepthTex },
+        // transparent instance of the face material. Engine-owned, not a material parameter.
+        { type : sampler2D, name : DepthPeelTex, ui : false },
+        { type : sampler2D, name : OpaqueDepthTex, ui : false },
 
-        { type : sampler2D,   name : _ShadowMap },
-        { type : mat4,        name : _LightSpaceMatrix },
+        { type : sampler2D,   name : _ShadowMap, ui : false },
+        { type : mat4,        name : _LightSpaceMatrix, ui : false },
 
-        { type : samplerCube, name : _IrradianceCube },
-        { type : samplerCube, name : _PrefilterCube },
-        { type : sampler2D,   name : _BRDFLut },
-        { type : sampler2D,   name : occlusionTex },
-        { type : float,       name : u_AoStrength, default : 3.0 },
+        { type : samplerCube, name : _IrradianceCube, ui : false },
+        { type : samplerCube, name : _PrefilterCube, ui : false },
+        { type : sampler2D,   name : _BRDFLut, ui : false },
 
         // One colour per B-rep domain, indexed by the domain id attribute.
-        { type : samplerBuffer, name : domainColorTex }
+        { type : samplerBuffer, name : domainColorTex, ui : false }
     ]
 }
 
@@ -208,7 +200,14 @@ void main()
 }
 
 fragment {
-#include ":Shaders/Lighting/PBR.glsl"
+    // This material keeps the feature power-set variants (it has no variantFilter), so the
+    // scene renderer does not add the engine VARIANT_HAS_* bits. Declare the lighting variants
+    // the CAD surface needs here; without them the light loop's point / directional / spot
+    // cases are compiled out and only ambient lights + IBL would light the faces.
+    #define VARIANT_HAS_DIRECTIONAL_LIGHTING
+    #define VARIANT_HAS_DYNAMIC_LIGHTING
+
+#include ":Shaders/Lighting/Filament/surface_lighting.glsl"
 
 in GS_OUT
 {
@@ -227,51 +226,10 @@ in GS_OUT
 // by MoonMatc in front of this block (the same holds for every other uniform that used to be
 // declared here - see the parameters list above).
 
-#define MATERIAL_HAS_NORMAL
-#define HAS_ATTRIBUTE_TANGENTS
-#define MIN_N_DOT_V 1e-4
-#define MIN_PERCEPTUAL_ROUGHNESS 0.045
-#define MIN_ROUGHNESS            0.002025
-#define saturate(x)                 clamp(x, 0.0, 1.0)
-
-float sq(float x) {
-    return x * x;
-}
-float max3(const vec3 v) {
-    return max(v.x, max(v.y, v.z));
-}
-float vmax(const vec2 v) {
-    return max(v.x, v.y);
-}
-float vmax(const vec3 v) {
-    return max(v.x, max(v.y, v.z));
-}
-float vmax(const vec4 v) {
-    return max(max(v.x, v.y), max(v.z, v.w));
-}
-float min3(const vec3 v) {
-    return min(v.x, min(v.y, v.z));
-}
-float vmin(const vec2 v) {
-    return min(v.x, v.y);
-}
-float vmin(const vec3 v) {
-    return min(v.x, min(v.y, v.z));
-}
-float vmin(const vec4 v) {
-    return min(min(v.x, v.y), min(v.z, v.w));
-}
-#define MIN_N_DOT_V 1e-4
-float clampNoV(float NoV) {
-    return max(NoV, MIN_N_DOT_V);
-}
+// The shared Filament prelude (surface_common.glsl) provides saturate/pow5 and the standard
+// model helpers; only the CAD-specific normal mapping below is kept here.
 
 
-
-// ----------------------------------------------------------------------------
-
-
-#if defined(NORMAL_MAPPING)
 vec3 getNormalFromMap(vec3 Normal)
 {
     vec3 tangentNormal = texture(u_NormalMap, fs_in.TexCoords).xyz * 2.0 - 1.0;
@@ -288,7 +246,6 @@ vec3 getNormalFromMap(vec3 Normal)
 
     return normalize(TBN * tangentNormal);
 }
-#endif
 
 
 out vec4 FRAGMENT_COLOR;
@@ -325,14 +282,9 @@ void main()
     }
 
 
-    vec2 texCoords = TileAndOffsetTexCoords(fs_in.TexCoords, u_TextureTiling, u_TextureOffset);
+    const vec2 texCoords = fs_in.TexCoords;
     vec4 albedoTexel = texture(u_AlbedoMap, texCoords);
     vec4 albedo = albedoTexel * u_Albedo;
-    albedo.a *= texture(u_MaskMap, texCoords).r;
-    if (albedo.a < u_AlphaClippingThreshold)
-    {
-        discard;
-    }
 
     // The albedo map, the picker tint and the domain colour are all sRGB: decode each one and
     // combine in linear. Decoding the product (the old path) darkens any tint that is not white.
@@ -341,12 +293,6 @@ void main()
     int domainIndex=int(round(fs_in.DomainId.x));
     linearAlbedo *= pow(texelFetch(domainColorTex,domainIndex).rgb, vec3(2.2));
 #endif
-
-    if (u_AlphaDithering && Dithering(albedo.a, gl_FragCoord.xy) < 0)
-    {
-        discard;
-    }
-
 
     vec3 normal = normalize(fs_in.Normal);
   
@@ -359,32 +305,14 @@ void main()
     } 
     vec3 gnormal=normal;
 
-#if defined(NORMAL_MAPPING)
-    normal=getNormalFromMap(normal);
-#endif
-   
+    if (u_UseNormalMap) {
+        normal=getNormalFromMap(normal);
+    }
 
-#if defined(SPECULAR_WORKFLOW)
-    const float specular = texture(u_SpecularMap, texCoords).r * u_Specular;
-    const float glossiness = texture(u_GlossinessMap, texCoords).r * u_Glossiness;
-    const float metallic = 1.0 - specular;
-    const float roughness = 1.0 - glossiness;
-#else
     const float metallic = texture(u_MetallicMap, texCoords).r * u_Metallic;
     const float roughness = texture(u_RoughnessMap, texCoords).r * u_Roughness;
-#endif
 
-#if defined(SSAO)
-    vec4 ndcpos= ubo_Projection * ubo_View * vec4(fs_in.FragPos, 1.0);
-    ndcpos.xyz=ndcpos.xyz/ndcpos.w;
-    ndcpos.xy=(ndcpos.xy+1.0)/2.0;
-    float ssao=texture(occlusionTex, ndcpos.xy).r;
-    // Strength boost: 1.0 keeps the raw SSAO value, values > 1.0 darken the
-    // occlusion further (e.g. 1.5-2.0), 0.0 disables the effect.
-    const float ao = mix(1.0, ssao, u_AoStrength);
-#else
     const float ao = texture(u_AmbientOcclusionMap, texCoords).r;
-#endif
 
 
 #if defined(WITH_EDGE)
@@ -407,31 +335,40 @@ void main()
     float opacityFactor = clamp(fs_in.screenLengthOutput / 50., 0.15, 1.0);
     linearAlbedo = mix(linearAlbedo, pow(edgeColor, vec3(2.2)), emix*opacityFactor*edgeOpacity);
 #endif
-   vec3 pbr = PBRLighting(
-        linearAlbedo,
-        metallic,
-        roughness,
-        ao,
-        normal,
-        VD,
-        fs_in.FragPos,
-        _ShadowMap,
-        _LightSpaceMatrix,
-        _IrradianceCube,
-        _PrefilterCube,
-        _BRDFLut,
-        u_Transmission,
-        u_RefractionIndex
-    );
+    // Filament standard model, the same include chain FilamentPBR.mat uses. Everything the
+    // CAD surface has already computed (albedo including domain/edge colour, metallic/
+    // roughness, AO map, geometric/mapped normal, ortho view vector) is handed over as material
+    // inputs; shading, clear coat, transmission and the IBL stay in Lighting/Filament/.
+    //
+    // NOTE: unlike the old Lighting/IBL.glsl path this one does not apply ParallaxCorrect or
+    // the local reflection-probe OBB mask yet; that is a known difference (see
+    // docs/FilamentAlignmentTODO.md, "GeomertySurface 迁移").
+    FilamentMaterialInputs material;
+    material.baseColor = linearAlbedo;
+    material.metallic = clamp(metallic, 0.0, 1.0);
+    material.roughness = roughness;
+    material.reflectance = u_Reflectance;
+    material.specularFactor = u_SpecularFactor;
+    material.specularColorFactor = u_SpecularColorFactor;
+    material.refractionIndex = u_RefractionIndex;
+    material.thickness = u_Thickness;
+    material.clearCoat = u_ClearCoat;
+    material.clearCoatRoughness = u_ClearCoatRoughness;
+    material.ambientOcclusion = clamp(ao, 0.0, 1.0);
+    material.transmission = u_Transmission;
+    material.absorption = u_Absorption;
+    // GeomertySurface adds emissive itself after the shading (it decodes the map and the picker
+    // colour separately); the shared function does not read this field.
+    material.emissive = vec3(0.0);
 
-    // Simple built-in tonemapping (Reinhard) and gamma correction for elements
-    // not affected by post-processing (e.g. debug, UI, etc.), but still aiming
-    // to approximate the final PBR look.
-    // The flag is broadcast with bvec3(): `mix(genType, genType, bool)` is not an overload the
-    // GLSL 4.50 spec has (the boolean selector is the genBType one), so the old spelling only
-    // compiled because the driver accepted it. Selecting per component is exactly what it did.
-    pbr = mix(pbr, pbr / (pbr + vec3(1.0)), bvec3(u_BuiltInToneMapping));
-    pbr = mix(pbr, pow(pbr, vec3(1.0 / 2.2)), bvec3(u_BuiltInGammaCorrection));
+    // Filament's specular AA, as in FilamentPBR: widen the roughness where the shading normal
+    // changes quickly across the pixel.
+    FilamentMaterialInputs filteredMaterial = material;
+    filteredMaterial.roughness = normalFiltering(material.roughness, normal);
+    const PixelParams pixel = preparePixelParams(filteredMaterial, normal, VD, _BRDFLut);
+    vec3 pbr = evaluateFilamentSurface(
+        material, pixel, fs_in.FragPos, normal, VD,
+        _IrradianceCube, _PrefilterCube, _ShadowMap, _LightSpaceMatrix, _BRDFLut);
 
     // The emissive map is sRGB and the colour comes from the panel's colour picker, which is
     // sRGB too: decode each separately, then scale by the (linear) intensity. Decoding the

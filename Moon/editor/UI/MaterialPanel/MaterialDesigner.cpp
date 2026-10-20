@@ -112,12 +112,9 @@ namespace MOON
 			return label;
 		}
 
-		bool IsColorParameter(const std::string& p_name)
+		bool IsAlbedoParameter(const std::string& p_name)
 		{
-			const std::string name = ToLower(p_name);
-			return name.find("albedo") != std::string::npos
-				|| name.find("color") != std::string::npos
-				|| name.find("tint") != std::string::npos;
+			return ToLower(p_name).find("albedo") != std::string::npos;
 		}
 
 		/** "PARALLAX_MAPPING" -> "Parallax Mapping", the label of a feature toggle. */
@@ -140,11 +137,6 @@ namespace MOON
 				start = false;
 			}
 			return label;
-		}
-
-		bool IsAlbedoParameter(const std::string& p_name)
-		{
-			return ToLower(p_name).find("albedo") != std::string::npos;
 		}
 
 		/** The range a unit-less material scalar gets.
@@ -276,7 +268,15 @@ namespace MOON
 				if (std::holds_alternative<int>(value)) { return std::get<int>(value); }
 				if (std::holds_alternative<float>(value)) { return std::get<float>(value); }
 				if (std::holds_alternative<FVector2>(value)) { return QVariant::fromValue(std::get<FVector2>(value)); }
-				if (std::holds_alternative<FVector3>(value)) { return QVariant::fromValue(std::get<FVector3>(value)); }
+				if (std::holds_alternative<FVector3>(value))
+				{
+					const FVector3& vector = std::get<FVector3>(value);
+					if (m_colorNames.contains(name))
+					{
+						return QColor::fromRgbF(vector.x, vector.y, vector.z);
+					}
+					return QVariant::fromValue(vector);
+				}
 				if (std::holds_alternative<FVector4>(value))
 				{
 					const FVector4& vector = std::get<FVector4>(value);
@@ -344,27 +344,41 @@ namespace MOON
 				if (p_value.userType() == QMetaType::QColor)
 				{
 					const QColor color = p_value.value<QColor>();
-					m_material.SetProperty(name, FVector4{
-						static_cast<float>(color.redF()),
-						static_cast<float>(color.greenF()),
-						static_cast<float>(color.blueF()),
-						static_cast<float>(color.alphaF()) });
-
-					if (IsAlbedoParameter(name))
+					if (std::holds_alternative<FVector3>(current))
 					{
-						// The same rule the property panel applies to u_Albedo: alpha below 1
-						// makes the instance transparent, so the preview and the viewport agree.
-						// An explicit add/multiply/screen mode is the user's choice, though - the
-						// alpha of the colour must not drag it back to the plain alpha blend.
-						using Rendering::Settings::EBlendMode;
-						if (m_material.GetBlendMode() == EBlendMode::BLEND_OPAQUE
-							|| m_material.GetBlendMode() == EBlendMode::BLEND_TRANSPARENT)
+						m_material.SetProperty(name, FVector3{
+							static_cast<float>(color.redF()),
+							static_cast<float>(color.greenF()),
+							static_cast<float>(color.blueF()) });
+					}
+					else if (std::holds_alternative<FVector4>(current))
+					{
+						m_material.SetProperty(name, FVector4{
+							static_cast<float>(color.redF()),
+							static_cast<float>(color.greenF()),
+							static_cast<float>(color.blueF()),
+							static_cast<float>(color.alphaF()) });
+
+						if (IsAlbedoParameter(name))
 						{
-							const bool transparent = color.alphaF() < 0.999f;
-							m_material.SetTransparent(transparent);
-							m_material.SetBlendable(transparent);
-							m_material.SetDepthWriting(true);
+							// The same rule the property panel applies to u_Albedo: alpha below 1
+							// makes the instance transparent, so the preview and the viewport agree.
+							// An explicit add/multiply/screen mode is the user's choice, though - the
+							// alpha of the colour must not drag it back to the plain alpha blend.
+							using Rendering::Settings::EBlendMode;
+							if (m_material.GetBlendMode() == EBlendMode::BLEND_OPAQUE
+								|| m_material.GetBlendMode() == EBlendMode::BLEND_TRANSPARENT)
+							{
+								const bool transparent = color.alphaF() < 0.999f;
+								m_material.SetTransparent(transparent);
+								m_material.SetBlendable(transparent);
+								m_material.SetDepthWriting(true);
+							}
 						}
+					}
+					else
+					{
+						return;
 					}
 				}
 				else if (std::holds_alternative<bool>(current)) { m_material.SetProperty(name, p_value.toBool()); }
@@ -420,16 +434,25 @@ namespace MOON
 
 				if (p_incoming.userType() == QMetaType::QColor)
 				{
-					if (!std::holds_alternative<FVector4>(p_current))
-					{
-						return false;
-					}
-					const FVector4& stored = std::get<FVector4>(p_current);
 					const QColor color = p_incoming.value<QColor>();
-					return std::abs(stored.x - static_cast<float>(color.redF())) < 1e-4f
-						&& std::abs(stored.y - static_cast<float>(color.greenF())) < 1e-4f
-						&& std::abs(stored.z - static_cast<float>(color.blueF())) < 1e-4f
-						&& std::abs(stored.w - static_cast<float>(color.alphaF())) < 1e-4f;
+					if (std::holds_alternative<FVector3>(p_current))
+					{
+						const FVector3& stored = std::get<FVector3>(p_current);
+						constexpr float epsilon = 1.0f / 255.0f;
+						return std::abs(stored.x - static_cast<float>(color.redF())) <= epsilon
+							&& std::abs(stored.y - static_cast<float>(color.greenF())) <= epsilon
+							&& std::abs(stored.z - static_cast<float>(color.blueF())) <= epsilon;
+					}
+					if (std::holds_alternative<FVector4>(p_current))
+					{
+						const FVector4& stored = std::get<FVector4>(p_current);
+						constexpr float epsilon = 1.0f / 255.0f;
+						return std::abs(stored.x - static_cast<float>(color.redF())) <= epsilon
+							&& std::abs(stored.y - static_cast<float>(color.greenF())) <= epsilon
+							&& std::abs(stored.z - static_cast<float>(color.blueF())) <= epsilon
+							&& std::abs(stored.w - static_cast<float>(color.alphaF())) <= epsilon;
+					}
+					return false;
 				}
 				if (std::holds_alternative<bool>(p_current)) { return std::get<bool>(p_current) == p_incoming.toBool(); }
 				if (std::holds_alternative<int>(p_current)) { return std::get<int>(p_current) == p_incoming.toInt(); }
@@ -1098,7 +1121,7 @@ namespace MOON
 			if (!parameter.isSampler)
 			{
 				labelToUniform.emplace(label, parameter.name);
-				if (parameter.type == "vec4" && (parameter.isColor || IsColorParameter(parameter.name)))
+				if (parameter.isColor)
 				{
 					colorNames.insert(parameter.name);
 				}
@@ -1323,11 +1346,18 @@ namespace MOON
 			}
 			else if (type == "vec3")
 			{
-				group->addProperty(new FVec3Property(qname, m_component.get()));
+				if (parameter.isColor)
+				{
+					group->addProperty(new ColorPickerProperty(qname, m_component.get()));
+				}
+				else
+				{
+					group->addProperty(new FVec3Property(qname, m_component.get()));
+				}
 			}
 			else if (type == "vec4")
 			{
-				if (parameter.isColor || IsColorParameter(parameter.name))
+				if (parameter.isColor)
 				{
 					group->addProperty(new ColorPickerProperty(qname, m_component.get()));
 				}

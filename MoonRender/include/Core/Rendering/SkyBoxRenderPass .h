@@ -59,7 +59,10 @@ namespace Core::Rendering
 		std::shared_ptr<::Rendering::HAL::Texture> prefilterCube;
 		std::unique_ptr<::Rendering::HAL::UniformBuffer> m_irradianceSHBuffer;
 		SkyBoxSetting mSetting;
-		std::string mPath = ":Textures/PureSky.hdr";
+		// The default environment is the same studio HDR the FilamentPBR material preview
+		// bakes, so a material judged in the viewport and one judged in the preview share
+		// their IBL. A scene/Setting-panel sky texture can still override it.
+		std::string mPath = ":Textures/Studio.hdr";
 		bool needUpdateSkyTexture = true;
 		bool m_captureEnvironment = true;
 	};

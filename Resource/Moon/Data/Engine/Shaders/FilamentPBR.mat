@@ -24,28 +24,30 @@ material {
     ],
 
     parameters : [
-        { type : sampler2D, name : u_AlbedoMap },
-        { type : float4,    name : u_Albedo, default : vec4(1.0) },
-        { type : sampler2D, name : u_MetallicMap },
-        { type : float,     name : u_Metallic, default : 0.0 },
-        { type : sampler2D, name : u_RoughnessMap },
-        { type : float,     name : u_Roughness, default : 0.5 },
+        // label / group / min / max / step / color are the designer schema. The material
+        // designer and the actor inspector read them instead of guessing from the name.
+        { type : sampler2D, name : u_AlbedoMap, label : "Albedo Map", group : "Textures" },
+        { type : float4,    name : u_Albedo, default : vec4(1.0), label : "Base Color", group : "Base", color : true },
+        { type : sampler2D, name : u_MetallicMap, label : "Metallic Map", group : "Textures" },
+        { type : float,     name : u_Metallic, default : 0.0, label : "Metallic", group : "Base", min : 0.0, max : 1.0, step : 0.005 },
+        { type : sampler2D, name : u_RoughnessMap, label : "Roughness Map", group : "Textures" },
+        { type : float,     name : u_Roughness, default : 0.5, label : "Roughness", group : "Base", min : 0.0, max : 1.0, step : 0.005 },
         { type : float,     name : u_Reflectance, default : 0.5, label : "Reflectance", group : "Base", min : 0.0, max : 1.0, step : 0.005 },
         { type : float,     name : u_SpecularFactor, default : 1.0, label : "Specular Factor", group : "Base", min : 0.0, max : 1.0, step : 0.005 },
-        { type : float3,    name : u_SpecularColorFactor, default : vec3(1.0), label : "Specular Color Factor", group : "Base" },
+        { type : float3,    name : u_SpecularColorFactor, default : vec3(1.0), label : "Specular Color Factor", group : "Base", color : true },
         { type : float,     name : u_ClearCoat, default : 0.0, label : "Clear Coat", group : "Base", min : 0.0, max : 1.0, step : 0.005 },
         { type : float,     name : u_ClearCoatRoughness, default : 0.0, label : "Clear Coat Roughness", group : "Base", min : 0.0, max : 1.0, step : 0.005 },
-        { type : sampler2D, name : u_AmbientOcclusionMap },
-        { type : sampler2D, name : u_NormalMap },
+        { type : sampler2D, name : u_AmbientOcclusionMap, label : "Ambient Occlusion Map", group : "Textures" },
+        { type : sampler2D, name : u_NormalMap, label : "Normal Map", group : "Textures" },
         // A uniform rather than a feature on purpose: the editor builds its texture list
         // from the variant's parameters, and a map only read under a feature is optimized
         // out of the default variant, so it never showed up in the panel.
-        { type : bool,      name : u_UseNormalMap, default : false },
-        { type : sampler2D, name : u_EmissiveMap },
-        { type : float3,    name : u_EmissiveColor, default : vec3(1.0) },
-        { type : float,     name : u_EmissiveIntensity, default : 0.0 },
-        { type : float,     name : u_Transmission, default : 0.0 },
-        { type : float3,    name : u_Absorption, default : vec3(0.0), label : "Absorption", group : "Parameters" },
+        { type : bool,      name : u_UseNormalMap, default : false, label : "Use Normal Map", group : "Base" },
+        { type : sampler2D, name : u_EmissiveMap, label : "Emissive Map", group : "Textures" },
+        { type : float3,    name : u_EmissiveColor, default : vec3(1.0), label : "Emissive Color", group : "Base", color : true },
+        { type : float,     name : u_EmissiveIntensity, default : 0.0, label : "Emissive Intensity", group : "Base", min : 0.0, max : 10.0, step : 0.01 },
+        { type : float,     name : u_Transmission, default : 0.0, label : "Transmission", group : "Base", min : 0.0, max : 1.0, step : 0.005 },
+        { type : float3,    name : u_Absorption, default : vec3(0.0), label : "Absorption", group : "Parameters", color : true },
         { type : float,     name : u_RefractionIndex, default : 1.5, label : "Refraction Index", group : "Parameters", min : 1.0, max : 3.0, step : 0.01 },
         { type : float,     name : u_Thickness, default : 1.0, label : "Thickness", group : "Parameters", min : 0.0, max : 10.0, step : 0.01 },
 

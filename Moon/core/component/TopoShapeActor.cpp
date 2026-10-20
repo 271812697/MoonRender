@@ -1,4 +1,4 @@
-﻿#include "core/component/TopoShapeActor.h"
+#include "core/component/TopoShapeActor.h"
 #include "renderer/SceneView.h"
 #include <Core/ResourceManagement/MaterialManager.h>
 #include <Core/ECS/Components/CMaterialRenderer.h>
@@ -92,12 +92,7 @@ namespace MOON {
 				//tempMat->SetDepthWriting(false);
 				faceMat->SetShader(GetShaderService[":Shaders\\GeomertySurface.mat"]);
 				faceMat->SetProperty("u_Albedo",Maths::FVector4(1,1,1,1));
-				faceMat->SetProperty("u_AlphaClippingThreshold", 0.0f);
-				faceMat->SetProperty("u_Roughness", 0.25f);
-				faceMat->SetProperty("u_Metallic", 0.25f);
-				// Emission
-				faceMat->SetProperty("u_EmissiveIntensity", 1.0f);
-				faceMat->SetProperty("u_EmissiveColor", Maths::FVector3{ 0.0f, 0.0f, 0.0f });
+				// Everything else stays at the shader's declared defaults.
 				faceMat->TrySetProperty("_IrradianceCube", renderer.GetIrradianceCube());
 				faceMat->TrySetProperty("_PrefilterCube", renderer.GetPrefilterCube());
 				faceMat->TrySetProperty("_BRDFLut", renderer.GetBrdfTexture());
@@ -108,12 +103,7 @@ namespace MOON {
 				//tempMat->SetDepthWriting(false);
 				faceTransparentMat->SetShader(GetShaderService[":Shaders\\GeomertySurface.mat"]);
 				faceTransparentMat->SetProperty("u_Albedo", Maths::FVector4(1, 0, 0, 0.5));
-				faceTransparentMat->SetProperty("u_AlphaClippingThreshold", 0.0f);
-				faceTransparentMat->SetProperty("u_Roughness", 0.25f);
-				faceTransparentMat->SetProperty("u_Metallic", 0.25f);
-				// Emission
-				faceTransparentMat->SetProperty("u_EmissiveIntensity", 1.0f);
-				faceTransparentMat->SetProperty("u_EmissiveColor", Maths::FVector3{ 0.0f, 0.0f, 0.0f });
+				// Everything else stays at the shader's declared defaults.
 
 				faceTransparentMat->TrySetProperty("_IrradianceCube", renderer.GetIrradianceCube());
 				faceTransparentMat->TrySetProperty("_PrefilterCube", renderer.GetPrefilterCube());
