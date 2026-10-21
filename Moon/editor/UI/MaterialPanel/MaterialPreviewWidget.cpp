@@ -187,6 +187,8 @@ void MOON::MaterialPreviewWidget::BindEnvironmentTextures()
 
 	auto* irradiance = renderer.GetIrradianceCube();
 	auto* prefilter = renderer.GetPrefilterCube();
+	// The DFG LUT is bound view-globally by CompositeRenderer (see ABaseRenderer::SetBrdfLut);
+	// the material must not carry it as a property, or an instance without it samples white.
 	auto* brdf = renderer.GetBrdfTexture();
 	if (irradiance == nullptr || prefilter == nullptr || brdf == nullptr)
 	{
@@ -211,7 +213,11 @@ void MOON::MaterialPreviewWidget::BindEnvironmentTextures()
 				return; // already pointing at it; SetProperty would bump the upload version
 			}
 		}
-		p_material->TrySetProperty(p_name, p_texture);
+		// Set (not TrySet): the internal IBL parameters are declared ui:false and a material
+		// instance can come back from the loader without them, in which case TrySetProperty is
+		// a silent no-op and the shader samples the white fallback (the DFG LUT then reads
+		// (1,1) and kills the diffuse).
+		p_material->SetProperty(p_name, p_texture);
 	};
 
 	if (!m_refractionCube)
@@ -236,7 +242,6 @@ void MOON::MaterialPreviewWidget::BindEnvironmentTextures()
 	{
 		bind(material, "_IrradianceCube", irradiance);
 		bind(material, "_PrefilterCube", prefilter);
-		bind(material, "_BRDFLut", brdf);
 		bind(material, "_RefractionCube", m_refractionCube.get());
 	}
 }

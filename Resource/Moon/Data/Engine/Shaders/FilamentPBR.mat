@@ -27,10 +27,13 @@ material {
         // label / group / min / max / step / color are the designer schema. The material
         // designer and the actor inspector read them instead of guessing from the name.
         { type : sampler2D, name : u_AlbedoMap, label : "Albedo Map", group : "Textures" },
+        { type : bool,      name : u_HasAlbedoMap, default : false, ui : false },
         { type : float4,    name : u_Albedo, default : vec4(1.0), label : "Base Color", group : "Base", color : true },
         { type : sampler2D, name : u_MetallicMap, label : "Metallic Map", group : "Textures" },
+        { type : bool,      name : u_HasMetallicMap, default : false, ui : false },
         { type : float,     name : u_Metallic, default : 0.0, label : "Metallic", group : "Base", min : 0.0, max : 1.0, step : 0.005 },
         { type : sampler2D, name : u_RoughnessMap, label : "Roughness Map", group : "Textures" },
+        { type : bool,      name : u_HasRoughnessMap, default : false, ui : false },
         { type : float,     name : u_Roughness, default : 0.5, label : "Roughness", group : "Base", min : 0.0, max : 1.0, step : 0.005 },
         { type : float,     name : u_Reflectance, default : 0.5, label : "Reflectance", group : "Base", min : 0.0, max : 1.0, step : 0.005 },
         { type : float,     name : u_SpecularFactor, default : 1.0, label : "Specular Factor", group : "Base", min : 0.0, max : 1.0, step : 0.005 },
@@ -38,6 +41,7 @@ material {
         { type : float,     name : u_ClearCoat, default : 0.0, label : "Clear Coat", group : "Base", min : 0.0, max : 1.0, step : 0.005 },
         { type : float,     name : u_ClearCoatRoughness, default : 0.0, label : "Clear Coat Roughness", group : "Base", min : 0.0, max : 1.0, step : 0.005 },
         { type : sampler2D, name : u_AmbientOcclusionMap, label : "Ambient Occlusion Map", group : "Textures" },
+        { type : bool,      name : u_HasAOMap, default : false, ui : false },
         { type : sampler2D, name : u_NormalMap, label : "Normal Map", group : "Textures" },
         // A uniform rather than a feature on purpose: the editor builds its texture list
         // from the variant's parameters, and a map only read under a feature is optimized
@@ -97,11 +101,14 @@ fragment {
 
     void main()
     {
-        const vec4 albedoTexel = texture(u_AlbedoMap, fs_in.TexCoords);
+        // The panel shows no map for a fresh material, but the texture property can still hold
+        // the black "empty" texture, which multiplied the whole PBR input to zero. Only sample a
+        // map when the designer marked it as assigned.
+        const vec4 albedoTexel = u_HasAlbedoMap ? texture(u_AlbedoMap, fs_in.TexCoords) : vec4(1.0);
         const vec4 albedo = albedoTexel * u_Albedo;
-        const float metallic = texture(u_MetallicMap, fs_in.TexCoords).r * u_Metallic;
-        const float roughness = texture(u_RoughnessMap, fs_in.TexCoords).r * u_Roughness;
-        const float ao = texture(u_AmbientOcclusionMap, fs_in.TexCoords).r;
+        const float metallic = (u_HasMetallicMap ? texture(u_MetallicMap, fs_in.TexCoords).r : 1.0) * u_Metallic;
+        const float roughness = (u_HasRoughnessMap ? texture(u_RoughnessMap, fs_in.TexCoords).r : 1.0) * u_Roughness;
+        const float ao = u_HasAOMap ? texture(u_AmbientOcclusionMap, fs_in.TexCoords).r : 1.0;
 
         // sRGB sources are decoded once each; lighting works in linear.
         const vec3 emissive = pow(texture(u_EmissiveMap, fs_in.TexCoords).rgb, vec3(2.2))
@@ -139,6 +146,7 @@ fragment {
         filteredMaterial.roughness = normalFiltering(material.roughness, n);
 
         const PixelParams pixel = preparePixelParams(filteredMaterial, n, v, _BRDFLut);
+
         vec3 color = evaluateFilamentSurface(
             material, pixel, fs_in.FragPos, n, v,
             _IrradianceCube, _PrefilterCube, _ShadowMap, _LightSpaceMatrix, _BRDFLut);

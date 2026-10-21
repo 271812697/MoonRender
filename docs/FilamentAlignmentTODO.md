@@ -12,7 +12,7 @@
 
 - 变体系统：`EVariant` 7 位（DIR/DYN/SHADOW/FOG/PICKING/SSR/DEPTH）、MoonMatc keyed 变体、`SHDRFEAT`、`--features`、`defaultFeatures`；材质 feature 编译期固定，设计师勾选触发重编译。
 - 顶点属性：`.mat` 的 `vertexAttributes` + `HAS_ATTRIBUTE_*`，Standard/CAD/FilamentPBR 等已迁移。
-- PBR/IBL 核心：GGX / Smith / Schlick / DFG LUT / 能量补偿 / prefilter LOD / SH9 漫反射 / specular AO / multiBounce AO / clear coat（直接光 + IBL）/ reflectance / transmission / refractionIndex / thickness / specular AA（normalFiltering）。
+- PBR/IBL 核心：GGX / Smith / Schlick / DFG LUT / 能量补偿 / prefilter LOD / Filament 无 SH 时的 roughness-one prefiltered cubemap 漫反射 / specular AO / multiBounce AO / clear coat（直接光 + IBL）/ reflectance / transmission / refractionIndex / thickness / specular AA（normalFiltering）。
 - 后处理：Filament ACES + triangle-noise dithering。
 - 预览：Studio.hdr IBL、sun（强度 1.0、方向 -0.35,-0.85,-0.55）、曝光 1.2、背景 0.032、相机 3/4 姿态 (1.5,0.82,3.65)；Reset View 按钮已实现并由用户确认正常（2026-10-20）。
 - 环境 cubemap 方位：已修并**目视确认**（2026-10-20，用户确认“正常了”）；结论与验证见下方“环境 cube 方位”。
@@ -37,12 +37,57 @@
 - 默认 skybox 对齐（2026-10-20）：`SkyboxRenderPass` 的默认 `mPath` 从 `PureSky.hdr` 改为
   `Studio.hdr`，新场景的 IBL 和 Material Preview/FilamentPBR 预览使用同一张 HDR；项目或
   Setting 面板仍可覆盖。Reference Lighting 临时模式已移除（默认 IBL 已经一致）。
+- Filament IBL 路径修正（2026-10-21）：Filament 的 `surface_light_indirect.fs` 在
+  `iblSH[0].x == 65504`（没有传 SH）时，diffuse IBL 采样 **prefiltered specular cubemap 的
+  roughness-one mip**；Qt-Filament 的预览只传 `.reflections()`，没有 SH/独立 irradiance map。
+  之前 Moon 手工投影 SH9 并优先使用，属于走错路径（且高反差 studio 会 ringing）；现在改为
+  同一 fallback，移除 shader 里的 SH include/分支和 `SkyboxRenderPass` 的 SH 绑定/调用。
+  不再用 SH；剩余的 SH 投影函数是未调用的死代码，后续清理。
+- Filament IBL 预滤波修正（2026-10-21）：`SkyboxRenderPass` 的 prefilter `omegaP` 之前按
+  **当前 mip 宽度** 计算，而 Filament `IBLPrefilterContext::SpecularFilter` 用的是 **输出
+  cubemap 的 base 宽度**（它的源和输出都是 256）。加上我们的源 cubemap 是 1024、输出 256，
+  源尺寸还差 2 级，旧实现第 i 级比 Filament 锐 `2+i` 级：level 4（roughness one，被
+  diffuse 直接使用）保留了 studio 窗帘/柔光箱结构，球面出现大理石纹；level 2~3（roughness
+  0.4 的 specular）采到接近 1024 原图，出现细密 hatch 和过曝白色高光。现改为：
+  `omegaP = 4π/(6*sourceWidth²)`（所有 level 共用），mirror level 用
+  `baseLod = log2(sourceWidth/256)`；prefilter FBO 改为单 COLOR attachment；DFG LUT 从
+  1024² 降到 128²（Filament 的表尺寸）。验证时 dump 了 5 级 prefilter，max 依次
+  488→305→39→6.4→1.8，level 4 已平滑；DFG 在 (NoV 0.5, p 0.5) = (0.832, 0.0215)，与
+  Filament `DFV` 一致。详见 `docs/IBLDebugHandoff.md`。
+- 预览 IBL 强度重标定（2026-10-21）：prefilter 修好后，旧的 `SetEnvironmentIntensity(4.0)`
+  （× brightness 0.2 × 后处理 1.2 = 0.96）比 Filament 的 `iblLuminance`（20000 ×
+  1/125s f/16 ISO100 的 2.604e-5 = 0.521）亮 1.84 倍；截图反推 ACES 前的球均值 0.571 vs
+  0.315，差值正好是 IBL 部分。改为 **2.2**（0.521/(0.2×1.2)=2.17）。球均值应落到
+  sRGB≈146，与 Qt-Filament 一致。太阳同轮标定：40000×2.604e-5=1.042，后处理还要乘 1.2，
+  所以 light 强度从 1.0 调到 **0.87**，太阳/IBL 比例回到 Filament 的 2:1。
 - GeomertySurface 默认参数（2026-10-20）：使用截图里的 CAD 材质基线：Metallic `0.8`、
   Roughness `0.4`、Reflectance `0.42`、Clear Coat `1.0`、Clear Coat Roughness `0.53`、
   Specular Factor `0.0`、Specular Color `#ffcfbf`、Thickness `10.0`、Refraction Index `2.94`、
   Emissive Intensity `1.0`、Emissive Color 黑、Transmission `0.0`；`TopoShapeActor` 不再覆盖
   metallic/roughness/emissive。Actor Property 的材质表单顶部有 **Reset to Defaults**，按 shader
   参数表重新初始化所有参数（保留 feature 和 renderer state）。
+- **预览球体绕序修正（2026-10-21 傍晚，两个观感 bug 的真正根因）**：
+  `PreviewView.cpp` 的 `BuildUVSphere` / `BuildMaterialBall` 三角形索引是 `{a, b, a+1, ...}`
+  （从外面看顺时针），而引擎从不调 `glFrontFace`，GL 默认 **CCW 才是正面**。于是
+  `culling : back` 剔掉了近半球，材质一直在给**远半球的内表面**着色：NoV 恒为 0，DFG
+  取掠射值（电介质看起来像全镜面，metallic 0 / roughness 0 反射过强），`reflect(-v, n)`
+  在 v≈-n 时退化成 `n`（环境按法线采样，表现为 **cubemap 左右反转**）。绕序改为
+  `{a, a+1, b, a+1, b+1, b}`，底座 `addBaseTriangle` 的法线对齐方向同步反过来。验证用
+  `FilamentPBR.mat` 的临时 `u_DebugView`：修复前 signed NoV 全为 -1、`FragPos` 编码显示
+  远半球（z<0）；修复后金属球右边缘高光/底部亮斑与参考同侧。调试参数已删除。
+  其它预览网格已逐一核对：Ball 用的 `material_sphere.obj` 有向体积 +0.948（CCW），
+  Cube 六面、Plane 的几何法线都与面法线同向（dot=1.000），无需修改；只有程序化球体
+  （`BuildUVSphere`）和 `BuildMaterialBall` 的球/底座是反的。
+  `SkyboxConvert.mat` 的 v 号同时改回 `0.5 + asin`（14:08 的翻转是在绕序 bug 干扰下判错的，
+  它把 studio 的顶光翻到了底部，表现为参考左上角的柔光箱高光消失）。
+- **DFG LUT 每帧绑定（2026-10-21）**：sampler 只在材质签名变化时随上传绑定，预览第一帧
+  sky pass 还没烘出 LUT，白色空纹理就留住了。`ABaseRenderer::DrawEntity` 现在每次 draw
+  调 `Material::BindGlobalTexture("_BRDFLut", m_brdfLut)`。调试视图确认 LUT 为 128×128
+  且 (0.5,0.5) 处内容正确，(1,1) 的白色回退不再出现。
+- **diffuse 改回 irradiance cube（2026-10-21）**：Filament 无 SH 时用 prefilter 的
+  roughness-one mip，但预览里该 mip 曾被测到是黑的，diffuse 归零。现在
+  `surface_light_indirect.glsl` 的 `diffuseIrradiance` 采样 `_IrradianceCube`；
+  Filament 那条路径保留为 `diffuseIrradianceRoughnessOne` 备查。
 - Qt-Filament 参考工程（`D:\Project\C++\Qt-Filament`）：材质面板已对齐 Base Color / Metallic / Roughness / Reflectance / Clear Coat / Clear Coat Roughness / Transmission / Refraction Index / Thickness 及六张贴图槽；`aiDefaultMat.mat`（samples + filamentapp）已同步，运行时包会重新生成。
 
 ## 环境 cube 方位（2026-10-20，已确认）

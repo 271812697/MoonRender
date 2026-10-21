@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <any>
 #include <cstdint>
 #include <map>
@@ -67,9 +67,18 @@ namespace Rendering::Data
 			bool uploadStableProperties,
 			bool uploadSingleUseProperties,
 			Rendering::HAL::Texture* p_emptyTexture2D = nullptr,
-			Rendering::HAL::Texture* p_emptyTextureCube = nullptr
+			Rendering::HAL::Texture* p_emptyTextureCube = nullptr,
+			Rendering::HAL::Texture* p_brdfLut = nullptr
 		);
 		void UpdateProperties();
+		/** Binds a texture the view owns (not the material) on every draw.
+		 *
+		 * Sampler bindings normally ride along with UploadProperties, which only runs when
+		 * the material's signature changes. A view-global texture such as the DFG LUT can
+		 * appear *after* that upload (the sky pass bakes it later in the frame), and the
+		 * white fallback bound on the first draw then sticks forever. Binding it here, per
+		 * draw, keeps the shader's sampler pointing at the view's texture. */
+		void BindGlobalTexture(const std::string& p_name, Rendering::HAL::Texture* p_texture);
 		MaterialSignatureSet Bind(
 			HAL::Texture* p_emptyTexture2D = nullptr,
 			HAL::Texture* p_emptyTextureCube = nullptr,
@@ -158,7 +167,8 @@ namespace Rendering::Data
 			bool p_uploadStableProperties,
 			bool p_uploadSingleUseProperties,
 			Rendering::HAL::Texture* p_emptyTexture2D,
-			Rendering::HAL::Texture* p_emptyTextureCube
+			Rendering::HAL::Texture* p_emptyTextureCube,
+			Rendering::HAL::Texture* p_brdfLut
 		);
 
 		/** Acquires a slice sized to the shader's block, or releases it when the block is gone

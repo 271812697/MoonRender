@@ -21,7 +21,8 @@ material {
         { type : samplerCube, name : SkyboxCube },
         { type : int,     name : u_CaptureAxis, default : 0 },
         { type : float,   name : u_CaptureSide, default : 1.0 },
-        { type : float2,  name : u_CaptureViewport, default : vec2(1024.0) }
+        { type : float2,  name : u_CaptureViewport, default : vec2(1024.0) },
+        { type : float,   name : intensity, default : 1.0 }
     ]
 }
 
@@ -86,7 +87,7 @@ fragment {
         }
         irradiance = PI * irradiance * (1.0 / float(nrSamples));
 
-        FRAGMENT_COLOR = vec4(irradiance, 1.0);
+        FRAGMENT_COLOR = vec4(irradiance * intensity, 1.0);
 
     }
 }

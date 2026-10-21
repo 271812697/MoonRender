@@ -23,7 +23,18 @@
 
 namespace
 {
-	unsigned int resolution = 1024;
+	/** The environment cubemap the equirect is captured into. It is the source of the
+	 * specular prefilter and of the visible sky, so it is kept at 1024 even though Filament's
+	 * IBLPrefilterContext defaults to a 256 source; the prefilter takes the source size into
+	 * account when it picks its sample LOD (see the prefilter loop below). */
+	// 1024 source + 2-level LOD compensation. The strict 256-source alignment (Filament's
+	// IBLPrefilterContext) was tried and made the preview darker/more structured, so it is not
+	// the remaining difference; keep the higher-quality source for the scene's sky.
+	constexpr uint32_t kEnvironmentResolution = 1024;
+	/** The DFG LUT. Filament's built-in table is 128x128 (dfg.bin is 128*128*3 halves); the
+	 * LUT is a smooth two-parameter function, so a larger table stores no more information
+	 * and only makes the one-time integration more expensive. */
+	constexpr uint32_t kBrdfLutResolution = 128;
 	constexpr uint32_t kFaceCount = 6;
 	const Maths::FVector3 kFaceRotations[kFaceCount] = {
 		{ 0.0f, -90.0f, 180.0f },	// (Right)
@@ -74,10 +85,6 @@ void Core::Rendering::SkyboxRenderPass::Draw(::Rendering::Data::PipelineState p_
 {
 	ZoneScoped;
 	TracyGpuZone("SkyboxRenderPass");
-	if (m_irradianceSHBuffer)
-	{
-		m_irradianceSHBuffer->Bind(::Rendering::Settings::kIrradianceSHUBOBinding);
-	}
 	if (needUpdateSkyTexture && m_captureEnvironment) {
 		needUpdateSkyTexture = false;
 		computeSkyTexture();
@@ -242,8 +249,8 @@ void Core::Rendering::SkyboxRenderPass::computeSkyTexture()
 			//initialize framebuffer
 			{
 				auto fBColorDesc = ::Rendering::Settings::TextureDesc{
-				.width = resolution,
-				.height = resolution,
+				.width = kBrdfLutResolution,
+				.height = kBrdfLutResolution,
 				.minFilter = ::Rendering::Settings::ETextureFilteringMode::LINEAR,
 				.magFilter = ::Rendering::Settings::ETextureFilteringMode::LINEAR,
 				.horizontalWrap = ::Rendering::Settings::ETextureWrapMode::CLAMP_TO_EDGE,
@@ -266,8 +273,8 @@ void Core::Rendering::SkyboxRenderPass::computeSkyTexture()
 				);
 				skyBoxCube->Allocate(
 					::Rendering::Settings::TextureDesc{
-						.width = resolution,
-						.height = resolution,
+						.width = kEnvironmentResolution,
+						.height = kEnvironmentResolution,
 						.minFilter = ::Rendering::Settings::ETextureFilteringMode::LINEAR_MIPMAP_LINEAR,
 							.magFilter = ::Rendering::Settings::ETextureFilteringMode::LINEAR,
 							.horizontalWrap = ::Rendering::Settings::ETextureWrapMode::CLAMP_TO_EDGE,
@@ -300,17 +307,21 @@ void Core::Rendering::SkyboxRenderPass::computeSkyTexture()
 				);
 				prefilterCube->Allocate(
 					::Rendering::Settings::TextureDesc{
-						.width = resolution,
-						.height = resolution,
+						// IBLPrefilterContext::SpecularFilter(): default output is
+						// max(256, 1 << (levels - 1)); with its five levels that is 256.
+						.width = 256,
+						.height = 256,
 						.minFilter = ::Rendering::Settings::ETextureFilteringMode::LINEAR_MIPMAP_LINEAR,
 						.magFilter = ::Rendering::Settings::ETextureFilteringMode::LINEAR,
 						.horizontalWrap = ::Rendering::Settings::ETextureWrapMode::CLAMP_TO_EDGE,
 						.verticalWrap = ::Rendering::Settings::ETextureWrapMode::CLAMP_TO_EDGE,
 						.internalFormat = ::Rendering::Settings::EInternalFormat::RGBA32F,
-						.useMipMaps = true
+						.useMipMaps = true,
+						// Filament's IBLPrefilterContext::SpecularFilter defaults to five
+						// roughness levels; the shader derives maxLod from this level count.
+						.mipLevels = 5
 					}
 				);
-				prefilterCube->GenerateMipmaps();
 			}
 			//set up skyBoxBuffer 
 			{
@@ -326,7 +337,7 @@ void Core::Rendering::SkyboxRenderPass::computeSkyTexture()
 				// Depth buffer
 				const auto renderbuffer = std::make_shared<::Rendering::HAL::Renderbuffer>(false);
 				const auto internalFormat = ::Rendering::Settings::EInternalFormat::DEPTH_COMPONENT;
-				renderbuffer->Allocate(resolution, resolution, internalFormat);
+				renderbuffer->Allocate(kEnvironmentResolution, kEnvironmentResolution, internalFormat);
 				skyBoxBuffer.Attach(renderbuffer, ::Rendering::Settings::EFramebufferAttachment::DEPTH);
 				// Validation
 				skyBoxBuffer.Validate();
@@ -355,17 +366,19 @@ void Core::Rendering::SkyboxRenderPass::computeSkyTexture()
 				// Validation
 				irradianceBuffer.Validate();
 			}
-			//set up prefilterBuffer
+			// set up prefilterBuffer
 			{
-				for (uint32_t faceIndex = 0; faceIndex < 6; ++faceIndex)
-				{
-					prefilterBuffer.Attach<::Rendering::HAL::Texture>(
-						prefilterCube,
-						::Rendering::Settings::EFramebufferAttachment::COLOR,
-						faceIndex, // Each color attachment is a face of the cubemap
-						faceIndex // Each face of the cubemap is accessed by its layer index
-					);
-				}
+				// One color attachment, not one per face: this pass renders one face at a
+				// time (SetTargetDrawBuffer(0)), and when a framebuffer's attachments are at
+				// different mip levels some drivers take the smallest one as the framebuffer
+				// size. Attaching only the face being written keeps color and depth at the
+				// same mip, so every level is baked over its whole face instead of a corner.
+				prefilterBuffer.Attach<::Rendering::HAL::Texture>(
+					prefilterCube,
+					::Rendering::Settings::EFramebufferAttachment::COLOR,
+					0,
+					0
+				);
 
 				// No depth buffer here: each prefilter mip has a different size, so the depth
 				// renderbuffer is attached per-mip inside the prefilter loop below.
@@ -442,13 +455,13 @@ void Core::Rendering::SkyboxRenderPass::computeSkyTexture()
 				skyboxDrawable.material.value().SetProperty("u_CaptureViewport",
 					Maths::FVector2{ static_cast<float>(irradianceCube->GetDesc().width),
 						static_cast<float>(irradianceCube->GetDesc().height) });
+				skyboxDrawable.material.value().SetProperty("intensity", m_environmentIntensity);
 				m_renderer.DrawEntity(p_pso, skyboxDrawable);
 			}
 			irradianceBuffer.Unbind();
 			// The irradiance cube is sampled with implicit LOD (mipmapped min filter),
 			// so the mip chain must be generated after the convolution.
 			irradianceCube->GenerateMipmaps();
-			computeIrradianceSH();
 			m_renderer.SetViewport(0, 0, frameDescriptor.renderWidth, frameDescriptor.renderHeight);
 		}
 		//prefilter
@@ -460,7 +473,32 @@ void Core::Rendering::SkyboxRenderPass::computeSkyTexture()
 			skyCamera.SetPosition({ 0.0f, 0.0f, 0.0f });
 			skyCamera.SetFov(90.0f);
 			const auto [width, height] = prefilterBuffer.GetSize();
-			const uint32_t maxMipLevels = static_cast<uint32_t>(std::floor(std::log2(width))) + 1u;
+			const uint32_t maxMipLevels = prefilterCube->GetDesc().mipLevels != 0
+				? prefilterCube->GetDesc().mipLevels
+				: static_cast<uint32_t>(std::floor(std::log2(width))) + 1u;
+
+			// The prefilter's per-sample LOD is expressed in solid-angle units: the kernel
+			// stores l = -log4(sampleCount * pdf) = log4(omegaS), where omegaS is the solid
+			// angle covered by one sample. Adding -log4(omegaP) turns that into a source mip
+			// level, so omegaP must be the solid angle of one *source* texel.
+			//
+			// Filament's IBLPrefilterContext has its source and output cubemaps at the same
+			// 256x256 (EquirectangularToCubemap's default output, SpecularFilter's default
+			// output), so it computes omegaP from the output base width. Ours captures the
+			// environment at kEnvironmentResolution and filters it down to 256, so the source
+			// base width is what defines mip 0. This is the whole bug behind the ball: the old
+			// code used the *current* mip width, which sharpened level i by another i mips
+			// (and skipped the 1024/256 = 2-level difference); at the roughness-one level the
+			// shader uses for diffuse that left the studio's curtains and softboxes in the
+			// "irradiance" (the marbled ball), and at mid roughness it left importance-sampling
+			// noise in the specular (the fine hatch).
+			const float sourceWidth = static_cast<float>(skyBoxCube->GetDesc().width);
+			constexpr float kPi = 3.14159265358979323846f;
+			const float omegaP = 4.0f * kPi / (6.0f * sourceWidth * sourceWidth);
+			// The mirror level has one sample and no kernel width: it uses the LOD whose texel
+			// matches one output texel (Filament's level 0 is a filtered copy of its 256 source).
+			const float baseLod = std::log2(sourceWidth / static_cast<float>(width));
+
 			prefilterBuffer.Bind();
 			for (uint32_t mip = 0; mip < maxMipLevels; ++mip)
 			{
@@ -492,11 +530,11 @@ void Core::Rendering::SkyboxRenderPass::computeSkyTexture()
 					prefilterBuffer.AttachLevel<::Rendering::HAL::Texture>(
 						prefilterCube,
 						::Rendering::Settings::EFramebufferAttachment::COLOR,
-						faceIndex, // Each color attachment is a face of the cubemap
+						0,
 						mip,
-						faceIndex // Each face of the cubemap is accessed by its layer index
+						faceIndex
 					);
-					prefilterBuffer.SetTargetDrawBuffer(faceIndex);
+					prefilterBuffer.SetTargetDrawBuffer(0);
 					prefilterBuffer.Validate();
 					m_renderer.Clear(true, true, true);
 					// Draw skybox
@@ -507,18 +545,18 @@ void Core::Rendering::SkyboxRenderPass::computeSkyTexture()
 					skyboxDrawable.stateMask = stateMask;
 					skyboxDrawable.material.value().SetProperty("SkyboxCube", skyBoxCube.get());
 					skyboxDrawable.material.value().SetProperty("roughness", roughness);
-					// Filament's per-level lodOffset: 1.0 (2.0 on the last level) minus the
-					// solid angle of an output texel, so the sample LOD lands in output-texel
-					// units rather than sample-density units.
-					constexpr float kPi = 3.14159265358979323846f;
-					const float omegaP = 4.0f * kPi / (6.0f * float(mipWidth) * float(mipWidth));
+					// Filament's per-level lodOffset: 1.0 (2.0 on the last level) minus log4 of
+					// one source texel's solid angle. It is the same for every level, exactly as
+					// in IBLPrefilterContext (the level only changes the viewport, not omegaP).
 					const float lodOffset =
 						((mip == maxMipLevels - 1) ? 2.0f : 1.0f) - 0.5f * std::log2(omegaP);
 					skyboxDrawable.material.value().SetProperty("lodOffset", lodOffset);
+					skyboxDrawable.material.value().SetProperty("baseLod", baseLod);
 					skyboxDrawable.material.value().SetProperty("u_CaptureAxis", static_cast<int>(faceIndex / 2));
 					skyboxDrawable.material.value().SetProperty("u_CaptureSide", (faceIndex % 2 == 0) ? 1.0f : -1.0f);
 					skyboxDrawable.material.value().SetProperty("u_CaptureViewport",
 						Maths::FVector2{ static_cast<float>(mipWidth), static_cast<float>(mipHeight) });
+					skyboxDrawable.material.value().SetProperty("intensity", m_environmentIntensity);
 					m_renderer.DrawEntity(p_pso, skyboxDrawable);
 				}
 			}

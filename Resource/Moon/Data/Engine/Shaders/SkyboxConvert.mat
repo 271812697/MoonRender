@@ -82,8 +82,14 @@ fragment {
         // capture has to bake the mirror in; otherwise the specular and diffuse IBL disagree with
         // each other and with Filament's preview.
         //
-        // u is Filament's toEquirect() with x negated. v is measured from the bottom because the
-        // equirect texture is uploaded bottom-up (TextureLoader flips stb's rows).
+        // u is Filament's toEquirect() with x negated.
+        // v is measured from the bottom because TextureLoader leaves stb's vertical flip on:
+        // the texture's row 0 is the image's last row, so v = 0.5 + asin(y)/PI maps +Y to the
+        // file's first row. This is the sign that matches Filament's toEquirect()/cmgen for
+        // Studio.hdr (3000 directions and a per-face correlation of 0.986); the 14:08 flip to
+        // 0.5 - asin was based on a comparison that was confounded by the preview sphere's
+        // inverted winding, and it put the studio's ceiling below the horizon - the upper-left
+        // softbox in Filament's reflection disappeared and a left-edge streak appeared.
         vec2 uv = vec2(0.5 + atan(-d.x, d.z) * INV_TWO_PI,
                        0.5 + asin(clamp(d.y, -1.0, 1.0)) * INV_PI);
         FRAGMENT_COLOR = texture(u_SkyBoxTexture, uv) ;

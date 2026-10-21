@@ -5,11 +5,38 @@
 // SkyboxRenderPass), so the sample LOD is Filament's p * (2 - p) curve.
 
 #include ":Shaders/Common/Buffers/ReflectionUBO.glsl"
-#include ":Shaders/Common/Buffers/IrradianceSH.glsl"
+
+// Filament samples the roughness-one level of the prefiltered specular cubemap here when no
+// SH is supplied. That path is kept for the viewport but is not used for diffuse: the
+// material preview's prefilter cubemap has been measured black at its roughness-one level
+// (the preview's one-shot capture does not bake the high mips), so sampling it made a
+// dielectric's whole diffuse term zero and the ball looked like a mirror. The engine's
+// cosine-convolved irradiance cube is always valid and is what the pre-Filament-IBL
+// GeomertySurface/FilamentPBR shading used.
+vec3 diffuseIrradianceRoughnessOne(samplerCube prefilterCube, vec3 n)
+{
+    const float maxLod = float(textureQueryLevels(prefilterCube) - 1);
+    const ivec2 size = textureSize(prefilterCube, int(maxLod));
+    const float du = 1.0 / float(size.x);
+    const float dv = 1.0 / float(size.y);
+    // Filament's high-quality path averages four taps around n. At the 1x1-per-face level
+    // this is what smooths the cube-face seams; a single tap produces visible face bands.
+    const vec3 up = abs(n.y) > 0.99 ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 1.0, 0.0);
+    const vec3 m0 = normalize(cross(n, up));
+    const vec3 m1 = cross(m0, n);
+    const vec3 m0du = m0 * du;
+    const vec3 m1dv = m1 * dv;
+    vec3 irradiance = textureLod(prefilterCube, n - m0du - m1dv, maxLod).rgb;
+    irradiance += textureLod(prefilterCube, n + m0du - m1dv, maxLod).rgb;
+    irradiance += textureLod(prefilterCube, n + m0du + m1dv, maxLod).rgb;
+    irradiance += textureLod(prefilterCube, n - m0du + m1dv, maxLod).rgb;
+    irradiance *= 0.25;
+    return irradiance;
+}
 
 vec3 diffuseIrradiance(samplerCube irradianceCube, vec3 n)
 {
-    vec3 irradiance = HasIrradianceSH() ? EvaluateIrradianceSH(n) : texture(irradianceCube, n).rgb;
+    vec3 irradiance = texture(irradianceCube, n).rgb;
     if (any(isnan(irradiance)) || any(isinf(irradiance)))
     {
         irradiance = vec3(0.0);
@@ -35,9 +62,11 @@ vec3 specularDFG(vec3 f0, vec2 dfg)
     return f0 * dfg.x + dfg.y;
 }
 
-vec3 getSpecularDominantDirection(vec3 n, vec3 r, float perceptualRoughness)
+vec3 getSpecularDominantDirection(vec3 n, vec3 r, float roughness)
 {
-    return mix(r, n, perceptualRoughness * perceptualRoughness);
+    // Filament calls this with pixel.roughness, which is already the linear roughness
+    // (perceptualRoughness^2); squaring again gives the p^4 pull used by Filament.
+    return mix(r, n, roughness * roughness);
 }
 
 // Filament's specularAO(): ambient occlusion attenuates the specular environment less than
@@ -61,12 +90,15 @@ vec3 evaluateIBL(
     // Filament specularDFG(): with specularFactor/specularColorFactor the DFG result is scaled
     // by specularFactor as well (f0 already carries the color factor).
     const vec3 E = specularDFG(pixel.f0, pixel.dfg) * pixel.specular;
-    const vec3 r = getSpecularDominantDirection(n, reflect(-v, n), pixel.perceptualRoughness);
+    const vec3 r = getSpecularDominantDirection(n, reflect(-v, n), pixel.roughness);
     const float NoV = max(dot(n, v), 1.0e-4);
 
     vec3 Fr = E * prefilteredRadiance(prefilterCube, r, pixel.perceptualRoughness)
         * pixel.energyCompensation * specularAO(NoV, ao, pixel.perceptualRoughness);
-    vec3 Fd = pixel.diffuseColor * diffuseIrradiance(irradianceCube, n) * (1.0 - E) * multiBounceAO(ao, pixel.diffuseColor);
+    // Diffuse from the engine's irradiance cube, not from the prefilter's roughness-one mip
+    // (see diffuseIrradianceRoughnessOne for why).
+    vec3 Fd = pixel.diffuseColor * diffuseIrradiance(irradianceCube, n)
+        * (1.0 - E) * multiBounceAO(ao, pixel.diffuseColor);
 
     // Filament isEvaluateClearCoatIBL(): the clear coat is its own specular layer with
     // F0 = 0.04, evaluated at clearCoatPerceptualRoughness (its own DFG lookup), and the

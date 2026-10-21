@@ -1,4 +1,4 @@
-﻿#include <glad/glad.h>
+#include <glad/glad.h>
 #include <Rendering/HAL/OpenGL/GLTexture.h>
 #include <Rendering/HAL/OpenGL/GLTypes.h>
 #include <assert.h>
@@ -106,7 +106,9 @@ void Rendering::HAL::GLTexture::Allocate(const Settings::TextureDesc& p_desc)
 			if (m_context.type != GL_TEXTURE_2D_MULTISAMPLE) {
 				glTextureStorage2D(
 					m_context.id,
-					desc.useMipMaps ? CalculateMipMapLevels(desc.width, desc.height) : 1,
+					desc.mipLevels != 0
+						? desc.mipLevels
+						: (desc.useMipMaps ? CalculateMipMapLevels(desc.width, desc.height) : 1),
 					EnumToValue<GLenum>(desc.internalFormat),
 					desc.width,
 					desc.height

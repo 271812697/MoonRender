@@ -1,4 +1,4 @@
-﻿#include <functional>
+#include <functional>
 #include <ranges>
 #include <tracy/Tracy.hpp>
 #include <Core/Rendering/SkyBoxRenderPass .h>
@@ -49,6 +49,10 @@ void Rendering::Core::CompositeRenderer::DrawFrame()
 {
 	ZoneScoped;
 	TracyGpuZone("DrawFrame");
+	// The DFG LUT is a view-global texture; materials declare _BRDFLut but must not carry it as
+	// a per-instance property (a material without it sampled the white empty texture and lost
+	// its whole diffuse term).
+	SetBrdfLut(GetBrdfTexture());
 	auto pso = CreatePipelineState();
 	for (const auto& pass : m_passes | std::views::values)
 	{

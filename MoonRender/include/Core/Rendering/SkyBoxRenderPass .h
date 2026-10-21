@@ -34,6 +34,10 @@ namespace Core::Rendering
 		 * the background, and the capture is the expensive half of this pass. */
 		void SetEnvironmentCapture(bool p_enabled) { m_captureEnvironment = p_enabled; }
 		bool IsEnvironmentCaptureEnabled() const { return m_captureEnvironment; }
+		/** Scales the baked IBL radiance. The preview uses this to match Filament's IBL
+		 * intensity without lifting the dark preview backdrop. */
+		void SetEnvironmentIntensity(float p_intensity) { m_environmentIntensity = p_intensity; }
+		float GetEnvironmentIntensity() const { return m_environmentIntensity; }
 
 	protected:
 		virtual void Draw(::Rendering::Data::PipelineState p_pso) override;
@@ -65,5 +69,6 @@ namespace Core::Rendering
 		std::string mPath = ":Textures/Studio.hdr";
 		bool needUpdateSkyTexture = true;
 		bool m_captureEnvironment = true;
+		float m_environmentIntensity = 1.0f;
 	};
 }

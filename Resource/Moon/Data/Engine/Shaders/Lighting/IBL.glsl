@@ -1,5 +1,4 @@
 #include ":Shaders/Common/Buffers/ReflectionUBO.glsl"
-#include ":Shaders/Common/Buffers/IrradianceSH.glsl"
 
 // Image based lighting, following Filament's standard model (surface_light_indirect.fs):
 // a split-sum prefiltered cubemap for the specular term, an irradiance cubemap for the diffuse
@@ -134,7 +133,7 @@ vec3 CalculateImageBasedLighting(
     // Filament's `getSpecularDominantDirection`: pull the reflected direction toward the normal
     // as the surface gets rougher, then sample the roughness level.
     vec3 R = ParallaxCorrect(reflect(-v, n), fragPos);
-    R = normalize(mix(R, n, perceptualRoughness * perceptualRoughness));
+    R = normalize(mix(R, n, perceptualRoughness * perceptualRoughness * perceptualRoughness * perceptualRoughness));
     vec3 prefiltered = textureLod(prefilterCube, R, lod).rgb;
     if (any(isnan(prefiltered)) || any(isinf(prefiltered)))
     {
@@ -142,7 +141,7 @@ vec3 CalculateImageBasedLighting(
     }
     const vec3 Fr = E * prefiltered * energyCompensation * specularAO(NoV, ao, perceptualRoughness);
 
-    vec3 irradiance = HasIrradianceSH() ? EvaluateIrradianceSH(n) : texture(irradianceCube, n).rgb;
+    vec3 irradiance = texture(irradianceCube, n).rgb;
     if (any(isnan(irradiance)) || any(isinf(irradiance)))
     {
         irradiance = vec3(0.0);

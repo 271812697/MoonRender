@@ -106,7 +106,9 @@ set(SHADER_GENERATED_SOURCE "${SHADER_OUTPUT_DIR}/shader.cpp")
 add_custom_command(
   OUTPUT "${SHADER_GENERATED_HEADER}" "${SHADER_GENERATED_SOURCE}"
   COMMAND ShaderPack -o "${SHADER_OUTPUT_DIR}" -n MOONSHADER ${SHADER_PACK_ARGS}
-  DEPENDS ShaderPack ${SHADER_MATC_OUTPUTS}
+  # The headers are listed too: a .glsl-only edit has to regenerate shader.cpp, otherwise
+  # MoonShader happily relinks the stale archive and the change never reaches the exe.
+  DEPENDS ShaderPack ${SHADER_MATC_OUTPUTS} ${SHADER_HEADER_PATHS}
   COMMENT "Packing the shader packages into shader.cpp"
   VERBATIM)
 

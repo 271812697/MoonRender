@@ -96,9 +96,14 @@ namespace
 			{
 				const uint32_t a = ring * stride + segment;
 				const uint32_t b = a + stride;
-				// The winding the engine's models use: counter-clockwise seen from outside,
-				// so the material's default back-face culling keeps the sphere.
-				p_indices.insert(p_indices.end(), { a, b, a + 1, a + 1, b, b + 1 });
+				// Counter-clockwise seen from outside - the winding OpenGL treats as the front
+				// face (the engine never calls glFrontFace, so it is the default CCW). The
+				// previous order was clockwise, so back-face culling kept the *far* hemisphere
+				// and the material shaded the back side of the sphere: its normals point away
+				// from the camera (NoV == 0), the DFG term sat at the grazing-angle value and
+				// the "reflection" was the environment sampled along n (matcap), not along
+				// reflect(-v, n).
+				p_indices.insert(p_indices.end(), { a, a + 1, b, a + 1, b + 1, b });
 			}
 		}
 	}
@@ -255,6 +260,7 @@ namespace
 				const float sinTheta = std::sin(theta);
 				const float cosTheta = std::cos(theta);
 
+
 				const FVector3 radial{ sinPhi * cosTheta, cosPhi, sinPhi * sinTheta };
 
 				// The dimple faces +Z, the side the default camera looks from.
@@ -291,7 +297,8 @@ namespace
 			{
 				const uint32_t a = ring * stride + segment;
 				const uint32_t b = a + stride;
-				p_indices.insert(p_indices.end(), { a, b, a + 1, a + 1, b, b + 1 });
+				// Same counter-clockwise (outward) winding as BuildUVSphere.
+				p_indices.insert(p_indices.end(), { a, a + 1, b, a + 1, b + 1, b });
 			}
 		}
 
@@ -343,9 +350,9 @@ namespace
 			}
 		}
 
-		// The visible faces follow the same winding convention as the sphere above (its
-		// geometric normal is opposite the surface normal). The pedestal's flat top and bottom
-		// turn a corner relative to its walls, so the order is picked per triangle.
+		// Counter-clockwise seen from outside, like the sphere above: the geometric normal must
+		// agree with the surface normal. The pedestal's flat top and bottom turn a corner
+		// relative to its walls, so the order is picked per triangle.
 		const auto addBaseTriangle = [&](uint32_t p_a, uint32_t p_b, uint32_t p_c)
 		{
 			const auto& a = p_vertices[p_a];
@@ -364,7 +371,7 @@ namespace
 				return; // the pole rows collapse to a point
 			}
 
-			if (FVector3::Dot(geometric, FVector3::Normalize(normalA + normalB + normalC)) > 0.0f)
+			if (FVector3::Dot(geometric, FVector3::Normalize(normalA + normalB + normalC)) < 0.0f)
 			{
 				const uint32_t swap = p_b;
 				p_b = p_c;
@@ -414,6 +421,16 @@ Editor::Panels::PreviewView::PreviewView(::Rendering::Context::Driver& p_driver)
 		// gradient below.
 		skyPass.SetEnvironmentCapture(true);
 		skyPass.updateSkyTexture(":Textures/Studio.hdr");
+		// The preview's IBL is calibrated against Qt-Filament's studio intensity. Filament
+		// gives IndirectLight 20000 lux and uses the default camera exposure (1/125s, f/16,
+		// ISO 100 -> 2.604e-5), so its shader-side iblLuminance is 20000 * 2.604e-5 = 0.521.
+		// Moon multiplies the baked environment by the reflection block's brightness (0.2 in
+		// EngineBufferRenderFeature) and then by the post-process exposure (1.2), so the bake
+		// needs 0.521 / (0.2 * 1.2) = 2.17. The earlier 4.0 was calibrated against the
+		// over-sharp prefilter, which made the ball read much darker than it does with the
+		// correct mips; with those it was 1.8x too bright (measured 0.57 vs Filament's 0.315
+		// in pre-ACES scene radiance).
+		skyPass.SetEnvironmentIntensity(2.2f);
 
 		// A neutral vignette behind the material: darker at the centre (where the mesh is) and
 		// lighter towards the corners, so the silhouette reads without a background plane.
@@ -574,9 +591,12 @@ void Editor::Panels::PreviewView::BuildScene()
 	{
 		if (auto* light = defaultLight->GetComponent<CDirectionalLight>())
 		{
-			// Filament's preview sun: 40000 lux against its 20000 IBL, i.e. twice the
-			// environment's intensity, warm white, no shadows.
-			light->SetIntensity(1.0f);
+			// Filament's preview sun: 40000 lux against its 20000 IBL. Filament's camera
+			// exposure is 2.604e-5 (1/125s, f/16, ISO 100), so the sun reaches the shader as
+			// 40000 * 2.604e-5 = 1.042. Moon's tonemapper applies its own 1.2 exposure after
+			// lighting, so the light itself carries 1.042 / 1.2 = 0.87; with the IBL at 2.2
+			// this also restores Filament's 2:1 sun-to-environment ratio.
+			light->SetIntensity(0.87f);
 			light->SetColor({ 1.0f, 0.912f, 0.787f });
 			light->SetCastShadows(false);
 			defaultLight->transform.SetLocalRotation(Maths::FQuaternion::LookAt(
@@ -607,8 +627,8 @@ void Editor::Panels::PreviewView::BuildScene()
 			auto tonemapping = stack->GetTonemappingSettings();
 			tonemapping.enabled = true;
 			tonemapping.mode = ::Core::Rendering::PostProcess::ETonemappingMode::ACES;
-			// _Exposure is a multiplier, not an EV: our radiance is O(0.1..1) while Filament's
-			// studio IBL is O(20000), so 0.2 was many stops darker than its preview.
+			// _Exposure is a multiplier, not an EV. Keep the preview exposure fixed; IBL
+			// brightness is matched on the environment side, not by lifting the backdrop.
 			tonemapping.exposure = 1.2f;
 			tonemapping.gammaCorrection = true;
 			stack->SetTonemappingSettings(tonemapping);

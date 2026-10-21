@@ -23,7 +23,13 @@ material {
         { type : float,   name : u_CaptureSide, default : 1.0 },
         { type : float2,  name : u_CaptureViewport, default : vec2(1024.0) },
         { type : float,       name : roughness },
-        { type : float,       name : lodOffset, default : 0.0 }
+        { type : float,       name : lodOffset, default : 0.0 },
+        // Source LOD that makes one output texel cover the same solid angle as one texel of
+        // the 256x256 cube Filament filters from (log2(sourceWidth / 256)). The mirror level
+        // (roughness zero) has no kernel width to derive a LOD from, so it uses this one
+        // instead of a single texel of the 1024 source.
+        { type : float,       name : baseLod, default : 0.0 },
+        { type : float,       name : intensity, default : 1.0 }
     ]
 }
 
@@ -111,6 +117,21 @@ fragment {
         return fract(m.z * fract(dot(w, m.xy)));
     }
 
+    // Filament's IBLPrefilterContext HDR compression (hdrLinear=1024, hdrMax=16384):
+    // without it the studio softboxes produce severe fireflies in the prefiltered mips.
+    vec3 compressHDR(vec3 color, float linear, float compressed)
+    {
+        const vec3 rec709 = vec3(0.2126, 0.7152, 0.0722);
+        float luma = dot(color, rec709);
+        float s = 1.0;
+        if (luma > linear)
+        {
+            s = ((linear * linear - compressed * luma) /
+                 ((2.0 * linear - compressed - luma) * luma));
+        }
+        return color * s;
+    }
+
     mat3 tangentSpace(vec3 N)
     {
         vec3 up = abs(N.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
@@ -172,15 +193,17 @@ fragment {
             float pdf = DistributionGGX(vec3(0.0, 0.0, 1.0), H, roughness) * 0.25;
             float l = (pdf > 0.0) ? -0.5 * log2(float(SAMPLE_COUNT) * pdf) : 0.0;
 
-            // A roughness-zero level has pdf = 0, so l would be 0; with the level's
-            // lodOffset that would sample the 1x1 mip and average the sky flat.
-            float sampleLod = (roughness <= 0.0001) ? 0.0 : (l + lodOffset);
-            prefilteredColor += textureLod(SkyboxCube, T * L, sampleLod).rgb * NoL;
+            // A roughness-zero level has no measurable kernel: it is a single sample along N.
+            // Sample the source at baseLod, the LOD whose texel is the size of one *output*
+            // texel, so the mirror level is a filtered copy of the 1024 source (as Filament's
+            // level 0 is of its 256 source) instead of one aliased source texel.
+            float sampleLod = (roughness <= 0.0001) ? baseLod : (l + lodOffset);
+            prefilteredColor += compressHDR(textureLod(SkyboxCube, T * L, sampleLod).rgb, 1024.0, 16384.0) * NoL;
             totalWeight += NoL;
         }
 
         prefilteredColor = prefilteredColor / max(totalWeight, 1.0);
 
-        FRAGMENT_COLOR = vec4(prefilteredColor, 1.0);
+        FRAGMENT_COLOR = vec4(prefilteredColor * intensity, 1.0);
     }
 }

@@ -63,6 +63,10 @@ PixelParams preparePixelParams(FilamentMaterialInputs material, vec3 n, vec3 v, 
     pixel.thickness = max(material.thickness, 0.0);
 
     const float NoV = max(dot(n, v), 1.0e-4);
+    // Filament's split-sum DFG LUT. The LUT is a view-global texture bound by the renderer
+    // (CompositeRenderer sets it on the renderer each frame), not a per-material property; a
+    // material instance without it used to sample the white empty 2D, DFG=(1,1), E~=1, killing
+    // the diffuse and turning the specular into a full mirror.
     pixel.dfg = textureLod(dfgLut, vec2(NoV, pixel.perceptualRoughness), 0.0).rg;
     if (any(isnan(pixel.dfg)) || any(isinf(pixel.dfg)))
     {

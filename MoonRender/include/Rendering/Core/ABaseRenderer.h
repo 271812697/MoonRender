@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <atomic>
 #include "Rendering/Core/IRenderer.h"
 #include "Rendering/Data/FrameInfo.h"
@@ -118,11 +118,15 @@ namespace Rendering::Core
 	public:
 		Rendering::Resources::Mesh m_unitQuad;
 		Rendering::Resources::Mesh m_unitCube;
+		/** The view's split-sum DFG LUT: global, bound for every material that declares
+		 * _BRDFLut (see Material::UploadParameterBlock). Set by CompositeRenderer each frame. */
+		void SetBrdfLut(Rendering::HAL::Texture* p_lut) { m_brdfLut = p_lut; }
 	protected:
 		Data::FrameDescriptor m_frameDescriptor;
 		Context::Driver& m_driver;
 		Rendering::HAL::Texture m_emptyTexture2D;
 		Rendering::HAL::Texture m_emptyTextureCube;
+		Rendering::HAL::Texture* m_brdfLut = nullptr;
 		
 		Rendering::Data::PipelineState m_basePipelineState;
 		bool m_isDrawing;
