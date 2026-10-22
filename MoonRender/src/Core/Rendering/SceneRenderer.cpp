@@ -1,6 +1,8 @@
 #include <ranges>
 #include <tracy/Tracy.hpp>
 #include <algorithm>
+#include <cstdlib>
+#include <string>
 #include <glad/glad.h>
 #include <cstdint>
 #include <cstring>
@@ -66,6 +68,27 @@ namespace
 		HashCombine(p_seed, HashFloat(p_sphere.position.y));
 		HashCombine(p_seed, HashFloat(p_sphere.position.z));
 		HashCombine(p_seed, HashFloat(p_sphere.radius));
+	}
+
+	/** Diagnostic switch for the section passes (see docs/SectionRendering.md):
+	 * MOON_SECTION_DEBUG=always  - the cap ignores the stencil (fills the whole plane)
+	 * MOON_SECTION_DEBUG=nodepth - the cap ignores the depth buffer
+	 * MOON_SECTION_DEBUG=nocap   - no cap at all (parity only)
+	 * MOON_SECTION_DEBUG=paritycolor   - draw the parity fill into the colour buffer
+	 * MOON_SECTION_DEBUG=replace       - stencil REPLACE 1 instead of INVERT
+	 * MOON_SECTION_DEBUG=countN        - count layers instead of parity, show == N
+	 * MOON_SECTION_DEBUG=eqN           - show the parity count == N
+	 * MOON_SECTION_DEBUG=capred        - cap with no depth rejection
+	 * It is the fastest way to tell "no stencil" from "stencil but no cap" - the
+	 * infinite-far-plane regression (SectionCap.shader, section 8 of the doc) showed up
+	 * as "cap appears with capred, nothing with the depth test on". */
+	const std::string& SectionDebugMode()
+	{
+		static const std::string mode = [] {
+			const char* p_mode = std::getenv("MOON_SECTION_DEBUG");
+			return p_mode != nullptr ? std::string(p_mode) : std::string();
+		}();
+		return mode;
 	}
 
 	class SceneRenderPass : public Rendering::Core::ARenderPass
@@ -204,6 +227,31 @@ namespace
 				p_pso.depthWriting = false;
 				p_pso.depthTest = false;
 
+				// TEMPORARY probes (MOON_SECTION_DEBUG):
+				//   paritycolor - draw the parity pass into the colour buffer (white where the
+				//                 shader kept a fragment), so "no stencil" can be told apart from
+				//                 "no draws".
+				//   replace     - REPLACE the stencil with 1 instead of INVERTing it.
+				//   countN      - count layers (INCREMENT_WRAP) instead of toggling parity and
+				//                 show the pixels that end up with exactly N layers.
+				const bool parityColor = SectionDebugMode() == "paritycolor";
+				const bool countLayers = SectionDebugMode().starts_with("count");
+				const bool stencilReplace = SectionDebugMode() == "replace";
+				if (stencilReplace || countLayers)
+				{
+					p_pso.stencilOpFail = ::Rendering::Settings::EOperation::REPLACE;
+					p_pso.depthOpFail = ::Rendering::Settings::EOperation::REPLACE;
+					p_pso.bothOpFail = countLayers
+						? ::Rendering::Settings::EOperation::INCREMENT_WRAP
+						: ::Rendering::Settings::EOperation::REPLACE;
+					p_pso.stencilFuncRef = 1;
+				}
+				if (parityColor)
+				{
+					p_pso.stencilTest = false;
+					p_pso.colorWriting.mask = 0xFF;
+				}
+
 				const auto& drawables = m_renderer.GetDescriptor<SceneRenderer::SceneFilteredDrawablesDescriptor>();
 				for (auto drawable : drawables.opaques | std::views::values)
 				{
@@ -213,22 +261,48 @@ namespace
 
 					drawable.pass = "";
 					drawable.material = m_parityMaterial;
+					// The pass owns the material from here on, so it owns the variant key too:
+					// leaving the drawable's own override on it asks the single-variant parity
+					// shader for another material's feature set and sends Material::Bind through
+					// Shader::GetVariant's fallback (keyed materials such as Standard, i.e. the
+					// .bin import path, always hit it).
+					drawable.featureSetOverride.reset();
 					drawable.stateMask = m_parityMaterial.GenerateStateMask();
 					drawable.stateMask.depthTest = false;
 					drawable.stateMask.depthWriting = false;
-					drawable.stateMask.colorWriting = false;
+					drawable.stateMask.colorWriting = parityColor;
 					drawable.stateMask.frontfaceCulling = false;
 					drawable.stateMask.backfaceCulling = false;
 					m_renderer.DrawEntity(p_pso, drawable);
 				}
 
+				if (parityColor) return;
+
 				// Draw the cap where the parity is odd, occluded by kept surfaces in
 				// front of the clip plane (depth test against the scene depth). The
 				// IBL textures are resolved here because the skybox pass allocates
 				// them on its first draw, after this pass is constructed.
+				if (SectionDebugMode() == "nocap") return;
+
 				m_capMaterial.SetProperty("_IrradianceCube", m_renderer.GetIrradianceCube());
 				m_capMaterial.SetProperty("_PrefilterCube", m_renderer.GetPrefilterCube());
 				m_capMaterial.SetProperty("_BRDFLut", m_renderer.GetBrdfTexture());
+				// across on screen drops the stripes instead of showing a few stray ticks.
+
+				// TEMPORARY: sweep the hatch look from the environment so one build can show
+				// several variants (see MOON_HATCH_* in the probe notes above).
+				auto hatchFromEnv = [this](const char* p_name, const char* p_property)
+				{
+					if (const char* p_value = std::getenv(p_name); p_value != nullptr && *p_value != '\0')
+					{
+						m_capMaterial.SetProperty(p_property, static_cast<float>(std::atof(p_value)));
+					}
+				};
+				hatchFromEnv("MOON_HATCH_PERIOD", "u_HatchPeriodPx");
+				hatchFromEnv("MOON_HATCH_BAND", "u_HatchBandPx");
+				hatchFromEnv("MOON_HATCH_CONTRAST", "u_HatchContrast");
+				hatchFromEnv("MOON_HATCH_ANGLE", "u_HatchAngleDeg");
+				hatchFromEnv("MOON_HATCH_PLANE", "u_HatchScreenFixed");
 				p_pso.stencilFuncOp = ::Rendering::Settings::EComparaisonAlgorithm::NOTEQUAL;
 				p_pso.stencilFuncRef = 0;
 				p_pso.stencilFuncMask = 0xFF;
@@ -248,6 +322,42 @@ namespace
 				drawable.stateMask.depthWriting = true;
 				drawable.stateMask.frontfaceCulling = false;
 				drawable.stateMask.backfaceCulling = false;
+
+				// TEMPORARY probes (MOON_SECTION_DEBUG): "always" shows whether the cap quad
+				// draws at all, "nodepth" shows where the parity left a non-zero stencil,
+				// "capred" paints the stencil region red with no depth rejection, and
+				// "depthless" flips the depth comparison.
+				if (SectionDebugMode() == "always")
+				{
+					p_pso.stencilFuncOp = ::Rendering::Settings::EComparaisonAlgorithm::ALWAYS;
+				}
+				if (SectionDebugMode() == "nodepth")
+				{
+					p_pso.depthTest = false;
+					drawable.stateMask.depthTest = false;
+				}
+				if (SectionDebugMode() == "capred" || SectionDebugMode() == "depthless"
+					|| SectionDebugMode().starts_with("eq")
+					|| SectionDebugMode().starts_with("count"))
+				{
+					p_pso.depthFunc = ::Rendering::Settings::EComparaisonAlgorithm::ALWAYS;
+				}
+				// "eqN" / "countN": show the pixels whose layer count is exactly N (EQUAL N,
+				// depth off), i.e. the distribution of surface layers the parity fill counted.
+				if (SectionDebugMode().starts_with("eq") || SectionDebugMode().starts_with("count"))
+				{
+					const std::string& mode = SectionDebugMode();
+					const int n = std::atoi(mode.c_str() + (mode.starts_with("eq") ? 2 : 5));
+					p_pso.stencilFuncOp = ::Rendering::Settings::EComparaisonAlgorithm::EQUAL;
+					p_pso.stencilFuncRef = n;
+					static bool reported = false;
+					if (!reported) { reported = true; std::cout << "[Section] show stencil == " << n << std::endl; }
+				}
+				if (SectionDebugMode() == "capred")
+				{
+					m_capMaterial.SetProperty("u_Albedo", Maths::FVector4(1.0f, 0.0f, 0.0f, 1.0f));
+					m_capMaterial.SetProperty("u_environmentIntensity", 0.0f);
+				}
 				m_renderer.DrawEntity(p_pso, drawable);
 
 			}
@@ -294,6 +404,7 @@ namespace
 
 					drawable.pass = "";
 					drawable.material = m_contourMaterial;
+					drawable.featureSetOverride.reset();   // see the parity pass above
 					drawable.stateMask = m_contourMaterial.GenerateStateMask();
 					m_renderer.DrawEntity(p_pso, drawable);
 				}			

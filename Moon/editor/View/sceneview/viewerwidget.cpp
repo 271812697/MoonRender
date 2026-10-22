@@ -33,6 +33,8 @@
 #include "core/SelectionManager.h"
 #include "renderer/GizmoRenderPass.h"
 #include "Rendering/Features/FrameInfoRenderFeature.h"
+#include <Core/Rendering/EngineBufferRenderFeature.h>
+#include <cstdlib>
 
 namespace MOON {
 	struct OpenGLProcAddressHelper {
@@ -61,7 +63,13 @@ namespace MOON {
 			QObject::connect(&tree, &TreeViewPanel::itemLeave, mSelf, &onActorHoverLeaved);
 			mEditorContext = new Editor::Core::Context("", "");
 			mEditorContext->sceneManager.LoadDefaultScene();
-			parser->ParseFile(mReadFilePath.toStdString());
+			// The pending file is NOT read here. It used to be, and that made a file opened at
+			// start-up (start page, command line, "open with") be read twice: the deferred read
+			// in paintGL - which waits for the viewport, see mDoReadFile - already does the work.
+			// Reading it twice put two identical bodies in the scene (every surface count
+			// doubled, which is exactly what kills the stencil-parity section cap), and reading
+			// it *here* is even worse: this runs before initializeView(), so a STEP import would
+			// go through TopoActor::TopoActor -> GetSceneView, which is not a service yet.
 		}
 		/** The view, and with it the renderer and every render target of the frame. Runs with the
 		 * render module's own context current: framebuffers and vertex arrays belong to the
@@ -255,6 +263,7 @@ namespace MOON {
 						CORE_INFO("[Viewer] scene query built; framing the view");
 						mSceneView->FitToFocus(mSceneView->GetCamera()->GetTransform().GetWorldForward());
 						CORE_INFO("[Viewer] view framed");
+						applyClipDemo();
 					}
 					else
 					{
@@ -442,6 +451,34 @@ namespace MOON {
 			if (mSceneView != nullptr && mViewWidth > 1 && mViewHeight > 1)
 				mSceneView->Resize(mViewWidth, mViewHeight);
 		}
+		/** TEMPORARY PROBE for the "imported STEP has no section" investigation: with
+		 * MOON_CLIP_DEMO=<ratio> set, cut the framed document with a horizontal plane
+		 * `<ratio>` of its height above the centre, so a headless run (Moon.exe file.step
+		 * plus MOON_SHOT) renders the section without anyone dragging the clip widget.
+		 * Remove together with the MOON_SECTION_DEBUG switch in SceneRenderer.cpp. */
+		void applyClipDemo()
+		{
+			if (mClipDemoApplied) return;
+			const char* p_ratio = std::getenv("MOON_CLIP_DEMO");
+			if (p_ratio == nullptr || *p_ratio == '\0') return;
+			auto* scene = mSceneView != nullptr ? mSceneView->GetScene() : nullptr;
+			if (scene == nullptr) return;
+			const auto box = scene->GetSceneBoundingBox();
+			if (!box.isValid()) return;
+
+			const float ratio = static_cast<float>(std::atof(p_ratio));
+			const Maths::FVector3 center = box.center();
+			const float height = box.lengthZ();
+			const Maths::FVector3 normal{ 0.0f, 0.0f, 1.0f };
+			const float d = center.z + ratio * height * 0.5f;
+
+			auto& feature = mSceneView->GetRenderer()
+				.GetFeature<::Core::Rendering::EngineBufferRenderFeature>();
+			feature.SetClipPlane(normal.x, normal.y, normal.z, -d);
+			feature.EnableClip(true);
+			mClipDemoApplied = true;
+			CORE_INFO("[Section] clip demo plane z = {0} (ratio {1}, bbox height {2})", d, ratio, height);
+		}
 		void onReadFile(const QString& path)
 		{
 			// The request is recorded first, then the workspace is brought up: raising the
@@ -524,6 +561,8 @@ namespace MOON {
 		static constexpr int kViewFitTimeoutFrames = 600;
 		bool mPendingViewFit = false;
 		int mPendingViewFitFrames = 0;
+		/** TEMPORARY: set once applyClipDemo() cut the document (MOON_CLIP_DEMO). */
+		bool mClipDemoApplied = false;
 		QElapsedTimer m_fpsTimer;
 		double m_fps = 0.0;
 		double m_frameMs = 0.0;
