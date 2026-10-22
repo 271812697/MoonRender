@@ -2,6 +2,7 @@
 #include "Interactive/EventWidget.h"
 #include "Interactive/Screen/HitShape.h"
 #include "Interactive/Screen/ScreenLayout.h"
+#include <Rendering/Overlay/Im2D.h>
 #include <vector>
 
 namespace MOON
@@ -82,7 +83,7 @@ namespace MOON
 		/** Clickable shapes, in widget local space. */
 		virtual void BuildShapes(std::vector<HitShape>& p_outShapes) const {}
 		/** Draw the content; p_rect is the resolved placement. */
-		virtual void DrawContent(ImDrawList& p_drawList, const ScreenRect& p_rect) {}
+		virtual void DrawContent(::Rendering::Overlay::Im2D::DrawList& p_drawList, const ScreenRect& p_rect) {}
 		/** True for widgets that keep the cursor while the button is held down
 		 * (sliders, handles). Plain buttons leave it false and fire on press. */
 		virtual bool WantsCapture() const { return false; }
@@ -132,7 +133,7 @@ namespace MOON
 		/** Cursor shown while hovering a shape (Arrow leaves it to others). */
 		void SetHoverCursor(ImGuiMouseCursor p_cursor) { mHoverCursor = p_cursor; }
 		/** Draw every shape with the style, highlighting the hovered one. */
-		void DrawShapes(ImDrawList& p_drawList, const ScreenRect& p_rect);
+		void DrawShapes(::Rendering::Overlay::Im2D::DrawList& p_drawList, const ScreenRect& p_rect);
 		void SetShapeStyle(const ScreenShapeStyle& p_style) { mShapeStyle = p_style; }
 
 	private:

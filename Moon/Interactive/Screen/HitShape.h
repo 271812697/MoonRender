@@ -1,5 +1,6 @@
 #pragma once
 #include <ThirdParty/imgui/imgui/imgui.h>
+#include <Rendering/Overlay/Im2D.h>
 #include <memory>
 #include <vector>
 
@@ -72,7 +73,7 @@ namespace MOON
 
 		bool Contains(const ImVec2& p_local) const;
 		void Draw(
-			ImDrawList* p_drawList,
+			::Rendering::Overlay::Im2D::DrawList* p_drawList,
 			const ImVec2& p_offset,
 			ImU32 p_fill,
 			ImU32 p_outline,

@@ -1,5 +1,6 @@
 #include "Interactive/Widgets/DrawSketchHandlerLine.h"
 #include "Interactive/Im3DRenderer.h"
+#include <Rendering/Overlay/Im2DRender.h>
 #include "renderer/SceneView.h"
 #include <ThirdParty/imgui/imgui/imgui.h>
 #include "Interactive/Interactive/Event.h"
@@ -33,13 +34,12 @@ namespace MOON {
 
 			char text[64];
 			snprintf(text, sizeof(text), "%.2f", value);
-			ImPlotCustom::drawDoubleArrow(
-				ImPlotCustom::Transform(from.x, from.y, angleDeg),
-				col,
-				len,
-				thickness,
-				text
-			);
+			{
+				auto& render2d = Rendering::Overlay::Im2DRender::Instance();
+				Rendering::Overlay::Im2D::AddDoubleArrow(render2d.GetDrawList(), render2d.GetFont(), 20.0f,
+					Rendering::Overlay::Im2D::Transform(from.x, from.y, angleDeg),
+					col, len, thickness, text);
+			}
 		}
 
 		// Both component arrows share the mouse position as one endpoint:
@@ -139,14 +139,13 @@ namespace MOON {
 
 				char angleText[64];
 				snprintf(angleText, sizeof(angleText), "%.1f", m_sketchAngleAccumDeg);
-				ImPlotCustom::drawDoubleArcArrow(
-					ImPlotCustom::Transform(screenStart.x, screenStart.y, 0.0f),
-					IM_COL32(255, 255, 0, 255),
-					screenDist * 0.5f,
-					m_screenAngleAccumDeg,
-					2.5f,
-					angleText
-				);
+				{
+					auto& render2d = Rendering::Overlay::Im2DRender::Instance();
+					Rendering::Overlay::Im2D::AddDoubleArcArrow(render2d.GetDrawList(), render2d.GetFont(), 20.0f,
+						Rendering::Overlay::Im2D::Transform(screenStart.x, screenStart.y, 0.0f),
+						Rendering::Overlay::Im2D::ColorU32(255, 255, 0, 255),
+						screenDist * 0.5f, m_screenAngleAccumDeg, 2.5f, angleText);
+				}
 			}
 		}
 	}

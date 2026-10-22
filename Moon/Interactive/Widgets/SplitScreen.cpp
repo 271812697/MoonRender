@@ -77,7 +77,7 @@ namespace MOON
 		p_outShapes.push_back(handle);
 	}
 
-	void SplitScreen::DrawContent(ImDrawList& p_drawList, const ScreenRect& p_rect)
+	void SplitScreen::DrawContent(::Rendering::Overlay::Im2D::DrawList& p_drawList, const ScreenRect& p_rect)
 	{
 		// The line is decoration; the handles are the interactive shapes and are
 		// drawn from the same geometry that is hit tested.

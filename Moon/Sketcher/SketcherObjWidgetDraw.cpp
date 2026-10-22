@@ -6,13 +6,31 @@
 #include "Interactive/Im3DRenderer.h"
 #include "Core/Global/ServiceLocator.h"
 #include "core/log.h"
-#include <ThirdParty/imgui/imgui/imgui.h>
-#include <ThirdParty/imgui/implot/implotCustom.h>
+#include <Rendering/Overlay/Im2DRender.h>
 #include "Sketcher/SketcheTool2D.h"
 #include <QInputDialog>
 #include <limits>
 #include <cmath>
 namespace MOON {
+    // The sketch's annotations (dimension text, constraint arrows, constraint icons) are drawn
+    // with Im2D, the overlay draw list that replaces ImGui's. See docs/Im2DRendering.md.
+    namespace Im2D = ::Rendering::Overlay::Im2D;
+
+    namespace {
+        /** Annotation text size. The font atlas is baked at 24px, so this is crisp and the
+         * exponent labels (1.4x) are only slightly magnified. */
+        constexpr float kAnnotationFontSize = 20.0f;
+
+        Im2D::DrawList& AnnotationDrawList()
+        {
+            return ::Rendering::Overlay::Im2DRender::Instance().GetDrawList();
+        }
+
+        Im2D::Font& AnnotationFont()
+        {
+            return ::Rendering::Overlay::Im2DRender::Instance().GetFont();
+        }
+    }
     // Constraint types that get a numeric viewport label.
     static bool isDimensionLabelType(Sketcher::ConstraintType type)
     {
@@ -31,9 +49,9 @@ namespace MOON {
             || type == Sketcher::ConstraintType::DistanceX
             || type == Sketcher::ConstraintType::DistanceY;
     }
-    static ImU32 abgrToImU32(const Eigen::Vector4<uint8_t>& c)
+    static Im2D::ImU32 abgrToImU32(const Eigen::Vector4<uint8_t>& c)
     {
-        return IM_COL32(c[3], c[2], c[1], c[0]);
+        return Im2D::ColorU32(c[3], c[2], c[1], c[0]);
     }
     // Draws a sketch-plane polyline with a screen-space dashed pattern (dash
     // and gap lengths are fixed in pixels, so the pattern keeps its size when
@@ -575,6 +593,34 @@ namespace MOON {
 
                 const float step = grid.step;
 
+                // How the two families crowd as the view turns. Lines of constant u are
+                // spaced along the u axis, and the plane's axes are sheared by the
+                // projection, so the *perpendicular* distance between two of them is
+                //     step * scaleU * sin(angle between the projected axes)
+                // in view space; the same for the other family with scaleV. The step is
+                // sized by the larger of the two scales (see SketchPicking::gridView), so
+                // the family across the foreshortened axis is the one that can come out
+                // denser than the target - and when it gets below a few pixels it turns
+                // into a grey band. Fading it by its own spacing keeps the rotation smooth
+                // without letting that happen.
+                const float scaleU = std::sqrt(grid.uX * grid.uX + grid.uY * grid.uY);
+                const float scaleV = std::sqrt(grid.vX * grid.vX + grid.vY * grid.vY);
+                const float sinTheta = (scaleU > 1.0e-6f && scaleV > 1.0e-6f)
+                    ? std::abs(det) / (scaleU * scaleV)
+                    : 0.0f;
+                const float viewportHeight = static_cast<float>(
+                    m_sceneView->GetRenderer().GetFrameDescriptor().renderHeight);
+                const float pixelsPerViewUnit = viewportHeight / (2.0f * grid.hy);
+                constexpr float kGridFadeStartPx = 8.0f;
+                constexpr float kGridFadeEndPx = 4.0f;
+                const auto familyFade = [&](float p_scaleAlongAxis) {
+                    const float spacingPx
+                        = grid.step * p_scaleAlongAxis * sinTheta * pixelsPerViewUnit;
+                    return std::clamp(
+                        (spacingPx - kGridFadeEndPx) / (kGridFadeStartPx - kGridFadeEndPx),
+                        0.0f, 1.0f);
+                };
+
                 // Narrows [p_lo, p_hi] down to the values of the free parameter that keep
                 // p_offset + p_coeff * t inside [-p_limit, p_limit], i.e. to the part of
                 // the line that is inside the viewport.
@@ -598,6 +644,12 @@ namespace MOON {
                 constexpr int kMaxLinesPerFamily = 2000;
                 // Lines of constant u (they run along v), then lines of constant v.
                 const auto drawFamily = [&](bool p_constantU) {
+                    // The family across the foreshortened axis crowds first; below a few
+                    // pixels of spacing it is just a grey band, so it fades out.
+                    const float fade = familyFade(p_constantU ? scaleU : scaleV);
+                    if (fade <= 0.0f) {
+                        return;
+                    }
                     const float fixedX = p_constantU ? grid.uX : grid.vX;
                     const float fixedY = p_constantU ? grid.uY : grid.vY;
                     const float freeX = p_constantU ? grid.vX : grid.uX;
@@ -621,7 +673,9 @@ namespace MOON {
                             || !narrowSpan(grid.oY + g * fixedY, freeY, grid.hy, lo, hi)) {
                             continue;
                         }
-                        const auto& col = (i % 5) == 0 ? majorColor : minorColor;
+                        Eigen::Vector4<uint8_t> col = (i % 5) == 0 ? majorColor : minorColor;
+                        col[0] = static_cast<uint8_t>(
+                            static_cast<float>(col[0]) * fade + 0.5f);
                         const Eigen::Vector3f rawA = p_constantU
                             ? m_sketch->plane().valueEigen(g, lo)
                             : m_sketch->plane().valueEigen(lo, g);
@@ -1994,7 +2048,7 @@ namespace MOON {
             if (!computeConstraintLabel(i, anchor, sx, sy)) {
                 continue;
             }
-            const ImVec2 ts = ImGui::CalcTextSize(constraintLabelText(c).c_str());
+            const Im2D::Vec2 ts = Im2D::DrawList::CalcTextSize(AnnotationFont(), kAnnotationFontSize, constraintLabelText(c).c_str());
             const float padX = 8.0f, padY = 5.0f;
             if (mouseX >= sx - ts.x * 0.5f - padX && mouseX <= sx + ts.x * 0.5f + padX
                 && mouseY >= sy - ts.y * 0.5f - padY && mouseY <= sy + ts.y * 0.5f + padY) {
@@ -2145,7 +2199,7 @@ namespace MOON {
                 m_labelHoverHandle = LabelHandle::Caption;
             }
         }
-        ImDrawList* drawList = ImGui::GetForegroundDrawList();
+        Im2D::DrawList* drawList = &Rendering::Overlay::Im2DRender::Instance().GetDrawList();
         if (!drawList) {
             return;
         }
@@ -2162,13 +2216,13 @@ namespace MOON {
                 continue;
             }
             const std::string text = constraintLabelText(c);
-            const ImVec2 ts = ImGui::CalcTextSize(text.c_str());
+            const Im2D::Vec2 ts = Im2D::DrawList::CalcTextSize(AnnotationFont(), kAnnotationFontSize, text.c_str());
             const bool isError = constraintInError(i);
             const bool hovered = (i == m_labelHover) || (i == m_labelDrag);
             const float padX = 6.0f, padY = 3.0f;
-            const ImVec2 boxMin(sx - ts.x * 0.5f - padX, sy - ts.y * 0.5f - padY);
-            const ImVec2 boxMax(sx + ts.x * 0.5f + padX, sy + ts.y * 0.5f + padY);
-            const ImU32 arrowCol = isError ? IM_COL32(255, 110, 110, 255)
+            const Im2D::Vec2 boxMin(sx - ts.x * 0.5f - padX, sy - ts.y * 0.5f - padY);
+            const Im2D::Vec2 boxMax(sx + ts.x * 0.5f + padX, sy + ts.y * 0.5f + padY);
+            const Im2D::ImU32 arrowCol = isError ? Im2D::ColorU32(255, 110, 110, 255)
                 : abgrToImU32(m_drawOption.constraintColor);
             auto screenOf = [&](const Base::Vector2d& sk) -> Eigen::Vector2f {
                 return renderer->worldToScreen(m_sketch->plane().valueEigen(sk));
@@ -2194,14 +2248,14 @@ namespace MOON {
                     if (straightDimFrame(c, frame)) {
                         constexpr float kExtensionThickness = 1.0f;
                         drawList->AddLine(
-                            ImVec2(frame.screenA.x(), frame.screenA.y()),
-                            ImVec2(trackAx, trackAy),
+                            Im2D::Vec2(frame.screenA.x(), frame.screenA.y()),
+                            Im2D::Vec2(trackAx, trackAy),
                             arrowCol,
                             kExtensionThickness
                         );
                         drawList->AddLine(
-                            ImVec2(frame.screenB.x(), frame.screenB.y()),
-                            ImVec2(trackBx, trackBy),
+                            Im2D::Vec2(frame.screenB.x(), frame.screenB.y()),
+                            Im2D::Vec2(trackBx, trackBy),
                             arrowCol,
                             kExtensionThickness
                         );
@@ -2211,12 +2265,11 @@ namespace MOON {
                     const float len = std::sqrt(dx * dx + dy * dy);
                     if (len > 4.0f) {
                         const float angleDeg = -std::atan2(dy, dx) * 180.0f / pi;
-                        ImPlotCustom::drawDoubleArrow(
-                            ImPlotCustom::Transform(trackAx, trackAy, angleDeg),
+                        Im2D::AddDoubleArrow(*drawList, 
+                            Im2D::Transform(trackAx, trackAy, angleDeg),
                             arrowCol,
                             len,
-                            thickness,
-                            nullptr
+                            thickness
                         );
                     }
                     // Mark both arrows while the line is under the cursor: the whole
@@ -2227,9 +2280,9 @@ namespace MOON {
                             = i == m_labelDrag ? m_labelDragHandle : m_labelHoverHandle;
                         if (handle == LabelHandle::DimensionLine) {
                             drawList->AddCircleFilled(
-                                ImVec2(trackAx, trackAy), 4.5f, IM_COL32(255, 255, 140, 235));
+                                Im2D::Vec2(trackAx, trackAy), 4.5f, Im2D::ColorU32(255, 255, 140, 235));
                             drawList->AddCircleFilled(
-                                ImVec2(trackBx, trackBy), 4.5f, IM_COL32(255, 255, 140, 235));
+                                Im2D::Vec2(trackBx, trackBy), 4.5f, Im2D::ColorU32(255, 255, 140, 235));
                         }
                     }
                 }
@@ -2252,14 +2305,13 @@ namespace MOON {
                         if (c->Type == Sketcher::ConstraintType::Diameter) {
                             // A diameter runs from one rim through the centre to the
                             // other, so it carries an arrow at either end.
-                            ImPlotCustom::drawDoubleArrow(
-                                ImPlotCustom::Transform(
+                            Im2D::AddDoubleArrow(*drawList, 
+                                Im2D::Transform(
                                     centerS.x() - rx, centerS.y() - ry, angleDeg
                                 ),
                                 arrowCol,
                                 rimDist * 2.0f,
-                                thickness,
-                                nullptr
+                                thickness
                             );
                         }
                         else {
@@ -2268,8 +2320,8 @@ namespace MOON {
                             // length past the end of the line, so the line stops that
                             // much short of the rim and the tip lands on it.
                             const float head = 2.0f * 2.5f * thickness;
-                            ImPlotCustom::AddArrow(
-                                ImPlotCustom::Transform(centerS.x(), centerS.y(), angleDeg),
+                            Im2D::AddArrow(*drawList, 
+                                Im2D::Transform(centerS.x(), centerS.y(), angleDeg),
                                 arrowCol,
                                 std::max(rimDist - head, 1.0f),
                                 thickness
@@ -2285,13 +2337,12 @@ namespace MOON {
                 float cx = 0.0f, cy = 0.0f;
                 float arcRadius = 0.0f, startDeg = 0.0f, sweepDeg = 0.0f;
                 if (computeAngleLabelTrack(c, cx, cy, arcRadius, startDeg, sweepDeg)) {
-                    ImPlotCustom::drawDoubleArcArrow(
-                        ImPlotCustom::Transform(cx, cy, startDeg),
+                    Im2D::AddDoubleArcArrow(*drawList, 
+                        Im2D::Transform(cx, cy, startDeg),
                         arrowCol,
                         arcRadius,
                         sweepDeg,
-                        thickness,
-                        nullptr
+                        thickness
                     );
                     // Mark the arc while the cursor is on it: it is the grip that pulls
                     // the annotation in and out, and nothing else says so.
@@ -2301,23 +2352,23 @@ namespace MOON {
                         const float midDeg = startDeg + sweepDeg * 0.5f;
                         const float midRad = midDeg * pi / 180.0f;
                         drawList->AddCircleFilled(
-                            ImVec2(
+                            Im2D::Vec2(
                                 cx + std::cos(midRad) * arcRadius,
                                 cy + std::sin(midRad) * arcRadius
                             ),
                             4.5f,
-                            IM_COL32(255, 255, 140, 235)
+                            Im2D::ColorU32(255, 255, 140, 235)
                         );
                     }
                 }
             }
-            const ImU32 textCol = isError ? IM_COL32(255, 92, 92, 255)
+            const Im2D::ImU32 textCol = isError ? Im2D::ColorU32(255, 92, 92, 255)
                 : abgrToImU32(m_drawOption.constraintColor);
-            const ImU32 borderCol = isError ? IM_COL32(255, 120, 120, 220)
-                : hovered ? IM_COL32(255, 255, 140, 255) : IM_COL32(255, 255, 255, 42);
-            //drawList->AddRectFilled(boxMin, boxMax, IM_COL32(24, 24, 30, 178), 4.0f);
+            const Im2D::ImU32 borderCol = isError ? Im2D::ColorU32(255, 120, 120, 220)
+                : hovered ? Im2D::ColorU32(255, 255, 140, 255) : Im2D::ColorU32(255, 255, 255, 42);
+            //drawList->AddRectFilled(boxMin, boxMax, Im2D::ColorU32(24, 24, 30, 178), 4.0f);
             //drawList->AddRect(boxMin, boxMax, borderCol, 4.0f);
-            drawList->AddText(ImVec2(sx - ts.x * 0.5f, sy - ts.y * 0.5f), textCol, text.c_str());
+            drawList->AddText(AnnotationFont(), kAnnotationFontSize, Im2D::Vec2(sx - ts.x * 0.5f, sy - ts.y * 0.5f), textCol, text.c_str());
         }
     }
     void SketcherObjWidget::editConstraintValue(int constrId)
@@ -2506,7 +2557,7 @@ namespace MOON {
         if (!InEdit()) {
             return;
         }
-        ImDrawList* drawList = ImGui::GetForegroundDrawList();
+        Im2D::DrawList* drawList = &Rendering::Overlay::Im2DRender::Instance().GetDrawList();
         if (!drawList) {
             return;
         }
@@ -2522,7 +2573,7 @@ namespace MOON {
                 continue;
             }
             const bool isError = constraintInError(i);
-            const ImU32 col = isError ? IM_COL32(255, 110, 110, 255)
+            const Im2D::ImU32 col = isError ? Im2D::ColorU32(255, 110, 110, 255)
                                       : abgrToImU32(m_drawOption.constraintColor);
             const auto screenOfSketch = [this](const Base::Vector2d& sk) {
                 const Base::Vector3d w = m_sketch->plane().origin + sk.x * m_sketch->plane().xAxis
@@ -2567,8 +2618,8 @@ namespace MOON {
             const float ly0 = cy + ny * circleR - ty * lineHalf;
             const float lx1 = cx + nx * circleR + tx * lineHalf;
             const float ly1 = cy + ny * circleR + ty * lineHalf;
-            drawList->AddCircle(ImVec2(cx, cy), circleR, col, 0, 2.0f);
-            drawList->AddLine(ImVec2(lx0, ly0), ImVec2(lx1, ly1), col, 2.0f);
+            drawList->AddCircle(Im2D::Vec2(cx, cy), circleR, col, 0, 2.0f);
+            drawList->AddLine(Im2D::Vec2(lx0, ly0), Im2D::Vec2(lx1, ly1), col, 2.0f);
         }
     }
     void SketcherObjWidget::drawConstraintIcons()
@@ -2576,7 +2627,7 @@ namespace MOON {
         if (!InEdit()) {
             return;
         }
-        ImDrawList* drawList = ImGui::GetForegroundDrawList();
+        Im2D::DrawList* drawList = &Rendering::Overlay::Im2DRender::Instance().GetDrawList();
         if (!drawList) {
             return;
         }
@@ -2602,7 +2653,7 @@ namespace MOON {
                 continue;
             }
             const bool isError = constraintInError(i);
-            const ImU32 col = isError ? IM_COL32(255, 110, 110, 255)
+            const Im2D::ImU32 col = isError ? Im2D::ColorU32(255, 110, 110, 255)
                                       : abgrToImU32(m_drawOption.constraintColor);
 
             switch (c->Type) {
@@ -2618,10 +2669,10 @@ namespace MOON {
                     const Eigen::Vector2f s = screenOf(p);
                     // Offset the glyph away from the coincident point, then
                     // draw a circle with two dots inside.
-                    const ImVec2 centre(s.x() + 16.0f, s.y() + 16.0f);
+                    const Im2D::Vec2 centre(s.x() + 16.0f, s.y() + 16.0f);
                     drawList->AddCircle(centre, 10.0f, col, 0, 1.8f);
-                    drawList->AddCircleFilled(ImVec2(centre.x - 3.0f, centre.y), 2.5f, col);
-                    drawList->AddCircleFilled(ImVec2(centre.x + 3.0f, centre.y), 2.5f, col);
+                    drawList->AddCircleFilled(Im2D::Vec2(centre.x - 3.0f, centre.y), 2.5f, col);
+                    drawList->AddCircleFilled(Im2D::Vec2(centre.x + 3.0f, centre.y), 2.5f, col);
                 }
                 break;
             }
@@ -2632,23 +2683,23 @@ namespace MOON {
                     // Screen Y grows downwards, so north-west = up-left:
                     // (-,-). Offset the arc centre away from the point so it
                     // does not cover it, then sweep 180..270 degrees.
-                    const ImVec2 centre(s.x() - 5.0f, s.y() - 5.0f);
+                    const Im2D::Vec2 centre(s.x() - 5.0f, s.y() - 5.0f);
                     const float radius = 20.0f;
                     constexpr float kPi = 3.14159265358979f;
                     const int seg = 8;
-                    ImVec2 arc[seg + 1];
+                    Im2D::Vec2 arc[seg + 1];
                     for (int k = 0; k <= seg; ++k) {
                         const float deg = 180.0f + 90.0f * static_cast<float>(k) / seg;
                         const float a0 = deg * kPi / 180.0f;
-                        arc[k] = ImVec2(
+                        arc[k] = Im2D::Vec2(
                             centre.x + radius * std::cos(a0),
                             centre.y + radius * std::sin(a0)
                         );
                     }
-                    drawList->AddPolyline(arc, seg + 1, col, 0, 1.8f);
+                    drawList->AddPolyline(arc, seg + 1, col, 1.8f);
                     const float midDeg = 225.0f * kPi / 180.0f;
                     drawList->AddCircleFilled(
-                        ImVec2(centre.x + radius * std::cos(midDeg),
+                        Im2D::Vec2(centre.x + radius * std::cos(midDeg),
                                centre.y + radius * std::sin(midDeg)),
                         3.0f,
                         col
@@ -2669,15 +2720,15 @@ namespace MOON {
                         const float offsetY = -22.0f;
                         const float halfLen = 16.0f;
                         drawList->AddLine(
-                            ImVec2(s.x() - halfLen, s.y() + offsetY),
-                            ImVec2(s.x() + halfLen, s.y() + offsetY),
+                            Im2D::Vec2(s.x() - halfLen, s.y() + offsetY),
+                            Im2D::Vec2(s.x() + halfLen, s.y() + offsetY),
                             col,
                             2.4f
                         );
                         drawList->AddText(
-                            ImGui::GetFont(),
-                            ImGui::GetFontSize() * 1.4f,
-                            ImVec2(s.x() + halfLen + 5.0f, s.y() + offsetY - 9.0f),
+                            AnnotationFont(),
+                            kAnnotationFontSize * 1.4f,
+                            Im2D::Vec2(s.x() + halfLen + 5.0f, s.y() + offsetY - 9.0f),
                             col,
                             indexText
                         );
@@ -2688,15 +2739,15 @@ namespace MOON {
                         const float offsetX = 24.0f;
                         const float lineHalf = 18.0f;
                         drawList->AddLine(
-                            ImVec2(s.x() + offsetX, s.y() - lineHalf),
-                            ImVec2(s.x() + offsetX, s.y() + lineHalf),
+                            Im2D::Vec2(s.x() + offsetX, s.y() - lineHalf),
+                            Im2D::Vec2(s.x() + offsetX, s.y() + lineHalf),
                             col,
                             3.0f
                         );
                         drawList->AddText(
-                            ImGui::GetFont(),
-                            ImGui::GetFontSize() * 1.4f,
-                            ImVec2(s.x() + offsetX + lineHalf + 5.0f, s.y() - 9.0f),
+                            AnnotationFont(),
+                            kAnnotationFontSize * 1.4f,
+                            Im2D::Vec2(s.x() + offsetX + lineHalf + 5.0f, s.y() - 9.0f),
                             col,
                             indexText
                         );
@@ -2718,19 +2769,20 @@ namespace MOON {
                 const auto drawEqualAt = [&](const Base::Vector2d& p) {
                     const Eigen::Vector2f s = screenOf(p);
                     drawList->AddLine(
-                        ImVec2(s.x() - 9.0f, s.y() - 3.0f),
-                        ImVec2(s.x() + 9.0f, s.y() - 3.0f),
+                        Im2D::Vec2(s.x() - 9.0f, s.y() - 3.0f),
+                        Im2D::Vec2(s.x() + 9.0f, s.y() - 3.0f),
                         col,
                         1.5f
                     );
                     drawList->AddLine(
-                        ImVec2(s.x() - 9.0f, s.y() + 3.0f),
-                        ImVec2(s.x() + 9.0f, s.y() + 3.0f),
+                        Im2D::Vec2(s.x() - 9.0f, s.y() + 3.0f),
+                        Im2D::Vec2(s.x() + 9.0f, s.y() + 3.0f),
                         col,
                         1.5f
                     );
                     drawList->AddText(
-                        ImVec2(s.x() + 11.0f, s.y() - 8.0f),
+                        AnnotationFont(), kAnnotationFontSize,
+                        Im2D::Vec2(s.x() + 11.0f, s.y() - 8.0f),
                         col,
                         indexText
                     );
@@ -2781,25 +2833,25 @@ namespace MOON {
                         const float half = 12.0f;
                         const float sep = 5.0f;
                         drawList->AddLine(
-                            ImVec2(s.x() + dS.x() * half + nx * sep,
+                            Im2D::Vec2(s.x() + dS.x() * half + nx * sep,
                                    s.y() + dS.y() * half + ny * sep),
-                            ImVec2(s.x() - dS.x() * half + nx * sep,
+                            Im2D::Vec2(s.x() - dS.x() * half + nx * sep,
                                    s.y() - dS.y() * half + ny * sep),
                             col,
                             2.2f
                         );
                         drawList->AddLine(
-                            ImVec2(s.x() + dS.x() * half - nx * sep,
+                            Im2D::Vec2(s.x() + dS.x() * half - nx * sep,
                                    s.y() + dS.y() * half - ny * sep),
-                            ImVec2(s.x() - dS.x() * half - nx * sep,
+                            Im2D::Vec2(s.x() - dS.x() * half - nx * sep,
                                    s.y() - dS.y() * half - ny * sep),
                             col,
                             2.2f
                         );
                         drawList->AddText(
-                            ImGui::GetFont(),
-                            ImGui::GetFontSize() * 1.4f,
-                            ImVec2(s.x() + dS.x() * (half + 7.0f) + nx * sep,
+                            AnnotationFont(),
+                            kAnnotationFontSize * 1.4f,
+                            Im2D::Vec2(s.x() + dS.x() * (half + 7.0f) + nx * sep,
                                    s.y() + dS.y() * (half + 7.0f) + ny * sep - 7.0f),
                             col,
                             indexText
@@ -2820,21 +2872,21 @@ namespace MOON {
                     const float leg = 16.0f;
                     const float thick = 2.4f;
                     drawList->AddLine(
-                        ImVec2(s.x(), s.y()),
-                        ImVec2(s.x() + leg, s.y()),
+                        Im2D::Vec2(s.x(), s.y()),
+                        Im2D::Vec2(s.x() + leg, s.y()),
                         col,
                         thick
                     );
                     drawList->AddLine(
-                        ImVec2(s.x() + leg, s.y()),
-                        ImVec2(s.x() + leg, s.y() + leg),
+                        Im2D::Vec2(s.x() + leg, s.y()),
+                        Im2D::Vec2(s.x() + leg, s.y() + leg),
                         col,
                         thick
                     );
                     drawList->AddText(
-                        ImGui::GetFont(),
-                        ImGui::GetFontSize() * 1.4f,
-                        ImVec2(s.x() + leg + 5.0f, s.y() - 9.0f),
+                        AnnotationFont(),
+                        kAnnotationFontSize * 1.4f,
+                        Im2D::Vec2(s.x() + leg + 5.0f, s.y() - 9.0f),
                         col,
                         indexText
                     );
@@ -2853,13 +2905,13 @@ namespace MOON {
                     const Base::Vector2d p = (a + b) * 0.5;
                     const Eigen::Vector2f s = screenOf(p);
                     drawList->AddLine(
-                        ImVec2(s.x(), s.y() - 10.0f),
-                        ImVec2(s.x(), s.y() + 10.0f),
+                        Im2D::Vec2(s.x(), s.y() - 10.0f),
+                        Im2D::Vec2(s.x(), s.y() + 10.0f),
                         col,
                         1.5f
                     );
-                    drawList->AddCircleFilled(ImVec2(s.x() - 5.0f, s.y()), 2.0f, col);
-                    drawList->AddCircleFilled(ImVec2(s.x() + 5.0f, s.y()), 2.0f, col);
+                    drawList->AddCircleFilled(Im2D::Vec2(s.x() - 5.0f, s.y()), 2.0f, col);
+                    drawList->AddCircleFilled(Im2D::Vec2(s.x() + 5.0f, s.y()), 2.0f, col);
                 }
                 break;
             }
@@ -2868,11 +2920,10 @@ namespace MOON {
                 if (anchorOf(c, 0, a)) {
                     const Eigen::Vector2f s = screenOf(a);
                     drawList->AddRect(
-                        ImVec2(s.x() - 8.0f, s.y() - 8.0f),
-                        ImVec2(s.x() + 8.0f, s.y() + 8.0f),
+                        Im2D::Vec2(s.x() - 8.0f, s.y() - 8.0f),
+                        Im2D::Vec2(s.x() + 8.0f, s.y() + 8.0f),
                         col,
                         0.0f,
-                        0,
                         1.5f
                     );
                 }

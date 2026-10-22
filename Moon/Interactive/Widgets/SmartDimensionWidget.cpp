@@ -13,8 +13,8 @@
 #include "core/log.h"
 #include "editor/Toolbar/sketchToolbar.h"
 #include "renderer/SceneView.h"
+#include <Rendering/Overlay/Im2DRender.h>
 #include <ThirdParty/imgui/imgui/imgui.h>
-#include <ThirdParty/imgui/implot/implotCustom.h>
 
 #include <QDialog>
 #include <QDoubleSpinBox>
@@ -705,10 +705,9 @@ namespace MOON
 		if (state.picks.empty() || state.type == Sketcher::ConstraintType::None) {
 			return;
 		}
-		ImDrawList* drawList = ImGui::GetForegroundDrawList();
-		if (drawList == nullptr) {
-			return;
-		}
+		Rendering::Overlay::Im2DRender& render2d = Rendering::Overlay::Im2DRender::Instance();
+		Rendering::Overlay::Im2D::DrawList& drawList = render2d.GetDrawList();
+		Rendering::Overlay::Im2D::Font& font = render2d.GetFont();
 
 		const auto toScreen = [this](const Base::Vector2d& sketchPos) {
 			return renderer->worldToScreen(plane.valueEigen(sketchPos));
@@ -751,7 +750,7 @@ namespace MOON
 			const Base::Vector2d secondEnd = pick.centre + direction * pick.radius;
 			const ImVec2 first = toImVec(toScreen(firstEnd));
 			const ImVec2 second = toImVec(toScreen(secondEnd));
-			drawList->AddLine(first, second, kPreviewColor, kShaftThickness);
+			drawList.AddLine(first, second, kPreviewColor, kShaftThickness);
 			const float length = std::sqrt(
 				(second.x - first.x) * (second.x - first.x)
 				+ (second.y - first.y) * (second.y - first.y));
@@ -759,23 +758,18 @@ namespace MOON
 				return;
 			}
 			if (diameter) {
-				ImPlotCustom::drawDoubleArrow(
-					ImPlotCustom::Transform(first, angleOf(first, second)),
-					kPreviewColor,
-					length,
-					kShaftThickness,
-					text.c_str());
+				Rendering::Overlay::Im2D::AddDoubleArrow(drawList, font, 20.0f,
+					Rendering::Overlay::Im2D::Transform(first.x, first.y, angleOf(first, second)),
+					kPreviewColor, length, kShaftThickness, text.c_str());
 			}
 			else {
 				// A radius carries one arrow, at the circle, and its value beside the
 				// line. AddArrow puts its tip a head length past the end of the line,
 				// so the line stops that much short and the tip lands on the circle.
 				const float head = 2.0f * 2.5f * kShaftThickness;
-				ImPlotCustom::AddArrow(
-					ImPlotCustom::Transform(first, angleOf(first, second)),
-					kPreviewColor,
-					std::max(length - head, 1.0f),
-					kShaftThickness);
+				Rendering::Overlay::Im2D::AddArrow(drawList,
+					Rendering::Overlay::Im2D::Transform(first.x, first.y, angleOf(first, second)),
+					kPreviewColor, std::max(length - head, 1.0f), kShaftThickness);
 				// The caption sits just outside the rim, which is where the sketch puts
 				// it once the constraint is there.
 				const float dirX = (second.x - first.x);
@@ -785,8 +779,8 @@ namespace MOON
 				const ImVec2 caption(
 					len > 1.0f ? first.x + dirX / len * captionDist : first.x,
 					len > 1.0f ? first.y + dirY / len * captionDist : first.y);
-				ImPlotCustom::AddTextTransform(
-					ImPlotCustom::Transform(caption, 0.0f), kPreviewColor, text.c_str());
+				Rendering::Overlay::Im2D::AddTextRotated(drawList, font, 20.0f,
+					Rendering::Overlay::Im2D::Transform(caption.x, caption.y, 0.0f), kPreviewColor, text.c_str());
 			}
 			return;
 		}
@@ -842,13 +836,9 @@ namespace MOON
 			const float cursorDy = cursorScreen.y() - cornerScreen.y;
 			const float radius = std::max(
 				std::sqrt(cursorDx * cursorDx + cursorDy * cursorDy), 8.0f);
-			ImPlotCustom::drawDoubleArcArrow(
-				ImPlotCustom::Transform(cornerScreen, start),
-				kPreviewColor,
-				radius,
-				sweep,
-				kShaftThickness,
-				text.c_str());
+			Rendering::Overlay::Im2D::AddDoubleArcArrow(drawList, font, 20.0f,
+				Rendering::Overlay::Im2D::Transform(cornerScreen.x, cornerScreen.y, start),
+				kPreviewColor, radius, sweep, kShaftThickness, text.c_str());
 			return;
 		}
 
@@ -886,9 +876,9 @@ namespace MOON
 
 		const ImVec2 fromScreen = toImVec(toScreen(from));
 		const ImVec2 toScreen2 = toImVec(toScreen(to));
-		drawList->AddLine(
+		drawList.AddLine(
 			toImVec(toScreen(a)), fromScreen, kPreviewColor, kExtensionThickness);
-		drawList->AddLine(
+		drawList.AddLine(
 			toImVec(toScreen(b)), toScreen2, kPreviewColor, kExtensionThickness);
 
 		const float length = std::sqrt(
@@ -897,12 +887,9 @@ namespace MOON
 		if (length < 4.0f) {
 			return;
 		}
-		ImPlotCustom::drawDoubleArrow(
-			ImPlotCustom::Transform(fromScreen, angleOf(fromScreen, toScreen2)),
-			kPreviewColor,
-			length,
-			kShaftThickness,
-			text.c_str());
+		Rendering::Overlay::Im2D::AddDoubleArrow(drawList, font, 20.0f,
+			Rendering::Overlay::Im2D::Transform(fromScreen.x, fromScreen.y, angleOf(fromScreen, toScreen2)),
+			kPreviewColor, length, kShaftThickness, text.c_str());
 	}
 
 	void SmartDimensionWidget::applyCandidate()

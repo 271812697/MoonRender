@@ -25,7 +25,7 @@ namespace MOON
 	protected:
 		ScreenLayout BuildLayout() const override;
 		void BuildShapes(std::vector<HitShape>& p_outShapes) const override;
-		void DrawContent(ImDrawList& p_drawList, const ScreenRect& p_rect) override;
+		void DrawContent(::Rendering::Overlay::Im2D::DrawList& p_drawList, const ScreenRect& p_rect) override;
 		bool WantsCapture() const override { return true; }
 		void OnDragBegin(const ImVec2& p_localCursor) override;
 		void OnDrag(const ImVec2& p_localCursor) override;
