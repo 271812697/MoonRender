@@ -1,4 +1,5 @@
-﻿#include "editor/Toolbar/DesignModelingToolbar.h"
+#include "editor/Toolbar/DesignModelingToolbar.h"
+#include "editor/Toolbar/RibbonGroup.h"
 #include "editor/Command/command.h"
 #include "editor/UI/TaskPanel/TaskViewWidget.h"
 #include "editor/UI/TaskPanel/ExtrudeTaskDialog.h"
@@ -20,6 +21,7 @@
 #include "renderer/SceneView.h"
 #include "renderer/GizmoRenderPass.h"
 #include <QCoreApplication>
+#include <initializer_list>
 namespace MOON {
 
 	BaseTaskDialog* createTaskDialog(const std::string name) {
@@ -150,46 +152,66 @@ namespace MOON {
 			linearPatternCommand = new DesignModelCommand(self, "LinearPattern");
 			linearPatternCommand->setIcon(
 				":/widgets/icons/partdesign/PartDesign_LinearPattern.svg");
-			self->addAction(padCommand->action());			
-			self->addAction(revolveCommand->action());
-			self->addAction(thicknessCommand->action());
-			self->addAction(filletCommand->action());
-			self->addAction(chamferCommand->action());
-			self->addAction(pocketCommand->action());
-			self->addAction(grooveCommand->action());
-			self->addAction(additivePipeCommand->action());
-			self->addAction(subtractivePipeCommand->action());
-			self->addAction(additiveLoftCommand->action());
-			self->addAction(subtractiveLoftCommand->action());
-			self->addAction(additiveHelixCommand->action());
-			self->addAction(subtractiveHelixCommand->action());
-			self->addAction(datumLineCommand->action());
-			self->addAction(datumPlaneCommand->action());
-			self->addAction(polarPatternCommand->action());
-			self->addAction(mirrorCommand->action());
-			self->addAction(linearPatternCommand->action());
+			// The toolbar is a ribbon: one group per theme, in the order a part is
+			// actually built in. The old flat row put all eighteen icons together,
+			// where the only way to find one was to read its tooltip.
+			self->setMovable(false);
+			self->setFloatable(false);
+			self->setIconSize(QSize(22, 22));
+
+			RibbonGroup* lastGroup = nullptr;
+			lastGroup = addGroup("基于轮廓", 2, { padCommand, pocketCommand, revolveCommand, grooveCommand });
+			lastGroup = addGroup("扫掠", 3, { additivePipeCommand, subtractivePipeCommand,
+				additiveLoftCommand, subtractiveLoftCommand,
+				additiveHelixCommand, subtractiveHelixCommand });
+			lastGroup = addGroup("修饰", 2, { filletCommand, chamferCommand, thicknessCommand });
+			lastGroup = addGroup("基准", 2, { datumLineCommand, datumPlaneCommand });
+			lastGroup = addGroup("变换", 2, { polarPatternCommand, linearPatternCommand, mirrorCommand });
+			if (lastGroup != nullptr) {
+				// Nothing follows the last group, so its right edge has no rule.
+				lastGroup->setDrawSeparator(false);
+			}
 
 			retranslateUi();
 		}
+		RibbonGroup* addGroup(const QString& p_title, int p_columns,
+			std::initializer_list<DesignModelCommand*> p_commands) {
+			auto* group = new RibbonGroup(p_title, self);
+			for (auto* command : p_commands) {
+				group->addAction(command->action());
+			}
+			group->setGrid(p_columns, 2);
+			// The action the toolbar gets for the widget is what its overflow menu
+			// lists when the window is too narrow to show the whole ribbon.
+			QAction* groupAction = self->addWidget(group);
+			groupAction->setText(p_title);
+			return group;
+		}
+		void setLabel(DesignModelCommand* p_command, const QString& p_text, const QString& p_english) {
+			p_command->action()->setText(p_text);
+			// The English name is what the feature goes by in the tree and in the task
+			// panels, so the tooltip keeps both rather than the label alone.
+			p_command->action()->setToolTip(QStringLiteral("%1 (%2)").arg(p_text, p_english));
+		}
 		void retranslateUi() {
-			padCommand->action()->setText(QCoreApplication::translate("DesignModelingToolbar", "Pad", nullptr));
-			thicknessCommand->action()->setText(QCoreApplication::translate("DesignModelingToolbar", "Thickness", nullptr));
-			filletCommand->action()->setText(QCoreApplication::translate("DesignModelingToolbar", "Fillet", nullptr));
-			chamferCommand->action()->setText(QCoreApplication::translate("DesignModelingToolbar", "Chamfer", nullptr));
-			pocketCommand->action()->setText(QCoreApplication::translate("DesignModelingToolbar", "Pocket", nullptr));
-			revolveCommand->action()->setText(QCoreApplication::translate("DesignModelingToolbar", "Revolve", nullptr));
-			grooveCommand->action()->setText(QCoreApplication::translate("DesignModelingToolbar", "Groove", nullptr));
-			additivePipeCommand->action()->setText(QCoreApplication::translate("DesignModelingToolbar", "Additive Pipe", nullptr));
-			subtractivePipeCommand->action()->setText(QCoreApplication::translate("DesignModelingToolbar", "Subtractive Pipe", nullptr));
-			additiveLoftCommand->action()->setText(QCoreApplication::translate("DesignModelingToolbar", "Additive Loft", nullptr));
-			subtractiveLoftCommand->action()->setText(QCoreApplication::translate("DesignModelingToolbar", "Subtractive Loft", nullptr));
-			additiveHelixCommand->action()->setText(QCoreApplication::translate("DesignModelingToolbar", "Additive Helix", nullptr));
-			subtractiveHelixCommand->action()->setText(QCoreApplication::translate("DesignModelingToolbar", "Subtractive Helix", nullptr));
-			datumLineCommand->action()->setText(QCoreApplication::translate("DesignModelingToolbar", "Datum Line", nullptr));
-			datumPlaneCommand->action()->setText(QCoreApplication::translate("DesignModelingToolbar", "Datum Plane", nullptr));
-			polarPatternCommand->action()->setText(QCoreApplication::translate("DesignModelingToolbar", "Polar Pattern", nullptr));
-			mirrorCommand->action()->setText(QCoreApplication::translate("DesignModelingToolbar", "Mirror", nullptr));
-			linearPatternCommand->action()->setText(QCoreApplication::translate("DesignModelingToolbar", "Linear Pattern", nullptr));
+			setLabel(padCommand, QStringLiteral("凸台"), QStringLiteral("Pad"));
+			setLabel(pocketCommand, QStringLiteral("凹槽"), QStringLiteral("Pocket"));
+			setLabel(revolveCommand, QStringLiteral("旋转"), QStringLiteral("Revolve"));
+			setLabel(grooveCommand, QStringLiteral("开槽"), QStringLiteral("Groove"));
+			setLabel(additivePipeCommand, QStringLiteral("加法管道"), QStringLiteral("Additive Pipe"));
+			setLabel(subtractivePipeCommand, QStringLiteral("减法管道"), QStringLiteral("Subtractive Pipe"));
+			setLabel(additiveLoftCommand, QStringLiteral("加法放样"), QStringLiteral("Additive Loft"));
+			setLabel(subtractiveLoftCommand, QStringLiteral("减法放样"), QStringLiteral("Subtractive Loft"));
+			setLabel(additiveHelixCommand, QStringLiteral("加法螺旋"), QStringLiteral("Additive Helix"));
+			setLabel(subtractiveHelixCommand, QStringLiteral("减法螺旋"), QStringLiteral("Subtractive Helix"));
+			setLabel(filletCommand, QStringLiteral("圆角"), QStringLiteral("Fillet"));
+			setLabel(chamferCommand, QStringLiteral("倒角"), QStringLiteral("Chamfer"));
+			setLabel(thicknessCommand, QStringLiteral("抽壳"), QStringLiteral("Thickness"));
+			setLabel(datumLineCommand, QStringLiteral("基准线"), QStringLiteral("Datum Line"));
+			setLabel(datumPlaneCommand, QStringLiteral("基准面"), QStringLiteral("Datum Plane"));
+			setLabel(polarPatternCommand, QStringLiteral("环形阵列"), QStringLiteral("Polar Pattern"));
+			setLabel(linearPatternCommand, QStringLiteral("线性阵列"), QStringLiteral("Linear Pattern"));
+			setLabel(mirrorCommand, QStringLiteral("镜像"), QStringLiteral("Mirror"));
 		}
 	private:
 		friend class DesignModelingToolbarToolbar;

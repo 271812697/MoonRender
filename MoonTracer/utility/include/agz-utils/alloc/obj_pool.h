@@ -9,11 +9,11 @@ namespace agz::alloc
 {
 
 /**
- * @brief �̶����Ͷ���أ�������ͷŶ���Ҫ�ֶ�����
+ * @brief 固定类型对象池，分配和释放都需要手动进行
  *
- * ��������ʱ�ѷ��������������������ᱻ�Զ����ã���ֻ�Ǹ��ȽϿ��new/delete����
+ * 池子销毁时已分配对象的析构函数并不会被自动调用，这只是个比较快的new/delete而已
  *
- * �̲߳���ȫ
+ * 线程不安全
  */
 template<typename T>
 class obj_pool_t : public misc::uncopyable_t
@@ -89,7 +89,7 @@ public:
     }
 
     /**
-     * @brief �ø������캯����������һ������
+     * @brief 用给定构造函数参数创建一个对象
      */
     template<typename...Args>
     T *create(Args &&...args)
@@ -118,7 +118,7 @@ public:
     }
 
     /**
-     * @brief �������ͷ�һ���ɸó��Ӵ����Ķ���
+     * @brief 析构并释放一个由该池子创建的对象
      */
     void destroy(T *obj) noexcept
     {

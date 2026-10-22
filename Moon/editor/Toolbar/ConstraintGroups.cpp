@@ -1,4 +1,5 @@
-#include "editor/Toolbar/ContraintToolbar.h"
+#include "editor/Toolbar/ConstraintGroups.h"
+#include "editor/Toolbar/RibbonGroup.h"
 #include "editor/Command/command.h"
 #include "Core/Global/ServiceLocator.h"
 #include "renderer/SceneView.h"
@@ -17,7 +18,9 @@
 #include <QHBoxLayout>
 #include <QFormLayout>
 #include <QTimer>
+#include <QToolBar>
 #include <cmath>
+#include <initializer_list>
 namespace MOON {
 	/** What the sketch panel works on: the selection lives in the editing widget,
 	 * not in the sketch data. */
@@ -1061,118 +1064,82 @@ namespace MOON {
 			}
 		}
 	};
-	class ConstraintToolbar::Internal {
-	public:
-		Internal(ConstraintToolbar* toolbar) :self(toolbar)
-		{
-			setup();
-		}
-		void setup() {
-			coincident = new CoincidentConstraint(self);
-			coincident->setIcon(":/widgets/icons/constraint/Constraint_Coincident.svg");
-			horizontal = new HorizontalConstraint(self);
-			horizontal->setIcon(":/widgets/icons/constraint/Constraint_Horizontal.svg");
-			vertical = new VerticalConstraint(self);
-			vertical->setIcon(":/widgets/icons/constraint/Constraint_Vertical.svg");
-			parallel = new ParallelConstraint(self);
-			parallel->setIcon(":/widgets/icons/constraint/Constraint_Parallel.svg");
-			perpendicular = new PerpendicularConstraint(self);
-			perpendicular->setIcon(":/widgets/icons/constraint/Constraint_Perpendicular.svg");
-			distanceX = new DistanceXConstraint(self);
-			distanceX->setIcon(":/widgets/icons/constraint/Constraint_DistanceX.svg");
-			distanceY = new DistanceYConstraint(self);
-			distanceY->setIcon(":/widgets/icons/constraint/Constraint_VerticalDistance.svg");
-			tangent = new TangentConstraint(self);
-			tangent->setIcon(":/widgets/icons/constraint/Constraint_Tangent.svg");
-			equal = new EqualConstraint(self);
-			equal->setIcon(":/widgets/icons/constraint/Constraint_EqualLength.svg");
-			symmetric = new SymmetricConstraint(self);
-			symmetric->setIcon(":/widgets/icons/constraint/Constraint_Symmetric.svg");
-			length = new LengthConstraint(self);
-			length->setIcon(":/widgets/icons/constraint/Constraint_Length.svg");
-			radius = new RadiusConstraint(self);
-			radius->setIcon(":/widgets/icons/constraint/Constraint_Radius.svg");
-			diameter = new DiameterConstraint(self);
-			diameter->setIcon(":/widgets/icons/constraint/Constraint_Diameter.svg");
-			block = new BlockConstraint(self);
-			block->setIcon(":/widgets/icons/constraint/Constraint_Block.svg");
-			angle= new AngleConstraint(self);
-			angle->setIcon(":/widgets/icons/constraint/Constraint_InternalAngle.svg");
-			smartDimension = new SmartDimensionCommand(self);
-			smartDimension->setIcon(":/widgets/icons/constraint/Constraint_Dimension.svg");
-			self->addAction(coincident->action());
-			self->addAction(horizontal->action());
-			self->addAction(vertical->action());
-			self->addAction(parallel->action());
-			self->addAction(perpendicular->action());
-			self->addAction(tangent->action());
-			self->addAction(distanceX->action());
-			self->addAction(distanceY->action());
-			self->addAction(equal->action());
-			self->addAction(symmetric->action());
-			self->addAction(length->action());
-			self->addAction(radius->action());
-			self->addAction(diameter->action());
-			self->addAction(block->action());
-			self->addAction(angle->action());
-			self->addAction(smartDimension->action());
-			retranslateUi();
-		}
-		void retranslateUi() {
-			coincident->action()->setText(QCoreApplication::translate("ConstraintToolbar", "Coincident", nullptr));
-			horizontal->action()->setText(QCoreApplication::translate("ConstraintToolbar", "Horizontal", nullptr));
-			vertical->action()->setText(QCoreApplication::translate("ConstraintToolbar", "Vertical", nullptr));
-			parallel->action()->setText(QCoreApplication::translate("ConstraintToolbar", "Parallel", nullptr));
-			perpendicular->action()->setText(QCoreApplication::translate("ConstraintToolbar", "Perpendicular", nullptr));
-			distanceX->action()->setText(QCoreApplication::translate("ConstraintToolbar", "DistanceX", nullptr));
-			distanceY->action()->setText(QCoreApplication::translate("ConstraintToolbar", "DistanceY", nullptr));
-			tangent->action()->setText(QCoreApplication::translate("ConstraintToolbar", "Tangent", nullptr));
-			equal->action()->setText(QCoreApplication::translate("ConstraintToolbar", "Equal", nullptr));
-			symmetric->action()->setText(QCoreApplication::translate("ConstraintToolbar", "Symmetric", nullptr));
-			length->action()->setText(QCoreApplication::translate("ConstraintToolbar", "Length", nullptr));
-			radius->action()->setText(QCoreApplication::translate("ConstraintToolbar", "Radius", nullptr));
-			diameter->action()->setText(QCoreApplication::translate("ConstraintToolbar", "Diameter", nullptr));
-			block->action()->setText(QCoreApplication::translate("ConstraintToolbar", "Block", nullptr));
-			angle->action()->setText(QCoreApplication::translate("ConstraintToolbar", "Angle", nullptr));
-			smartDimension->action()->setText(QCoreApplication::translate("ConstraintToolbar", "Dimension", nullptr));
-		}
-	private:
-		friend class ConstraintToolbar;
-		ConstraintToolbar* self = nullptr;
-		ConstraintCommand* coincident = nullptr;
-		ConstraintCommand* horizontal = nullptr;
-		ConstraintCommand* vertical = nullptr;
-		ConstraintCommand* parallel = nullptr;
-		ConstraintCommand* perpendicular = nullptr;
-		ConstraintCommand* distanceX = nullptr;
-		ConstraintCommand* distanceY = nullptr;
-		ConstraintCommand* tangent = nullptr;
-		ConstraintCommand* equal = nullptr;
-		ConstraintCommand* symmetric = nullptr;
-		ConstraintCommand* length = nullptr;
-		ConstraintCommand* radius = nullptr;
-		ConstraintCommand* diameter = nullptr;
-		ConstraintCommand* block = nullptr;
-		ConstraintCommand* angle = nullptr;
-		SmartDimensionCommand* smartDimension = nullptr;
-	};
+	void AddConstraintGroups(QToolBar* p_toolbar, QObject* p_owner)
+	{
+		auto* coincident = new CoincidentConstraint(p_owner);
+		coincident->setIcon(":/widgets/icons/constraint/Constraint_Coincident.svg");
+		auto* horizontal = new HorizontalConstraint(p_owner);
+		horizontal->setIcon(":/widgets/icons/constraint/Constraint_Horizontal.svg");
+		auto* vertical = new VerticalConstraint(p_owner);
+		vertical->setIcon(":/widgets/icons/constraint/Constraint_Vertical.svg");
+		auto* parallel = new ParallelConstraint(p_owner);
+		parallel->setIcon(":/widgets/icons/constraint/Constraint_Parallel.svg");
+		auto* perpendicular = new PerpendicularConstraint(p_owner);
+		perpendicular->setIcon(":/widgets/icons/constraint/Constraint_Perpendicular.svg");
+		auto* distanceX = new DistanceXConstraint(p_owner);
+		distanceX->setIcon(":/widgets/icons/constraint/Constraint_DistanceX.svg");
+		auto* distanceY = new DistanceYConstraint(p_owner);
+		distanceY->setIcon(":/widgets/icons/constraint/Constraint_VerticalDistance.svg");
+		auto* tangent = new TangentConstraint(p_owner);
+		tangent->setIcon(":/widgets/icons/constraint/Constraint_Tangent.svg");
+		auto* equal = new EqualConstraint(p_owner);
+		equal->setIcon(":/widgets/icons/constraint/Constraint_EqualLength.svg");
+		auto* symmetric = new SymmetricConstraint(p_owner);
+		symmetric->setIcon(":/widgets/icons/constraint/Constraint_Symmetric.svg");
+		auto* length = new LengthConstraint(p_owner);
+		length->setIcon(":/widgets/icons/constraint/Constraint_Length.svg");
+		auto* radius = new RadiusConstraint(p_owner);
+		radius->setIcon(":/widgets/icons/constraint/Constraint_Radius.svg");
+		auto* diameter = new DiameterConstraint(p_owner);
+		diameter->setIcon(":/widgets/icons/constraint/Constraint_Diameter.svg");
+		auto* block = new BlockConstraint(p_owner);
+		block->setIcon(":/widgets/icons/constraint/Constraint_Block.svg");
+		auto* angle = new AngleConstraint(p_owner);
+		angle->setIcon(":/widgets/icons/constraint/Constraint_InternalAngle.svg");
+		auto* smartDimension = new SmartDimensionCommand(p_owner);
+		smartDimension->setIcon(":/widgets/icons/constraint/Constraint_Dimension.svg");
 
-	ConstraintToolbar::ConstraintToolbar(const QString& title, QWidget* parent)
-		:QToolBar(title, parent),mInternal(new Internal(this))
-	{
-		RegService(ConstraintToolbar,*this);
-	}
-	ConstraintToolbar::ConstraintToolbar(QWidget* parentObject) 
-		:QToolBar(parentObject), mInternal(new Internal(this))
-	{
-		RegService(ConstraintToolbar, *this);
-	}
-	ConstraintToolbar::~ConstraintToolbar()
-	{
-		if (mInternal) {
-			delete mInternal;
-			mInternal = nullptr;
-		}
+		const auto addGroup = [p_toolbar](const QString& p_title, int p_columns,
+			std::initializer_list<QAction*> p_actions) {
+			auto* group = new RibbonGroup(p_title, p_toolbar);
+			for (auto* action : p_actions) {
+				group->addAction(action);
+			}
+			group->setGrid(p_columns, 2);
+			QAction* groupAction = p_toolbar->addWidget(group);
+			groupAction->setText(p_title);
+			return group;
+		};
+		// Geometric constraints first, then the ones that carry a value. A sketch
+		// usually gets a few of the former before any of the latter.
+		addGroup("几何约束", 5, { coincident->action(), horizontal->action(), vertical->action(),
+			parallel->action(), perpendicular->action(), tangent->action(),
+			equal->action(), symmetric->action(), block->action() });
+		RibbonGroup* lastGroup = addGroup("尺寸约束", 4, { distanceX->action(),
+			distanceY->action(), length->action(), radius->action(),
+			diameter->action(), angle->action(), smartDimension->action() });
+		lastGroup->setDrawSeparator(false);
+
+		const auto setLabel = [](QAction* p_action, const QString& p_text, const QString& p_english) {
+			p_action->setText(p_text);
+			p_action->setToolTip(QStringLiteral("%1 (%2)").arg(p_text, p_english));
+		};
+		setLabel(coincident->action(), QStringLiteral("重合"), QStringLiteral("Coincident"));
+		setLabel(horizontal->action(), QStringLiteral("水平"), QStringLiteral("Horizontal"));
+		setLabel(vertical->action(), QStringLiteral("竖直"), QStringLiteral("Vertical"));
+		setLabel(parallel->action(), QStringLiteral("平行"), QStringLiteral("Parallel"));
+		setLabel(perpendicular->action(), QStringLiteral("垂直"), QStringLiteral("Perpendicular"));
+		setLabel(tangent->action(), QStringLiteral("相切"), QStringLiteral("Tangent"));
+		setLabel(equal->action(), QStringLiteral("相等"), QStringLiteral("Equal"));
+		setLabel(symmetric->action(), QStringLiteral("对称"), QStringLiteral("Symmetric"));
+		setLabel(block->action(), QStringLiteral("锁定"), QStringLiteral("Block"));
+		setLabel(distanceX->action(), QStringLiteral("水平距离"), QStringLiteral("DistanceX"));
+		setLabel(distanceY->action(), QStringLiteral("竖直距离"), QStringLiteral("DistanceY"));
+		setLabel(length->action(), QStringLiteral("长度"), QStringLiteral("Length"));
+		setLabel(radius->action(), QStringLiteral("半径"), QStringLiteral("Radius"));
+		setLabel(diameter->action(), QStringLiteral("直径"), QStringLiteral("Diameter"));
+		setLabel(angle->action(), QStringLiteral("角度"), QStringLiteral("Angle"));
+		setLabel(smartDimension->action(), QStringLiteral("尺寸"), QStringLiteral("Dimension"));
 	}
 }
 

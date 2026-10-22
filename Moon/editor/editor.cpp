@@ -6,6 +6,7 @@
 #include <QtWidgets/QDockWidget>
 #include <QStackedWidget>
 #include <QStackedLayout>
+#include <QTabBar>
 #include "editor.h"
 #include "UI/TreeViewPanel/hierarchypanel.h"
 #include "UI/SettingPanel/SettingPanel.h"
@@ -17,7 +18,6 @@
 #include "UI/ContentBrowser/ContentBrowserPanel.h"
 #include "UI/TaskPanel/TaskViewPanel.h"
 #include "editor/Toolbar/sketchToolbar.h"
-#include "editor/Toolbar/ContraintToolbar.h"
 #include "editor/Toolbar/primitiveToolbar.h"
 #include "editor/Toolbar/DesignModelingToolbar.h"
 #include "Command/menubar/openFile.h"
@@ -206,11 +206,41 @@ namespace MOON {
 			menu_sketch->addAction(sketchCommand->action());
 		}
 		void buildMenu() {
-			mMenubar = new QMenuBar(self);
-			mMenubar->setObjectName(QString::fromUtf8("menubar"));
-			//mMenubar->setGeometry(QRect(0, 0, 1152, 20));
+			// The menu bar and the ribbon tabs share one row. The tabs are part of the
+			// top bar rather than a toolbar of their own, so the ribbon starts right
+			// under the menus instead of two strips below them.
+			mTopBar = new QWidget(self);
+			mTopBar->setObjectName("ribbonTopBar");
+			mTopBar->setStyleSheet(
+				"#ribbonTopBar {"
+				"  background: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
+				"    stop:0 rgba(25,25,25,127), stop:1 rgba(53,53,53,75));"
+				"  border-bottom: 2px solid rgba(25,25,25,75); }"
+				"QMenuBar { background: transparent; border: none; }");
+			auto* topLayout = new QHBoxLayout(mTopBar);
+			topLayout->setContentsMargins(0, 0, 0, 0);
+			topLayout->setSpacing(4);
 
-			self->setMenuBar(mMenubar);
+			mMenubar = new QMenuBar(mTopBar);
+			mMenubar->setObjectName(QString::fromUtf8("menubar"));
+			topLayout->addWidget(mMenubar, 0);
+
+			mTabs = new QTabBar(mTopBar);
+			mTabs->setDocumentMode(true);
+			mTabs->setDrawBase(false);
+			mTabs->setExpanding(false);
+			mTabs->setFocusPolicy(Qt::NoFocus);
+			mTabs->setStyleSheet(
+				"QTabBar { background: transparent; }"
+				"QTabBar::tab { background: transparent; color: #b5b5b5; padding: 4px 14px;"
+				"  margin-right: 2px; border: none; border-bottom: 2px solid transparent; }"
+				"QTabBar::tab:hover { color: #ffffff; }"
+				"QTabBar::tab:selected { color: #ffffff; border-bottom: 2px solid #2a82da;"
+				"  background: rgba(255, 255, 255, 0.05); }");
+			topLayout->addWidget(mTabs, 0, Qt::AlignVCenter);
+			topLayout->addStretch(1);
+			self->setMenuWidget(mTopBar);
+
 			menu_File = new QMenu(mMenubar);
 			menu_Display = new QMenu(mMenubar);
 			menu_View = new QMenu(mMenubar);
@@ -226,18 +256,33 @@ namespace MOON {
 	
 		}
 		void buildToolBar() {
-			QToolBar* sketchtoolBar = new SketchToolbar(self);
-			sketchtoolBar->layout()->setSpacing(0);
-			self->addToolBar(Qt::TopToolBarArea, sketchtoolBar);
-			QToolBar* sketchContraintToolBar = new ConstraintToolbar(self);
-			sketchContraintToolBar->layout()->setSpacing(0);
-			self->addToolBar(Qt::TopToolBarArea, sketchContraintToolBar);
-			QToolBar* primitiveToolBar = new PrimitiveToolbar(self);
-			primitiveToolBar->layout()->setSpacing(0);
-			self->addToolBar(Qt::TopToolBarArea, primitiveToolBar);
-			DesignModelingToolbar* designModelingToolbar = new DesignModelingToolbar(self);
-			designModelingToolbar->layout()->setSpacing(0);
-			self->addToolBar(Qt::TopToolBarArea, designModelingToolbar);
+			// The ribbon has two pages: the sketch page carries the drawing tools, the
+			// edit tools, the references and the constraints (a sketch needs them
+			// together), and the model page the features that turn a sketch into a
+			// solid. Groups are two rows tall, which is what lets the whole sketch page
+			// fit in one row of groups.
+			auto* sketchToolbar = new SketchToolbar(self);
+			auto* primitiveToolbar = new PrimitiveToolbar(self);
+			auto* designModelingToolbar = new DesignModelingToolbar(self);
+
+			const QList<QToolBar*> pageToolbars = {
+				sketchToolbar, primitiveToolbar, designModelingToolbar };
+			for (QToolBar* toolbar : pageToolbars) {
+				toolbar->layout()->setSpacing(0);
+				self->addToolBar(Qt::TopToolBarArea, toolbar);
+			}
+
+			mTabs->addTab(QStringLiteral("草图"));
+			mTabs->addTab(QStringLiteral("模型"));
+			const auto showPage = [=](int p_index) {
+				sketchToolbar->setVisible(p_index == 0);
+				const bool modeling = p_index == 1;
+				primitiveToolbar->setVisible(modeling);
+				designModelingToolbar->setVisible(modeling);
+			};
+			QObject::connect(mTabs, &QTabBar::currentChanged, self, showPage);
+			mTabs->setCurrentIndex(1);
+			showPage(1);
 
 		}
 		void retranslateUi() {
@@ -253,6 +298,9 @@ namespace MOON {
 		Editor* self = nullptr;
 		QSplitter* vert_splitter_ = nullptr;
 		QMenuBar* mMenubar;
+		/** The menu bar and the ribbon tabs, as one row (see buildMenu). */
+		QWidget* mTopBar = nullptr;
+		QTabBar* mTabs = nullptr;
 		QMenu* menu_File;
 		QMenu* menu_Display;
 		QMenu* menu_View;

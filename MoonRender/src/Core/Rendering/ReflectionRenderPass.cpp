@@ -115,8 +115,8 @@ void Core::Rendering::ReflectionRenderPass::_DrawReflections(
 		*drawables,
 		SceneRenderer::SceneDrawablesFilteringInput{
 			.camera = p_camera,
-			.frustumerride = std::nullopt, // No frustum erride for reflections
-			.errideMaterial = std::nullopt, // No erride material for reflections
+			.frustumOverride = std::nullopt, // No frustum override for reflections
+			.overrideMaterial = std::nullopt, // No override material for reflections
 			.fallbackMaterial = std::nullopt, // No fallback material for reflections
 			.requiredVisibilityFlags = EVisibilityFlags::REFLECTION,
 			.includeUI = false, // Exclude UI elements from contribution
