@@ -742,7 +742,7 @@ void Core::Rendering::SceneRenderer::BeginFrame(const ::Rendering::Data::FrameDe
 
 	AddDescriptor<::Rendering::Features::LightingRenderFeature::LightingDescriptor>({
 		FindActiveLights(sceneDescriptor.scene),
-		frustumLightCulling ? sceneDescriptor.frustumerride : std::nullopt
+		frustumLightCulling ? sceneDescriptor.frustumOverride : std::nullopt
 		});
 
 	AddDescriptor<Core::Rendering::ReflectionRenderFeature::ReflectionDescriptor>({
@@ -765,8 +765,8 @@ void Core::Rendering::SceneRenderer::BeginFrame(const ::Rendering::Data::FrameDe
 			*GetDescriptor<SceneDrawablesHandle>().drawables,
 			SceneDrawablesFilteringInput{
 				.camera = p_frameDescriptor.camera.value(),
-				.frustumerride = sceneDescriptor.frustumerride,
-				.errideMaterial = sceneDescriptor.errideMaterial,
+				.frustumOverride = sceneDescriptor.frustumOverride,
+				.overrideMaterial = sceneDescriptor.overrideMaterial,
 				.fallbackMaterial = sceneDescriptor.fallbackMaterial,
 				.requiredVisibilityFlags = EVisibilityFlags::GEOMETRY
 			}
@@ -1095,13 +1095,13 @@ SceneRenderer::SceneFilteredDrawablesDescriptor Core::Rendering::SceneRenderer::
 	SceneFilteredDrawablesDescriptor output;
 
 	const auto& camera = p_filteringInput.camera;
-	const auto& frustumerride = p_filteringInput.frustumerride;
+	const auto& frustumOverride = p_filteringInput.frustumOverride;
 
 	// Determine if we should use frustum culling
 	Tools::Utils::OptRef<const ::Rendering::Data::Frustum> frustum;
 	if (camera.HasFrustumGeometryCulling())
 	{
-		frustum = frustumerride ? frustumerride : camera.GetFrustum();
+		frustum = frustumOverride ? frustumOverride : camera.GetFrustum();
 	}
 
 	// Hierarchical Z-buffer occlusion culling. The depth grid is produced by the
@@ -1147,8 +1147,8 @@ SceneRenderer::SceneFilteredDrawablesDescriptor Core::Rendering::SceneRenderer::
 		}
 
 		const auto targetMaterial =
-			p_filteringInput.errideMaterial.has_value() ?
-			p_filteringInput.errideMaterial.value() :
+			p_filteringInput.overrideMaterial.has_value() ?
+			p_filteringInput.overrideMaterial.value() :
 			(drawable.material.has_value() ? drawable.material.value() : p_filteringInput.fallbackMaterial);
 
 		// Skip if material is invalid
