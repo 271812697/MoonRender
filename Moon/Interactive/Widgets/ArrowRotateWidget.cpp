@@ -10,7 +10,7 @@
 #include "Interactive/ViewData.h"
 #include <cmath>
 namespace MOON {
-		// Same FIXED_SCALE ratio as GizmoCell.ovfx (see ClipPlane.cpp for the full
+		// Same FIXED_SCALE ratio as GizmoCell.shader (see ClipPlane.cpp for the full
 	// derivation): the widget is scaled by ratio / refRatio so it keeps a
 	// constant screen size as the camera moves. The reference ratio is captured
 	// on the first frame, locking the gizmo to the size it had when it appeared.
@@ -139,19 +139,19 @@ class ArrowRotateWidget::Internal {
 
 	void ArrowRotateWidget::setAngle(float angleDeg)
 	{
-		// 角度转弧度
+		// ?????
 		float rad = angleDeg * 3.14159265358979323846f / 180.0f;
 
 		auto& center = mInternal->rotateCenter;
 		auto& axis = mInternal->rotateAxis;
 		auto& origin = mInternal->originPos;
 
-		// 1. 基准径向向量（垂直旋转轴分量）
+		// 1. ??????(???????)
 		Eigen::Vector3f originVec = origin - center;
 		float proj = originVec.dot(axis);
 		Eigen::Vector3f radial0 = originVec - proj * axis;
 
-		// 2. 罗德里格斯：绕轴旋转 radial0 得到旋转后径向向量
+		// 2. ?????:???? radial0 ?????????
 		Eigen::Matrix3f rotMat;
 		float c = cos(rad);
 		float s = sin(rad);
@@ -164,18 +164,18 @@ class ArrowRotateWidget::Internal {
 
 		Eigen::Vector3f radialRot = rotMat * radial0;
 
-		// 3. 还原完整坐标（保留平行轴分量）
+		// 3. ??????(???????)
 		Eigen::Vector3f newPos = center + radialRot + proj * axis;
 		mInternal->curPos = newPos;
 
-		// 4. 更新箭头面片平移与朝向矩阵
+		// 4. ?????????????
 		TriangleFace* face = nullptr;
 		if (mInternal->viewData.getTriangleFace("Arrow", face))
 		{
-			// 平移到新位置
+			// ??????
 			face->model.block(0, 3, 3, 1) = mInternal->curPos;
 
-			// 重新计算箭头朝向
+			// ????????
 			Eigen::Vector3f offset = mInternal->curPos - mInternal->rotateCenter;
 			Eigen::Vector3f arrowDir = mInternal->rotateAxis.cross(offset).normalized();
 			face->model.block(0, 0, 3, 3) = RotationMatrixZ(arrowDir);

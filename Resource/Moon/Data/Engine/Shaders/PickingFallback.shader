@@ -1,0 +1,52 @@
+// The picking pass's fallback material: the actor id as the colour, and where the fragment is
+// in the world in the picking target's second attachment.
+//
+// Written in the material form MoonMatc consumes (see docs/ShaderPipeline.md). Both stages own
+// their main(): the fragment writes two colour attachments of its own, which the generated
+// output - a single FRAGMENT_COLOR - cannot express, and the vertex stage passes the world
+// position instead of the surface varyings. MoonMatc puts the prelude, the variant #defines
+// and the parameters in front of them and generates nothing else for either stage.
+
+material {
+    name         : PickingFallback,
+    shadingModel : unlit,
+    blending     : opaque,
+    culling      : none,           // the picking pass draws with culling off
+    depthWrite   : true,
+
+    vertexAttributes : [POSITION],
+
+    parameters : [
+        // Set per actor by the picking pass, right before the draw.
+        { type : float4, name : _PickingColor }
+    ]
+}
+
+vertex {
+out vec3 VSOUT_World;
+void main()
+{
+    vec4 worldPos = ubo_Model * vec4(geo_Pos, 1.0);
+    VSOUT_World=worldPos.xyz;
+    gl_Position = ubo_Projection * ubo_View * worldPos;
+}
+}
+
+fragment {
+in vec3 VSOUT_World;
+out vec4 FRAGMENT_COLOR;
+// The picking target's second color attachment: the fragment's place in the world,
+// read back with the id (w = 1 marks a pixel something was drawn at).
+layout (location = 1) out vec4 FRAGMENT_WORLDPOS;
+void main()
+{
+    if(ubo_enableClip==1){
+        float offsetw=dot(ubo_plane.xyz,VSOUT_World)+ubo_plane.w;
+        if(offsetw>0){
+            discard;
+        }
+    }
+    FRAGMENT_COLOR = _PickingColor;
+    FRAGMENT_WORLDPOS = vec4(VSOUT_World, 1.0);
+}
+}

@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <Rendering/Settings/ETextureFilteringMode.h>
 #include <Rendering/Settings/ETextureWrapMode.h>
 #include <Rendering/Settings/EInternalFormat.h>
@@ -31,6 +31,9 @@ namespace Rendering::Settings
 		ETextureWrapMode verticalWrap = ETextureWrapMode::REPEAT;
 		EInternalFormat internalFormat = EInternalFormat::RGBA;
 		bool useMipMaps = true;
+		/** Explicit mip count; 0 lets the backend use the full chain. Filament's IBL
+		 * prefilter uses 5 roughness levels, not the full mip chain. */
+		uint32_t mipLevels = 0;
 		bool isTextureBuffer = false;
 		unsigned int buffetLen = 0;
 		unsigned int texBufferId=0;

@@ -1,4 +1,4 @@
-﻿#include <algorithm>
+#include <algorithm>
 #include <array>
 #include <cctype>
 #include <cstdlib>
@@ -287,7 +287,7 @@ void Rendering::Data::Material::SetShader(Rendering::Resources::Shader* p_shader
 
 	// Rebinding to a shader re-creates the instance's state from the definition: the package's
 	// material block is the authority for blending / culling / depth writing, and whatever the
-	// call site (or a .ovmat's settings) sets afterwards is the override.
+	// call site (or a .mat's settings) sets afterwards is the override.
 	ResetStateToShader();
 
 	if (m_shader)
@@ -347,7 +347,7 @@ Tools::Utils::OptRef<Rendering::HAL::ShaderProgram> Rendering::Data::Material::G
 	return std::nullopt;
 }
 
-void Rendering::Data::Material::UploadProperties(bool uploadStableProperties, bool uploadSingleUseProperties, Rendering::HAL::Texture* p_emptyTexture2D, Rendering::HAL::Texture* p_emptyTextureCube)
+void Rendering::Data::Material::UploadProperties(bool uploadStableProperties, bool uploadSingleUseProperties, Rendering::HAL::Texture* p_emptyTexture2D, Rendering::HAL::Texture* p_emptyTextureCube, Rendering::HAL::Texture* p_brdfLut)
 {
 	ZoneScoped;
 
@@ -357,10 +357,10 @@ void Rendering::Data::Material::UploadProperties(bool uploadStableProperties, bo
 	const bool hasParameterBlock = m_shader != nullptr && m_shader->HasParameterBlock();
 	if (hasParameterBlock)
 	{
-		UploadParameterBlock(uploadStableProperties, uploadSingleUseProperties, p_emptyTexture2D, p_emptyTextureCube);
+		UploadParameterBlock(uploadStableProperties, uploadSingleUseProperties, p_emptyTexture2D, p_emptyTextureCube, p_brdfLut);
 	}
 
-	// Properties the shader does not declare (an include's own uniforms, like PBR.ovfxh's
+	// Properties the shader does not declare (an include's own uniforms, like PBR.glsl's
 	// u_ReceiveShadows) are not in the block: they still go through the per-name path below,
 	// while the declared ones were written by UploadParameterBlock.
 	const auto isDeclaredParameter = [this](const std::string& p_name) {
@@ -591,7 +591,8 @@ void Rendering::Data::Material::UploadParameterBlock(
 	bool p_uploadStableProperties,
 	bool p_uploadSingleUseProperties,
 	Rendering::HAL::Texture* p_emptyTexture2D,
-	Rendering::HAL::Texture* p_emptyTextureCube)
+	Rendering::HAL::Texture* p_emptyTextureCube,
+	Rendering::HAL::Texture* p_brdfLut)
 {
 	EnsureParameterSlice();
 	if (!m_parameterSlice.IsValid())
@@ -654,6 +655,15 @@ void Rendering::Data::Material::UploadParameterBlock(
 			}
 		}
 
+		// The split-sum DFG LUT is global to the view, like Filament's frame uniform. Binding it
+		// through the material property was fragile: an instance without the parameter (the
+		// material preview) sampled the white empty 2D, giving DFG=(1,1), E~=1 and no diffuse.
+		if (parameter.name == "_BRDFLut" && p_brdfLut != nullptr)
+		{
+			p_brdfLut->Bind(parameter.binding);
+			continue;
+		}
+
 		Rendering::HAL::TextureHandle* fallback =
 			parameter.type == "samplerCube" ? p_emptyTextureCube : p_emptyTexture2D;
 		if (auto* target = handle != nullptr ? handle : fallback)
@@ -685,6 +695,61 @@ void Rendering::Data::Material::UploadParameterBlock(
 			property.value = ZeroOf(property.value);
 		}
 	}
+}
+
+void Rendering::Data::Material::BindGlobalTexture(const std::string& p_name, Rendering::HAL::Texture* p_texture)
+{
+	if (m_shader == nullptr || p_texture == nullptr)
+	{
+		return;
+	}
+
+	for (const Rendering::Resources::Shader::Parameter& parameter : m_shader->GetParameters())
+	{
+		if (parameter.isSampler && parameter.name == p_name)
+		{
+			p_texture->Bind(parameter.binding);
+			return;
+		}
+	}
+}
+
+bool Rendering::Data::Material::ResetPropertyToDefault(const std::string& p_name)
+{
+	if (m_shader == nullptr || !m_shader->HasParameterTable())
+	{
+		return false;
+	}
+
+	for (const Rendering::Resources::Shader::Parameter& parameter : m_shader->GetParameters())
+	{
+		if (parameter.name != p_name)
+		{
+			continue;
+		}
+		if (!parameter.isUi)
+		{
+			return false;
+		}
+
+		const MaterialPropertyType value = ParameterDefaultValue(parameter);
+		if (std::holds_alternative<std::monostate>(value))
+		{
+			return false;
+		}
+
+		if (HasProperty(p_name))
+		{
+			SetProperty(p_name, value);
+		}
+		else
+		{
+			m_properties.emplace(p_name, MaterialProperty{ .value = value, .singleUse = false });
+			InvalidatePropertySignature();
+		}
+		return true;
+	}
+	return false;
 }
 
 void Rendering::Data::Material::UpdateProperties()

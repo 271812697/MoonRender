@@ -1,4 +1,4 @@
-#include <algorithm>
+﻿#include <algorithm>
 #include <array>
 #include <filesystem>
 #include <format>
@@ -171,7 +171,7 @@ namespace
 		return result;
 	}
 
-	std::unique_ptr<Rendering::HAL::ShaderProgram> CreateProgram(
+	std::shared_ptr<Rendering::HAL::ShaderProgram> CreateProgram(
 		const ShaderInputInfo& p_shaderInputInfo,
 		std::span<const ShaderStageDesc> p_stages,
 		const std::string_view p_pass,
@@ -187,7 +187,7 @@ namespace
 
 		for (const auto& stageInput : p_stages)
 		{
-			if (stageInput.type == Rendering::Settings::EShaderType::GEOMERTY) {
+			if (stageInput.type == Rendering::Settings::EShaderType::GEOMETRY) {
 				int i = 0;
 				bool startWithIf = false;
 				std::string define = "";
@@ -322,7 +322,7 @@ namespace
 		}
 
 		// Link the program
-		auto program = std::make_unique<Rendering::HAL::ShaderProgram>();
+		auto program = std::make_shared<Rendering::HAL::ShaderProgram>();
 
 		// Attach all stages
 		for (const auto& processedStage : processedStages)
@@ -370,7 +370,7 @@ namespace
 		}
 	}
 
-	std::unique_ptr<Rendering::HAL::ShaderProgram> CreateDefaultProgram()
+	std::shared_ptr<Rendering::HAL::ShaderProgram> CreateDefaultProgram()
 	{
 		const std::string vertex = R"(
 #version 450 core
@@ -463,7 +463,7 @@ void main()
 					const auto included = LoadShader(p_shaderInputInfo, realIncludeFilePath, p_pathParser);
 					// The included lines keep the file and line they were written on: the
 					// parser turns that into #line directives, so an error inside the
-					// .ovfxh names the .ovfxh instead of the concatenation it ended up in.
+					// .glsl names the .glsl instead of the concatenation it ended up in.
 					buffer << included.source;
 					origins.insert(origins.end(), included.origins.begin(), included.origins.end());
 				}
@@ -606,7 +606,7 @@ void main()
 				versionPending = true;
 			}
 			else if (trimmedLine.starts_with(Grammar::kGeomertyShaderToken)) {
-				currentType = EShaderType::GEOMERTY;
+				currentType = EShaderType::GEOMETRY;
 				anchorPending = true;
 				versionPending = true;
 			}
@@ -643,7 +643,7 @@ void main()
 			.inputInfo = p_shaderLoadResult.inputInfo,
 			.vertexShader = shaderSources[EShaderType::VERTEX].str(),
 			.fragmentShader = shaderSources[EShaderType::FRAGMENT].str(),
-			.geomertyShader = shaderSources[EShaderType::GEOMERTY].str(),
+			.geomertyShader = shaderSources[EShaderType::GEOMETRY].str(),
 			.passes = passes,
 			.features = features,
 			.sourceFiles = std::move(sourceFiles)
@@ -668,7 +668,7 @@ void main()
 			  { p_parseResult.fragmentShader, Rendering::Settings::EShaderType::FRAGMENT }
 			});
 		if (p_parseResult.geomertyShader != "") {
-			stages.push_back({ p_parseResult.geomertyShader, Rendering::Settings::EShaderType::GEOMERTY });
+			stages.push_back({ p_parseResult.geomertyShader, Rendering::Settings::EShaderType::GEOMETRY });
 		}
 		// We create as many additional shader programs (variants) as there are passes
 		for (const auto& pass : p_parseResult.passes)
@@ -900,7 +900,7 @@ void main()
 	 *
 	 * p_error, when given, collects what the driver said. The editor's hot reload needs that
 	 * text: a material being edited is compiled into a package and loaded here, and the failure
-	 * has to be shown - with the .ovfx line the #line directives point at. */
+	 * has to be shown - with the .shader line the #line directives point at. */
 	Rendering::Resources::Shader::Variants AssembleFromPackage(
 		const Rendering::Resources::ShaderPackage& p_package,
 		std::string* p_error = nullptr)
@@ -909,6 +909,12 @@ void main()
 
 		Rendering::Resources::Shader::Variants variants;
 		bool blockValidated = false;
+
+		// Keyed packages have many feature sets whose composed stage text is identical (the
+		// unused variant bits are pruned by MoonMatc). Compile each distinct stage once and
+		// link each distinct stage combination once, instead of once per feature set.
+		std::unordered_map<std::string, std::shared_ptr<Rendering::HAL::ShaderStage>> stageCache;
+		std::unordered_map<std::string, std::shared_ptr<Rendering::HAL::ShaderProgram>> programCache;
 
 		const auto report = [p_error](const std::string& p_text) {
 			std::cout << p_text << std::endl;
@@ -921,7 +927,8 @@ void main()
 
 		for (const Rendering::Resources::ShaderPackage::Variant& variant : p_package.Variants())
 		{
-			std::vector<std::unique_ptr<Rendering::HAL::ShaderStage>> stages;
+			std::vector<std::shared_ptr<Rendering::HAL::ShaderStage>> stages;
+			std::string programKey;
 			bool ok = true;
 
 			struct StageSpec
@@ -934,7 +941,7 @@ void main()
 			static constexpr StageSpec kStages[] = {
 				{ Rendering::Resources::ShaderPackage::Stage::Vertex,   EShaderType::VERTEX,   "vertex",   false },
 				{ Rendering::Resources::ShaderPackage::Stage::Fragment, EShaderType::FRAGMENT, "fragment", false },
-				{ Rendering::Resources::ShaderPackage::Stage::Geometry, EShaderType::GEOMERTY, "geometry", true },
+				{ Rendering::Resources::ShaderPackage::Stage::Geometry, EShaderType::GEOMETRY, "geometry", true },
 			};
 
 			for (const StageSpec& spec : kStages)
@@ -952,16 +959,26 @@ void main()
 					break;
 				}
 
-				auto stage = std::make_unique<Rendering::HAL::ShaderStage>(spec.type);
-				stage->Upload(std::move(source));
-				if (const auto result = stage->Compile(); !result.success)
+				const std::string stageKey =
+					std::to_string(static_cast<int>(spec.type)) + '\n' + source;
+				auto& cachedStage = stageCache[stageKey];
+				if (cachedStage == nullptr)
 				{
-					report(std::format("[Shader Compile] {}<{}> (pass '{}'): {}",
-						p_package.Name(), spec.name, variant.pass, result.message));
-					ok = false;
-					break;
+					auto stage = std::make_shared<Rendering::HAL::ShaderStage>(spec.type);
+					stage->Upload(std::move(source));
+					if (const auto result = stage->Compile(); !result.success)
+					{
+						report(std::format("[Shader Compile] {}<{}> (pass '{}'): {}",
+							p_package.Name(), spec.name, variant.pass, result.message));
+						ok = false;
+						break;
+					}
+					cachedStage = std::move(stage);
 				}
-				stages.push_back(std::move(stage));
+
+				stages.push_back(cachedStage);
+				programKey += stageKey;
+				programKey.push_back('\x1f');
 			}
 
 			if (!ok)
@@ -969,35 +986,41 @@ void main()
 				continue;
 			}
 
-			auto program = std::make_unique<Rendering::HAL::ShaderProgram>();
-			for (const auto& stage : stages)
+			auto& program = programCache[programKey];
+			if (program == nullptr)
 			{
-				program->Attach(*stage);
-			}
-			const auto linkResult = program->Link();
-			for (const auto& stage : stages)
-			{
-				program->Detach(*stage);
-			}
+				auto candidate = std::make_shared<Rendering::HAL::ShaderProgram>();
+				for (const auto& stage : stages)
+				{
+					candidate->Attach(*stage);
+				}
+				const auto linkResult = candidate->Link();
+				for (const auto& stage : stages)
+				{
+					candidate->Detach(*stage);
+				}
 
-			if (!linkResult.success)
-			{
-				report(std::format("[Shader Linking] {} (pass '{}'): {}",
-					p_package.Name(), variant.pass, linkResult.message));
-				continue;
-			}
+				if (!linkResult.success)
+				{
+					report(std::format("[Shader Linking] {} (pass '{}'): {}",
+						p_package.Name(), variant.pass, linkResult.message));
+					continue;
+				}
 
-			// The descriptor layout is compile-time data; the driver is the one that has to
-			// agree. Check it once per shader, on the first linked variant, so a mismatch is a
-			// line in the log rather than a corrupted image.
-			if (!blockValidated)
-			{
-				ValidateBindings(p_package, *program);
-				blockValidated = true;
+				// The descriptor layout is compile-time data; the driver is the one that has to
+				// agree. Check it once per shader, on the first linked program, so a mismatch is
+				// a line in the log rather than a corrupted image.
+				if (!blockValidated)
+				{
+					ValidateBindings(p_package, *candidate);
+					blockValidated = true;
+				}
+
+				program = std::move(candidate);
 			}
 
 			const Rendering::Data::FeatureSet features(variant.features.begin(), variant.features.end());
-			variants[variant.pass].emplace(features, std::move(program));
+			variants[variant.pass].emplace(features, program);
 		}
 
 		if (variants.empty() && p_error != nullptr && p_error->empty())
@@ -1109,6 +1132,7 @@ namespace Rendering::Resources::Loaders
 					Shader* shader = new Shader(p_filePath, AssembleFromPackage(package), RuntimeParameters(package));
 					shader->SetState(RuntimeState(package));
 					shader->SetParameterBlockSize(package.ParameterBlockSize());
+					shader->SetDeclaredFeatures(std::vector<std::string>(package.DeclaredFeatures().begin(), package.DeclaredFeatures().end()));
 					return shader;
 				}
 			}
@@ -1146,6 +1170,7 @@ namespace Rendering::Resources::Loaders
 		Shader* shader = new Shader(p_name, std::move(variants), RuntimeParameters(package));
 		shader->SetState(RuntimeState(package));
 		shader->SetParameterBlockSize(package.ParameterBlockSize());
+		shader->SetDeclaredFeatures(std::vector<std::string>(package.DeclaredFeatures().begin(), package.DeclaredFeatures().end()));
 		return shader;
 	}
 
@@ -1209,6 +1234,7 @@ namespace Rendering::Resources::Loaders
 		p_shader.SetParameters(RuntimeParameters(package));
 		p_shader.SetState(RuntimeState(package));
 		p_shader.SetParameterBlockSize(package.ParameterBlockSize());
+		p_shader.SetDeclaredFeatures(std::vector<std::string>(package.DeclaredFeatures().begin(), package.DeclaredFeatures().end()));
 		if (p_error != nullptr) { p_error->clear(); }
 		return true;
 	}

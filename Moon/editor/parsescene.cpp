@@ -158,13 +158,13 @@ namespace MOON {
 					tempMat = new Core::Resources::Material();
 					GetService(Core::ResourceManagement::MaterialManager).RegisterResource(sceneName, tempMat);
 
-					tempMat->SetShader(Core::Global::ServiceLocator::Get<Editor::Core::Context>().shaderManager[":Shaders\\Standard.ovfx"]);
+					tempMat->SetShader(Core::Global::ServiceLocator::Get<Editor::Core::Context>().shaderManager[":Shaders\\Standard.shader"]);
 					// The shader's material block is the default state now, so the instance's
 					// overrides have to come after it.
 					tempMat->SetBackfaceCulling(false);
 					tempMat->SetCastShadows(false);
 					tempMat->SetReceiveShadows(false);
-					// Enable the clip plane discard in Standard.ovfx.
+					// Enable the clip plane discard in Standard.shader.
 					tempMat->AddFeature("CLIP_PLANE");
 					// IBL: the three pieces Filament's standard model reads - irradiance
 					// (diffuse), prefiltered radiance (specular) and the DFG lookup table.
@@ -243,7 +243,7 @@ namespace MOON {
 	//				aMaterial()
 	//				{
 	//					baseColorR = baseColorG = baseColorB = 1.0f;
-	//					//各向异性
+	//					//????
 	//					anisotropic = 0.0f;
 
 	//					emissionR = emissionG = emissionB = 0.0f;
@@ -261,12 +261,12 @@ namespace MOON {
 
 	//					specTrans = 0.0f;
 	//					ior = 1.5f;
-	//					//介质类型
+	//					//????
 	//					mediumType = 0.0f;
 	//					mediumDensity = 0.0f;
 
 	//					mediumColor = Vec3(1.0f, 1.0f, 1.0f);
-	//					//各向同性
+	//					//????
 	//					mediumAnisotropy = 0.0f;
 
 	//					baseColorTexId = -1.0f;
@@ -358,7 +358,7 @@ namespace MOON {
 	//			}
 	//			Core::Resources::Material* tempMat = new Core::Resources::Material();
 	//			Core::Global::ServiceLocator::Get<Core::ResourceManagement::MaterialManager>().RegisterResource(name, tempMat);
-	//			tempMat->SetShader(Core::Global::ServiceLocator::Get<Editor::Core::Context>().shaderManager[":Shaders\\Standard.ovfx"]);
+	//			tempMat->SetShader(Core::Global::ServiceLocator::Get<Editor::Core::Context>().shaderManager[":Shaders\\Standard.shader"]);
 	//			tempMat->SetProperty("u_Albedo", Maths::FVector4{ material.baseColorR, material.baseColorG, material.baseColorB, material.opacity });
 	//			tempMat->SetProperty("u_EmissiveColor", Maths::FVector3{ material.emissionR, material.emissionG, material.emissionB });
 	//			tempMat->SetProperty("u_Metallic", material.metallic);
@@ -767,7 +767,7 @@ namespace MOON {
 				Core::Global::ServiceLocator::Get<Core::ResourceManagement::MaterialManager>().RegisterResource(materilaMap[i], tempMat);
 				tempMat->AddFeature("NORMAL_MAPPING");
 				tempMat->AddFeature("CLIP_PLANE");
-				tempMat->SetShader(Core::Global::ServiceLocator::Get<Editor::Core::Context>().shaderManager[":Shaders\\Standard.ovfx"]);
+				tempMat->SetShader(Core::Global::ServiceLocator::Get<Editor::Core::Context>().shaderManager[":Shaders\\Standard.shader"]);
 				// Overrides after the shader: SetShader now takes the state from the material block.
 				tempMat->SetBackfaceCulling(false);
 				tempMat->SetCastShadows(false);

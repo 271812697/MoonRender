@@ -100,10 +100,18 @@ namespace Editor::Panels {
 			break;
 
 		case InputEvent::EType::MouseButtonPress:
+			// A widget does not receive mouse-move events while no button is pressed (unless
+			// it enables tracking), so moving the cursor to a new place and pressing must not
+			// leave the position at the previous release: the camera would treat the whole
+			// gap as the first drag delta and snap.
+			mouseX = p_event.x;
+			mouseY = p_event.y;
 			m_mouseButtonEvents[p_event.button] = MouseButtonState::MOUSE_DOWN;
 			break;
 
 		case InputEvent::EType::MouseButtonRelease:
+			mouseX = p_event.x;
+			mouseY = p_event.y;
 			m_mouseButtonEvents[p_event.button] = MouseButtonState::MOUSE_UP;
 			break;
 

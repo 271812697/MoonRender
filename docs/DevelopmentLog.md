@@ -16,16 +16,16 @@
 
 | 主题 | 完成内容 | 关键文件 |
 |---|---|---|
-| **IBL / 天空盒** | `SkyboxRenderPass` 完成 HDR 环境图 → CubeMap 转换、irradiance、prefilter、BRDF LUT 的全链路；材质面板 `u_Metallic` / `u_Roughness` 联动 | `renderer/SkyboxRenderPass.*`、`SkyboxConvert/Irradiance/Prefilter.ovfx`、`Lighting/IBL.ovfxh` |
+| **IBL / 天空盒** | `SkyboxRenderPass` 完成 HDR 环境图 → CubeMap 转换、irradiance、prefilter、BRDF LUT 的全链路；材质面板 `u_Metallic` / `u_Roughness` 联动 | `renderer/SkyboxRenderPass.*`、`SkyboxConvert/Irradiance/Prefilter.shader`、`Lighting/IBL.glsl` |
 | IBL 反射方向修复 | 之前金属度=1、粗糙度≈0 时，移动相机模型表面的天空反射不变化。定位为反射向量在 view space 与 world space 之间混用，修正后反射随相机正确变化（顺带确认：平面反射的射线方向与平面平移无关） | 同上 + `skybox/Material` 属性传递 |
 | **透明与深度剥离** | 深度剥离实现透明排序（`mBlendFbo` + `mLayerFbo[]` 逐层 peel）；修复正交相机下的条纹；打通「材质面板改 `u_Albedo` 透明度 → 透明队列分发 → Transparent pass」链路 | `SceneRenderer.cpp`（TransparentRenderPass）、`PropertyWidget.cpp` |
-| **剖切与截面** | `ClipPlane` 交互 widget 实时剖切；截面渲染从 CPU 交线三角化改为 GPU 逐像素奇偶（模板 `INVERT`）；修复截面光照（法线取剖切平面法线）、背面穿透、以及远景随相机变化的条纹 | `Interactive/Widgets/ClipPlane.*`、`SceneRenderer`（SectionCap/SectionContour）、`Section*.ovfx`、[SectionRendering.md](./SectionRendering.md) |
+| **剖切与截面** | `ClipPlane` 交互 widget 实时剖切；截面渲染从 CPU 交线三角化改为 GPU 逐像素奇偶（模板 `INVERT`）；修复截面光照（法线取剖切平面法线）、背面穿透、以及远景随相机变化的条纹 | `Interactive/Widgets/ClipPlane.*`、`SceneRenderer`（SectionCap/SectionContour）、`Section*.shader`、[SectionRendering.md](./SectionRendering.md) |
 | **线面深度冲突** | `res` 模型中线与面共面时被面遮挡：采用 reverse-Z + 深度比较策略（线用 `GREATER_EQUAL`）+ 多边形偏移；`PickingRenderPass` 的 id 绘制同步同一深度策略 | `LineRenderPass`、`PickingRenderPass`、[DepthPrecision.md](./DepthPrecision.md) |
-| **SSAO** | `GbufferPass` 的 SSAO 变体与材质面板开关；改为深度感知采样、7×7 模糊；缓解边缘变钝；当前 SSAO / Reflect feature 暂时整体禁用（commit `2cb9fc7c`） | `GbufferPass.*`、`ssao.ovfx`、`ssaoblur.ovfx` |
-| **路径追踪** | 场景 mesh → 顶点/索引 TBO + BVH TBO，`PathTraceRenderPass` 做光追；新增低分辨率变体 `PathTraceLowRes.ovfx`；正交/透视切换时重建累积与变体；每个 solid 一种配色（修正 domainId → solidId 的映射） | `renderer/PathTraceRenderPass.*`、`PathTrace/*.ovfx` |
+| **SSAO** | `GbufferPass` 的 SSAO 变体与材质面板开关；改为深度感知采样、7×7 模糊；缓解边缘变钝；当前 SSAO / Reflect feature 暂时整体禁用（commit `2cb9fc7c`） | `GbufferPass.*`、`ssao.shader`、`ssaoblur.shader` |
+| **路径追踪** | 场景 mesh → 顶点/索引 TBO + BVH TBO，`PathTraceRenderPass` 做光追；新增低分辨率变体 `PathTraceLowRes.shader`；正交/透视切换时重建累积与变体；每个 solid 一种配色（修正 domainId → solidId 的映射） | `renderer/PathTraceRenderPass.*`、`PathTrace/*.shader` |
 | **拓扑与网格可视化** | `TopoShape` 离散化时按拓扑结构建 Actor（Solid/Shell/Face/Edge），并加 `AllFaces` / `AllEdges` 锚点；支持从祖先节点整体显隐、边隐藏、相机 fit 与拾取 | `core/component/CTopoShape.*`、`TopoShapeActor.*`、`TreeViewPanel` |
 | **反射平面 / 其它** | `GridRenderPass` 固定尺寸反射平面；编辑器叠加层（FPS、帧吞吐、Gbuffer 调试视图） | `renderer/GridRenderPass.*`、`viewerwidget.cpp` |
-| **GPU id 拾取** | `PickingRenderPass` 把 actor id 编码进颜色缓冲：`(r,g,b) = actorID`、`a = 255`；gizmo 方向用 `(255,255,252..254)`，gizmo 多边形选择用 `a = 254`；线和面共面时用多边形偏移 + `GeomertySurfacePick.ovfx` 保证**线的 id 优先于面**；悬停 / 选中 / gizmo 拖拽都基于这张 id 缓冲（性能优化见 §1.2.4） | `renderer/PickingRenderPass.*`、`renderer/SceneView.cpp` |
+| **GPU id 拾取** | `PickingRenderPass` 把 actor id 编码进颜色缓冲：`(r,g,b) = actorID`、`a = 255`；gizmo 方向用 `(255,255,252..254)`，gizmo 多边形选择用 `a = 254`；线和面共面时用多边形偏移 + `GeomertySurfacePick.shader` 保证**线的 id 优先于面**；悬停 / 选中 / gizmo 拖拽都基于这张 id 缓冲（性能优化见 §1.2.4） | `renderer/PickingRenderPass.*`、`renderer/SceneView.cpp` |
 
 ---
 
@@ -57,7 +57,7 @@
 | `HzbBuildPass` | 解析 MSAA 深度 → R32F 金字塔逐级 reduce → 回读最小一级 → 交给 culler；pass order `35000` |
 | `HzbCuller` | CPU 侧 BVH 分层遍历、节点 AABB → 屏幕矩形 → tile 深度测试、统计输出 |
 | `SceneRenderer` | pass 注册、`FilterDrawables` 中按遮挡结果跳过 drawable |
-| `HzbReduce.ovfx` | 2×2 取最远表面（本项目 Reversed-Z 下为 min）的降采样 shader |
+| `HzbReduce.shader` | 2×2 取最远表面（本项目 Reversed-Z 下为 min）的降采样 shader |
 
 **本阶段发现并修复的问题**
 
@@ -194,7 +194,7 @@ pick pass 里：`SetScissor(光标 ±24px)` → `pso.scissorTest = true` → sci
 - 屏幕半径按 `r_ndc ≈ |proj(0,0)| · r / w` 估算（x/y 各一次）再乘 1.25 安全系数，圆当方框做相交测试；
 - `clip.w <= 0`（近平面附近 / 身后）或没有 bounds 的 drawable **一律保留**；
 - 用 **drawable 自己的 bounds**，不依赖场景 BVH，所以 BVH 过期也不会漏选；
-- GPU id 判定完全不变：候选仍用原来的 picking 材质、多边形偏移与 `GeomertySurfacePick.ovfx` 画进同一张 id 缓冲，**线与面的优先级、子网格、gizmo 判定都和以前一致**。
+- GPU id 判定完全不变：候选仍用原来的 picking 材质、多边形偏移与 `GeomertySurfacePick.shader` 画进同一张 id 缓冲，**线与面的优先级、子网格、gizmo 判定都和以前一致**。
 
 **效果**
 

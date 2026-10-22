@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <any>
 #include <cstdint>
 #include <map>
@@ -67,9 +67,24 @@ namespace Rendering::Data
 			bool uploadStableProperties,
 			bool uploadSingleUseProperties,
 			Rendering::HAL::Texture* p_emptyTexture2D = nullptr,
-			Rendering::HAL::Texture* p_emptyTextureCube = nullptr
+			Rendering::HAL::Texture* p_emptyTextureCube = nullptr,
+			Rendering::HAL::Texture* p_brdfLut = nullptr
 		);
 		void UpdateProperties();
+		/** Puts one parameter back to the initialiser its .shader declared. Engine-owned
+		 * parameters (ui : false - the view's IBL cubes, the DFG LUT, the CAD domain colour
+		 * buffer, the depth-peel textures) are left untouched: they are bound by the renderer
+		 * or the actor, not by the material panel. Returns false when the parameter is
+		 * unknown, not a UI parameter, or has no declared default. */
+		bool ResetPropertyToDefault(const std::string& p_name);
+		/** Binds a texture the view owns (not the material) on every draw.
+		 *
+		 * Sampler bindings normally ride along with UploadProperties, which only runs when
+		 * the material's signature changes. A view-global texture such as the DFG LUT can
+		 * appear *after* that upload (the sky pass bakes it later in the frame), and the
+		 * white fallback bound on the first draw then sticks forever. Binding it here, per
+		 * draw, keeps the shader's sampler pointing at the view's texture. */
+		void BindGlobalTexture(const std::string& p_name, Rendering::HAL::Texture* p_texture);
 		MaterialSignatureSet Bind(
 			HAL::Texture* p_emptyTexture2D = nullptr,
 			HAL::Texture* p_emptyTextureCube = nullptr,
@@ -158,7 +173,8 @@ namespace Rendering::Data
 			bool p_uploadStableProperties,
 			bool p_uploadSingleUseProperties,
 			Rendering::HAL::Texture* p_emptyTexture2D,
-			Rendering::HAL::Texture* p_emptyTextureCube
+			Rendering::HAL::Texture* p_emptyTextureCube,
+			Rendering::HAL::Texture* p_brdfLut
 		);
 
 		/** Acquires a slice sized to the shader's block, or releases it when the block is gone

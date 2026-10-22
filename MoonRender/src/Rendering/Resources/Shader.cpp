@@ -1,5 +1,10 @@
-﻿#include <format>
+﻿#include <algorithm>
+#include <format>
+#include <iostream>
 #include <ranges>
+#include <set>
+#include <stdexcept>
+#include <vector>
 #include <Rendering/Resources/Shader.h>
 
 namespace
@@ -13,24 +18,52 @@ Rendering::HAL::ShaderProgram& Rendering::Resources::Shader::GetVariant(std::opt
 {
 	const std::string pass = std::string{ p_pass.value_or("") };
 
-	if (!m_variants.contains(pass))
+	// Never dereference a missing entry: a fixed-feature package has no empty-set fallback, and
+	// a request for a set the package was not compiled with used to end in a null program.
+	auto passIt = m_variants.find(pass);
+	if (passIt == m_variants.end() || passIt->second.empty())
 	{
-
-		return *m_variants[{}][{}];
+		passIt = m_variants.begin();
+	}
+	if (passIt == m_variants.end() || passIt->second.empty())
+	{
+		throw std::runtime_error("shader has no variant");
 	}
 
-	if (!m_variants[pass].contains(p_featureSet))
+	auto& variants = passIt->second;
+	auto it = variants.find(p_featureSet);
+	if (it == variants.end())
 	{
-	
-		return *m_variants[pass][{}];
+		it = variants.find(Data::FeatureSet{});
+		if (it == variants.end())
+		{
+			it = variants.begin();
+		}
+
+		static std::set<std::string> reported;
+		if (reported.insert(path + "|" + pass).second)
+		{
+			std::cout << "[Shader] " << path << " has no variant for pass " << pass
+				<< " with " << p_featureSet.size() << " feature(s); using a fallback." << std::endl;
+		}
 	}
 
-	return *m_variants[pass][p_featureSet];
+	return *it->second;
 }
 
 const Rendering::Data::FeatureSet& Rendering::Resources::Shader::GetFeatures() const
 {
 	return m_features;
+}
+
+const std::vector<std::string>& Rendering::Resources::Shader::GetDeclaredFeatures() const
+{
+	return m_declaredFeatures;
+}
+
+void Rendering::Resources::Shader::SetDeclaredFeatures(std::vector<std::string>&& p_features)
+{
+	m_declaredFeatures = std::move(p_features);
 }
 
 const std::unordered_set<std::string>& Rendering::Resources::Shader::GetPasses() const
@@ -59,6 +92,7 @@ void Rendering::Resources::Shader::SetVariants(Variants&& p_variants)
 
 	m_passes.clear();
 	m_features.clear();
+	m_usesVariantKeys = false;
 
 	// Find all passes & features based on the compiled variants
 	for (const auto& [pass, featureVariants] : m_variants)
@@ -67,7 +101,15 @@ void Rendering::Resources::Shader::SetVariants(Variants&& p_variants)
 
 		for (const auto& featureSet : featureVariants | std::views::keys)
 		{
-			m_features.insert(featureSet.begin(), featureSet.end());
+			for (const std::string& feature : featureSet)
+			{
+				if (feature.starts_with("VARIANT_"))
+				{
+					m_usesVariantKeys = true;
+					continue;
+				}
+				m_features.insert(feature);
+			}
 		}
 	}
 }
@@ -80,6 +122,11 @@ const Rendering::Resources::Shader::Variants& Rendering::Resources::Shader::GetV
 const std::vector<Rendering::Resources::Shader::Parameter>& Rendering::Resources::Shader::GetParameters() const
 {
 	return m_parameters;
+}
+
+bool Rendering::Resources::Shader::UsesVariantKeys() const
+{
+	return m_usesVariantKeys;
 }
 
 bool Rendering::Resources::Shader::HasParameterTable() const

@@ -5,8 +5,10 @@
 #include <QApplication>
 #include <QFileInfo>
 #include <QFontDatabase>
+#include <QImage>
 #include <QStringList>
 #include <QTimer>
+#include <cstdlib>
 #include <editor/editor.h>
 #include "Core/Global/ServiceLocator.h"
 #include "editor/UI/HomePanel/RecentProjects.h"
@@ -62,6 +64,14 @@ int main(int argc, char* argv[])
 			const QString project = arguments[1];
 			QTimer::singleShot(200, &app, [project] { GetViewerWidget.onReadFile(project); });
 		}
+		// TEMPORARY PROBE: a run that saves its frame (MOON_SHOT) closes itself, so the save on
+		// the way out happens without anyone clicking. Delay is the time the read and the frame
+		// get; see applyClipDemo in viewerwidget.cpp.
+		if (std::getenv("MOON_SHOT") != nullptr) {
+			const char* p_delay = std::getenv("MOON_SHOT_DELAY_MS");
+			const int delay = p_delay != nullptr ? std::atoi(p_delay) : 8000;
+			QTimer::singleShot(delay, &app, [] { QCoreApplication::quit(); });
+		}
 		res = QApplication::exec();
 		// The picture of the document that is open is taken here, the way closing a project
 		// takes one: the viewport is still drawing it, so what is grabbed is how it was left.
@@ -71,6 +81,16 @@ int main(int argc, char* argv[])
 		const QString document = GetViewerWidget.getDocumentPath();
 		if (!document.isEmpty()) {
 			MOON::RecentProjects::Remember(document, MOON::RecentProjects::GrabViewportPreview());
+		}
+		// TEMPORARY PROBE (see applyClipDemo in viewerwidget.cpp): MOON_SHOT=<png> saves the
+		// viewport's frame on the way out, so two headless runs (a section with and without
+		// something) can be compared pixel by pixel. Remove with the rest of the probe.
+		if (const char* p_shot = std::getenv("MOON_SHOT"); p_shot != nullptr && *p_shot != '\0') {
+			const QImage frame = GetViewerWidget.grabFramebuffer();
+			if (!frame.isNull()) {
+				frame.save(QString::fromLocal8Bit(p_shot));
+				CORE_INFO("[Section] viewport saved to {0}", p_shot);
+			}
 		}
 		// The document is closed on the way out, the way the File menu closes one: its bodies
 		// go, with their features, the actors those spawned, and the sketches that leave the

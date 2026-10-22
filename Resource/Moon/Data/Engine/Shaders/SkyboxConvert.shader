@@ -1,0 +1,104 @@
+// Skybox: turns the equirectangular environment texture into the cubemap the IBL samples, and
+// draws that cubemap as the visible sky.
+//
+// Written in the material form MoonMatc consumes (see docs/ShaderPipeline.md). Both stages own
+// their main() because the skeleton's fixed transform cannot express either of them: the vertex
+// stage has to swap the projection for a unit ortho matrix when the camera is orthographic (the
+// unit cube sits on the camera, so the real near plane would clip it), and the fragment stage
+// has to build the sampling direction from the cube position instead of a generated varying.
+// Nothing is generated for these stages - the attributes, the VS_OUT block, the output and the
+// mains below are the whole stage.
+
+material {
+    name         : SkyboxConvert,
+    shadingModel : unlit,
+    blending     : opaque,
+    // No culling: the cube is seen from the inside while a face is captured. Depth writing stays
+    // on for the capture, which is what the capture loop asks for; the visible skybox draw turns
+    // it off per drawable (SkyboxRenderPass::Draw).
+    culling      : none,
+    depthWrite   : true,
+
+    // The cubemap capture pass. Without it the material is the visible skybox, which samples the
+    // prefiltered cube instead of the flat equirectangular source.
+    features : [ SKY_Convert ],
+
+    parameters : [
+        // SKY_Convert samples u_SkyBoxTexture, the plain skybox draw samples SkyboxCube. Both are
+        // declared for every variant - the one a variant does not read is dropped by the driver.
+        { type : sampler2D,   name : u_SkyBoxTexture },
+        { type : samplerCube, name : SkyboxCube }
+    ]
+}
+
+vertex {
+    layout (location = 0) in vec3 geo_Pos;
+    layout (location = 1) in vec2 geo_TexCoords;
+
+    out VS_OUT
+    {
+        vec3 dir;
+    } vs_out;
+
+    void main()
+    {
+        vs_out.dir = geo_Pos;
+        mat4 p = ubo_Projection;
+        if (ubo_CameraType == 0)
+        {
+            // The unit skybox cube is centered on the camera. An ortho camera's near plane
+            // would clip it, so use a unit ortho projection that exactly fits the cube
+            // (it always fills the viewport, just like a skybox at infinity should).
+            p = mat4(
+                2.0, 0.0, 0.0, 0.0,
+                0.0, 2.0, 0.0, 0.0,
+                0.0, 0.0, 2.0, 0.0,
+                0.0, 0.0, 0.0, 1.0
+            );
+        }
+        gl_Position = p *ubo_View  * vec4(ubo_ViewPos +  geo_Pos, 1.0);
+    }
+}
+
+fragment {
+    in VS_OUT
+    {
+        vec3 dir;
+    } fs_in;
+
+    out vec4 FRAGMENT_COLOR;
+    #define INV_PI     0.31830988618379067
+    #define INV_TWO_PI 0.15915494309189533
+    void main()
+    {
+
+        vec3 d=normalize(fs_in.dir);
+    #if defined(SKY_Convert)
+
+        // Filament stores IBL cubemaps mirrored on X (the "Mirroring" section of the Filament
+        // manual, and the default of both cmgen and IBLPrefilterContext::EquirectangularToCubemap):
+        // the equirect texel for direction (x, y, z) ends up at (-x, y, z) in the cube. The
+        // reflection and irradiance shaders sample that cube with world-space directions, so the
+        // capture has to bake the mirror in; otherwise the specular and diffuse IBL disagree with
+        // each other and with Filament's preview.
+        //
+        // u is Filament's toEquirect() with x negated.
+        // v is measured from the bottom because TextureLoader leaves stb's vertical flip on:
+        // the texture's row 0 is the image's last row, so v = 0.5 + asin(y)/PI maps +Y to the
+        // file's first row. This is the sign that matches Filament's toEquirect()/cmgen for
+        // Studio.hdr (3000 directions and a per-face correlation of 0.986); the 14:08 flip to
+        // 0.5 - asin was based on a comparison that was confounded by the preview sphere's
+        // inverted winding, and it put the studio's ceiling below the horizon - the upper-left
+        // softbox in Filament's reflection disappeared and a left-edge streak appeared.
+        vec2 uv = vec2(0.5 + atan(-d.x, d.z) * INV_TWO_PI,
+                       0.5 + asin(clamp(d.y, -1.0, 1.0)) * INV_PI);
+        FRAGMENT_COLOR = texture(u_SkyBoxTexture, uv) ;
+    #else
+        //FRAGMENT_COLOR =vec4(texture(SkyboxCube, normalize(vec3(1,1,1))).rgb,1.0f);
+        //textureLod(environmentMap, N, environmentMaxLOD).rgb;
+        vec3 color=textureLod(SkyboxCube,d,0).rgb;
+        FRAGMENT_COLOR =vec4(color,1.0f);
+    #endif
+
+    }
+}

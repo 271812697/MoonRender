@@ -589,10 +589,10 @@ void main()
 	}
 	void PathTraceRenderPass::UpdateShaders() {
 		std::string enginePath = Tools::Utils::PathParser::GetExeDirectory() + "/Moon/Data/Engine";
-		static std::string pathTraceShaderSrcObj = loadShaderSource(enginePath+"/Shaders/PathTrace/PathTrace.ovfx");
-		static std::string pathTraceShaderLowResSrcObj = loadShaderSource(enginePath+"/Shaders/PathTrace/PathTraceLowRes.ovfx");
-		static std::string outputShaderSrcObj = loadShaderSource(enginePath+"/Shaders/PathTrace/Output.ovfx");
-		static std::string tonemapShaderSrcObj = loadShaderSource(enginePath+"/Shaders/PathTrace/ToneMap.ovfx");
+		static std::string pathTraceShaderSrcObj = loadShaderSource(enginePath+"/Shaders/PathTrace/PathTrace.shader");
+		static std::string pathTraceShaderLowResSrcObj = loadShaderSource(enginePath+"/Shaders/PathTrace/PathTraceLowRes.shader");
+		static std::string outputShaderSrcObj = loadShaderSource(enginePath+"/Shaders/PathTrace/Output.shader");
+		static std::string tonemapShaderSrcObj = loadShaderSource(enginePath+"/Shaders/PathTrace/ToneMap.shader");
 
 		static std::unordered_map<std::string, std::unique_ptr<::Rendering::Resources::Shader>>pathTraceShaderMap;
 		static std::unordered_map<std::string, std::unique_ptr<::Rendering::Resources::Shader>>pathTraceShaderLowResMap;

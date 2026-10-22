@@ -12,7 +12,7 @@
 #include <Core/ECS/Components/CMaterialRenderer.h>
 #include <renderer/SceneView.h>
 namespace MOON {
-    // 读取 STEP 模型并返回其形状
+    // ?? STEP ????????
     namespace IO {
         struct LoadedDomain {
 
@@ -45,7 +45,7 @@ namespace MOON {
 				dom.vertex.resize((size_t)ptSize);
 				dom.indices.resize((size_t)triSize * 3);
 
-				// 整块读入再转 float3，避免逐分量 read
+				// ?????? float3,????? read
 				std::vector<double> raw((size_t)(ptSize + nmlSize) * 3);
 				in.read(reinterpret_cast<char*>(raw.data()),
 					(std::streamsize)(raw.size() * sizeof(double)));
@@ -61,8 +61,8 @@ namespace MOON {
 					(std::streamsize)(dom.indices.size() * sizeof(uint32_t)));
 				if (!in) return false;
 
-				// 索引范围校验：越界索引在 GPU 上会取到随机顶点，表现为三角形乱飞，
-				// 因此把越界的三角形整块丢掉（宁可少画，也不要画出错的面）。
+				// ??????:????? GPU ????????,????????,
+				// ?????????????(????,????????)?
 				{
 					std::vector<uint32_t> safeIndices;
 					safeIndices.reserve(dom.indices.size());
@@ -85,9 +85,9 @@ namespace MOON {
 					}
 				}
 
-				// 法线：只有 nmlSize == ptSize 时法线段才与顶点一一对应。
-				// 其它情况（缺失、数量不符）必须用面法线累加补一份，否则顶点法线为
-				// (0,0,0)，而 Standard.ovfx 里 normalize(0) 会得到 NaN，光照整个坏掉。
+				// ??:?? nmlSize == ptSize ?????????????
+				// ????(???????)???????????,???????
+				// (0,0,0),? Standard.shader ? normalize(0) ??? NaN,???????
 				if (nmlSize == ptSize) {
 					for (size_t i = 0; i < ptSize; i++) {
 						dom.vertex[i].normals = {
@@ -155,7 +155,7 @@ namespace MOON {
 			std::string  path(filePath);
 			std::vector<LoadedDomain> domains;
 			if (!LoadDomainsFromFile(path, domains) || domains.empty()) {
-				std::cout << "[Mesh] 解析失败: " << path << std::endl;
+				std::cout << "[Mesh] ????: " << path << std::endl;
 				return;
 			}
 			auto&parent=scene->CreateActor();
@@ -164,12 +164,11 @@ namespace MOON {
 				auto tempMat = new Core::Resources::Material();
 
 
-				tempMat->SetShader(GetShaderService[":Shaders\\Standard.ovfx"]);
+				tempMat->SetShader(GetShaderService[":Shaders\\Standard.shader"]);
 				// Overrides after SetShader: the state now starts from the material block.
 				tempMat->SetBackfaceCulling(false);
 				tempMat->SetCastShadows(false);
 				tempMat->SetReceiveShadows(false);
-				tempMat->AddFeature("VERTEX_POS_NORMAL");
 				// IBL: the three pieces Filament's standard model reads.
 				tempMat->SetProperty("_IrradianceCube", GetSceneView.GetRenderer().GetIrradianceCube());
 				tempMat->SetProperty("_PrefilterCube", GetSceneView.GetRenderer().GetPrefilterCube());
@@ -191,7 +190,28 @@ namespace MOON {
 
 					auto& modelRender = actor.AddComponent<Core::ECS::Components::CModelRenderer>();
 					modelRender.SetModel(faceModel);
-					auto mesh = new ::Rendering::Resources::Mesh(domains[i].vertex,
+					std::vector<::Rendering::Geometry::Vertex> meshVertices;
+					meshVertices.reserve(domains[i].vertex.size());
+					for (const auto& source : domains[i].vertex)
+					{
+						::Rendering::Geometry::Vertex vertex{};
+						vertex.position[0] = source.position.x;
+						vertex.position[1] = source.position.y;
+						vertex.position[2] = source.position.z;
+						vertex.normals[0] = source.normals.x;
+						vertex.normals[1] = source.normals.y;
+						vertex.normals[2] = source.normals.z;
+						vertex.texCoords[0] = 0.0f;
+						vertex.texCoords[1] = 0.0f;
+						vertex.tangent[0] = 1.0f;
+						vertex.tangent[1] = 0.0f;
+						vertex.tangent[2] = 0.0f;
+						vertex.bitangent[0] = 0.0f;
+						vertex.bitangent[1] = 1.0f;
+						vertex.bitangent[2] = 0.0f;
+						meshVertices.push_back(vertex);
+					}
+					auto mesh = new ::Rendering::Resources::Mesh(meshVertices,
 						domains[i].indices,
 						0,
 						::Rendering::Settings::EPrimitiveMode::TRIANGLES);

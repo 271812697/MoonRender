@@ -789,4 +789,4 @@ shape.exportStl("result.stl", 0.1);
 | `Moon/editor/` | 编辑器面板、命令、输入 |
 | `Moon/feature/`、`Moon/Sketcher/` | 参数化特征与草图 |
 | `Moon/renderer/` | 编辑器视口与渲染扩展 |
-| `Resource/Moon/Data/Engine/Shaders/` | `.ovfx` 着色器资源 |
+| `Resource/Moon/Data/Engine/Shaders/` | `.shader` 着色器资源 |

@@ -10,7 +10,7 @@
 > - `MoonRender/src/Core/Rendering/SceneRenderer.cpp`（渲染消费）
 > - `Moon/editor/UI/TreeViewPanel/EntityTreeModel.cpp`、`treeViewpanel.cpp`（勾选入口）
 > - `Moon/core/SelectionManager.cpp`（hover/选中）
-> - `Moon/renderer/PickingRenderPass.cpp`、`Resource/Moon/Data/Engine/Shaders/GeomertySurfacePick.ovfx`（拾取）
+> - `Moon/renderer/PickingRenderPass.cpp`、`Resource/Moon/Data/Engine/Shaders/GeomertySurfacePick.shader`（拾取）
 
 ---
 
@@ -225,7 +225,7 @@ void CTopoShape::setChildsMeshTransParent(const std::vector<int>& childs, bool u
 顶点 `domainId.y` 存叶子 actor 的 ID；拾取 shader 直接把它编码成像素色：
 
 ```glsl
-// GeomertySurfacePick.ovfx
+// GeomertySurfacePick.shader
 int actorId = int(round(VSDomainId.y));
 int r = actorId & 0xFF; int g = (actorId >> 8) & 0xFF; int b = (actorId >> 16) & 0xFF;
 FRAGMENT_COLOR = vec4(r / 255.0, g / 255.0, b / 255.0, 1.0);

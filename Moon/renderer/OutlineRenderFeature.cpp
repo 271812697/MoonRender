@@ -19,10 +19,10 @@ Editor::Rendering::OutlineRenderFeature::OutlineRenderFeature(
 	::Rendering::Features::ARenderFeature(p_renderer, p_executionPolicy)
 {
 	/* Stencil Fill Material */
-	m_stencilFillMaterial.SetShader(GetShaderService[":Shaders/OutlineFallback.ovfx"]);
+	m_stencilFillMaterial.SetShader(GetShaderService[":Shaders/OutlineFallback.shader"]);
 
 	/* Outline Material */
-	m_outlineMaterial.SetShader(GetShaderService[":Shaders/OutlineFallback.ovfx"]);
+	m_outlineMaterial.SetShader(GetShaderService[":Shaders/OutlineFallback.shader"]);
 }
 
 void Editor::Rendering::OutlineRenderFeature::DrawOutline(

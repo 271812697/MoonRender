@@ -1,4 +1,4 @@
-#include <Rendering/Resources/ShaderPackage.h>
+﻿#include <Rendering/Resources/ShaderPackage.h>
 
 #include <cstring>
 #include <iostream>
@@ -104,6 +104,23 @@ namespace Rendering::Resources
 						variant.features.insert(feature);
 					}
 					m_variants.push_back(std::move(variant));
+				}
+			}
+			else if (tag == "SHDRFEAT")
+			{
+				uint32_t count = 0;
+				if (!Take(payload, count))
+				{
+					continue;
+				}
+				for (uint32_t i = 0; i < count; ++i)
+				{
+					std::string feature;
+					if (!TakeString(payload, feature))
+					{
+						break;
+					}
+					m_declaredFeatures.push_back(std::move(feature));
 				}
 			}
 			else if (tag == "SHDRPROP")

@@ -1,4 +1,4 @@
-﻿#include "Widgets/TextureDrop.h"
+#include "Widgets/TextureDrop.h"
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
@@ -38,6 +38,13 @@ namespace MOON {
 
     void TextureDrop::setWidgetValue(const QVariant& value)
     {
+        // Only show the assigned asset name here: loading every texture of every material
+        // when the inspector is rebuilt would stall the UI. The material designer shows the
+        // thumbnails; a drop still loads and previews the image.
+        m_texturePath = value.toString();
+        m_displayPixmap = QPixmap();
+        m_isEmpty = m_texturePath.isEmpty();
+        update();
     }
 
     void TextureDrop::setTexture(const QString& path)
@@ -107,9 +114,15 @@ namespace MOON {
         p.setPen(QColor(100, 100, 100));
         p.drawRect(0, 0, width() - 1, height() - 1);
 
-        if (m_isEmpty || m_displayPixmap.isNull()) {
+        if (m_displayPixmap.isNull()) {
             p.setPen(QColor(170, 170, 170));
-            p.drawText(rect(), Qt::AlignCenter, "Drop\nTexture");
+            if (!m_texturePath.isEmpty()) {
+                const QString fileName = QFileInfo(m_texturePath).fileName();
+                p.drawText(rect().adjusted(4, 4, -4, -4), Qt::AlignCenter | Qt::TextWordWrap, fileName);
+            }
+            else {
+                p.drawText(rect(), Qt::AlignCenter, "Drop\nTexture");
+            }
             return;
         }
 

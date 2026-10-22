@@ -7,6 +7,8 @@
 #include "core/ECS/Components/CDirectionalLight.h"
 #include "core/component/CTopoShape.h"
 #include "core/Resources/Material.h"
+#include <Rendering/Resources/Shader.h>
+#include <Rendering/Resources/Texture.h>
 #include "Core/Global/ServiceLocator.h"
 #include "editor/UI/PropertyPanel/Collapsiblegroupboxwidget.h"
 #include "Widgets/PropertyComponent.h"
@@ -19,9 +21,16 @@
 #include "Widgets/SliderIntProperty.h"
 #include "Widgets/ColorPickerProperty.h"
 #include "Widgets/TextureProperty.h"
+#include "Widgets/Vec2Property.h"
 #include "feature/Feature.h"
 #include "feature/FeatureBody.h"
 #include "core/log.h"
+#include <algorithm>
+#include <cctype>
+#include <cmath>
+#include <map>
+#include <ranges>
+#include <set>
 #include <QTreeWidget>
 #include <QStackedWidget>
 #include <QVBoxLayout>
@@ -42,6 +51,112 @@
 #include <fstream>
 
 namespace MOON {
+	namespace {
+		std::string ToLower(std::string p_text)
+		{
+			std::ranges::transform(p_text, p_text.begin(),
+				[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+			return p_text;
+		}
+
+		// "u_TextureTiling" -> "Texture Tiling", the same label the material designer uses.
+		std::string PrettyLabel(const std::string& p_name)
+		{
+			std::string name = p_name;
+			if (name.starts_with("u_")) { name.erase(0, 2); }
+			else if (name.starts_with("_")) { name.erase(0, 1); }
+
+			std::string label;
+			label.reserve(name.size() + 4);
+			for (size_t i = 0; i < name.size(); ++i)
+			{
+				const char c = name[i];
+				if (i > 0
+					&& std::isupper(static_cast<unsigned char>(c))
+					&& !std::isupper(static_cast<unsigned char>(name[i - 1]))
+					&& name[i - 1] != '_')
+				{
+					label += ' ';
+				}
+				label += (c == '_' ? ' ' : c);
+			}
+			if (!label.empty())
+			{
+				label[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(label[0])));
+			}
+			return label;
+		}
+
+		bool IsAlbedoParameter(const std::string& p_name)
+		{
+			return ToLower(p_name).find("albedo") != std::string::npos;
+		}
+
+		// "PARALLAX_MAPPING" -> "Parallax Mapping", the label of a feature toggle.
+		std::string FeatureLabel(const std::string& p_name)
+		{
+			std::string label;
+			label.reserve(p_name.size());
+			bool start = true;
+			for (const char c : p_name)
+			{
+				if (c == '_')
+				{
+					label += ' ';
+					start = true;
+					continue;
+				}
+				label += start
+					? static_cast<char>(std::toupper(static_cast<unsigned char>(c)))
+					: static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+				start = false;
+			}
+			return label;
+		}
+
+		struct SliderRange
+		{
+			float min = 0.0f;
+			float max = 1.0f;
+			float step = 0.005f;
+		};
+
+		// The range a unit-less material scalar gets - same heuristic as the designer.
+		SliderRange RangeFor(float p_value, const std::string& p_name)
+		{
+			const std::string name = ToLower(p_name);
+			const auto has = [&name](const char* p_part) {
+				return name.find(p_part) != std::string::npos;
+			};
+
+			SliderRange range;
+			const bool unit = has("roughness") || has("metallic") || has("specular")
+				|| has("glossiness") || has("transmission") || has("opacity")
+				|| has("threshold") || has("alpha") || has("dither") || has("parallax");
+			const bool wide = has("intensity") || has("strength") || has("scale")
+				|| has("fade") || has("distance") || has("emissive") || has("height");
+
+			if (unit)
+			{
+				range.min = 0.0f;
+				range.max = 1.0f;
+			}
+			else if (wide)
+			{
+				range.min = 0.0f;
+				range.max = std::max(10.0f, p_value * 2.0f);
+			}
+			else
+			{
+				range.min = p_value < 0.0f ? std::min(-1.0f, p_value * 2.0f) : 0.0f;
+				range.max = p_value > 1.0f ? p_value * 2.0f : 1.0f;
+			}
+
+			range.step = std::max(0.0005f, (range.max - range.min) / 500.0f);
+			return range;
+		}
+	}
+
 	class TopoShapePropertyComponent :public ActorPropertyComponent
 	{
 	public:
@@ -307,126 +422,350 @@ namespace MOON {
 			}
 		}
 	};
+	/** The material section of the actor inspector.
+	 *
+	 * It is generated from the shader's parameter table, exactly like the material designer's
+	 * form (the same labels, groups, ranges, colour pickers and texture slots), instead of
+	 * listing whatever names the instance happens to carry. The widgets edit the actor's own
+	 * material instance, so the viewport updates live. */
 	class MaterialPropertyComponent :public ActorPropertyComponent
 	{
 	public:
 		MaterialPropertyComponent(Core::ECS::Components::CMaterialRenderer* comp) :ActorPropertyComponent(comp) {
 			mat = comp->GetMaterialAtIndex(0);
-			featureList = mat->GetShader()->GetFeatures();
-			for (auto feature : featureList) {
-				mProperties.push_back(new BoolProperty(feature.c_str(), this, BoolProperty::Style::InviwoRect));
-			}
-			for (auto& mprop:mat->GetProperties()) {
-				if (std::holds_alternative<Maths::FVector3>(mprop.second.value)) {
-					mProperties.push_back(new FVec3Property(mprop.first.c_str(), this));
-				}
-				else if (std::holds_alternative<float>(mprop.second.value)) {
-					mProperties.push_back(new SliderFloatProperty(mprop.first.c_str(), this));
-				}
-				else if (std::holds_alternative<Maths::FVector4>(mprop.second.value)) {
-					std::string mainLower = mprop.first;
-					std::transform(mainLower.begin(), mainLower.end(), mainLower.begin(),
-						[](unsigned char c) { return std::tolower(c); });
-					if (mainLower.find("u_albedo") != std::string::npos) {
-						mProperties.push_back(new ColorPickerProperty(mprop.first.c_str(), this));
-					}
-					else
-					{
-						mProperties.push_back(new FVec4Property(mprop.first.c_str(), this));
-					}
-				}
-				else if (std::holds_alternative<Rendering::Resources::Texture*>(mprop.second.value)) {
-					mProperties.push_back(new TextureProperty(mprop.first.c_str(), this));
-
-				}
-			}
+			BuildForm();
 		}
-		virtual ~MaterialPropertyComponent() {
+		virtual ~MaterialPropertyComponent() = default;
 
+		QWidget* createCustomWidget(QWidget* p_parent) override {
+			(void)p_parent;
+			return m_form;
 		}
+
 		virtual QVariant getPropertyValue(const QString& propertyName)override {
-			std::string propName = propertyName.toStdString();
-			auto ref = mat->GetProperty(propName);
-			if (ref.has_value()) {
-				if (std::holds_alternative<Maths::FVector3>(ref.value().value)) {
-					auto v = std::get<Maths::FVector3>(ref.value().value);
-					return QVariant::fromValue(v);
-				}else if (std::holds_alternative<Maths::FVector4>(ref.value().value)) {
-					auto v = std::get<Maths::FVector4>(ref.value().value);
+			if (mat == nullptr) { return QVariant(); }
 
-					std::string mainLower = propName;
-					std::transform(mainLower.begin(), mainLower.end(), mainLower.begin(),
-						[](unsigned char c) { return std::tolower(c); });
-					if (mainLower.find("u_albedo") != std::string::npos) {
-						return QVariant::fromValue(QColor(v.x * 255, v.y* 255, v.z * 255,v.w*255));
-						
-					}
-					return QVariant::fromValue(v);
-				}
-				else if (std::holds_alternative<float>(ref.value().value)) {
-					auto v = std::get<float>(ref.value().value);
-					return QVariant::fromValue(v);
-				}
+			if (const auto feature = m_featureNames.find(propertyName); feature != m_featureNames.end()) {
+				return QVariant::fromValue(mat->HasFeature(feature->second));
 			}
-			else if (featureList.count(propName))
-			{
-				return QVariant::fromValue(mat->HasFeature(propName)?true:false);
+
+			const auto uniform = m_uniformNames.find(propertyName);
+			if (uniform == m_uniformNames.end()) { return QVariant(); }
+
+			const auto ref = mat->GetProperty(uniform->second);
+			if (!ref.has_value()) { return QVariant(); }
+
+			const auto& value = ref.value().value;
+			if (std::holds_alternative<bool>(value)) {
+				return QVariant::fromValue(std::get<bool>(value));
+			}
+			if (std::holds_alternative<int>(value)) {
+				return QVariant::fromValue(std::get<int>(value));
+			}
+			if (std::holds_alternative<float>(value)) {
+				return QVariant::fromValue(std::get<float>(value));
+			}
+			if (std::holds_alternative<Maths::FVector2>(value)) {
+				return QVariant::fromValue(std::get<Maths::FVector2>(value));
+			}
+			if (std::holds_alternative<Maths::FVector3>(value)) {
+				const auto& vector = std::get<Maths::FVector3>(value);
+				if (m_colorNames.contains(uniform->second)) {
+					return QVariant::fromValue(QColor::fromRgbF(vector.x, vector.y, vector.z));
+				}
+				return QVariant::fromValue(vector);
+			}
+			if (std::holds_alternative<Maths::FVector4>(value)) {
+				const auto& vector = std::get<Maths::FVector4>(value);
+				if (m_colorNames.contains(uniform->second)) {
+					return QVariant::fromValue(QColor::fromRgbF(vector.x, vector.y, vector.z, vector.w));
+				}
+				return QVariant::fromValue(vector);
+			}
+			if (std::holds_alternative<Rendering::Resources::Texture*>(value)) {
+				const auto* texture = std::get<Rendering::Resources::Texture*>(value);
+				return texture != nullptr ? QString::fromStdString(texture->path) : QString();
 			}
 			return QVariant();
 		}
+
 		virtual void setPropertyValue(const QString& propertyName, const QVariant& value)override {
-			std::string propName = propertyName.toStdString();
-			auto ref = mat->GetProperty(propName);
-			if (mat->HasProperty(propName)) {
-				if (std::holds_alternative<Maths::FVector3>(ref.value().value)) {
-					mat->SetProperty(propName,value.value<Maths::FVector3>());
-				}else if (std::holds_alternative<Maths::FVector4>(ref.value().value)) {
-					std::string mainLower = propName;
-					std::transform(mainLower.begin(), mainLower.end(), mainLower.begin(),
-						[](unsigned char c) { return std::tolower(c); });
-					if (mainLower.find("u_albedo") != std::string::npos) {
-						auto color = value.value<QColor>();
-						float alpha = color.alpha();
-						if (alpha < 255) {
+			if (mat == nullptr) { return; }
+
+			if (const auto feature = m_featureNames.find(propertyName); feature != m_featureNames.end()) {
+				if (value.toBool()) { mat->AddFeature(feature->second); }
+				else { mat->RemoveFeature(feature->second); }
+				return;
+			}
+
+			const auto uniform = m_uniformNames.find(propertyName);
+			if (uniform == m_uniformNames.end()) { return; }
+
+			const std::string& name = uniform->second;
+			const auto ref = mat->GetProperty(name);
+			if (!ref.has_value()) { return; }
+
+			const auto& current = ref.value().value;
+			if (std::holds_alternative<bool>(current)) {
+				mat->SetProperty(name, value.toBool());
+			}
+			else if (std::holds_alternative<int>(current)) {
+				mat->SetProperty(name, value.toInt());
+			}
+			else if (std::holds_alternative<float>(current)) {
+				mat->SetProperty(name, value.toFloat());
+			}
+			else if (std::holds_alternative<Maths::FVector2>(current)) {
+				mat->SetProperty(name, value.value<Maths::FVector2>());
+			}
+			else if (std::holds_alternative<Maths::FVector3>(current)) {
+				if (m_colorNames.contains(name)) {
+					const QColor color = value.value<QColor>();
+					const auto& stored = std::get<Maths::FVector3>(current);
+					const float red = static_cast<float>(color.redF());
+					const float green = static_cast<float>(color.greenF());
+					const float blue = static_cast<float>(color.blueF());
+					// The colour widget pushes its initial value while it is created; that is
+					// not an edit and must not touch the material. QColor is 8-bit, so allow
+					// one quantization step rather than demanding bit equality.
+					constexpr float epsilon = 1.0f / 255.0f;
+					if (std::abs(stored.x - red) <= epsilon
+						&& std::abs(stored.y - green) <= epsilon
+						&& std::abs(stored.z - blue) <= epsilon) {
+						return;
+					}
+					mat->SetProperty(name, Maths::FVector3{ red, green, blue });
+				}
+				else {
+					mat->SetProperty(name, value.value<Maths::FVector3>());
+				}
+			}
+			else if (std::holds_alternative<Maths::FVector4>(current)) {
+				if (m_colorNames.contains(name)) {
+					const QColor color = value.value<QColor>();
+					const auto& stored = std::get<Maths::FVector4>(current);
+					const float red = static_cast<float>(color.redF());
+					const float green = static_cast<float>(color.greenF());
+					const float blue = static_cast<float>(color.blueF());
+					const float alpha = static_cast<float>(color.alphaF());
+					constexpr float epsilon = 1.0f / 255.0f;
+					if (std::abs(stored.x - red) <= epsilon
+						&& std::abs(stored.y - green) <= epsilon
+						&& std::abs(stored.z - blue) <= epsilon
+						&& std::abs(stored.w - alpha) <= epsilon) {
+						return;
+					}
+					// Keep the old inspector behaviour: changing the albedo alpha toggles the
+					// transparent queue, so a colour edit is enough to make a face translucent.
+					if (IsAlbedoParameter(name)) {
+						if (color.alpha() < 255) {
 							mat->SetTransparent(true);
 							mat->SetDepthWriting(true);
 						}
-						else
-						{
+						else {
 							mat->SetBlendable(false);
 							mat->SetTransparent(false);
 							mat->SetDepthWriting(true);
 						}
-						mat->SetProperty(propName, Maths::FVector4{ color.red() / 255.0f,color.green() / 255.0f,color.blue() / 255.0f,color.alpha() / 255.0f });						
 					}
-					else
-					{
-						mat->SetProperty(propName, value.value<Maths::FVector4>());
-					}
+					mat->SetProperty(name, Maths::FVector4{ red, green, blue, alpha });
 				}
-				else if (std::holds_alternative<Rendering::Resources::Texture*>(ref.value().value)) {
-					auto texturePath=value.toString().toStdString();
-					mat->LateUpdateTexture(propName, texturePath);
-				}
-				else if (std::holds_alternative<float>(ref.value().value)) {
-					mat->SetProperty(propName, value.value<float>());
+				else {
+					mat->SetProperty(name, value.value<Maths::FVector4>());
 				}
 			}
-			else if (featureList.count(propName))
-			{
-				bool enable = value.value<bool>();
-				if (enable) {
-					mat->AddFeature(propName);
-				}
-				else
-				{
-					mat->RemoveFeature(propName);
-				}
+			else if (std::holds_alternative<Rendering::Resources::Texture*>(current)) {
+				mat->LateUpdateTexture(name, value.toString().toStdString());
 			}
 		}
+
 	private:
-		std::unordered_set<std::string>featureList;
-		Core::Resources::Material* mat;
+		void BuildForm() {
+			m_form = new QWidget();
+			auto* layout = new QVBoxLayout(m_form);
+			layout->setContentsMargins(0, 0, 0, 0);
+			layout->setSpacing(0);
+
+			if (mat == nullptr || mat->GetShader() == nullptr) {
+				auto* hint = new QLabel(QStringLiteral("This material has no shader."), m_form);
+				hint->setMargin(8);
+				layout->addWidget(hint);
+				return;
+			}
+
+			auto* resetButton = new QPushButton(QStringLiteral("Reset to Defaults"), m_form);
+			resetButton->setToolTip(QStringLiteral(
+				"Reset every material parameter to the shader's declared default"));
+			layout->addWidget(resetButton);
+			QObject::connect(resetButton, &QPushButton::clicked, resetButton,
+				[this] { ResetToDefaults(); });
+
+			auto* shader = mat->GetShader();
+			const auto& parameters = shader->GetParameters();
+
+			// First pass: labels and the label -> uniform map. The widgets are keyed by the
+			// label, the material by the shader's own name; duplicate labels fall back to the
+			// uniform name, as in the material designer.
+			std::vector<QString> labels(parameters.size());
+			std::set<QString> usedLabels;
+			for (size_t i = 0; i < parameters.size(); ++i) {
+				const auto& parameter = parameters[i];
+				if (!parameter.isUi || parameter.count > 0) { continue; }
+
+				QString label = parameter.label.empty()
+					? QString::fromStdString(PrettyLabel(parameter.name))
+					: QString::fromStdString(parameter.label);
+				if (usedLabels.contains(label)) {
+					label = QString::fromStdString(parameter.name);
+				}
+				usedLabels.insert(label);
+				labels[i] = label;
+				m_uniformNames.emplace(label, parameter.name);
+
+				if (parameter.isColor) {
+					m_colorNames.insert(parameter.name);
+				}
+			}
+
+			std::vector<std::string> features;
+			if (!shader->GetDeclaredFeatures().empty()) {
+				features = shader->GetDeclaredFeatures();
+			}
+			else {
+				features.assign(shader->GetFeatures().begin(), shader->GetFeatures().end());
+			}
+			std::ranges::sort(features);
+
+			std::map<std::string, CollapsibleGroupBoxWidget*> groups;
+			const auto groupFor = [&](const std::string& p_name) -> CollapsibleGroupBoxWidget* {
+				if (const auto it = groups.find(p_name); it != groups.end()) {
+					return it->second;
+				}
+				auto* group = new CollapsibleGroupBoxWidget(QString::fromStdString(p_name), m_form);
+				group->setCollapsed(false);
+				layout->addWidget(group);
+				groups.emplace(p_name, group);
+				return group;
+			};
+
+			const auto registerProperty = [this](CollapsibleGroupBoxWidget* p_group, WidgetProperty* p_property) {
+				p_group->addProperty(p_property);
+				addProperty(p_property);
+				p_property->updateWidgetValue(getPropertyValue(p_property->getPropertyName()));
+			};
+
+			// Features first: they select the shader variant, and the parameters that only some
+			// variants read come after them.
+			if (!features.empty()) {
+				auto* group = groupFor("Features");
+				for (const std::string& feature : features) {
+					QString label = QString::fromStdString(FeatureLabel(feature));
+					if (usedLabels.contains(label)) {
+						label = QString::fromStdString(feature);
+					}
+					usedLabels.insert(label);
+					m_featureNames.emplace(label, feature);
+					registerProperty(group, new BoolProperty(label, this, BoolProperty::Style::InviwoRect));
+				}
+			}
+
+			for (size_t i = 0; i < parameters.size(); ++i) {
+				const auto& parameter = parameters[i];
+				if (!parameter.isUi || parameter.count > 0) { continue; }
+
+				const QString& label = labels[i];
+				const std::string groupName = parameter.group.empty()
+					? (parameter.isSampler ? "Textures" : "Parameters")
+					: parameter.group;
+				auto* group = groupFor(groupName);
+
+				if (parameter.isSampler) {
+					registerProperty(group, new TextureProperty(label, this));
+					continue;
+				}
+
+				const std::string& type = parameter.type;
+				if (type == "bool") {
+					registerProperty(group, new BoolProperty(label, this, BoolProperty::Style::InviwoRect));
+				}
+				else if (type == "int") {
+					auto* property = new SliderIntProperty(label, this);
+					const int value = getPropertyValue(label).toInt();
+					property->setMinMax(
+						parameter.hasRange ? static_cast<int>(std::lround(parameter.min)) : std::min(0, value),
+						parameter.hasRange ? static_cast<int>(std::lround(parameter.max)) : std::max(16, std::abs(value) * 2));
+					property->setIncrement(parameter.hasStep
+						? std::max(1, static_cast<int>(std::lround(parameter.step)))
+						: 1);
+					registerProperty(group, property);
+				}
+				else if (type == "float") {
+					const float value = getPropertyValue(label).toFloat();
+					SliderRange range;
+					if (parameter.hasRange) {
+						range.min = parameter.min;
+						range.max = parameter.max;
+						range.step = parameter.hasStep
+							? parameter.step
+							: std::max(0.0005f, (parameter.max - parameter.min) / 500.0f);
+					}
+					else {
+						range = RangeFor(value, parameter.name);
+					}
+
+					auto* property = new SliderFloatProperty(label, this, range.min, range.max);
+					registerProperty(group, property);
+					// setStep needs the editor widget, so it comes after addProperty above.
+					property->setStep(range.step);
+				}
+				else if (type == "vec2") {
+					registerProperty(group, new Vec2Property(label, this));
+				}
+				else if (type == "vec3") {
+					if (parameter.isColor) {
+						registerProperty(group, new ColorPickerProperty(label, this));
+					}
+					else {
+						registerProperty(group, new FVec3Property(label, this));
+					}
+				}
+				else if (type == "vec4") {
+					if (parameter.isColor) {
+						registerProperty(group, new ColorPickerProperty(label, this));
+					}
+					else {
+						registerProperty(group, new FVec4Property(label, this));
+					}
+				}
+			}
+
+			layout->addStretch(1);
+		}
+
+		void ResetToDefaults() {
+			if (mat == nullptr || mat->GetShader() == nullptr) {
+				return;
+			}
+			// Reset only the parameters the panel edits. Clearing the whole property map and
+			// rebuilding it from the shader defaults also recreated the engine-owned samplers
+			// (_IrradianceCube, _PrefilterCube, _BRDFLut, _ShadowMap, the CAD domain colour
+			// buffer and the depth-peel textures) as null textures: the next draw then bound
+			// the empty 2D fallback to their units, which crashed on the CAD material.
+			for (const auto& parameter : mat->GetShader()->GetParameters()) {
+				if (parameter.isUi) {
+					mat->ResetPropertyToDefault(parameter.name);
+				}
+			}
+			for (auto* property : mProperties) {
+				property->updateWidgetValue(getPropertyValue(property->getPropertyName()));
+			}
+		}
+
+		Core::Resources::Material* mat = nullptr;
+		QWidget* m_form = nullptr;
+		std::map<QString, std::string> m_uniformNames;
+		std::map<QString, std::string> m_featureNames;
+		std::set<std::string> m_colorNames;
 	};
 	ActorPropertyComponent* transferActorPropertyComponent(Core::ECS::Components::AComponent* comp) {
 
@@ -541,10 +880,23 @@ namespace MOON {
 					for (auto& ptr : m_selectedActor->GetComponents()) {
 					
 						auto p = transferActorPropertyComponent(ptr.get());
-						auto collpase = new CollapsibleGroupBoxWidget(p->getComponentName(), mSelf);
+						const bool isMaterial = dynamic_cast<MaterialPropertyComponent*>(p) != nullptr;
+						auto collpase = new CollapsibleGroupBoxWidget(
+							isMaterial ? QStringLiteral("Material") : p->getComponentName(), mSelf);
 						layout_->addWidget(collpase);
-						for (auto u:p->getProperties()) {
-							collpase->addProperty(u);
+						if (auto* custom = p->createCustomWidget(collpase)) {
+							// The material component renders the same grouped form as the
+							// material designer, so it is one custom widget instead of a flat
+							// list of properties.
+							collpase->addSubWidget(custom);
+							if (isMaterial) {
+								collpase->setCollapsed(false);
+							}
+						}
+						else {
+							for (auto u : p->getProperties()) {
+								collpase->addProperty(u);
+							}
 						}
 						m_comps.push_back({ collpase ,p});
 					}

@@ -26,6 +26,10 @@ namespace Editor::Core
 		void HandleFirstMouse();
 		void MoveToTarget(::Core::ECS::Actor& p_target);
 		void MoveToPose(const Maths::FVector3& pos, const Maths::FQuaternion& quat);
+		/** Drops a pending move and any stale mouse-pressed state, so a new MoveToPose can run. */
+		void ClearMovement();
+		/** True while a MoveToPose/MoveToTarget animation is still playing. */
+		bool HasPendingMovement() const;
 		void SetSpeed(float p_speed);
 		float GetSpeed() const;
 		/** Multiplies the wheel-zoom step. The step is proportional to the scene's extent, which

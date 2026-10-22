@@ -1,4 +1,4 @@
-﻿#include <functional>
+#include <functional>
 #include <tracy/Tracy.hpp>
 #include <Rendering/Core/ABaseRenderer.h>
 #include <Rendering/HAL/TextureHandle.h>
@@ -431,11 +431,20 @@ void Rendering::Core::ABaseRenderer::DrawEntity(
 			uploadStableProperties,
 			uploadSingleUseProperties,
 			&m_emptyTexture2D,
-			&m_emptyTextureCube
+			&m_emptyTextureCube,
+			m_brdfLut
 		);
 	}
 
 	m_previousMaterialSignature = signature;
+
+	// The DFG LUT is owned by the view, not by the material: the sky pass bakes it after the
+	// material's first upload has already run, and uploads only happen when the material's
+	// signature changes. Without this per-draw bind the material keeps the white empty 2D that
+	// was bound on the first frame (DFG=(1,1), E~=1, diffuse multiplied by zero and the
+	// dielectric looking like a full mirror).
+	p_drawable.material->BindGlobalTexture("_BRDFLut", m_brdfLut);
+
 	m_driver.Draw(
 		p_pso,
 		p_drawable.mesh.value(),

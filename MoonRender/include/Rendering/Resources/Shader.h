@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <cstdint>
 #include <string>
 #include <memory>
@@ -24,10 +24,12 @@ namespace Rendering::Resources
 		friend class Loaders::ShaderLoader;
 
 	public:
-		// Shader programs for each feature combination
+		// Shader programs for each feature combination. Shared because keyed packages produce
+		// many feature sets whose composed source is identical (all the unused variant bits
+		// are pruned): they can point at one linked program instead of compiling per set.
 		using FeatureVariants = std::unordered_map<
 			Data::FeatureSet,
-			std::unique_ptr<HAL::ShaderProgram>,
+			std::shared_ptr<HAL::ShaderProgram>,
 			Data::FeatureSetHash,
 			Data::FeatureSetEqual
 		>;
@@ -73,7 +75,7 @@ namespace Rendering::Resources
 		 * it, and the instance keeps the engine's default.
 		 *
 		 * This is the definition's state, not the instance's: a material starts from it and may
-		 * override it afterwards (a .ovmat's settings, or the call site's Set* calls). */
+		 * override it afterwards (a .mat's settings, or the call site's Set* calls). */
 		struct State
 		{
 			std::optional<bool> blendable;        // blending: opaque = false, transparent = true
@@ -97,6 +99,12 @@ namespace Rendering::Resources
 		* Returns supported features
 		*/
 		const Data::FeatureSet& GetFeatures() const;
+
+		/** The features the material declared in its material block, whatever subset this
+		 * package compiled. Empty for shaders built from source. */
+		const std::vector<std::string>& GetDeclaredFeatures() const;
+
+		void SetDeclaredFeatures(std::vector<std::string>&& p_features);
 
 		/**
 		* Returns supported passes
@@ -140,6 +148,11 @@ namespace Rendering::Resources
 		 * source does not). */
 		bool HasState() const;
 
+		/** True when the variants are Filament-style engine variant keys (their feature names
+		 * start with VARIANT_): the renderer then chooses one per draw from the scene/pass state
+		 * instead of the material's feature set. */
+		bool UsesVariantKeys() const;
+
 		/** Replaces the state, for a hot reload whose material block changed. */
 		void SetState(State p_state);
 	private:
@@ -157,11 +170,13 @@ namespace Rendering::Resources
 	private:
 		std::unordered_set<std::string> m_passes;
 		Data::FeatureSet m_features;
+		std::vector<std::string> m_declaredFeatures;
 		Variants m_variants;
 		std::vector<Parameter> m_parameters;
 		bool m_hasParameterTable = false;
 		uint32_t m_parameterBlockSize = 0;
 		State m_state;
 		bool m_hasState = false;
+		bool m_usesVariantKeys = false;
 	};
 }

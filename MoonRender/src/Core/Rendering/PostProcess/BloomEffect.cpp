@@ -65,10 +65,10 @@ Core::Rendering::PostProcess::BloomEffect::BloomEffect(::Rendering::Core::Compos
 
 	auto& shaderManager = GetService(Core::ResourceManagement::ShaderManager);
 
-	m_downsamplingMaterial.SetShader(shaderManager[":Shaders\\PostProcess\\BloomDownsampling.ovfx"]);
-	m_upsamplingMaterial.SetShader(shaderManager[":Shaders\\PostProcess\\BloomUpsampling.ovfx"]);
-	m_bloomMaterial.SetShader(shaderManager[":Shaders\\PostProcess\\Bloom.ovfx"]);
-	m_blitMaterial.SetShader(shaderManager[":Shaders\\PostProcess\\Blit.ovfx"]);
+	m_downsamplingMaterial.SetShader(shaderManager[":Shaders\\PostProcess\\BloomDownsampling.shader"]);
+	m_upsamplingMaterial.SetShader(shaderManager[":Shaders\\PostProcess\\BloomUpsampling.shader"]);
+	m_bloomMaterial.SetShader(shaderManager[":Shaders\\PostProcess\\Bloom.shader"]);
+	m_blitMaterial.SetShader(shaderManager[":Shaders\\PostProcess\\Blit.shader"]);
 
 	// Since we want to use blending during the upsampling pass, we need to set up the material
 	// manually. The EBlitFlag::USE_MATERIAL_STATE_MASK will be used to enforce these settings.

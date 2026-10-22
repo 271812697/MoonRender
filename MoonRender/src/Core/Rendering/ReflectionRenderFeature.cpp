@@ -241,7 +241,7 @@ void Core::Rendering::ReflectionRenderFeature::OnBeforeDraw(::Rendering::Data::P
 	{
 		// No reflection probe in the scene: fall back to the skybox prefilter
 		// cube with a neutral probe UBO, so image-based lighting keeps working
-		// for materials like Standard.ovfx.
+		// for materials like Standard.shader.
 		material.SetProperty("_EnvironmentMap", m_renderer.GetPrefilterCube(), true);
 		m_defaultReflectionUbo->Bind(1);
 	}

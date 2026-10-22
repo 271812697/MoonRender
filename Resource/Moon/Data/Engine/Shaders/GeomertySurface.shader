@@ -1,0 +1,400 @@
+// Topology shape faces: the shaded surface of a batch mesh, with every triangle's edges
+// expanded into screen-space geometry so their antialiasing can be feathered per pixel.
+//
+// Written in the material form MoonMatc consumes (see docs/ShaderPipeline.md), with all three
+// stages written by this file - the generated skeletons cannot host any of them. The vertex
+// stage builds the world normal with the inverse-transpose of the model matrix and carries a
+// fourth attribute (the domain id) the skeleton has no varying for; the geometry stage insets
+// each triangle and emits its edge equations; the fragment stage shades with those equations
+// rather than with the three varyings the skeleton would pass. MoonMatc puts the prelude, the
+// variant #defines and the parameters in front of the blocks and generates nothing else.
+
+material {
+    name         : GeomertySurface,
+    shadingModel : unlit,
+    blending     : opaque,        // the face material itself is opaque; the same shader also
+                                  // backs a SetTransparent(true) instance (the Transparents pass)
+    culling      : none,          // SetBackfaceCulling(false) at the TopoActor draw site
+    depthWrite   : true,          // both face materials keep depth writing on
+
+    vertexAttributes : [POSITION, UV0, NORMAL, DOMAIN_ID],
+
+    features : [ WITH_EDGE, DISABLE_DOMAIN_COLOR ],
+    passes   : [ Transparents ],
+
+    parameters : [
+        // label / group / min / max / step / color are the designer schema, read by the
+        // material designer and the actor inspector instead of guessing from the name.
+        // The edge expansion reads the width in the geometry stage and feathers with it in
+        // the fragment stage, so it is one parameter for both.
+        { type : float,     name : lineWidth, default : 1.0, label : "Line Width", group : "Edge", min : 0.0, max : 10.0, step : 0.1 },
+        { type : float3,    name : edgeColor, label : "Edge Color", group : "Edge", color : true },
+        { type : float,     name : edgeOpacity, default : 1.0, label : "Edge Opacity", group : "Edge", min : 0.0, max : 1.0, step : 0.005 },
+
+        { type : sampler2D, name : u_AlbedoMap, label : "Albedo Map", group : "Textures" },
+        { type : float4,    name : u_Albedo, default : vec4(0.7215686, 0.7215686, 0.7215686, 1.0), label : "Base Color", group : "Base", color : true },
+        { type : sampler2D, name : u_NormalMap, label : "Normal Map", group : "Textures" },
+        { type : bool,      name : u_UseNormalMap, default : false, label : "Use Normal Map", group : "Base" },
+        // Filament's per-material specularAntiAliasing (GEOMETRIC_SPECULAR_AA). Kept equal to
+        // FilamentPBR.mat so the CAD face and the alignment material start from the same state.
+        { type : bool,      name : u_SpecularAA, default : false, label : "Specular AA", group : "Base" },
+        { type : sampler2D, name : u_AmbientOcclusionMap, label : "Ambient Occlusion Map", group : "Textures" },
+
+        { type : sampler2D, name : u_EmissiveMap, label : "Emissive Map", group : "Textures" },
+        { type : float3,    name : u_EmissiveColor, default : vec3(0.0, 0.0, 0.0), label : "Emissive Color", group : "Base", color : true },
+        { type : float,     name : u_EmissiveIntensity, default : 0.0, label : "Emissive Intensity", group : "Base", min : 0.0, max : 10.0, step : 0.01 },
+
+        { type : sampler2D, name : u_MetallicMap, label : "Metallic Map", group : "Textures" },
+        { type : float,     name : u_Metallic, default : 0.0, label : "Metallic", group : "Base", min : 0.0, max : 1.0, step : 0.005 },
+        { type : sampler2D, name : u_RoughnessMap, label : "Roughness Map", group : "Textures" },
+        { type : float,     name : u_Roughness, default : 0.4, label : "Roughness", group : "Base", min : 0.0, max : 1.0, step : 0.005 },
+
+        // Filament standard model inputs, the same set and the same defaults as FilamentPBR.mat
+        // (which in turn match Qt-Filament's MaterialPreview()): base #b8b8b8, metallic 0,
+        // roughness 0.40, reflectance 0.5, no clear coat.
+        { type : float,     name : u_Reflectance, default : 0.5, label : "Reflectance", group : "Base", min : 0.0, max : 1.0, step : 0.005 },
+        { type : float,     name : u_ClearCoat, default : 0.0, label : "Clear Coat", group : "Base", min : 0.0, max : 1.0, step : 0.005 },
+        { type : float,     name : u_ClearCoatRoughness, default : 0.0, label : "Clear Coat Roughness", group : "Base", min : 0.0, max : 1.0, step : 0.005 },
+        { type : float,     name : u_Thickness, default : 1.0, label : "Thickness", group : "Parameters", min : 0.0, max : 10.0, step : 0.01 },
+        { type : float,     name : u_SpecularFactor, default : 1.0, label : "Specular Factor", group : "Base", min : 0.0, max : 1.0, step : 0.005 },
+        { type : float3,    name : u_SpecularColorFactor, default : vec3(1.0), label : "Specular Color Factor", group : "Base", color : true },
+        { type : float3,    name : u_Absorption, default : vec3(0.0), label : "Absorption", group : "Parameters", color : true },
+
+        { type : float,     name : u_RefractionIndex, default : 1.5, label : "Refraction Index", group : "Parameters", min : 1.0, max : 3.0, step : 0.01 },       // 1.0 = air, 1.33 = water, 1.5 = glass, etc.
+        { type : float,     name : u_Transmission, default : 0.0, label : "Transmission", group : "Parameters", min : 0.0, max : 1.0, step : 0.005 },          // 0.0 = opaque, 1.0 = fully transmissive
+
+        // The Transparents pass: the depth peel this material is drawn with when it is the
+        // transparent instance of the face material. Engine-owned, not a material parameter.
+        { type : sampler2D, name : DepthPeelTex, ui : false },
+        { type : sampler2D, name : OpaqueDepthTex, ui : false },
+
+        { type : sampler2D,   name : _ShadowMap, ui : false },
+        { type : mat4,        name : _LightSpaceMatrix, ui : false },
+
+        { type : samplerCube, name : _IrradianceCube, ui : false },
+        { type : samplerCube, name : _PrefilterCube, ui : false },
+        { type : sampler2D,   name : _BRDFLut, ui : false },
+
+        // One colour per B-rep domain, indexed by the domain id attribute.
+        { type : samplerBuffer, name : domainColorTex, ui : false }
+    ]
+}
+
+vertex {
+
+out VS_OUT
+{
+    vec3 FragPos;
+    vec2 TexCoords;
+    vec3 Normal;
+    vec2 DomainId;
+} vs_out;
+
+void main()
+{
+    vec4 worldPos = ubo_Model * vec4(geo_Pos, 1.0);
+    mat3 normalMatrix = mat3(transpose(inverse(ubo_Model)));
+    vec3 worldNormal = normalize(normalMatrix * geo_Normal);
+    vs_out.FragPos = worldPos.xyz;
+    vs_out.TexCoords = geo_TexCoords;
+    vs_out.Normal = worldNormal;
+    vs_out.DomainId=geo_DomainId;    
+    gl_Position = ubo_Projection * ubo_View * worldPos;
+}
+}
+
+geometry {
+in VS_OUT
+{
+    vec3 FragPos;
+    vec2 TexCoords;
+    vec3 Normal;
+    vec2 DomainId;
+
+}gs_in[];
+out GS_OUT{
+    vec3 FragPos;
+    vec2 TexCoords;
+    vec3 Normal;
+    vec2 DomainId;
+#if defined(WITH_EDGE)
+    noperspective vec4 edgeEqn[3];
+    float screenLengthOutput;
+#endif
+} gs_out;
+
+layout(triangles) in;
+layout(triangle_strip, max_vertices = 3) out;
+
+// `lineWidth` is a material parameter now: it is read here to build the offsets and in the
+// fragment stage to feather the edge.
+//uniform samplerBuffer edgeTexture;
+// surface with edges
+
+void main() 
+{
+
+#if defined(WITH_EDGE)
+    vec2 pos[4];
+    for (int i = 0; i < 3; i++)
+    {
+        pos[i] = gl_in[i].gl_Position.xy/gl_in[i].gl_Position.w;
+        pos[i] = pos[i]*vec2(0.5) + vec2(0.5);
+        pos[i] = pos[i]*vec2(ubo_ScreenWidth,ubo_ScreenHeight);
+    }
+    pos[3] = pos[0];  
+
+    float ccw = sign(cross(vec3(pos[1] - pos[0], 0.0), vec3(pos[2] - pos[0], 0.0)).z);
+
+    for (int i = 0; i < 3; i++)
+    {
+        vec2 tmp = normalize(pos[i+1] - pos[i]);
+        tmp = ccw*vec2(-tmp.y, tmp.x);
+        float d = dot(pos[i], tmp);
+        gs_out.edgeEqn[i] = vec4(tmp.x, tmp.y, 0.0, -d);
+    }
+    vec2 offsets[3];
+
+    offsets[0] = gs_out.edgeEqn[2].xy + gs_out.edgeEqn[0].xy;
+    offsets[0] = -0.5*normalize(offsets[0])*lineWidth;
+    offsets[0] /= vec2(ubo_ScreenWidth,ubo_ScreenHeight);
+
+    offsets[1] = gs_out.edgeEqn[0].xy + gs_out.edgeEqn[1].xy;
+    offsets[1] = -0.5*normalize(offsets[1])*lineWidth;
+    offsets[1] /= vec2(ubo_ScreenWidth,ubo_ScreenHeight);
+
+    offsets[2] = gs_out.edgeEqn[1].xy + gs_out.edgeEqn[2].xy;
+    offsets[2] = -0.5*normalize(offsets[2])*lineWidth;
+    offsets[2] /= vec2(ubo_ScreenWidth,ubo_ScreenHeight);
+
+    
+    //float edgeValues = 255.0*texelFetch(edgeTexture, gl_PrimitiveIDIn + PrimitiveIDOffset).r;
+    //if (edgeValues < 4.0) edgeEqn[2].z = lineWidth;
+    //if (mod(edgeValues, 4.0) < 2.0) edgeEqn[1].z = lineWidth;
+    //if (mod(edgeValues, 2.0) < 1.0) edgeEqn[0].z = lineWidth;
+
+
+#endif
+ 
+
+    vec3 nor=normalize(cross(gs_in[1].FragPos-gs_in[0].FragPos,gs_in[2].FragPos-gs_in[0].FragPos));      
+
+    for (int i = 0; i < 3; i++)
+    {
+        gl_PrimitiveID = gl_PrimitiveIDIn;
+#if defined(WITH_EDGE)
+        gs_out.screenLengthOutput = length(pos[i + 1] - pos[i]);
+#endif 
+        gs_out.FragPos=gs_in[i].FragPos;
+        gs_out.TexCoords=gs_in[i].TexCoords;
+        gs_out.DomainId=gs_in[i].DomainId;
+        gs_out.Normal=gs_in[i].Normal;
+       
+        gl_Position = gl_in[i].gl_Position;
+#if defined(WITH_EDGE)
+        gl_Position.xy = gl_Position.xy + offsets[i]*gl_Position.w;
+#else
+        gl_Position.xy = gl_Position.xy ;
+#endif 
+
+        EmitVertex();
+    }
+    EndPrimitive();
+}
+}
+
+fragment {
+    // This material keeps the feature power-set variants (it has no variantFilter), so the
+    // scene renderer does not add the engine VARIANT_HAS_* bits. Declare the lighting variants
+    // the CAD surface needs here; without them the light loop's point / directional / spot
+    // cases are compiled out and only ambient lights + IBL would light the faces.
+    #define VARIANT_HAS_DIRECTIONAL_LIGHTING
+    #define VARIANT_HAS_DYNAMIC_LIGHTING
+
+#include ":Shaders/Lighting/Filament/surface_lighting.glsl"
+
+in GS_OUT
+{
+    vec3 FragPos;
+    vec2 TexCoords;
+    vec3 Normal;
+    vec2 DomainId;
+#if defined(WITH_EDGE)
+    noperspective vec4 edgeEqn[3];
+    float screenLengthOutput;
+#endif
+} fs_in;
+
+// surface with edges
+// `lineWidth`, `edgeColor` and `edgeOpacity` are material parameters now, so they are declared
+// by MoonMatc in front of this block (the same holds for every other uniform that used to be
+// declared here - see the parameters list above).
+
+// The shared Filament prelude (surface_common.glsl) provides saturate/pow5 and the standard
+// model helpers; only the CAD-specific normal mapping below is kept here.
+
+
+vec3 getNormalFromMap(vec3 Normal, bool backFace)
+{
+    vec3 tangentNormal = texture(u_NormalMap, fs_in.TexCoords).xyz * 2.0 - 1.0;
+
+    vec3 Q1  = dFdx(fs_in.FragPos);
+    vec3 Q2  = dFdy(fs_in.FragPos);
+    vec2 st1 = dFdx(fs_in.TexCoords);
+    vec2 st2 = dFdy(fs_in.TexCoords);
+
+    vec3 N   = normalize(Normal);
+    vec3 T  = normalize(Q1*st2.t - Q2*st1.t);
+    // Filament flips the whole tangent frame on a back face (n, t and b). N is already
+    // flipped by the caller; flipping T too and using the opposite bitangent sign gives
+    // exactly (-T, -B, -N), so a normal map on a double-sided face keeps its handedness.
+    if (backFace)
+    {
+        T = -T;
+    }
+    vec3 B  = (backFace ? 1.0 : -1.0) * normalize(cross(N, T));
+    mat3 TBN = mat3(T, B, N);
+
+    return normalize(TBN * tangentNormal);
+}
+
+
+out vec4 FRAGMENT_COLOR;
+
+void main()
+{
+#if defined(Transparents)
+  // Compare linear view-space depth instead of window depth. In an ortho
+  // projection the whole [near, far] range is linearly compressed into [0, 1],
+  // so close transparent layers can quantize to the same window depth and the
+  // <= / >= comparisons swallow layers. Unprojecting both sides keeps the
+  // peeling consistent in perspective and ortho.
+  const mat4 invProj = inverse(ubo_Projection);
+  ivec2 coords = ivec2(gl_FragCoord.xy);
+  // Note: the unprojected vector is homogeneous (w != 1 in perspective), so
+  // the view-space depth must be z / w. Taking .z alone yields a constant
+  // (-1) in perspective and silently discards every peeled layer.
+  // Reversed-Z: window depth is 1 at near and 0 at far, so the NDC conversion
+  // flips (1 - 2 * raw) instead of (2 * raw - 1).
+  vec4 unprojPrev = invProj * vec4(0.0, 0.0, 1.0 - texelFetch(DepthPeelTex, coords, 0).r * 2.0, 1.0);
+  vec4 unprojOpaque = invProj * vec4(0.0, 0.0, 1.0 - texelFetch(OpaqueDepthTex, coords, 0).r * 2.0, 1.0);
+  vec4 unprojFrag = invProj * vec4(0.0, 0.0, 1.0 - gl_FragCoord.z * 2.0, 1.0);
+  float prevDepth = -unprojPrev.z / unprojPrev.w;
+  float opaqueDepth = -unprojOpaque.z / unprojOpaque.w;
+  float fragDepth = -unprojFrag.z / unprojFrag.w;
+  if (fragDepth <= prevDepth || fragDepth >= opaqueDepth) discard;
+#endif
+
+    if(ubo_enableClip==1){
+        float offsetw=dot(ubo_plane.xyz,fs_in.FragPos)+ubo_plane.w;
+        if(offsetw>0){
+            discard;
+        }
+    }
+
+
+    const vec2 texCoords = fs_in.TexCoords;
+    vec4 albedoTexel = texture(u_AlbedoMap, texCoords);
+    vec4 albedo = albedoTexel * u_Albedo;
+
+    // The albedo map, the picker tint and the domain colour are all sRGB: decode each one and
+    // combine in linear. Decoding the product (the old path) darkens any tint that is not white.
+    vec3 linearAlbedo = pow(albedoTexel.rgb, vec3(2.2)) * pow(u_Albedo.rgb, vec3(2.2));
+#if !defined(DISABLE_DOMAIN_COLOR) 
+    int domainIndex=int(round(fs_in.DomainId.x));
+    linearAlbedo *= pow(texelFetch(domainColorTex,domainIndex).rgb, vec3(2.2));
+#endif
+
+    vec3 normal = normalize(fs_in.Normal);
+  
+    vec3 VD=normalize(ubo_ViewPos-fs_in.FragPos);
+    if(ubo_CameraType==0){
+       VD=vec3(ubo_View[0][2],ubo_View[1][2],ubo_View[2][2]);
+    }
+    const bool backFace = dot(VD, normal) < 0.0f;
+    if (backFace) {
+        normal = -normal;
+    }
+    vec3 gnormal = normal;
+
+    if (u_UseNormalMap) {
+        normal = getNormalFromMap(normal, backFace);
+    }
+
+    const float metallic = texture(u_MetallicMap, texCoords).r * u_Metallic;
+    const float roughness = texture(u_RoughnessMap, texCoords).r * u_Roughness;
+
+    const float ao = texture(u_AmbientOcclusionMap, texCoords).r;
+
+
+#if defined(WITH_EDGE)
+    float edist[3];
+    edist[0] = dot(fs_in.edgeEqn[0].xy, gl_FragCoord.xy) + fs_in.edgeEqn[0].w;
+    edist[1] = dot(fs_in.edgeEqn[1].xy, gl_FragCoord.xy) + fs_in.edgeEqn[1].w;
+    edist[2] = dot(fs_in.edgeEqn[2].xy, gl_FragCoord.xy) + fs_in.edgeEqn[2].w;
+    if (edist[0] < -0.5 && fs_in.edgeEqn[0].z > 0.0) discard;
+    if (edist[1] < -0.5 && fs_in.edgeEqn[1].z > 0.0) discard;
+    if (edist[2] < -0.5 && fs_in.edgeEqn[2].z > 0.0) discard;
+    edist[0] += fs_in.edgeEqn[0].z;
+    edist[1] += fs_in.edgeEqn[1].z;
+    edist[2] += fs_in.edgeEqn[2].z;
+    float emix0 = clamp(0.5 + 0.5 * lineWidth - edist[0], 0.0, 1.0);
+    float emix1 = clamp(0.5 + 0.5 * lineWidth - edist[1], 0.0, 1.0);
+    float emix2 = clamp(0.5 + 0.5 * lineWidth - edist[2], 0.0, 1.0);
+    float emix = emix1;
+    emix = mix(emix, max(emix, emix0), step(fs_in.edgeEqn[0].z, 0.01));
+    emix = mix(emix, max(emix, emix2), step(fs_in.edgeEqn[2].z, 0.01));
+    float opacityFactor = clamp(fs_in.screenLengthOutput / 50., 0.15, 1.0);
+    linearAlbedo = mix(linearAlbedo, pow(edgeColor, vec3(2.2)), emix*opacityFactor*edgeOpacity);
+#endif
+    // Filament standard model, the same include chain FilamentPBR.mat uses. Everything the
+    // CAD surface has already computed (albedo including domain/edge colour, metallic/
+    // roughness, AO map, geometric/mapped normal, ortho view vector) is handed over as material
+    // inputs; shading, clear coat, transmission and the IBL stay in Lighting/Filament/.
+    //
+    // NOTE: unlike the old Lighting/IBL.glsl path this one does not apply ParallaxCorrect or
+    // the local reflection-probe OBB mask yet; that is a known difference (see
+    // docs/FilamentAlignmentTODO.md, "GeomertySurface 迁移").
+    FilamentMaterialInputs material;
+    material.baseColor = linearAlbedo;
+    material.metallic = clamp(metallic, 0.0, 1.0);
+    material.roughness = roughness;
+    material.reflectance = u_Reflectance;
+    material.specularFactor = u_SpecularFactor;
+    material.specularColorFactor = u_SpecularColorFactor;
+    material.refractionIndex = u_RefractionIndex;
+    material.thickness = u_Thickness;
+    material.clearCoat = u_ClearCoat;
+    material.clearCoatRoughness = u_ClearCoatRoughness;
+    material.ambientOcclusion = clamp(ao, 0.0, 1.0);
+    material.transmission = u_Transmission;
+    material.absorption = u_Absorption;
+    // GeomertySurface adds emissive itself after the shading (it decodes the map and the picker
+    // colour separately); the shared function does not read this field.
+    material.emissive = vec3(0.0);
+
+    // Filament's specular AA (GEOMETRIC_SPECULAR_AA): widen the roughness where the geometric
+    // normal changes quickly across the pixel. It is per material; the CAD face keeps it on.
+    FilamentMaterialInputs filteredMaterial = material;
+    if (u_SpecularAA)
+    {
+        filteredMaterial.roughness = normalFiltering(material.roughness, gnormal);
+        filteredMaterial.clearCoatRoughness = normalFiltering(material.clearCoatRoughness, gnormal);
+    }
+    const PixelParams pixel = preparePixelParams(filteredMaterial, normal, VD, _BRDFLut, gnormal);
+    vec3 pbr = evaluateFilamentSurface(
+        material, pixel, fs_in.FragPos, normal, VD,
+        _IrradianceCube, _PrefilterCube, _ShadowMap, _LightSpaceMatrix, _BRDFLut);
+
+    // The emissive map is sRGB and the colour comes from the panel's colour picker, which is
+    // sRGB too: decode each separately, then scale by the (linear) intensity. Decoding the
+    // product instead would darken any tint that is not white or black.
+    const vec3 emissive =
+        pow(texture(u_EmissiveMap, texCoords).rgb, vec3(2.2))
+        * pow(u_EmissiveColor, vec3(2.2))
+        * u_EmissiveIntensity;
+    pbr += emissive;
+    FRAGMENT_COLOR = vec4(pbr,albedo.a);
+
+}
+}

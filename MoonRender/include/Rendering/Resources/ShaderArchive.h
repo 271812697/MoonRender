@@ -7,14 +7,14 @@ namespace Rendering::Resources
 	/** One shader source the build packed into the executable. */
 	struct ShaderFile
 	{
-		/** Path relative to the shader folder, as it is on disk ("Common/Utils.ovfxh"). */
+		/** Path relative to the shader folder, as it is on disk ("Common/Utils.glsl"). */
 		const char* name;
 		/** The text itself, exactly as the file holds it, not null terminated. */
 		const uint8_t* data;
 		uint32_t size;
 	};
 
-	/** Everything the pack step embedded: every .ovfx and .ovfxh of the shader folder. */
+	/** Everything the pack step embedded: every .shader and .glsl of the shader folder. */
 	struct ShaderArchive
 	{
 		const ShaderFile* files = nullptr;
@@ -25,7 +25,7 @@ namespace Rendering::Resources
 	const ShaderArchive& GetShaderArchive();
 
 	/** Finds a source by any of the names the loaders are handed - a resource key such as
-	 * ":Shaders\\Standard.ovfx", a path under the engine assets, or a bare file name.
+	 * ":Shaders\\Standard.shader", a path under the engine assets, or a bare file name.
 	 *
 	 * The call sites are not consistent about separators, about the case of a file name or
 	 * about how much of the path they carry, so all of that is normalized away here rather

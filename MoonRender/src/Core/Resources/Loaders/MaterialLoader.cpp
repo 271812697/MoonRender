@@ -1,10 +1,45 @@
-﻿#include <tinyxml2.h>
+#include <tinyxml2.h>
 #include <Core/Resources/Loaders/MaterialLoader.h>
+#include <fstream>
 #include <iostream>
+#include <iterator>
+
+namespace
+{
+	/** Old .mat files still point at the pre-rename ".ovfx" shader files. The assets are
+	 * migrated in place on load, so a user's saved material keeps working. */
+	void MigrateLegacyShaderPath(const std::string& p_path)
+	{
+		std::ifstream in(p_path);
+		if (!in.is_open())
+		{
+			return;
+		}
+		const std::string text{ std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>() };
+		in.close();
+
+		if (text.find(".ovfx") == std::string::npos)
+		{
+			return;
+		}
+
+		std::string migrated = text;
+		for (size_t at = migrated.find(".ovfx"); at != std::string::npos; at = migrated.find(".ovfx", at + 4))
+		{
+			migrated.replace(at, 5, ".shader");
+		}
+
+		std::ofstream out(p_path, std::ios::binary | std::ios::trunc);
+		out << migrated;
+		std::cout << "[MATERIAL] \"" << p_path << "\": migrated .ovfx to .shader" << std::endl;
+	}
+}
 
 
 Core::Resources::Material * Core::Resources::Loaders::MaterialLoader::Create(const std::string & p_path)
 {
+	MigrateLegacyShaderPath(p_path);
+
 	tinyxml2::XMLDocument doc;
 	doc.LoadFile(p_path.c_str());
 	if (!doc.Error())
@@ -25,6 +60,8 @@ Core::Resources::Material * Core::Resources::Loaders::MaterialLoader::Create(con
 
 void Core::Resources::Loaders::MaterialLoader::Reload(Material& p_material, const std::string& p_path)
 {
+	MigrateLegacyShaderPath(p_path);
+
 	tinyxml2::XMLDocument doc;
 	doc.LoadFile(p_path.c_str());
 	if (!doc.Error())

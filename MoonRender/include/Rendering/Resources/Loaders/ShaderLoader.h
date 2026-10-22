@@ -34,7 +34,7 @@ namespace Rendering::Resources::Loaders
 		 * and hot swaps the result without touching the archive or the disk.
 		 *
 		 * Returns nullptr when the package has no variant the driver accepted, with the
-		 * driver's messages - they carry the .ovfx lines, thanks to the #line directives - in
+		 * driver's messages - they carry the .shader lines, thanks to the #line directives - in
 		 * p_error when it is given. */
 		static Shader* CreateFromPackage(const void* p_data, uint32_t p_size,
 			const std::string& p_name, std::string* p_error = nullptr);
@@ -49,7 +49,7 @@ namespace Rendering::Resources::Loaders
 	 * failure the current programs are kept untouched.
 	 *
 	 * Returns false and fills p_error when the package is invalid or a stage does not compile;
-	 * the message is the driver's, with the .ovfx line numbers the stages carry. */
+	 * the message is the driver's, with the .shader line numbers the stages carry. */
 	static bool RecompileFromPackage(Shader& p_shader, const void* p_data, uint32_t p_size,
 		std::string* p_error = nullptr);
 		static bool Destroy(Shader*& p_shader);

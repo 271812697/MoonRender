@@ -3,6 +3,8 @@
 #include <assimp/matrix4x4.h>
 #include <assimp/postprocess.h>
 
+#include <Rendering/Geometry/TangentSpace.h>
+
 
 #include <Rendering/Resources/Parsers/AssimpParser.h>
 
@@ -125,5 +127,21 @@ void Rendering::Resources::Parsers::AssimpParser::ProcessMesh(void* p_transform,
 
 		for (size_t indexID = 0; indexID < 3; ++indexID)
 			p_outIndices.push_back(face.mIndices[indexID]);
+	}
+
+	// Formats without normal/tangent attributes (OBJ, some FBX) reach the shaders with a
+	// zero tangent, which makes the normal-map TBN degenerate. Generate the missing data
+	// once, here, so every material sees a complete vertex.
+	if (!p_mesh->mNormals)
+	{
+		Geometry::GenerateNormals(p_outVertices.data(), sizeof(Geometry::Vertex),
+			p_outIndices.data(), sizeof(uint32_t), 0,
+			static_cast<uint32_t>(p_outIndices.size()), 0, 20);
+	}
+	if (!p_mesh->mTangents)
+	{
+		Geometry::GenerateTangents(p_outVertices.data(), sizeof(Geometry::Vertex),
+			p_outIndices.data(), sizeof(uint32_t), 0,
+			static_cast<uint32_t>(p_outIndices.size()), 20, 12, 32);
 	}
 }

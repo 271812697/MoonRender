@@ -14,13 +14,13 @@ namespace Core::Rendering
 	using ::Rendering::Settings::kObjectUBOBinding;
 	using ::Rendering::Settings::kReflectionUBOBinding;
 
-	/** The C++ mirror of Common/Buffers/EngineUBO.ovfxh's per-view block.
+	/** The C++ mirror of Common/Buffers/EngineUBO.glsl's per-view block.
 	 *
 	 * The layout has to match std140 exactly, because the shaders read this block by offset:
 	 *  - `vec3` / `int` / `float` pack the way the members below do (ubo_ViewPos's third
 	 *    component is followed immediately by ubo_CameraType, exactly as std140 places it),
 	 *  - every matrix is 64 bytes and self-aligned.
-	 * A field added here without the .ovfxh counterpart (or the other way round) silently
+	 * A field added here without the .glsl counterpart (or the other way round) silently
 	 * shifts every uniform after it - the static_asserts below pin the offsets that matter.
 	 *
 	 * Written per view by EngineBufferRenderFeature. What changes per drawable (the model and
@@ -51,7 +51,7 @@ namespace Core::Rendering
 	static_assert(sizeof(EngineUBO) == 240, "the block the shaders declare");
 
 	/** The C++ mirror of the per-renderable block (filament's set 1): the two matrices that
-	 * change between drawables, packed for the ObjectUBO block in the same .ovfxh. */
+	 * change between drawables, packed for the ObjectUBO block in the same .glsl. */
 	struct ObjectUBO
 	{
 		Maths::FMatrix4 ubo_Model;
@@ -61,8 +61,8 @@ namespace Core::Rendering
 	static_assert(offsetof(ObjectUBO, ubo_UserMatrix) == 64, "std140 layout");
 	static_assert(sizeof(ObjectUBO) == 128, "the block the shaders declare");
 
-	/** The C++ mirror of Common/Buffers/ReflectionUBO.ovfxh - the per-view reflection probe
-	 * data that IBL.ovfxh reads (position/box for parallax correction and the IBL brightness).
+	/** The C++ mirror of Common/Buffers/ReflectionUBO.glsl - the per-view reflection probe
+	 * data that IBL.glsl reads (position/box for parallax correction and the IBL brightness).
 	 *
 	 * The engine binds this every frame with the defaults the IBL path expects (brightness 1,
 	 * no box projection, not local) and a real ReflectionRenderFeature overrides it per probe.

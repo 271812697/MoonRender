@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <Rendering/Core/ARenderPass.h>
 #include <Rendering/HAL/Framebuffer.h>
 #include <Core/Rendering/PostProcess/AEffect.h>
@@ -34,11 +34,18 @@ namespace Core::Rendering
 		 * the background, and the capture is the expensive half of this pass. */
 		void SetEnvironmentCapture(bool p_enabled) { m_captureEnvironment = p_enabled; }
 		bool IsEnvironmentCaptureEnabled() const { return m_captureEnvironment; }
+		/** Scales the baked IBL radiance. The preview uses this to match Filament's IBL
+		 * intensity without lifting the dark preview backdrop. */
+		void SetEnvironmentIntensity(float p_intensity) { m_environmentIntensity = p_intensity; }
+		float GetEnvironmentIntensity() const { return m_environmentIntensity; }
 
 	protected:
 		virtual void Draw(::Rendering::Data::PipelineState p_pso) override;
 	private:
 		void computeSkyTexture();
+		/** Projects the sky's equirect HDR into the SH9 irradiance coefficients the IBL
+		 * shaders read at binding point 4 (Filament's IndirectLight SH). */
+		void computeIrradianceSH();
 		
 	private:
 		::Core::Resources::Material m_skyboxMaterial;
@@ -54,9 +61,14 @@ namespace Core::Rendering
 		std::shared_ptr<::Rendering::HAL::Texture> skyBoxCube;
 		std::shared_ptr<::Rendering::HAL::Texture> irradianceCube;
 		std::shared_ptr<::Rendering::HAL::Texture> prefilterCube;
+		std::unique_ptr<::Rendering::HAL::UniformBuffer> m_irradianceSHBuffer;
 		SkyBoxSetting mSetting;
-		std::string mPath = ":Textures/PureSky.hdr";
+		// The default environment is the same studio HDR the FilamentPBR material preview
+		// bakes, so a material judged in the viewport and one judged in the preview share
+		// their IBL. A scene/Setting-panel sky texture can still override it.
+		std::string mPath = ":Textures/Studio.hdr";
 		bool needUpdateSkyTexture = true;
 		bool m_captureEnvironment = true;
+		float m_environmentIntensity = 1.0f;
 	};
 }

@@ -19,8 +19,8 @@
 > - `MoonRender/src/Rendering/Context/Driver.cpp`（polygon offset 方向，方案二的连带修复）
 > - `MoonRender/src/Core/Rendering/SceneRenderer.cpp`（线/剖切深度函数、剥离层纹理）
 > - `Moon/renderer/PickingRenderPass.cpp`、`Moon/Interactive/Im3DRenderer.cpp`（深度函数）
-> - `Resource/Moon/Data/Engine/Shaders/Lighting/Shadow.ovfxh`、`GeomertySurface.ovfx`、
->   `SectionFace.ovfx`（深度值解释转换）
+> - `Resource/Moon/Data/Engine/Shaders/Lighting/Shadow.glsl`、`GeomertySurface.shader`、
+>   `SectionFace.shader`（深度值解释转换）
 > - `MoonRender/src/Rendering/Entities/Camera.cpp`（`ProjectionFitToSphere` 远平面修复）
 
 ---
@@ -179,9 +179,9 @@ float32 的尾数精度不是均匀的：**数值越接近 1，相对间隔越�
 
 只有**读取深度纹理并解释数值**的地方需要显式转换，本项目共两处：
 
-1. **深度剥离 shader**（`GeomertySurface.ovfx` / `SectionFace.ovfx` 的 `Transparents`
+1. **深度剥离 shader**（`GeomertySurface.shader` / `SectionFace.shader` 的 `Transparents`
    块）：窗口深度反算从 `2r − 1` 改为 `1 − 2r`；
-2. **阴影 shader**（`Shadow.ovfxh`）：把片元的光空间 z 也转成反转空间
+2. **阴影 shader**（`Shadow.glsl`）：把片元的光空间 z 也转成反转空间
    `projCoords.z = 1 − z` 后再比较，阴影贴图里存的同样是反转深度。
 
 ### 4.3 连带修复：polygon offset 方向
@@ -326,8 +326,8 @@ Reversed-Z 改的是**全局渲染状态**，合入后应回归：
 - `MoonRender/src/Rendering/Data/PipelineState.cpp`（默认深度函数）
 - `MoonRender/src/Core/Rendering/SceneRenderer.cpp`（线/剖切轮廓深度函数、剥离层纹理）
 - `Moon/renderer/PickingRenderPass.cpp`、`Moon/Interactive/Im3DRenderer.cpp`
-- `Resource/Moon/Data/Engine/Shaders/Lighting/Shadow.ovfxh`
-- `Resource/Moon/Data/Engine/Shaders/GeomertySurface.ovfx`、`SectionFace.ovfx`
+- `Resource/Moon/Data/Engine/Shaders/Lighting/Shadow.glsl`
+- `Resource/Moon/Data/Engine/Shaders/GeomertySurface.shader`、`SectionFace.shader`
 
 连带修复：
 - `MoonRender/src/Rendering/Context/Driver.cpp`（polygon offset 方向）

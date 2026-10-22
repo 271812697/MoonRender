@@ -178,7 +178,7 @@ void ::Editor::Core::CameraController::HandleInputs(float p_deltaTime)
 
 	if (!m_cameraDestinations.empty())
 	{
-		m_currentMovementSpeed = 0.0f;
+			m_currentMovementSpeed = 0.0f;
 
 		while (m_cameraDestinations.size() != 1)
 			m_cameraDestinations.pop();
@@ -297,11 +297,11 @@ void ::Editor::Core::CameraController::HandleInputs(float p_deltaTime)
 
 			m_lastMousePosX = xPos;
 			m_lastMousePosY = yPos;
-			if (m_rightMousePressed&&m_enableRotate)
-			{	
+			if (m_rightMousePressed && m_enableRotate && !wasFirstMouse)
+			{
 				HandleCameraOrbit(m_view.GetRoaterCenter(), mouseOffset, wasFirstMouse);
 			}
-			else if (m_middleMousePressed)
+			else if (m_middleMousePressed && !wasFirstMouse)
 			{
                 HandleCameraPanning(mouseOffset, wasFirstMouse);
 			}
@@ -382,6 +382,22 @@ void Editor::Core::CameraController::MoveToTarget(::Core::ECS::Actor& p_target)
 		GetActorFocusDist(p_target),
 		m_camera.GetRotation()
 		});
+}
+
+void Editor::Core::CameraController::ClearMovement()
+{
+	while (!m_cameraDestinations.empty())
+	{
+		m_cameraDestinations.pop();
+	}
+	m_leftMousePressed = false;
+	m_middleMousePressed = false;
+	m_rightMousePressed = false;
+}
+
+bool Editor::Core::CameraController::HasPendingMovement() const
+{
+	return !m_cameraDestinations.empty();
 }
 
 void Editor::Core::CameraController::MoveToPose(const Maths::FVector3& pos, const Maths::FQuaternion& quat)
@@ -591,11 +607,19 @@ void Editor::Core::CameraController::HandleMousePressed()
 	if (input.IsMouseButtonPressed(Editor::Panels::MouseButton::MOUSE_BUTTON_MIDDLE))
 	{
 		m_middleMousePressed = true;
+		// Start the pan from the press position too, not from wherever the previous drag
+		// ended: otherwise the first move after the press applies the whole jump as a delta.
+		m_firstMouse = true;
 	}
 
 	if (input.IsMouseButtonPressed(Editor::Panels::MouseButton::MOUSE_BUTTON_RIGHT))
 	{
 		m_rightMousePressed = true;
+		// Capture the orbit start on every press. The release already resets m_firstMouse,
+		// but a press that arrives before the release is processed (or a release delivered
+		// outside the widget) left it false, so the first move after the press orbited from
+		// the previous drag's last position and snapped the camera.
+		m_firstMouse = true;
 		if (!m_enableRotate)
 		{
 			// Say it once per press instead of silently ignoring the drag: the

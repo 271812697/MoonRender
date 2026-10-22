@@ -1,6 +1,6 @@
 // MoonMatc - the offline half of the shader pipeline, the counterpart of Filament's matc.
 //
-// One .ovfx in, one .ovshader package out. The package holds what the runtime used to work
+// One .shader in, one .ovshader package out. The package holds what the runtime used to work
 // out on every launch: the final GLSL of every (pass, variant, stage), the reflection of the
 // material's parameters, and the variant list. A file that has not been migrated yet (no
 // material { } block) is copied through untouched, so the pipeline can take the shaders one
@@ -29,6 +29,8 @@
 #include <vector>
 
 #include "Matc.h"
+
+#include <Rendering/Settings/EVariant.h>
 
 namespace Moon::Matc
 {
@@ -232,6 +234,13 @@ namespace
 		 * a sampler (or there are none). */
 		uint32_t parameterBlockSize = 0;
 		std::vector<std::string> features;        // declared feature bits
+		std::vector<std::string> variantFilter;   // Filament-style engine variant bits (EVariantBits names)
+		/** The feature set the archive build compiles with when the material enumerates engine
+		 * variants (variantFilter). Empty means "no optional feature"; hasDefaultFeatures tells
+		 * an explicit empty list from "not declared". */
+		std::vector<std::string> defaultFeatures;
+		bool hasDefaultFeatures = false;
+		std::vector<std::string> vertexAttributes; // declared vertex layout, in location order
 		std::vector<std::string> passes;          // extra passes, default pass implied
 		std::string vertexBody;                   // the vertex { ... } block, verbatim
 		std::string fragmentBody;                 // the fragment { ... } block, verbatim
@@ -245,7 +254,7 @@ namespace
 	};
 
 	/** The 1-based line a fragment of the source starts on: the #line directives handed to
-	 * the driver point back here, so an error names the .ovfx line the user wrote. */
+	 * the driver point back here, so an error names the .shader line the user wrote. */
 	uint32_t LineOf(const std::string& p_text, const std::string& p_fragment)
 	{
 		const size_t at = p_text.find(p_fragment);
@@ -328,6 +337,8 @@ namespace
 				const std::string array = p_body.substr(i + 1, (close == std::string::npos ? p_body.size() : close) - i - 1);
 				i = (close == std::string::npos) ? p_body.size() : close + 1;
 
+				if (key == "defaultFeatures") { p_out.hasDefaultFeatures = true; }
+
 				if (key == "parameters")
 				{
 					// One field of a parameter object: `field : value`, the value ending at the
@@ -401,7 +412,10 @@ namespace
 					{
 						const std::string trimmed = Trim(item);
 						if (trimmed.empty()) { continue; }
-						if (key == "features" || key == "variantFilter") { p_out.features.push_back(Trim(trimmed)); }
+						if (key == "features") { p_out.features.push_back(Trim(trimmed)); }
+						else if (key == "defaultFeatures") { p_out.defaultFeatures.push_back(Trim(trimmed)); }
+						else if (key == "variantFilter") { p_out.variantFilter.push_back(Trim(trimmed)); }
+						else if (key == "vertexAttributes") { p_out.vertexAttributes.push_back(Trim(trimmed)); }
 						else if (key == "passes") { p_out.passes.push_back(Trim(trimmed)); }
 					}
 				}
@@ -491,22 +505,44 @@ namespace
 	 * would declare the same UBO or helper twice. */
 	bool IsPreludeHeader(const std::string& p_relative)
 	{
-		return p_relative == "Common/Buffers/EngineUBO.ovfxh"
-			|| p_relative == "Common/Utils.ovfxh";
+		return p_relative == "Common/Buffers/EngineUBO.glsl"
+			|| p_relative == "Common/Utils.glsl";
 	}
 
 	struct ResolvedInclude
 	{
 		std::filesystem::path path;  // the file on disk
 		std::string relative;        // how #line should name it
+		std::string text;            // supplied by the resolver, when it handled the include
+		bool hasText = false;
 	};
 
 	/** Where one #include points, the way the engine's path parser resolves it: a leading
 	 * ':' marks an engine path, and the directories handed in with -I are the shader roots
 	 * the ":Shaders/" prefix stands for. A relative include is tried against them too, which
-	 * is what a file inside the tree gets for free. */
-	bool ResolveInclude(const std::string& p_target, const std::vector<std::string>& p_dirs, ResolvedInclude& p_out)
+	 * is what a file inside the tree gets for free.
+	 *
+	 * p_resolver runs first: a release build packs the headers into the executable and has no
+	 * directory to look in, while a development build simply leaves the resolver empty. */
+	bool ResolveInclude(
+		const std::string& p_target,
+		const std::vector<std::string>& p_dirs,
+		const IncludeResolver& p_resolver,
+		ResolvedInclude& p_out)
 	{
+		if (p_resolver)
+		{
+			std::string text;
+			std::string origin;
+			if (p_resolver(p_target, text, origin))
+			{
+				p_out.text = std::move(text);
+				p_out.relative = origin.empty() ? p_target : origin;
+				p_out.hasText = true;
+				return true;
+			}
+		}
+
 		std::string target = p_target;
 		if (!target.empty() && target.front() == ':')
 		{
@@ -542,12 +578,13 @@ namespace
 	 * included file opens with its own "#line 1", and the line after it goes back to the file
 	 * (and the line) the #include was written on.
 	 *
-	 * Each file is expanded once per stage - the headers have no include guards, and PBR.ovfxh
-	 * reaches Utils.ovfxh a second time - and the two the prelude already carries are dropped
+	 * Each file is expanded once per stage - the headers have no include guards, and PBR.glsl
+	 * reaches Utils.glsl a second time - and the two the prelude already carries are dropped
 	 * instead of duplicated. */
 	bool ExpandIncludes(
 		const std::string& p_text,
 		const std::vector<std::string>& p_dirs,
+		const IncludeResolver& p_resolver,
 		const std::string& p_origin,
 		std::set<std::string>& p_visited,
 		std::string& p_out,
@@ -602,7 +639,7 @@ namespace
 
 				const std::string target = trimmed.substr(first + 1, last - first - 1);
 				ResolvedInclude resolved;
-				if (!ResolveInclude(target, p_dirs, resolved))
+				if (!ResolveInclude(target, p_dirs, p_resolver, resolved))
 				{
 					p_error = "cannot resolve #include \"" + target + "\" (" + currentFile
 						+ ", line " + std::to_string(nextLine) + ")";
@@ -620,16 +657,24 @@ namespace
 				}
 				p_visited.insert(resolved.relative);
 
-				bool readOk = false;
-				const std::string content = ReadFile(resolved.path, readOk);
-				if (!readOk)
+				std::string content;
+				if (resolved.hasText)
 				{
-					p_error = "cannot read \"" + resolved.path.string() + "\"";
-					return false;
+					content = std::move(resolved.text);
+				}
+				else
+				{
+					bool readOk = false;
+					content = ReadFile(resolved.path, readOk);
+					if (!readOk)
+					{
+						p_error = "cannot read \"" + resolved.path.string() + "\"";
+						return false;
+					}
 				}
 
 				std::string expanded;
-				if (!ExpandIncludes(content, p_dirs, resolved.relative, p_visited, expanded, p_error))
+				if (!ExpandIncludes(content, p_dirs, p_resolver, resolved.relative, p_visited, expanded, p_error))
 				{
 					return false;
 				}
@@ -690,7 +735,7 @@ namespace
 		out << "    m.emissive = vec4(0.0);\n"
 			<< "    m.normal = vec3(0.0, 0.0, 1.0);\n"
 			<< "}\n\n"
-			// The .mat files call it prepareMaterial(); keeping the alias means a shader
+			// The .shader files call it prepareMaterial(); keeping the alias means a shader
 			// written either way compiles.
 			<< "void prepareMaterial(out MaterialInputs m) { initMaterial(m); }\n\n"
 			// The shading model's verdict on the inputs. Unlit is the whole slice.
@@ -874,7 +919,7 @@ namespace
 	}
 
 	/** The vertex main: the transform the entry point is not allowed to touch. Copied from
-	 * what Unlit/Standard.ovfx do by hand today, and from filament's post_process_main.vs for
+	 * what Unlit/Standard.shader do by hand today, and from filament's post_process_main.vs for
 	 * the full-screen case.
 	 *
 	 * Only generated for a stage that does not own its main() - see BuildStage. */
@@ -1112,9 +1157,53 @@ namespace
 	}
 
 	/** The `#define`s one variant is compiled with: the stage, then the pass, then the
-	 * features. The stage one is what lets Common/Utils.ovfxh keep its derivative helper out
+	 * features. The stage one is what lets Common/Utils.glsl keep its derivative helper out
 	 * of the stages that cannot call it (see ComputeTBN there). */
-	std::string VariantDefines(const PassVariant& p_variant, Stage p_stage)
+	/** Vertex attributes the material declares (material { vertexAttributes : [...] }) become
+	 * layout qualifiers and HAS_ATTRIBUTE_* defines, the way filament's material builder turns
+	 * its required attributes into shader defines. The declaration order is the attribute
+	 * order of the mesh, so the same material cannot serve two different vertex layouts; that
+	 * is exactly filament's model (a material owns its vertex layout). */
+	std::string AttributeDeclarations(const MaterialFile& p_material, Stage p_stage)
+	{
+		struct Entry
+		{
+			const char* name;
+			const char* glslType;
+			const char* variable;
+		};
+		static constexpr Entry kEntries[] = {
+			{ "POSITION", "vec3", "geo_Pos" },
+			{ "UV0", "vec2", "geo_TexCoords" },
+			{ "NORMAL", "vec3", "geo_Normal" },
+			{ "TANGENT", "vec3", "geo_Tangent" },
+			{ "BITANGENT", "vec3", "geo_Bitangent" },
+			{ "DOMAIN_ID", "vec2", "geo_DomainId" },
+		};
+
+		std::ostringstream out;
+		uint32_t location = 0;
+		for (const std::string& name : p_material.vertexAttributes)
+		{
+			for (const Entry& entry : kEntries)
+			{
+				if (name == entry.name)
+				{
+					if (p_stage == Stage::Vertex)
+					{
+						out << "layout(location = " << location << ") in " << entry.glslType
+							<< " " << entry.variable << ";\n";
+					}
+					out << "#define HAS_ATTRIBUTE_" << entry.name << "\n";
+					++location;
+					break;
+				}
+			}
+		}
+		return out.str();
+	}
+
+	std::string VariantDefines(const PassVariant& p_variant, Stage p_stage, const std::string& p_stageText = {})
 	{
 		std::ostringstream out;
 		out << (p_stage == Stage::Vertex ? "#define MOON_STAGE_VERTEX\n"
@@ -1126,6 +1215,13 @@ namespace
 		}
 		for (const std::string& feature : p_variant.features)
 		{
+			// A define the stage never mentions cannot change its code. Dropping it lets
+			// variants that differ only in unused bits share one compiled stage text, which
+			// is what keeps 128 keyed variants down to the handful with different code.
+			if (!p_stageText.empty() && p_stageText.find(feature) == std::string::npos)
+			{
+				continue;
+			}
 			out << "#define " << feature << "\n";
 		}
 		return out.str();
@@ -1141,7 +1237,7 @@ namespace
 
 	/** One complete stage source: version, defines, prelude, the entry point, main.
 	 *
-	 * The #line directives point back into the .ovfx the user wrote, so a compile error names
+	 * The #line directives point back into the .shader the user wrote, so a compile error names
 	 * the file and the line it came from rather than a line of this concatenation - the same
 	 * job filament's Includes.cpp does for #include.
 	 *
@@ -1161,6 +1257,7 @@ namespace
 		const std::string& p_prelude,
 		const std::string& p_fileName,
 		const std::vector<std::string>& p_includeDirs,
+		const IncludeResolver& p_includeResolver,
 		std::string& p_error,
 		bool p_shared = false)
 	{
@@ -1195,6 +1292,7 @@ namespace
 		{
 			out << VaryingsPrelude(p_stage == Stage::Vertex, p_material.domain);
 		}
+		out << AttributeDeclarations(p_material, p_stage);
 		out << ParametersPrelude(p_material.parameters, p_material.parameterBlockSize)
 			<< "\n#line " << entryLine << " \"" << p_fileName << "\"\n"
 			<< body
@@ -1210,7 +1308,7 @@ namespace
 		// compiled - there is no runtime pass left to do it once it is a package.
 		std::set<std::string> visited;
 		std::string expanded;
-		if (!ExpandIncludes(out.str(), p_includeDirs, p_fileName, visited, expanded, p_error))
+		if (!ExpandIncludes(out.str(), p_includeDirs, p_includeResolver, p_fileName, visited, expanded, p_error))
 		{
 			return {};
 		}
@@ -1243,7 +1341,83 @@ namespace
 	}
 } // anonymous namespace
 
-CompileResult CompileSource(const std::string& p_sourceText, const CompileOptions& p_options)
+	/** Build-time diagnostic: the Filament-style variant enumeration this material asks for
+	 * (its variantFilter), with the stage filtering applied. The package still stores the
+	 * feature-based variants; the runtime switches to VariantKey selection in phase 3.3. */
+	void WriteVariantDump(const MaterialFile& p_material, const std::string& p_path)
+	{
+		struct BitName
+		{
+			const char* name;
+			const char* define;
+			Rendering::Settings::EVariantBits bit;
+		};
+		static constexpr BitName kBits[] = {
+			{ "DIRECTIONAL_LIGHTING", "VARIANT_HAS_DIRECTIONAL_LIGHTING", Rendering::Settings::EVariantBits::DIRECTIONAL_LIGHTING },
+			{ "DYNAMIC_LIGHTING", "VARIANT_HAS_DYNAMIC_LIGHTING", Rendering::Settings::EVariantBits::DYNAMIC_LIGHTING },
+			{ "SHADOWING", "VARIANT_HAS_SHADOWING", Rendering::Settings::EVariantBits::SHADOWING },
+			{ "FOG", "VARIANT_HAS_FOG", Rendering::Settings::EVariantBits::FOG },
+			{ "PICKING", "VARIANT_HAS_PICKING", Rendering::Settings::EVariantBits::PICKING },
+			{ "SSR", "VARIANT_HAS_SSR", Rendering::Settings::EVariantBits::SSR },
+			{ "DEPTH", "VARIANT_DEPTH", Rendering::Settings::EVariantBits::DEPTH },
+		};
+
+		std::vector<uint32_t> bits;
+		std::ostringstream out;
+		out << "material: " << p_material.name << "\n";
+		out << "variant filter:";
+		for (const std::string& name : p_material.variantFilter)
+		{
+			for (const BitName& entry : kBits)
+			{
+				if (name == entry.name)
+				{
+					bits.push_back(static_cast<uint32_t>(entry.bit));
+					out << " " << entry.define;
+				}
+			}
+		}
+		out << "\n";
+
+		std::vector<uint32_t> fragments;
+		std::vector<uint32_t> vertices;
+		for (size_t mask = 0; mask < (size_t{ 1 } << bits.size()); ++mask)
+		{
+			uint32_t key = 0;
+			for (size_t i = 0; i < bits.size(); ++i)
+			{
+				if (mask & (size_t{ 1 } << i)) { key |= bits[i]; }
+			}
+			if (Rendering::Settings::FilterVariantFragment(key) == key) { fragments.push_back(key); }
+			if (Rendering::Settings::FilterVariantVertex(key) == key) { vertices.push_back(key); }
+		}
+
+		const auto defines = [&](uint32_t p_key) {
+			std::string names;
+			for (const BitName& entry : kBits)
+			{
+				if ((p_key & static_cast<uint32_t>(entry.bit)) != 0)
+				{
+					names += std::string(" ") + entry.define;
+				}
+			}
+			return names;
+		};
+
+		out << "fragment variants: " << fragments.size() << "\n";
+		for (uint32_t key : fragments)
+		{
+			out << "  0x" << std::hex << key << std::dec << ":" << defines(key) << "\n";
+		}
+		out << "vertex variants: " << vertices.size() << "\n";
+		for (uint32_t key : vertices)
+		{
+			out << "  0x" << std::hex << key << std::dec << ":" << defines(key) << "\n";
+		}
+
+		WriteFile(p_path, out.str());
+	}
+	CompileResult CompileSource(const std::string& p_sourceText, const CompileOptions& p_options)
 {
 	CompileResult result;
 
@@ -1252,6 +1426,7 @@ CompileResult CompileSource(const std::string& p_sourceText, const CompileOption
 	const std::string& dumpGlslDir = p_options.dumpGlslDir;
 	const std::string& dumpJsonPath = p_options.dumpJsonPath;
 	const std::vector<std::string>& includeDirs = p_options.includeDirs;
+	const IncludeResolver& includeResolver = p_options.includeResolver;
 	const bool preprocessOnly = p_options.preprocessOnly;
 
 	const std::string& text = p_sourceText;
@@ -1279,24 +1454,84 @@ CompileResult CompileSource(const std::string& p_sourceText, const CompileOption
 	// numbers.
 	LayoutParameters(material);
 
-	// Variants: the power set of the declared features, one entry per pass. (Filament uses a
-	// fixed enumeration instead - see docs/ShaderPipeline.md, this is the temporary shape.)
+	if (!p_options.dumpVariantsPath.empty())
+	{
+		WriteVariantDump(material, p_options.dumpVariantsPath);
+	}
+
+	// Variants. A material with a variantFilter (the Filament model) enumerates the engine
+	// variant keys instead of feature combinations; each entry's #define set is VARIANT_* (plus
+	// the material's fixed features). A material without one keeps the feature power set, so
+	// the materials that still rely on per-instance features are unchanged while the keyed path
+	// is brought up.
 	std::vector<PassVariant> variants;
 	std::vector<std::string> passes;
 	passes.emplace_back();
 	for (const std::string& pass : material.passes) { passes.push_back(pass); }
-	const size_t featureCount = material.features.size();
-	for (const std::string& pass : passes)
-	{
-		for (size_t mask = 0; mask < (size_t{ 1 } << featureCount); ++mask)
+
+	const auto variantDefine = [](const std::string& p_name) {
+		return p_name == "DEPTH" ? std::string("VARIANT_DEPTH") : ("VARIANT_HAS_" + p_name);
+	};
+
+	const auto appendVariants = [&](const std::vector<std::string>& p_baseFeatures) {
+		std::vector<std::string> variantDefines;
+		for (const std::string& name : material.variantFilter)
 		{
-			PassVariant variant;
-			variant.pass = pass;
-			for (size_t bit = 0; bit < featureCount; ++bit)
+			variantDefines.push_back(variantDefine(name));
+		}
+
+		for (const std::string& pass : passes)
+		{
+			if (variantDefines.empty())
 			{
-				if (mask & (size_t{ 1 } << bit)) { variant.features.insert(material.features[bit]); }
+				PassVariant variant;
+				variant.pass = pass;
+				for (const std::string& feature : p_baseFeatures) { variant.features.insert(feature); }
+				variants.push_back(std::move(variant));
+				continue;
 			}
-			variants.push_back(std::move(variant));
+
+			for (size_t mask = 0; mask < (size_t{ 1 } << variantDefines.size()); ++mask)
+			{
+				PassVariant variant;
+				variant.pass = pass;
+				for (const std::string& feature : p_baseFeatures) { variant.features.insert(feature); }
+				for (size_t bit = 0; bit < variantDefines.size(); ++bit)
+				{
+					if (mask & (size_t{ 1 } << bit)) { variant.features.insert(variantDefines[bit]); }
+				}
+				variants.push_back(std::move(variant));
+			}
+		}
+	};
+
+	if (!p_options.enabledFeatures.empty())
+	{
+		// The designer chose a feature set: compile exactly that set, plus the engine variants
+		// when the material enumerates them.
+		appendVariants(p_options.enabledFeatures);
+	}
+	else if (!material.variantFilter.empty())
+	{
+		// The archive build: the material's fixed default features plus the engine variants.
+		// A material with optional features declares defaultFeatures (possibly empty).
+		appendVariants(material.hasDefaultFeatures ? material.defaultFeatures : std::vector<std::string>{});
+	}
+	else
+	{
+		const size_t featureCount = material.features.size();
+		for (const std::string& pass : passes)
+		{
+			for (size_t mask = 0; mask < (size_t{ 1 } << featureCount); ++mask)
+			{
+				PassVariant variant;
+				variant.pass = pass;
+				for (size_t bit = 0; bit < featureCount; ++bit)
+				{
+					if (mask & (size_t{ 1 } << bit)) { variant.features.insert(material.features[bit]); }
+				}
+				variants.push_back(std::move(variant));
+			}
 		}
 	}
 
@@ -1306,18 +1541,30 @@ CompileResult CompileSource(const std::string& p_sourceText, const CompileOption
 	// Prelude: the buffer and utility headers the engine already has, then the generated
 	// MaterialInputs. Everything the shader used to #include by hand.
 	std::string commonPrelude;
-	for (const std::string& relative : { "Common/Buffers/EngineUBO.ovfxh", "Common/Utils.ovfxh" })
+	for (const std::string& relative : { "Common/Buffers/EngineUBO.glsl", "Common/Utils.glsl" })
 	{
-		for (const std::string& dir : includeDirs)
+		std::string content;
+		bool found = false;
+		if (includeResolver)
 		{
-			bool found = false;
-			const std::string candidate = (std::filesystem::path(dir) / relative).string();
-			const std::string content = ReadFile(candidate, found);
-			if (found)
+			std::string origin;
+			found = includeResolver(relative, content, origin);
+		}
+		if (!found)
+		{
+			for (const std::string& dir : includeDirs)
 			{
-				commonPrelude += "\n#line 1 \"" + relative + "\"\n" + content + "\n";
-				break;
+				const std::string candidate = (std::filesystem::path(dir) / relative).string();
+				content = ReadFile(candidate, found);
+				if (found)
+				{
+					break;
+				}
 			}
+		}
+		if (found)
+		{
+			commonPrelude += "\n#line 1 \"" + relative + "\"\n" + content + "\n";
 		}
 	}
 	commonPrelude += "\n#line 1 \"<material inputs>\"\n" + MaterialInputsPrelude(material.shadingModel);
@@ -1331,7 +1578,8 @@ CompileResult CompileSource(const std::string& p_sourceText, const CompileOption
 		for (const Stage stage : { Stage::Vertex, Stage::Fragment })
 		{
 			std::string text = BuildStage(
-				stage, material, none, commonPrelude, nameForLines, includeDirs, error, true);
+				stage, material, none, commonPrelude, nameForLines, includeDirs,
+				includeResolver, error, true);
 			if (text.empty())
 			{
 				result.error = error;
@@ -1342,7 +1590,8 @@ CompileResult CompileSource(const std::string& p_sourceText, const CompileOption
 		if (!material.geometryBody.empty())
 		{
 			std::string text = BuildStage(
-				Stage::Geometry, material, none, commonPrelude, nameForLines, includeDirs, error, true);
+				Stage::Geometry, material, none, commonPrelude, nameForLines, includeDirs,
+				includeResolver, error, true);
 			if (text.empty())
 			{
 				result.error = error;
@@ -1365,8 +1614,8 @@ CompileResult CompileSource(const std::string& p_sourceText, const CompileOption
 		}
 		const std::string prefix = variant.pass + "/" + featureKey + "/";
 
-		blobs[prefix + "vertex"] = VariantDefines(variant, Stage::Vertex);
-		blobs[prefix + "fragment"] = VariantDefines(variant, Stage::Fragment);
+		blobs[prefix + "vertex"] = VariantDefines(variant, Stage::Vertex, sharedStages.at("vertex"));
+		blobs[prefix + "fragment"] = VariantDefines(variant, Stage::Fragment, sharedStages.at("fragment"));
 		blobOrder.push_back(prefix + "vertex");
 		blobOrder.push_back(prefix + "fragment");
 
@@ -1377,7 +1626,7 @@ CompileResult CompileSource(const std::string& p_sourceText, const CompileOption
 		// stage there rather than running a pass-through.
 		if (!material.geometryBody.empty() && WantsGeometryStage(material.geometryBody, variant))
 		{
-			blobs[prefix + "geometry"] = VariantDefines(variant, Stage::Geometry);
+			blobs[prefix + "geometry"] = VariantDefines(variant, Stage::Geometry, sharedStages.at("geometry"));
 			blobOrder.push_back(prefix + "geometry");
 		}
 	}
@@ -1572,6 +1821,21 @@ CompileResult CompileSource(const std::string& p_sourceText, const CompileOption
 			}
 		}
 		AppendChunk(package, "SHDRVARI", payload);
+	}
+
+	// SHDRFEAT: the features the material declared, so the designer's toggles do not depend on
+	// which subset this package happened to compile.
+	{
+		std::string payload;
+		const uint32_t count = static_cast<uint32_t>(material.features.size());
+		payload.append(reinterpret_cast<const char*>(&count), sizeof(count));
+		for (const std::string& feature : material.features)
+		{
+			const uint32_t size = static_cast<uint32_t>(feature.size());
+			payload.append(reinterpret_cast<const char*>(&size), sizeof(size));
+			payload.append(feature);
+		}
+		AppendChunk(package, "SHDRFEAT", payload);
 	}
 
 	// SHDRPARM: name/type pairs of the material parameters (the binary form of the JSON). Kept as

@@ -116,7 +116,7 @@ int main(int argc, char* argv[])
 		else
 		{
 			// "name=path" names the blob explicitly, which is what the build passes: the
-			// MoonMatc output for a shader lives in a different folder than the .ovfxh the
+			// MoonMatc output for a shader lives in a different folder than the .glsl the
 			// legacy shaders still #include, and both have to land under the name the
 			// runtime asks for.
 			const size_t equals = argument.find('=');
@@ -151,7 +151,7 @@ int main(int argc, char* argv[])
 				continue;
 			}
 			const std::string extension = entry.path().extension().string();
-			if (extension == ".ovfx" || extension == ".ovfxh")
+			if (extension == ".shader" || extension == ".glsl")
 			{
 				inputs.push_back({
 					ToSlashes(std::filesystem::relative(entry.path(), root).string()),
@@ -166,8 +166,8 @@ int main(int argc, char* argv[])
 	size_t totalSize = 0;
 	for (const Input& input : inputs)
 	{
-		// The archived name comes from the caller when it gave one ("Standard.ovfx=.../matc/
-		// Standard.ovfx"); otherwise it is the path relative to -d, which is what a plain
+		// The archived name comes from the caller when it gave one ("Standard.shader=.../matc/
+		// Standard.shader"); otherwise it is the path relative to -d, which is what a plain
 		// "ShaderPack -d <shaders> ..." run means.
 		std::filesystem::path relative(input.path);
 		if (!input.name.empty())

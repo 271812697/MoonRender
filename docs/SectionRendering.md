@@ -1,6 +1,6 @@
 # 截面绘制（Clip Section）原理
 
-> 本文基于 `MoonRender/src/Core/Rendering/SceneRenderer.cpp` 中的 `SectionCapRenderPass` / `SectionContourRenderPass`，以及 `Resource/Moon/Data/Engine/Shaders/` 下的 `SectionCap.ovfx`、`SectionParity.ovfx`、`SectionContour.ovfx` 整理。
+> 本文基于 `MoonRender/src/Core/Rendering/SceneRenderer.cpp` 中的 `SectionCapRenderPass` / `SectionContourRenderPass`，以及 `Resource/Moon/Data/Engine/Shaders/` 下的 `SectionCap.shader`、`SectionParity.shader`、`SectionContour.shader` 整理。
 
 ---
 
@@ -45,13 +45,13 @@
 - **保留侧（可见）**：`f(P) <= 0`
 - **移除侧（被剪掉）**：`f(P) > 0`
 
-这与 `GeomertySurface.ovfx` 中的 `if (offsetw > 0) discard;` 一致。`ClipPlane` 控件通过 `SetClipPlane(zAxis, -zAxis·center)` 设置平面，即法线为控件 z 轴、过控件中心。
+这与 `GeomertySurface.shader` 中的 `if (offsetw > 0) discard;` 一致。`ClipPlane` 控件通过 `SetClipPlane(zAxis, -zAxis·center)` 设置平面，即法线为控件 z 轴、过控件中心。
 
 ---
 
 ## 4. 截线：几何着色器逐三角形求交
 
-`SectionContour.ovfx` 的几何着色器对每个三角形独立处理：
+`SectionContour.shader` 的几何着色器对每个三角形独立处理：
 
 1. 计算三个顶点到平面的有向距离 `d[i] = dot(plane.xyz, V[i]) + plane.w`；
 2. 若三个 `d[i]` 同号（三角形完全在一侧），跳过；
@@ -96,7 +96,7 @@ m_renderer.Clear(false, false, true, Maths::FVector4(0.0f));
 
 **② 奇偶填充：模型表面逐片元 INVERT**
 
-用 `SectionParity.ovfx` 重绘所有不透明三角形（双面、关闭深度测试/深度写入/颜色写入），模板状态为：
+用 `SectionParity.shader` 重绘所有不透明三角形（双面、关闭深度测试/深度写入/颜色写入），模板状态为：
 
 ```cpp
 p_pso.stencilTest   = true;
@@ -168,32 +168,25 @@ gl_FragDepth = (clipPos.z / clipPos.w) * 0.5 + 0.5;
 
 ---
 
-## 7. 剖面线条纹：随距离的抗锯齿
+## 7. 剖面线条纹：屏幕空间固定周期
 
-剖面线是世界空间等距条纹（周期 `stripePeriod`）。相机拉远后，一个像素覆盖多个条纹周期，采样相位随相机移动乱跳，表现为条纹不断闪烁变化——这是低于奈奎斯特频率的混叠。
+剖面线原来是**世界空间**等距条纹（周期 0.2 个世界单位）。相机拉远后一个像素覆盖多个条纹周期，采样相位随相机移动乱跳（低于奈奎斯特的混叠），当时的处理是退化成**平均色** —— 于是缩小后剖面变成一片灰，密度和对比度都随距离变化。
 
-解法是解析抗锯齿：用 `fwidth(dist)` 得到当前像素覆盖的条纹坐标变化量 `w`：
-
-- 条纹边缘的过渡宽度随 `w` 放大，保证过渡至少一个像素；
-- 当 `w >= stripePeriod`（一个像素内已包含整个周期）时，条纹无法分辨，直接退化为周期内的**平均颜色** `1 - stripeBand / stripePeriod`，而不是继续乱采样。
+现在条纹坐标直接按**像素**算：`u_HatchAngleDeg` 给出屏幕上的条纹角度（默认 45°），跨条纹方向的坐标是 `dot(gl_FragCoord.xy, normal)`，除以 `u_HatchPeriodPx` 就是相位：
 
 ```glsl
-float w = max(fwidth(dist), 1e-5);
-float tStrip;
-if (w >= stripePeriod)
-{
-    tStrip = 1.0 - stripeBand / stripePeriod;   // 低于奈奎斯特 → 平均色
-}
-else
-{
-    float phase = abs(fract(dist / stripePeriod) - 0.5) * 2.0; // 0=线中心
-    float halfW = stripeBand / stripePeriod;
-    float aa    = clamp(w / stripePeriod, 0.02, halfW);
-    tStrip = smoothstep(halfW - aa, halfW + aa, phase);
-}
+vec2  stripeNormal = vec2(-sin(angle), cos(angle));
+float dist  = dot(gl_FragCoord.xy, stripeNormal);            // 1 单位 = 1 像素
+float phase = abs(fract(dist / u_HatchPeriodPx) - 0.5) * 2.0;
+float halfW = (u_HatchBandPx * 0.5) / u_HatchPeriodPx;
+float aa    = 1.0 / u_HatchPeriodPx;                          // 固定一个像素的过渡
+tStrip = smoothstep(halfW - aa, halfW + aa, phase);
 ```
 
-效果：近处条纹清晰且边缘柔和；远处条纹平滑过渡为均匀填充，不再闪烁。
+- `u_HatchPeriodPx = 20`、`u_HatchBandPx = 5`、`u_HatchContrast = 0.8`：条纹永远是 20px 间距、5px 宽的深色线（按参考观感实测：周期约 21px、线宽约 6.5px、占空比 31%），任何缩放级别都一致；
+- **不做任何淡入淡出**：间距和线宽都只由像素决定，图案不可能比自己的周期更密，也就没有需要淡出的情形；
+- 不再需要"低于奈奎斯特退化成平均色"的分支；
+- `u_HatchScreenFixed = 0` 可以切回"跟随平面投影"的方向 —— 但默认是 1：跟随平面时用"世界坐标 ÷ 局部梯度"换算像素间距，窄截面带上方向会被投影压扁、间距沿带方向畸变，出现花斑/交叉网格（实测左右两侧疏密不一致）。
 
 ---
 
@@ -204,14 +197,22 @@ else
 ```glsl
 vec3 rayOrigin = ubo_ViewPos;                        // 透视：相机位置
 if (ubo_CameraType == 1)                             // 透视
-    rayDir = normalize(farWorld.xyz - ubo_ViewPos);  // 反投影远平面点
+    rayDir = normalize(nearWorld.xyz - ubo_ViewPos); // 反投影**近**平面点
 else {                                               // 正交
     rayOrigin = nearWorld.xyz;                       // 近平面点
     rayDir     = normalize(farWorld.xyz - nearWorld.xyz); // 平行射线
 }
 ```
 
-历史问题：早期代码在正交相机下用 `farWorld - ubo_ViewPos` 作为射线方向，其中混入了像面偏移分量，导致平面命中点、深度与剖面线位置计算错误。必须按 `ubo_CameraType` 区分两种投影。
+历史问题一：早期代码在正交相机下用 `farWorld - ubo_ViewPos` 作为射线方向，其中混入了像面偏移分量，导致平面命中点、深度与剖面线位置计算错误。必须按 `ubo_CameraType` 区分两种投影。
+
+历史问题二（2026-10）：透视相机的远平面改成无限远之后（`864860b8`，投影取 `far -> inf` 的极限，远平面退化成 `(0,0,0,1)`），透视分支如果仍然用**远平面点**反投影求方向，`farWorld /= farWorld.w` 就是除以 0：
+
+- 射线方向变成 inf/NaN，平面命中点 `hit` 跟着错；
+- `gl_FragDepth` 由 `hit` 算出，得到的是**负数**（被 clamp 成 0，即"最远"），于是 cap 在深度测试里被整块判掉 —— 表现为"剖切只剩洋红截线、没有剖面填充"，而且与模型来源无关（导入 STEP 和自建模型一样没有）；
+- 诊断特征：把 cap 的深度测试改成 ALWAYS（`MOON_SECTION_DEBUG=capred`）时 cap 立刻出现，但一开深度测试就一个像素都没有。
+
+结论：透视射线必须建在**近平面**上（`vec4(ndc, -1.0, 1.0)`），它在有限/无限远两种投影下都良定义；远平面点只用于正交（正交相机的 far 仍然贴合场景、是有限的）。
 
 ---
 
@@ -237,8 +238,8 @@ else {                                               // 正交
 | 文件 | 职责 |
 | --- | --- |
 | `MoonRender/src/Core/Rendering/SceneRenderer.cpp` | `SectionCapRenderPass`（模板奇偶 + 画截面）、`SectionContourRenderPass`（GS 截线） |
-| `Resource/Moon/Data/Engine/Shaders/SectionParity.ovfx` | 奇偶填充片元：保留比平面近的表面 |
-| `Resource/Moon/Data/Engine/Shaders/SectionCap.ovfx` | 截面：平面求交、深度、剖面线、IBL |
-| `Resource/Moon/Data/Engine/Shaders/SectionContour.ovfx` | 截线：GS 逐三角形求交 |
+| `Resource/Moon/Data/Engine/Shaders/SectionParity.shader` | 奇偶填充片元：保留比平面近的表面 |
+| `Resource/Moon/Data/Engine/Shaders/SectionCap.shader` | 截面：平面求交、深度、剖面线、IBL |
+| `Resource/Moon/Data/Engine/Shaders/SectionContour.shader` | 截线：GS 逐三角形求交 |
 | `MoonRender/include/Rendering/Settings/ERenderPassOrder.h` | Pass 顺序（`SectionCap = 25000`，`SectionContour = 25001`） |
 | `Moon/Interactive/Widgets/ClipPlane.cpp` | 剖切平面控件，实时更新平面 UBO |
