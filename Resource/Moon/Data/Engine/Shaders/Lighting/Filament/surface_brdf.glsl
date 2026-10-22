@@ -34,3 +34,11 @@ vec3 F_Schlick(vec3 f0, float VoH)
     const float f = pow5(1.0 - VoH);
     return f + f0 * (1.0 - f);
 }
+
+// Filament surface_material.fs (HIGH quality branch): the base layer's F0 assumes an
+// air -> 1.5 interface, but the clear coat forms a 1.5 -> 1.5 interface. This re-expresses
+// the same F0 for the coat's interface (CLEAR_COAT_IOR_CHANGE, on by default in Filament).
+vec3 f0ClearCoatToSurface(const vec3 f0)
+{
+    return saturate(f0 * (f0 * (0.941892 - 0.263008 * f0) + 0.346479) - 0.0285998);
+}

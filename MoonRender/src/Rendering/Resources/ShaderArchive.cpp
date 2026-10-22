@@ -76,6 +76,30 @@ namespace Rendering::Resources
 
 	bool ReadShaderSource(const std::string& p_path, std::string& p_text, std::string* p_origin)
 	{
+		// Builds that pack compiled packages under the shader name also pack the source text
+		// under Source/<name>: prefer that here, this function is the "give me the source"
+		// entry point (the loader asks FindShaderFile for the package itself).
+		const std::string relative = ArchiveKey(p_path);
+		if (!relative.empty())
+		{
+			if (const ShaderFile* source = FindShaderFile("Source/" + relative))
+			{
+				p_text.assign(reinterpret_cast<const char*>(source->data), source->size);
+				if (p_origin != nullptr)
+				{
+					*p_origin = source->name;
+				}
+				if (!g_reportedArchiveUse)
+				{
+					g_reportedArchiveUse = true;
+					std::cout << "[Shader] sources are read from the embedded archive ("
+						<< GetShaderArchive().count << " files packed); "
+						<< "the Shaders folder is not needed at run time." << std::endl;
+				}
+				return true;
+			}
+		}
+
 		if (const ShaderFile* file = FindShaderFile(p_path))
 		{
 			p_text.assign(reinterpret_cast<const char*>(file->data), file->size);

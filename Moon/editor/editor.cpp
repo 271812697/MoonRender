@@ -14,6 +14,7 @@
 #include "MulViewPanel.h"
 //#include "UI/ReousrcePanel/resourcePanel.h"
 #include "UI/LogPanel/LogPanel.h"
+#include "UI/ContentBrowser/ContentBrowserPanel.h"
 #include "UI/TaskPanel/TaskViewPanel.h"
 #include "editor/Toolbar/sketchToolbar.h"
 #include "editor/Toolbar/ContraintToolbar.h"
@@ -82,7 +83,6 @@ namespace MOON {
 			// compiles the source in process (MoonMatcLib), so the pipeline is exercised end to
 			// end without a rebuild.
 			auto materialPanel = new MaterialEditorPanel(self);
-			materialPanel->setAllowedAreas(Qt::AllDockWidgetAreas);
 			materialPanel->setWindowTitle(QApplication::translate("MaterialEditorPanel", "Material", nullptr));
 
 			auto taskViewPanel = new TaskViewPanel(self);
@@ -94,24 +94,30 @@ namespace MOON {
 			self->addDockWidget(Qt::RightDockWidgetArea,propertyPanel);
 			self->addDockWidget(Qt::RightDockWidgetArea, taskViewPanel);
 
-			// The material editor is a tool rather than part of the workspace layout: the View
-			// menu opens it, and it starts closed. It is still a dock, so it can sit next to the
-			// workspace or be undocked from its title bar when the comparison wants a whole
-			// screen.
-			self->addDockWidget(Qt::RightDockWidgetArea, materialPanel);
+			// The material editor is a window of its own (see MaterialEditorPanel): the content
+			// browser opens it on the material that was double-clicked, and it starts closed so
+			// it does not cover the workspace on startup.
 			materialPanel->hide();
 
-			/*auto resourcePanelDock = new ResPanel(self);
-			self->addDockWidget(Qt::RightDockWidgetArea, resourcePanelDock);*/
 			auto logPanelDock = new LogPanel(self);
 			self->addDockWidget(Qt::BottomDockWidgetArea, logPanelDock);
+
+			// The content browser sits in the same bottom area as the log: materials and
+			// textures are workspace assets, so it belongs to the workspace pages rather than
+			// to the tool windows. The View menu can still hide it.
+			auto contentBrowser = new ContentBrowserPanel(self);
+			contentBrowser->setAllowedAreas(Qt::AllDockWidgetAreas);
+			self->addDockWidget(Qt::BottomDockWidgetArea, contentBrowser);
+			self->tabifyDockWidget(logPanelDock, contentBrowser);
+			contentBrowser->raise();
 			//auto debugWidget = new DebugWidget(self);
 			//self->addDockWidget(Qt::LeftDockWidgetArea, debugWidget);
 			//self->tabifyDockWidget(HierarchypanelDock, debugWidget);
 
 			// The panels that belong to the workspace. The material editor is not one of them: it
 			// is a tool toggled from the View menu, so it keeps its state across pages.
-			mDocks = { hierarchypanel, settingPanel, propertyPanel, taskViewPanel, logPanelDock };
+			mDocks = { hierarchypanel, settingPanel, propertyPanel, taskViewPanel, logPanelDock,
+				contentBrowser };
 			QObject::connect(
 				pages, &QStackedWidget::currentChanged, self, [this](int p_index) {
 					// The panels are part of the workspace: there is no document to show

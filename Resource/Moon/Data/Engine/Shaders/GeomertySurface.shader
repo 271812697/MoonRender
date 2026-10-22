@@ -32,31 +32,35 @@ material {
         { type : float,     name : edgeOpacity, default : 1.0, label : "Edge Opacity", group : "Edge", min : 0.0, max : 1.0, step : 0.005 },
 
         { type : sampler2D, name : u_AlbedoMap, label : "Albedo Map", group : "Textures" },
-        { type : float4,    name : u_Albedo, default : vec4(1.0), label : "Base Color", group : "Base", color : true },
+        { type : float4,    name : u_Albedo, default : vec4(0.7215686, 0.7215686, 0.7215686, 1.0), label : "Base Color", group : "Base", color : true },
         { type : sampler2D, name : u_NormalMap, label : "Normal Map", group : "Textures" },
         { type : bool,      name : u_UseNormalMap, default : false, label : "Use Normal Map", group : "Base" },
+        // Filament's per-material specularAntiAliasing (GEOMETRIC_SPECULAR_AA). Kept equal to
+        // FilamentPBR.mat so the CAD face and the alignment material start from the same state.
+        { type : bool,      name : u_SpecularAA, default : false, label : "Specular AA", group : "Base" },
         { type : sampler2D, name : u_AmbientOcclusionMap, label : "Ambient Occlusion Map", group : "Textures" },
 
         { type : sampler2D, name : u_EmissiveMap, label : "Emissive Map", group : "Textures" },
         { type : float3,    name : u_EmissiveColor, default : vec3(0.0, 0.0, 0.0), label : "Emissive Color", group : "Base", color : true },
-        { type : float,     name : u_EmissiveIntensity, default : 1.0, label : "Emissive Intensity", group : "Base", min : 0.0, max : 10.0, step : 0.01 },
+        { type : float,     name : u_EmissiveIntensity, default : 0.0, label : "Emissive Intensity", group : "Base", min : 0.0, max : 10.0, step : 0.01 },
 
         { type : sampler2D, name : u_MetallicMap, label : "Metallic Map", group : "Textures" },
-        { type : float,     name : u_Metallic, default : 0.8, label : "Metallic", group : "Base", min : 0.0, max : 1.0, step : 0.005 },
+        { type : float,     name : u_Metallic, default : 0.0, label : "Metallic", group : "Base", min : 0.0, max : 1.0, step : 0.005 },
         { type : sampler2D, name : u_RoughnessMap, label : "Roughness Map", group : "Textures" },
         { type : float,     name : u_Roughness, default : 0.4, label : "Roughness", group : "Base", min : 0.0, max : 1.0, step : 0.005 },
 
-        // Filament standard model inputs, the same set FilamentPBR.mat exposes. Defaults are
-        // the material values used by the CAD face baseline.
-        { type : float,     name : u_Reflectance, default : 0.42, label : "Reflectance", group : "Base", min : 0.0, max : 1.0, step : 0.005 },
-        { type : float,     name : u_ClearCoat, default : 1.0, label : "Clear Coat", group : "Base", min : 0.0, max : 1.0, step : 0.005 },
-        { type : float,     name : u_ClearCoatRoughness, default : 0.53, label : "Clear Coat Roughness", group : "Base", min : 0.0, max : 1.0, step : 0.005 },
-        { type : float,     name : u_Thickness, default : 10.0, label : "Thickness", group : "Parameters", min : 0.0, max : 10.0, step : 0.01 },
-        { type : float,     name : u_SpecularFactor, default : 0.0, label : "Specular Factor", group : "Base", min : 0.0, max : 1.0, step : 0.005 },
-        { type : float3,    name : u_SpecularColorFactor, default : vec3(1.0, 0.8117647, 0.7490196), label : "Specular Color Factor", group : "Base", color : true },
+        // Filament standard model inputs, the same set and the same defaults as FilamentPBR.mat
+        // (which in turn match Qt-Filament's MaterialPreview()): base #b8b8b8, metallic 0,
+        // roughness 0.40, reflectance 0.5, no clear coat.
+        { type : float,     name : u_Reflectance, default : 0.5, label : "Reflectance", group : "Base", min : 0.0, max : 1.0, step : 0.005 },
+        { type : float,     name : u_ClearCoat, default : 0.0, label : "Clear Coat", group : "Base", min : 0.0, max : 1.0, step : 0.005 },
+        { type : float,     name : u_ClearCoatRoughness, default : 0.0, label : "Clear Coat Roughness", group : "Base", min : 0.0, max : 1.0, step : 0.005 },
+        { type : float,     name : u_Thickness, default : 1.0, label : "Thickness", group : "Parameters", min : 0.0, max : 10.0, step : 0.01 },
+        { type : float,     name : u_SpecularFactor, default : 1.0, label : "Specular Factor", group : "Base", min : 0.0, max : 1.0, step : 0.005 },
+        { type : float3,    name : u_SpecularColorFactor, default : vec3(1.0), label : "Specular Color Factor", group : "Base", color : true },
         { type : float3,    name : u_Absorption, default : vec3(0.0), label : "Absorption", group : "Parameters", color : true },
 
-        { type : float,     name : u_RefractionIndex, default : 2.94, label : "Refraction Index", group : "Parameters", min : 1.0, max : 3.0, step : 0.01 },       // 1.0 = air, 1.33 = water, 1.5 = glass, etc.
+        { type : float,     name : u_RefractionIndex, default : 1.5, label : "Refraction Index", group : "Parameters", min : 1.0, max : 3.0, step : 0.01 },       // 1.0 = air, 1.33 = water, 1.5 = glass, etc.
         { type : float,     name : u_Transmission, default : 0.0, label : "Transmission", group : "Parameters", min : 0.0, max : 1.0, step : 0.005 },          // 0.0 = opaque, 1.0 = fully transmissive
 
         // The Transparents pass: the depth peel this material is drawn with when it is the
@@ -230,7 +234,7 @@ in GS_OUT
 // model helpers; only the CAD-specific normal mapping below is kept here.
 
 
-vec3 getNormalFromMap(vec3 Normal)
+vec3 getNormalFromMap(vec3 Normal, bool backFace)
 {
     vec3 tangentNormal = texture(u_NormalMap, fs_in.TexCoords).xyz * 2.0 - 1.0;
 
@@ -241,7 +245,14 @@ vec3 getNormalFromMap(vec3 Normal)
 
     vec3 N   = normalize(Normal);
     vec3 T  = normalize(Q1*st2.t - Q2*st1.t);
-    vec3 B  = -normalize(cross(N, T));
+    // Filament flips the whole tangent frame on a back face (n, t and b). N is already
+    // flipped by the caller; flipping T too and using the opposite bitangent sign gives
+    // exactly (-T, -B, -N), so a normal map on a double-sided face keeps its handedness.
+    if (backFace)
+    {
+        T = -T;
+    }
+    vec3 B  = (backFace ? 1.0 : -1.0) * normalize(cross(N, T));
     mat3 TBN = mat3(T, B, N);
 
     return normalize(TBN * tangentNormal);
@@ -300,13 +311,14 @@ void main()
     if(ubo_CameraType==0){
        VD=vec3(ubo_View[0][2],ubo_View[1][2],ubo_View[2][2]);
     }
-    if(dot(VD,normal)<0.0f){
-        normal=-normal;
-    } 
-    vec3 gnormal=normal;
+    const bool backFace = dot(VD, normal) < 0.0f;
+    if (backFace) {
+        normal = -normal;
+    }
+    vec3 gnormal = normal;
 
     if (u_UseNormalMap) {
-        normal=getNormalFromMap(normal);
+        normal = getNormalFromMap(normal, backFace);
     }
 
     const float metallic = texture(u_MetallicMap, texCoords).r * u_Metallic;
@@ -361,11 +373,15 @@ void main()
     // colour separately); the shared function does not read this field.
     material.emissive = vec3(0.0);
 
-    // Filament's specular AA, as in FilamentPBR: widen the roughness where the shading normal
-    // changes quickly across the pixel.
+    // Filament's specular AA (GEOMETRIC_SPECULAR_AA): widen the roughness where the geometric
+    // normal changes quickly across the pixel. It is per material; the CAD face keeps it on.
     FilamentMaterialInputs filteredMaterial = material;
-    filteredMaterial.roughness = normalFiltering(material.roughness, normal);
-    const PixelParams pixel = preparePixelParams(filteredMaterial, normal, VD, _BRDFLut);
+    if (u_SpecularAA)
+    {
+        filteredMaterial.roughness = normalFiltering(material.roughness, gnormal);
+        filteredMaterial.clearCoatRoughness = normalFiltering(material.clearCoatRoughness, gnormal);
+    }
+    const PixelParams pixel = preparePixelParams(filteredMaterial, normal, VD, _BRDFLut, gnormal);
     vec3 pbr = evaluateFilamentSurface(
         material, pixel, fs_in.FragPos, normal, VD,
         _IrradianceCube, _PrefilterCube, _ShadowMap, _LightSpaceMatrix, _BRDFLut);

@@ -1,10 +1,11 @@
-﻿#include "visibleview.h"
+#include "visibleview.h"
 #include "editor/UI/TreeViewPanel/hierarchypanel.h"
 #include "editor/UI/SettingPanel/SettingPanel.h"
 #include "editor/UI/PropertyPanel/PropertyPanel.h"
 #include "editor/UI/TaskPanel/TaskViewPanel.h"
 #include "editor/UI/MaterialPanel/MaterialEditorPanel.h"
 #include "editor/UI/LogPanel/LogPanel.h"
+#include "editor/UI/ContentBrowser/ContentBrowserPanel.h"
 #include "Core/Global/ServiceLocator.h"
 #include "core/log.h"
 #include "renderer/SceneView.h"
@@ -41,12 +42,22 @@ namespace MOON {
 		menu->addAction(propertyPanel);
 		menu->addAction(taskViewPanel);
 
-		// The material editor is a tool window, not part of the workspace layout: it starts
-		// closed and this action is its switch. The action is the dock's own toggle, so the
-		// check mark also follows the panel's title bar close button.
-		auto* materialEditor = GetService(MOON::MaterialEditorPanel).toggleViewAction();
-		materialEditor->setText(VisibleViewCommand::tr("Material Editor"));
+		// The material editor is a window of its own; this action opens it (the content browser
+		// opens it too, on the material that was double-clicked).
+		auto* materialEditor = new QAction(VisibleViewCommand::tr("Material Editor"), this);
 		menu->addAction(materialEditor);
+		connect(materialEditor, &QAction::triggered, [] {
+			auto& panel = GetService(MOON::MaterialEditorPanel);
+			panel.show();
+			panel.raise();
+			panel.activateWindow();
+		});
+
+		// The content browser is a workspace panel, but its action is still the dock's own
+		// toggle so the check mark follows the title bar's close button.
+		auto* contentBrowser = GetService(MOON::ContentBrowserPanel).toggleViewAction();
+		contentBrowser->setText(VisibleViewCommand::tr("Content Browser"));
+		menu->addAction(contentBrowser);
 
 		menu->addAction(logPanel);
 

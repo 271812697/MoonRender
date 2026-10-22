@@ -1,6 +1,7 @@
 // Filament standard model - material inputs and per-pixel parameters.
-// Ported from filament/shaders/src/surface_shading_parameters.fs. Only the fields the
-// standard model reads are kept; the material DSL's own uniforms stay in the material.
+// Ported from filament/shaders/src/surface_shading_parameters.fs and the get*PixelParams()
+// functions in surface_shading_lit.fs. Only the fields the standard model reads are kept;
+// the material DSL's own uniforms stay in the material.
 
 struct FilamentMaterialInputs
 {
@@ -35,14 +36,17 @@ struct PixelParams
     float refractionIndex;
     float clearCoat;
     float clearCoatRoughness;
+    // Filament shades the clear coat with the geometric normal when the base layer has a
+    // normal map (surface_light_indirect.fs: "we want to use the geometric normal for the
+    // clear coat layer"), so the coat stays smooth instead of picking up the map's detail.
+    vec3 clearCoatNormal;
     float thickness;
 };
 
-PixelParams preparePixelParams(FilamentMaterialInputs material, vec3 n, vec3 v, sampler2D dfgLut)
+PixelParams preparePixelParams(FilamentMaterialInputs material, vec3 n, vec3 v,
+    sampler2D dfgLut, vec3 geometricNormal)
 {
     PixelParams pixel;
-    pixel.perceptualRoughness = clamp(material.roughness, 0.045, 1.0);
-    pixel.roughness = pixel.perceptualRoughness * pixel.perceptualRoughness;
     pixel.diffuseColor = material.baseColor * (1.0 - material.metallic);
 
     // Filament surface_shading_lit.fs: with specularFactor/specularColorFactor the dielectric
@@ -60,7 +64,28 @@ PixelParams preparePixelParams(FilamentMaterialInputs material, vec3 n, vec3 v, 
     pixel.refractionIndex = material.refractionIndex;
     pixel.clearCoat = saturate(material.clearCoat);
     pixel.clearCoatRoughness = clamp(material.clearCoatRoughness, 0.045, 1.0);
+    pixel.clearCoatNormal = geometricNormal;
     pixel.thickness = max(material.thickness, 0.0);
+
+    // Filament getClearCoatPixelParams() with CLEAR_COAT_IOR_CHANGE (on by default in
+    // Filament's MaterialBuilder): the base F0 was computed for an air -> 1.5 interface, but
+    // under the clear coat the interface is 1.5 -> 1.5.
+    if (pixel.clearCoat > 0.0)
+    {
+        pixel.f0 = mix(pixel.f0, f0ClearCoatToSurface(pixel.f0), pixel.clearCoat);
+    }
+
+    // Filament getRoughnessPixelParams(): the layer under the clear coat must be at least as
+    // rough as the coat itself (the coat diffuses it), blended by the coat weight. The CAD
+    // baseline (clearCoat 1, clearCoatRoughness 0.53, roughness 0.4) lands on 0.53, not 0.4.
+    float perceptualRoughness = clamp(material.roughness, 0.045, 1.0);
+    if (pixel.clearCoat > 0.0)
+    {
+        const float basePerceptualRoughness = max(perceptualRoughness, pixel.clearCoatRoughness);
+        perceptualRoughness = mix(perceptualRoughness, basePerceptualRoughness, pixel.clearCoat);
+    }
+    pixel.perceptualRoughness = perceptualRoughness;
+    pixel.roughness = perceptualRoughness * perceptualRoughness;
 
     const float NoV = max(dot(n, v), 1.0e-4);
     // Filament's split-sum DFG LUT. The LUT is a view-global texture bound by the renderer

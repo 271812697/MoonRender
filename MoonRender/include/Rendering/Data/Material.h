@@ -71,6 +71,12 @@ namespace Rendering::Data
 			Rendering::HAL::Texture* p_brdfLut = nullptr
 		);
 		void UpdateProperties();
+		/** Puts one parameter back to the initialiser its .shader declared. Engine-owned
+		 * parameters (ui : false - the view's IBL cubes, the DFG LUT, the CAD domain colour
+		 * buffer, the depth-peel textures) are left untouched: they are bound by the renderer
+		 * or the actor, not by the material panel. Returns false when the parameter is
+		 * unknown, not a UI parameter, or has no declared default. */
+		bool ResetPropertyToDefault(const std::string& p_name);
 		/** Binds a texture the view owns (not the material) on every draw.
 		 *
 		 * Sampler bindings normally ride along with UploadProperties, which only runs when

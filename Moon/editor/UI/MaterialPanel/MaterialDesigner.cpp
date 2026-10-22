@@ -13,22 +13,14 @@
 #include <utility>
 #include <vector>
 
-#include <QAction>
 #include <QComboBox>
 #include <QDateTime>
-#include <QDialog>
-#include <QDialogButtonBox>
-#include <QFileInfo>
-#include <QFormLayout>
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QImage>
-#include <QInputDialog>
 #include <QKeySequence>
 #include <QLabel>
 #include <QLineEdit>
-#include <QListWidget>
-#include <QMenu>
 #include <QMessageBox>
 #include <QMetaType>
 #include <QPainter>
@@ -49,6 +41,7 @@
 #include "Core/SceneSystem/SceneManager.h"
 #include "Rendering/Context/Driver.h"
 #include "Rendering/Resources/Shader.h"
+#include "Rendering/Resources/ShaderArchive.h"
 #include "Rendering/Resources/Loaders/ShaderLoader.h"
 #include "Matc.h"
 #include <iostream>
@@ -65,10 +58,8 @@
 #include "Widgets/SliderIntProperty.h"
 #include "Widgets/Vec2Property.h"
 #include "core/ECS/Actor.h"
-#include "core/ECS/Components/CMaterialRenderer.h"
 #include "editor/UI/PropertyPanel/Collapsiblegroupboxwidget.h"
 #include "renderer/Context.h"
-#include "renderer/SceneView.h"
 
 namespace MOON
 {
@@ -496,7 +487,7 @@ namespace MOON
 
 		/** A texture slot: the assets the engine ships as a combo box, a thumbnail next to it,
 		 * and the material property written straight away (a Texture* is what the upload binds;
-		 * its path is what the .ovmat stores). */
+		 * its path is what the .mat stores). */
 		class TextureSlotRow : public QWidget
 		{
 		public:
@@ -668,7 +659,7 @@ namespace MOON
 			QComboBox* m_combo = nullptr;
 		};
 
-		/** ":Shaders\\Standard.mat" for "Standard.mat", the key the shader manager is keyed by. */
+		/** ":Shaders\\Standard.shader" for "Standard.shader", the key the shader manager is keyed by. */
 		std::string ToShaderKey(const std::string& p_relative)
 		{
 			std::string key = ":Shaders\\";
@@ -679,31 +670,6 @@ namespace MOON
 			return key;
 		}
 
-		/** The little square a browser row shows until its material has been previewed: a sphere
-		 * outline on the panel's dark background, so the list keeps its rhythm. */
-		QIcon PlaceholderThumbnail()
-		{
-			static const QIcon icon = [] {
-				QPixmap pixmap(44, 44);
-				pixmap.fill(Qt::transparent);
-
-				QPainter painter(&pixmap);
-				painter.setRenderHint(QPainter::Antialiasing, true);
-				painter.setPen(QPen(QColor(0x4a, 0x4a, 0x50), 1.0));
-				painter.setBrush(QColor(0x2c, 0x2c, 0x30));
-				painter.drawRoundedRect(QRectF(0.5, 0.5, 43.0, 43.0), 4.0, 4.0);
-
-				painter.setPen(QPen(QColor(0x6f, 0x75, 0x7e), 1.2));
-				painter.setBrush(Qt::NoBrush);
-				painter.drawEllipse(QPointF(22.0, 22.0), 11.0, 11.0);
-				painter.setPen(QPen(QColor(0x55, 0x5b, 0x63), 1.0));
-				painter.drawArc(QRectF(14.0, 18.0, 16.0, 8.0), 0, 180 * 16);
-				painter.end();
-
-				return QIcon(pixmap);
-			}();
-			return icon;
-		}
 	}
 
 	MaterialDesigner::MaterialDesigner(QWidget* p_parent) : QWidget(p_parent)
@@ -746,59 +712,57 @@ namespace MOON
 		barLayout->setContentsMargins(6, 5, 6, 5);
 		barLayout->setSpacing(4);
 
-		m_new = new QToolButton(bar);
-		m_new->setObjectName("MaterialButton");
-		m_new->setText(QStringLiteral("New"));
-		m_new->setToolTip(QStringLiteral("Create a material from a shader"));
-		m_new->setCursor(Qt::PointingHandCursor);
-
-		m_duplicate = new QToolButton(bar);
-		m_duplicate->setObjectName("MaterialButton");
-		m_duplicate->setText(QStringLiteral("Duplicate"));
-		m_duplicate->setToolTip(QStringLiteral("Save a copy of this material under a new name"));
-		m_duplicate->setCursor(Qt::PointingHandCursor);
-
 		m_revert = new QToolButton(bar);
 		m_revert->setObjectName("MaterialButton");
 		m_revert->setText(QStringLiteral("Revert"));
-		m_revert->setToolTip(QStringLiteral("Discard the edits and read the .ovmat from disk again"));
+		m_revert->setToolTip(QStringLiteral("Discard the edits and read the .mat from disk again"));
 		m_revert->setCursor(Qt::PointingHandCursor);
 
 		m_save = new QToolButton(bar);
 		m_save->setObjectName("MaterialPrimaryButton");
 		m_save->setText(QStringLiteral("Save"));
-		m_save->setToolTip(QStringLiteral("Write the .ovmat back to disk"));
+		m_save->setToolTip(QStringLiteral("Write the .mat back to disk"));
 		m_save->setCursor(Qt::PointingHandCursor);
 
-		m_assign = new QToolButton(bar);
-		m_assign->setObjectName("MaterialButton");
-		m_assign->setText(QStringLiteral("Assign"));
-		m_assign->setToolTip(QStringLiteral("Give this material to the selected actor"));
-		m_assign->setCursor(Qt::PointingHandCursor);
-
 		barLayout->addStretch(1);
-		barLayout->addWidget(m_new);
-		barLayout->addWidget(m_duplicate);
 		barLayout->addWidget(m_revert);
 		barLayout->addWidget(m_save);
-		barLayout->addWidget(m_assign);
 		layout->addWidget(bar);
 
-		// --- the browser and the generated form -----------------------------------------------
-		auto* content = new QSplitter(Qt::Horizontal, this);
-		content->setHandleWidth(4);
-		content->setChildrenCollapsible(false);
+		// --- which shader this material instances ---------------------------------------------
+		// A .mat stores the .shader it references; the row makes that relationship visible and
+		// lets it be changed without editing the XML by hand.
+		auto* shaderRow = new QWidget(this);
+		shaderRow->setObjectName("MaterialDesignerShaderRow");
+		shaderRow->setAttribute(Qt::WA_StyledBackground, true);
+		auto* shaderLayout = new QHBoxLayout(shaderRow);
+		shaderLayout->setContentsMargins(6, 0, 6, 4);
+		shaderLayout->setSpacing(6);
 
-		m_browser = new QListWidget(content);
-		m_browser->setObjectName("MaterialBrowser");
-		m_browser->setUniformItemSizes(true);
-		m_browser->setIconSize(QSize(44, 44));
-		m_browser->setSelectionMode(QAbstractItemView::SingleSelection);
-		m_browser->setMinimumWidth(120);
-		m_browser->setMaximumWidth(280);
-		m_browser->setToolTip(QStringLiteral("The material assets under Engine/Materials"));
+		auto* shaderLabel = new QLabel(QStringLiteral("Shader"), shaderRow);
+		m_shaderPicker = new QComboBox(shaderRow);
+		m_shaderPicker->setMinimumContentsLength(30);
+		m_shaderPicker->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLength);
+		m_shaderPicker->setToolTip(QStringLiteral("The .shader this .mat references"));
 
-		m_scroll = new QScrollArea(content);
+		shaderLayout->addWidget(shaderLabel);
+		shaderLayout->addWidget(m_shaderPicker, 1);
+		layout->addWidget(shaderRow);
+
+		PopulateShaderPicker();
+		QObject::connect(m_shaderPicker, QOverload<int>::of(&QComboBox::activated), this,
+			[this](int p_index) {
+				if (m_material != nullptr)
+				{
+					SetShader(m_shaderPicker->itemText(p_index).toStdString());
+				}
+			});
+
+		// --- the generated form ---------------------------------------------------------------
+		// The material list that used to sit here moved to the content browser: it lists the
+		// same .mat files with rendered thumbnails and opens one through OpenMaterial, so
+		// the designer is the form and the preview only.
+		m_scroll = new QScrollArea(this);
 		m_scroll->setObjectName("MaterialDesignerScroll");
 		m_scroll->setWidgetResizable(true);
 		m_scroll->setFrameShape(QFrame::NoFrame);
@@ -812,12 +776,7 @@ namespace MOON
 		m_formLayout->setSpacing(0);
 		m_scroll->setWidget(m_form);
 
-		content->addWidget(m_browser);
-		content->addWidget(m_scroll);
-		content->setStretchFactor(0, 0);
-		content->setStretchFactor(1, 1);
-		content->setSizes({ 150, 420 });
-		layout->addWidget(content, 1);
+		layout->addWidget(m_scroll, 1);
 
 		m_status = new QLabel(this);
 		m_status->setObjectName("MaterialDesignerStatus");
@@ -827,40 +786,8 @@ namespace MOON
 		m_status->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
 		layout->addWidget(m_status);
 
-		QObject::connect(m_browser, &QListWidget::currentRowChanged,
-			this, [this](int p_index) { OnMaterialSelected(p_index); });
-		QObject::connect(m_new, &QToolButton::clicked, this, [this] { NewMaterial(); });
-		QObject::connect(m_duplicate, &QToolButton::clicked, this, [this] { DuplicateMaterial(); });
 		QObject::connect(m_revert, &QToolButton::clicked, this, [this] { RevertMaterial(); });
 		QObject::connect(m_save, &QToolButton::clicked, this, [this] { SaveMaterial(); });
-		QObject::connect(m_assign, &QToolButton::clicked, this, [this] { AssignToSelection(); });
-
-		// Right-clicking the browser is where the destructive action lives: a material an actor
-		// is drawing cannot be deleted, so Delete explains itself instead of being a button that
-		// always looks available.
-		m_browser->setContextMenuPolicy(Qt::CustomContextMenu);
-		QObject::connect(m_browser, &QWidget::customContextMenuRequested, this,
-			[this](const QPoint& p_position) {
-				if (auto* item = m_browser->itemAt(p_position); item != nullptr)
-				{
-					m_browser->setCurrentItem(item);
-				}
-				QMenu menu(this);
-				QAction* undo = menu.addAction(QStringLiteral("Undo"));
-				undo->setShortcut(QKeySequence::Undo);
-				undo->setEnabled(!m_undo.empty());
-				QAction* redo = menu.addAction(QStringLiteral("Redo"));
-				redo->setShortcut(QKeySequence::Redo);
-				redo->setEnabled(!m_redo.empty());
-				menu.addSeparator();
-				QAction* duplicate = menu.addAction(QStringLiteral("Duplicate"));
-				QAction* remove = menu.addAction(QStringLiteral("Delete"));
-				QAction* chosen = menu.exec(m_browser->mapToGlobal(p_position));
-				if (chosen == undo) { Undo(); }
-				else if (chosen == redo) { Redo(); }
-				else if (chosen == duplicate) { DuplicateMaterial(); }
-				else if (chosen == remove) { DeleteMaterial(); }
-			});
 
 		// Undo/redo are scoped to the designer's page, so the shader editor in the other page
 		// keeps its own undo stack.
@@ -919,6 +846,15 @@ namespace MOON
 		std::ranges::sort(m_textures, {}, &TextureAsset::key);
 	}
 
+	void MaterialDesigner::OpenMaterial(const std::string& p_key)
+	{
+		// Do not pre-set m_selectedKey: LoadMaterial compares the key against it to decide
+		// whether the material is already loaded, and setting it first would make every open
+		// take that shortcut - the new material never loaded, the title and the preview stayed
+		// on the previous one.
+		LoadMaterial(p_key);
+	}
+
 	void MaterialDesigner::Refresh()
 	{
 		ScanTextures();
@@ -932,57 +868,29 @@ namespace MOON
 
 	void MaterialDesigner::RefreshMaterialList(const std::string& p_select)
 	{
-		const std::string select = p_select.empty() ? m_selectedKey : p_select;
+		std::string select = p_select.empty() ? m_selectedKey : p_select;
 
-		m_browser->blockSignals(true);
-		m_browser->clear();
-		m_materialKeys.clear();
-
-		std::vector<std::string> files;
-		std::error_code error;
-		for (const auto& entry : std::filesystem::directory_iterator(m_materialsRoot, error))
+		if (select.empty())
 		{
-			if (entry.is_regular_file() && entry.path().extension() == ".ovmat")
+			// Opened on its own (the View menu) rather than through the content browser: start
+			// with the first asset in the folder, sorted so the choice is stable.
+			std::vector<std::string> files;
+			std::error_code error;
+			for (const auto& entry : std::filesystem::directory_iterator(m_materialsRoot, error))
 			{
-				files.push_back(entry.path().filename().generic_string());
+				if (entry.is_regular_file() && entry.path().extension() == ".mat")
+				{
+					files.push_back(entry.path().filename().generic_string());
+				}
+			}
+			std::ranges::sort(files);
+			if (!files.empty())
+			{
+				select = ":Materials/" + files.front();
 			}
 		}
-		std::ranges::sort(files);
 
-		for (const std::string& file : files)
-		{
-			const std::string key = ":Materials/" + file;
-			m_materialKeys.push_back(key);
-
-			auto* item = new QListWidgetItem(QString::fromStdString(std::filesystem::path(file).stem().string()));
-			item->setToolTip(QString::fromStdString(key));
-			if (const auto thumbnail = m_thumbnails.find(key); thumbnail != m_thumbnails.end())
-			{
-				item->setIcon(thumbnail->second);
-			}
-			else
-			{
-				item->setIcon(PlaceholderThumbnail());
-			}
-			m_browser->addItem(item);
-		}
-		m_browser->blockSignals(false);
-
-		int index = -1;
-		for (size_t i = 0; i < m_materialKeys.size(); ++i)
-		{
-			if (m_materialKeys[i] == select)
-			{
-				index = static_cast<int>(i);
-				break;
-			}
-		}
-		if (index < 0 && !m_materialKeys.empty())
-		{
-			index = 0;
-		}
-
-		if (index < 0)
+		if (select.empty())
 		{
 			m_material = nullptr;
 			m_selectedKey.clear();
@@ -991,28 +899,18 @@ namespace MOON
 			return;
 		}
 
-		m_browser->blockSignals(true);
-		m_browser->setCurrentRow(index);
-		m_browser->blockSignals(false);
-		OnMaterialSelected(index);
+		LoadMaterial(select);
 	}
 
-	void MaterialDesigner::OnMaterialSelected(int p_index)
+	void MaterialDesigner::LoadMaterial(const std::string& p_key)
 	{
-		if (p_index < 0 || p_index >= static_cast<int>(m_materialKeys.size()))
+		if (p_key == m_selectedKey && m_material != nullptr)
 		{
-			m_material = nullptr;
-			m_selectedKey.clear();
+			// Same material, but the shader behind it may have been hot reloaded. Emit the
+			// signal anyway: the preview and the window title are driven by it, and reopening
+			// the material is a request to show it again.
 			RebuildForm();
-			emit materialShown(nullptr);
-			return;
-		}
-
-		const std::string key = m_materialKeys[p_index];
-		if (key == m_selectedKey && m_material != nullptr)
-		{
-			// Same material, but the shader behind it may have been hot reloaded.
-			RebuildForm();
+			emit materialShown(m_material);
 			return;
 		}
 
@@ -1025,38 +923,160 @@ namespace MOON
 				return;
 			}
 			material = Core::Global::ServiceLocator::Get<Core::ResourceManagement::MaterialManager>()
-				.GetResource(key, true);
+				.GetResource(p_key, true);
 		}
 		if (material == nullptr)
 		{
-			SetStatus(QStringLiteral("Could not load ") + QString::fromStdString(key), true);
+			SetStatus(QStringLiteral("Could not load ") + QString::fromStdString(p_key), true);
 			return;
 		}
 
 		m_material = material;
-		m_selectedKey = key;
+		m_selectedKey = p_key;
 		m_dirty = false;
+
+		if (m_shaderPicker != nullptr)
+		{
+			const int index = m_shaderPicker->findText(QString::fromStdString(CurrentShaderKey()));
+			if (index >= 0)
+			{
+				m_shaderPicker->setCurrentIndex(index);
+			}
+		}
+
 		ResetHistory();
 		RebuildForm();
 		emit materialShown(m_material);
-		SetStatus(QString::fromStdString(key));
+		SetStatus(QString::fromStdString(p_key));
 	}
 
-	void MaterialDesigner::SetThumbnail(const QImage& p_image)
+	std::string MaterialDesigner::CurrentShaderKey() const
 	{
-		if (m_material == nullptr || m_selectedKey.empty() || p_image.isNull())
+		if (m_material == nullptr || m_material->GetShader() == nullptr)
+		{
+			return {};
+		}
+
+		std::string key = m_material->GetShader()->path;
+		std::replace(key.begin(), key.end(), '/', '\\');
+
+		const std::string prefix = ":Shaders\\";
+		if (key.rfind(prefix, 0) == 0)
+		{
+			return key;
+		}
+		if (const std::size_t at = key.find("Shaders\\"); at != std::string::npos)
+		{
+			return prefix + key.substr(at + 8);
+		}
+		return prefix + std::filesystem::path(key).filename().string();
+	}
+
+	void MaterialDesigner::PopulateShaderPicker()
+	{
+		if (m_shaderPicker == nullptr)
 		{
 			return;
 		}
 
-		const QImage scaled = p_image.scaled(44, 44, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-		m_thumbnails[m_selectedKey] = QIcon(QPixmap::fromImage(scaled));
+		m_shaderPicker->blockSignals(true);
+		m_shaderPicker->clear();
 
-		// The capture is of what the preview is showing, which is the current item.
-		if (auto* item = m_browser->currentItem(); item != nullptr)
+		// The release packs every .shader into the executable, so the folder may be absent:
+		// the archive is the list, with the disk only adding files newer than the last pack.
+		std::vector<std::string> names;
+		const Rendering::Resources::ShaderArchive& archive = Rendering::Resources::GetShaderArchive();
+		for (uint32_t i = 0; i < archive.count; ++i)
 		{
-			item->setIcon(m_thumbnails[m_selectedKey]);
+			std::string name = archive.files[i].name;
+			std::replace(name.begin(), name.end(), '\\', '/');
+			if (name.rfind("Source/", 0) == 0)
+			{
+				continue;
+			}
+			if (name.ends_with(".shader"))
+			{
+				names.push_back(std::move(name));
+			}
 		}
+
+		std::error_code error;
+		if (std::filesystem::exists(m_shadersRoot))
+		{
+			for (const auto& entry : std::filesystem::recursive_directory_iterator(m_shadersRoot, error))
+			{
+				if (entry.is_regular_file() && entry.path().extension() == ".shader")
+				{
+					names.push_back(
+						std::filesystem::relative(entry.path(), m_shadersRoot).generic_string());
+				}
+			}
+		}
+
+		std::ranges::sort(names);
+		names.erase(std::unique(names.begin(), names.end()), names.end());
+		for (std::string name : names)
+		{
+			std::replace(name.begin(), name.end(), '/', '\\');
+			m_shaderPicker->addItem(QString::fromStdString(":Shaders\\" + name));
+		}
+
+		const int index = m_shaderPicker->findText(QString::fromStdString(CurrentShaderKey()));
+		if (index >= 0)
+		{
+			m_shaderPicker->setCurrentIndex(index);
+		}
+		m_shaderPicker->blockSignals(false);
+	}
+
+	void MaterialDesigner::SetShader(const std::string& p_key)
+	{
+		if (m_material == nullptr)
+		{
+			return;
+		}
+
+		Rendering::Resources::Shader* shader = nullptr;
+		{
+			ModuleContextScope context;
+			if (!context)
+			{
+				SetStatus(QStringLiteral("The render context is not ready yet."), true);
+				return;
+			}
+			shader = Core::Global::ServiceLocator::Get<Core::ResourceManagement::ShaderManager>()
+				.GetResource(p_key, true);
+		}
+		if (shader == nullptr)
+		{
+			SetStatus(QStringLiteral("Could not load ") + QString::fromStdString(p_key), true);
+			return;
+		}
+
+		// Re-link the instance and regenerate its parameters from the new shader. The .mat is
+		// only written on Save, so this is an edit like any other (and Undo can take it back).
+		m_material->SetShader(shader);
+		m_material->GetProperties().clear();
+		m_material->UpdateProperties();
+		MarkDirty();
+		RebuildForm();
+		emit materialEdited();
+
+		if (m_shaderPicker != nullptr)
+		{
+			const int index = m_shaderPicker->findText(QString::fromStdString(p_key));
+			if (index >= 0)
+			{
+				m_shaderPicker->setCurrentIndex(index);
+			}
+		}
+		SetStatus(QStringLiteral("Shader ") + QString::fromStdString(p_key) + QStringLiteral(" - Save writes the .mat"));
+	}
+
+	void MaterialDesigner::SetThumbnail(const QImage&)
+	{
+		// The content browser renders its own thumbnails now (MaterialThumbnailRenderer); the
+		// designer has no list left to fill.
 	}
 
 	void MaterialDesigner::RebuildForm()
@@ -1167,7 +1187,7 @@ namespace MOON
 			}
 		}
 
-		// The instance's renderer state: what a .ovmat stores besides the parameters and the
+		// The instance's renderer state: what a .mat stores besides the parameters and the
 		// features. A material starts from the shader's material block (see Shader::State), and
 		// these are the overrides the designer can pin.
 		std::map<QString, std::string> stateNames;
@@ -1415,194 +1435,10 @@ namespace MOON
 		m_formLayout->addStretch();
 	}
 
-	void MaterialDesigner::NewMaterial()
-	{
-		QDialog dialog(this);
-		dialog.setWindowTitle(QStringLiteral("New Material"));
-		auto* form = new QFormLayout(&dialog);
-
-		auto* nameEdit = new QLineEdit(&dialog);
-		nameEdit->setPlaceholderText(QStringLiteral("MyMaterial"));
-		form->addRow(QStringLiteral("Name"), nameEdit);
-
-		auto* shaderPicker = new QComboBox(&dialog);
-		shaderPicker->setMinimumContentsLength(30);
-		shaderPicker->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLength);
-
-		std::vector<std::string> shaderKeys;
-		std::error_code error;
-		for (const auto& entry : std::filesystem::recursive_directory_iterator(m_shadersRoot, error))
-		{
-			if (!entry.is_regular_file() || entry.path().extension() != ".mat")
-			{
-				continue;
-			}
-			shaderKeys.push_back(ToShaderKey(
-				std::filesystem::relative(entry.path(), m_shadersRoot).generic_string()));
-		}
-		std::ranges::sort(shaderKeys);
-		for (const std::string& key : shaderKeys)
-		{
-			shaderPicker->addItem(QString::fromStdString(key));
-		}
-		form->addRow(QStringLiteral("Shader"), shaderPicker);
-
-		auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
-		form->addRow(buttons);
-		QObject::connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
-		QObject::connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
-
-		if (dialog.exec() != QDialog::Accepted)
-		{
-			return;
-		}
-
-		QString name = nameEdit->text().trimmed();
-		if (name.isEmpty())
-		{
-			SetStatus(QStringLiteral("A material needs a name."), true);
-			return;
-		}
-		if (name.contains('/') || name.contains('\\') || name.contains(QStringLiteral("..")))
-		{
-			SetStatus(QStringLiteral("The name cannot contain a path."), true);
-			return;
-		}
-		if (!name.endsWith(QStringLiteral(".ovmat")))
-		{
-			name += QStringLiteral(".ovmat");
-		}
-
-		const std::string key = ":Materials/" + name.toStdString();
-		const std::filesystem::path realPath = std::filesystem::path(m_materialsRoot) / name.toStdString();
-		if (std::filesystem::exists(realPath))
-		{
-			SetStatus(QStringLiteral("That material already exists."), true);
-			return;
-		}
-
-		const auto shaderKey = shaderPicker->currentText().toStdString();
-
-		Core::Resources::Material* created = nullptr;
-		std::string failure;
-		{
-			ModuleContextScope context;
-			if (!context)
-			{
-				failure = "The render context is not ready yet.";
-			}
-			else
-			{
-				auto* shader = Core::Global::ServiceLocator::Get<Core::ResourceManagement::ShaderManager>()
-					.GetResource(shaderKey, true);
-				if (shader == nullptr)
-				{
-					failure = "The shader could not be loaded.";
-				}
-				else
-				{
-					// Scaffold it, write it once, then load it through the manager: CreateResource
-					// is what gives the material its (const) resource path, so the designer never
-					// fabricates one.
-					Material scaffold;
-					scaffold.SetShader(shader);
-					Core::Resources::Loaders::MaterialLoader::Save(scaffold, realPath.string());
-					created = Core::Global::ServiceLocator::Get<Core::ResourceManagement::MaterialManager>()
-						.GetResource(key, true);
-					if (created == nullptr)
-					{
-						failure = "The new material could not be loaded back.";
-					}
-				}
-			}
-		}
-
-		if (created == nullptr)
-		{
-			SetStatus(QString::fromStdString(failure), true);
-			return;
-		}
-
-		m_selectedKey = key;
-		m_material = created;
-		m_dirty = false;
-		ResetHistory();
-		RefreshMaterialList(key);
-		SetStatus(QStringLiteral("Created ") + QString::fromStdString(realPath.filename().string()));
-	}
-
 	/** Saves the current (possibly edited) instance under a new name and opens the copy. What is
 	 * duplicated is what the designer shows, not what the file on disk happens to hold - that is
 	 * the usual "duplicate this and tweak it" workflow. */
-	void MaterialDesigner::DuplicateMaterial()
-	{
-		if (m_material == nullptr || m_selectedKey.empty())
-		{
-			SetStatus(QStringLiteral("Pick a material first."), true);
-			return;
-		}
-
-		const QString stem = QString::fromStdString(std::filesystem::path(m_selectedKey).stem().string());
-		bool accepted = false;
-		QString name = QInputDialog::getText(
-			this,
-			QStringLiteral("Duplicate Material"),
-			QStringLiteral("Name of the copy"),
-			QLineEdit::Normal,
-			stem + QStringLiteral(" Copy"),
-			&accepted).trimmed();
-
-		if (!accepted || name.isEmpty())
-		{
-			return;
-		}
-		if (!name.endsWith(QStringLiteral(".ovmat")))
-		{
-			name += QStringLiteral(".ovmat");
-		}
-		if (name.contains('/') || name.contains('\\') || name.contains(QStringLiteral("..")))
-		{
-			SetStatus(QStringLiteral("The name cannot contain a path."), true);
-			return;
-		}
-
-		const std::filesystem::path realPath = std::filesystem::path(m_materialsRoot) / name.toStdString();
-		if (std::filesystem::exists(realPath))
-		{
-			SetStatus(QStringLiteral("That material already exists."), true);
-			return;
-		}
-
-		Core::Resources::Loaders::MaterialLoader::Save(*m_material, realPath.string());
-
-		const std::string key = ":Materials/" + name.toStdString();
-		Core::Resources::Material* copy = nullptr;
-		{
-			ModuleContextScope context;
-			if (!context)
-			{
-				SetStatus(QStringLiteral("The render context is not ready yet."), true);
-				return;
-			}
-			copy = Core::Global::ServiceLocator::Get<Core::ResourceManagement::MaterialManager>()
-				.GetResource(key, true);
-		}
-		if (copy == nullptr)
-		{
-			SetStatus(QStringLiteral("The copy could not be loaded back."), true);
-			return;
-		}
-
-		m_selectedKey = key;
-		m_material = copy;
-		m_dirty = false;
-		ResetHistory();
-		RefreshMaterialList(key);
-		emit materialShown(m_material);
-		SetStatus(QStringLiteral("Duplicated to ") + name);
-	}
-
-	/** Reads the .ovmat from disk again, discarding whatever the designer changed in memory. The
+	/** Reads the .mat from disk again, discarding whatever the designer changed in memory. The
 	 * material instance is reloaded in place, so actors that already use it update too. */
 	void MaterialDesigner::RevertMaterial()
 	{
@@ -1644,83 +1480,6 @@ namespace MOON
 	/** Removes a material asset. Only when nothing in the current scene draws with it: an actor
 	 * keeps a raw pointer in its material renderer, and deleting the instance under it would
 	 * leave a dangling one. */
-	void MaterialDesigner::DeleteMaterial()
-	{
-		if (m_material == nullptr || m_selectedKey.empty())
-		{
-			SetStatus(QStringLiteral("Pick a material first."), true);
-			return;
-		}
-
-		Core::ECS::Actor* user = nullptr;
-		if (auto* scene = Core::Global::ServiceLocator::Get<Core::SceneSystem::SceneManager>().GetCurrentScene())
-		{
-			std::function<Core::ECS::Actor*(Core::ECS::Actor&)> findUser = [&](Core::ECS::Actor& p_actor)
-				-> Core::ECS::Actor* {
-				if (auto* renderer = p_actor.GetComponent<Core::ECS::Components::CMaterialRenderer>())
-				{
-					for (Core::Resources::Material* material : renderer->GetMaterials())
-					{
-						if (material == m_material)
-						{
-							return &p_actor;
-						}
-					}
-				}
-				for (Core::ECS::Actor* child : p_actor.GetChildren())
-				{
-					if (Core::ECS::Actor* found = findUser(*child))
-					{
-						return found;
-					}
-				}
-				return nullptr;
-			};
-
-			for (Core::ECS::Actor* actor : scene->GetActors())
-			{
-				if (Core::ECS::Actor* found = findUser(*actor))
-				{
-					user = found;
-					break;
-				}
-			}
-		}
-
-		if (user != nullptr)
-		{
-			SetStatus(QStringLiteral("In use by '%1' - assign another material first.")
-				.arg(QString::fromStdString(user->GetName())), true);
-			return;
-		}
-
-		const std::filesystem::path realPath =
-			std::filesystem::path(m_materialsRoot) / std::filesystem::path(m_selectedKey).filename();
-		const QString name = QString::fromStdString(realPath.filename().string());
-		if (QMessageBox::question(this, QStringLiteral("Delete Material"),
-			QStringLiteral("Delete %1 from disk?").arg(name),
-			QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
-		{
-			return;
-		}
-
-		// The preview holds a pointer as well: hand it the built-in material before this one dies.
-		emit materialShown(nullptr);
-
-		Core::Global::ServiceLocator::Get<Core::ResourceManagement::MaterialManager>()
-			.UnloadResource(m_selectedKey);
-		std::error_code error;
-		std::filesystem::remove(realPath, error);
-
-		m_thumbnails.erase(m_selectedKey);
-		m_material = nullptr;
-		m_selectedKey.clear();
-		m_dirty = false;
-		ResetHistory();
-		RefreshMaterialList();
-		SetStatus(QStringLiteral("Deleted ") + name);
-	}
-
 	void MaterialDesigner::SaveMaterial()
 	{
 		if (m_material == nullptr || m_selectedKey.empty())
@@ -1733,44 +1492,14 @@ namespace MOON
 			std::filesystem::path(m_materialsRoot) / std::filesystem::path(m_selectedKey).filename();
 		Core::Resources::Loaders::MaterialLoader::Save(*m_material, realPath.string());
 		m_dirty = false;
+		// The content browser's tile is a render of this instance; tell it the asset changed.
+		emit materialEdited();
 		SetStatus(QStringLiteral("Saved ") + QString::fromStdString(realPath.generic_string()));
 	}
 
-	void MaterialDesigner::AssignToSelection()
+	std::string MaterialDesigner::CurrentKey() const
 	{
-		if (m_material == nullptr)
-		{
-			SetStatus(QStringLiteral("Pick a material first."), true);
-			return;
-		}
-
-		auto& sceneView = Core::Global::ServiceLocator::Get<Editor::Panels::SceneView>();
-		auto* actor = sceneView.GetSelectedActor();
-		if (actor == nullptr)
-		{
-			SetStatus(QStringLiteral("Select an actor first."), true);
-			return;
-		}
-
-		auto* renderer = actor->GetComponent<Core::ECS::Components::CMaterialRenderer>();
-		if (renderer == nullptr)
-		{
-			// A topology shape keeps its face material on the AllFaces anchor (its edges and
-			// vertices keep theirs, so they are deliberately left alone).
-			if (auto* faces = actor->GetChild("AllFaces"); faces != nullptr)
-			{
-				renderer = faces->GetComponent<Core::ECS::Components::CMaterialRenderer>();
-			}
-		}
-		if (renderer == nullptr)
-		{
-			SetStatus(QStringLiteral("The selected actor has no material renderer."), true);
-			return;
-		}
-
-		renderer->FillWithMaterial(*m_material);
-		SetStatus(QStringLiteral("Assigned to ") + QString::fromStdString(actor->GetName()));
-		emit materialEdited();
+		return m_selectedKey;
 	}
 
 	void MaterialDesigner::RecompileMaterialFeatures()
@@ -1814,17 +1543,29 @@ namespace MOON
 				}
 			}
 		}
+		// A release has no Shaders folder: the source text rides in the archive instead.
+		std::string archiveSource;
+		std::string archiveName;
 		if (sourcePath.empty())
 		{
-			SetStatus(QStringLiteral("Cannot find the shader source for ") + QString::fromStdString(currentShader->path), true);
-			return;
+			if (!Rendering::Resources::ReadShaderSource(currentShader->path, archiveSource, &archiveName))
+			{
+				SetStatus(QStringLiteral("Cannot find the shader source for ")
+					+ QString::fromStdString(currentShader->path), true);
+				return;
+			}
 		}
+
+		const std::string sourceName = sourcePath.empty()
+			? std::filesystem::path(archiveName).filename().string()
+			: sourcePath.filename().string();
 
 		const Rendering::Data::FeatureSet& features = m_material->GetFeatures();
 		std::vector<std::string> sortedFeatures(features.begin(), features.end());
 		std::sort(sortedFeatures.begin(), sortedFeatures.end());
 
-		std::string cacheKey = sourcePath.string();
+		std::string cacheKey = sourcePath.empty()
+			? ":Shaders/" + sourceName : sourcePath.string();
 		for (const std::string& feature : sortedFeatures) { cacheKey += "|" + feature; }
 
 		// Recompiling is not free: the same (source, feature set) pair is reused across toggles.
@@ -1839,11 +1580,20 @@ namespace MOON
 		else
 		{
 			Moon::Matc::CompileOptions options;
-			options.displayName = sourcePath.filename().string();
-			options.includeDirs.push_back(includeDir.string());
+			options.displayName = sourceName;
+			if (!includeDir.empty())
+			{
+				options.includeDirs.push_back(includeDir.string());
+			}
 			options.enabledFeatures = sortedFeatures;
+			options.includeResolver = [](const std::string& p_name,
+				std::string& p_text, std::string& p_origin) {
+					return Rendering::Resources::ReadShaderSource(p_name, p_text, &p_origin);
+				};
 
-			const Moon::Matc::CompileResult result = Moon::Matc::CompileFile(sourcePath.string(), options);
+			const Moon::Matc::CompileResult result = sourcePath.empty()
+				? Moon::Matc::CompileSource(archiveSource, options)
+				: Moon::Matc::CompileFile(sourcePath.string(), options);
 			if (!result.success || result.package.empty())
 			{
 				SetStatus(QString::fromStdString(result.error), true);
@@ -1863,7 +1613,7 @@ namespace MOON
 			std::string error;
 			compiled = Rendering::Resources::Loaders::ShaderLoader::CreateFromPackage(
 				result.package.data(), static_cast<uint32_t>(result.package.size()),
-				sourcePath.filename().string(), &error);
+				sourceName, &error);
 			host->DoneCurrent();
 
 			if (compiled == nullptr)
@@ -1888,7 +1638,7 @@ namespace MOON
 		m_material->SetShader(compiled);
 		ApplySnapshot(snapshot);
 		MarkDirty();
-		SetStatus(QStringLiteral("Recompiled ") + QString::fromStdString(sourcePath.filename().string()) + QStringLiteral(" for the enabled features."));
+		SetStatus(QStringLiteral("Recompiled ") + QString::fromStdString(sourceName) + QStringLiteral(" for the enabled features."));
 	}
 
 	MaterialDesigner::Snapshot MaterialDesigner::Capture() const

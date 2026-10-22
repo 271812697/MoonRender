@@ -58,7 +58,7 @@ namespace
 Core::Rendering::HzbBuildPass::HzbBuildPass(::Rendering::Core::CompositeRenderer& p_renderer)
 	: ::Rendering::Core::ARenderPass(p_renderer)
 {
-	m_reduceMaterial.SetShader(GetShaderService[":Shaders\\PostProcess\\HzbReduce.mat"]);
+	m_reduceMaterial.SetShader(GetShaderService[":Shaders\\PostProcess\\HzbReduce.shader"]);
 	m_reduceMaterial.SetDepthTest(false);
 	m_reduceMaterial.SetDepthWriting(false);
 	m_reduceMaterial.SetColorWriting(true);

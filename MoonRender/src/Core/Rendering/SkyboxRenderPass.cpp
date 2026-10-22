@@ -49,14 +49,14 @@ namespace
 Core::Rendering::SkyboxRenderPass::SkyboxRenderPass(::Rendering::Core::CompositeRenderer& p_renderer) :
 	::Rendering::Core::ARenderPass(p_renderer)
 {
-	m_skyboxMaterial.SetShader(GetShaderService[":Shaders\\SkyboxConvert.mat"]);
+	m_skyboxMaterial.SetShader(GetShaderService[":Shaders\\SkyboxConvert.shader"]);
 	m_skyboxMaterial.SetBackfaceCulling(false);
-	m_skyboxIrrandianceMaterial.SetShader(GetShaderService[":Shaders\\SkyboxIrrandiance.mat"]);
+	m_skyboxIrrandianceMaterial.SetShader(GetShaderService[":Shaders\\SkyboxIrrandiance.shader"]);
 	m_skyboxIrrandianceMaterial.SetBackfaceCulling(false);
-	m_skyboxPrefilterMaterial.SetShader(GetShaderService[":Shaders\\SkyboxPrefilter.mat"]);
+	m_skyboxPrefilterMaterial.SetShader(GetShaderService[":Shaders\\SkyboxPrefilter.shader"]);
 	m_skyboxPrefilterMaterial.SetBackfaceCulling(false);
-	m_brdfMaterial.SetShader(GetShaderService[":Shaders\\BrdfLut.mat"]);
-	m_clearMaterial.SetShader(GetShaderService[":Shaders\\ClearBackground.mat"]);
+	m_brdfMaterial.SetShader(GetShaderService[":Shaders\\BrdfLut.shader"]);
+	m_clearMaterial.SetShader(GetShaderService[":Shaders\\ClearBackground.shader"]);
 }
 
 ::Rendering::HAL::Texture* Core::Rendering::SkyboxRenderPass::GetSkyBoxCube()
@@ -185,7 +185,7 @@ void Core::Rendering::SkyboxRenderPass::computeIrradianceSH()
 		{
 			const float xf = 2.0f * ((x + 0.5f) / width) - 1.0f;
 			const float phi = xf * kPi;
-			// Filament's IBL cube is mirrored on X (see SkyboxConvert.mat): the texel whose
+			// Filament's IBL cube is mirrored on X (see SkyboxConvert.shader): the texel whose
 			// equirect direction is (px, py, pz) is stored at (-px, py, pz). Project that
 			// direction, so the SH describes the same environment the specular cube holds.
 			const float px = -cosLat * std::sin(phi);
@@ -214,7 +214,7 @@ void Core::Rendering::SkyboxRenderPass::computeIrradianceSH()
 
 	stbi_image_free(pixels);
 
-	// Cosine-convolved irradiance E (the same convention as SkyboxIrrandiance.mat and
+	// Cosine-convolved irradiance E (the same convention as SkyboxIrrandiance.shader and
 	// therefore the existing IBL brightness): band scales PI, 2PI/3, PI/4.
 	for (int i = 0; i < 9; ++i)
 	{

@@ -161,14 +161,14 @@ namespace
 		SectionCapRenderPass(Rendering::Core::CompositeRenderer& p_renderer) :
 			SceneRenderPass(p_renderer)
 		{
-			m_capMaterial.SetShader(GetShaderService[":Shaders\\SectionCap.mat"]);
+			m_capMaterial.SetShader(GetShaderService[":Shaders\\SectionCap.shader"]);
 			m_capMaterial.SetBackfaceCulling(false);
 			m_capMaterial.SetFrontfaceCulling(false);
 			m_capMaterial.SetDepthWriting(true);
 			m_capMaterial.SetDepthTest(true);
 
 
-			m_parityMaterial.SetShader(GetShaderService[":Shaders\\SectionParity.mat"]);
+			m_parityMaterial.SetShader(GetShaderService[":Shaders\\SectionParity.shader"]);
 			m_parityMaterial.SetBackfaceCulling(false);
 			m_parityMaterial.SetFrontfaceCulling(false);
 			m_parityMaterial.SetDepthWriting(false);
@@ -263,7 +263,7 @@ namespace
 		SectionContourRenderPass(Rendering::Core::CompositeRenderer& p_renderer) :
 			SceneRenderPass(p_renderer)
 		{
-			m_contourMaterial.SetShader(GetShaderService[":Shaders\\SectionContour.mat"]);
+			m_contourMaterial.SetShader(GetShaderService[":Shaders\\SectionContour.shader"]);
 			m_contourMaterial.SetBackfaceCulling(false);
 			m_contourMaterial.SetFrontfaceCulling(false);
 			m_contourMaterial.SetDepthWriting(false);

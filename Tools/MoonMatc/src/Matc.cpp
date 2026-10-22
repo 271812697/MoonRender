@@ -1,6 +1,6 @@
 // MoonMatc - the offline half of the shader pipeline, the counterpart of Filament's matc.
 //
-// One .mat in, one .ovshader package out. The package holds what the runtime used to work
+// One .shader in, one .ovshader package out. The package holds what the runtime used to work
 // out on every launch: the final GLSL of every (pass, variant, stage), the reflection of the
 // material's parameters, and the variant list. A file that has not been migrated yet (no
 // material { } block) is copied through untouched, so the pipeline can take the shaders one
@@ -254,7 +254,7 @@ namespace
 	};
 
 	/** The 1-based line a fragment of the source starts on: the #line directives handed to
-	 * the driver point back here, so an error names the .mat line the user wrote. */
+	 * the driver point back here, so an error names the .shader line the user wrote. */
 	uint32_t LineOf(const std::string& p_text, const std::string& p_fragment)
 	{
 		const size_t at = p_text.find(p_fragment);
@@ -513,14 +513,36 @@ namespace
 	{
 		std::filesystem::path path;  // the file on disk
 		std::string relative;        // how #line should name it
+		std::string text;            // supplied by the resolver, when it handled the include
+		bool hasText = false;
 	};
 
 	/** Where one #include points, the way the engine's path parser resolves it: a leading
 	 * ':' marks an engine path, and the directories handed in with -I are the shader roots
 	 * the ":Shaders/" prefix stands for. A relative include is tried against them too, which
-	 * is what a file inside the tree gets for free. */
-	bool ResolveInclude(const std::string& p_target, const std::vector<std::string>& p_dirs, ResolvedInclude& p_out)
+	 * is what a file inside the tree gets for free.
+	 *
+	 * p_resolver runs first: a release build packs the headers into the executable and has no
+	 * directory to look in, while a development build simply leaves the resolver empty. */
+	bool ResolveInclude(
+		const std::string& p_target,
+		const std::vector<std::string>& p_dirs,
+		const IncludeResolver& p_resolver,
+		ResolvedInclude& p_out)
 	{
+		if (p_resolver)
+		{
+			std::string text;
+			std::string origin;
+			if (p_resolver(p_target, text, origin))
+			{
+				p_out.text = std::move(text);
+				p_out.relative = origin.empty() ? p_target : origin;
+				p_out.hasText = true;
+				return true;
+			}
+		}
+
 		std::string target = p_target;
 		if (!target.empty() && target.front() == ':')
 		{
@@ -562,6 +584,7 @@ namespace
 	bool ExpandIncludes(
 		const std::string& p_text,
 		const std::vector<std::string>& p_dirs,
+		const IncludeResolver& p_resolver,
 		const std::string& p_origin,
 		std::set<std::string>& p_visited,
 		std::string& p_out,
@@ -616,7 +639,7 @@ namespace
 
 				const std::string target = trimmed.substr(first + 1, last - first - 1);
 				ResolvedInclude resolved;
-				if (!ResolveInclude(target, p_dirs, resolved))
+				if (!ResolveInclude(target, p_dirs, p_resolver, resolved))
 				{
 					p_error = "cannot resolve #include \"" + target + "\" (" + currentFile
 						+ ", line " + std::to_string(nextLine) + ")";
@@ -634,16 +657,24 @@ namespace
 				}
 				p_visited.insert(resolved.relative);
 
-				bool readOk = false;
-				const std::string content = ReadFile(resolved.path, readOk);
-				if (!readOk)
+				std::string content;
+				if (resolved.hasText)
 				{
-					p_error = "cannot read \"" + resolved.path.string() + "\"";
-					return false;
+					content = std::move(resolved.text);
+				}
+				else
+				{
+					bool readOk = false;
+					content = ReadFile(resolved.path, readOk);
+					if (!readOk)
+					{
+						p_error = "cannot read \"" + resolved.path.string() + "\"";
+						return false;
+					}
 				}
 
 				std::string expanded;
-				if (!ExpandIncludes(content, p_dirs, resolved.relative, p_visited, expanded, p_error))
+				if (!ExpandIncludes(content, p_dirs, p_resolver, resolved.relative, p_visited, expanded, p_error))
 				{
 					return false;
 				}
@@ -704,7 +735,7 @@ namespace
 		out << "    m.emissive = vec4(0.0);\n"
 			<< "    m.normal = vec3(0.0, 0.0, 1.0);\n"
 			<< "}\n\n"
-			// The .mat files call it prepareMaterial(); keeping the alias means a shader
+			// The .shader files call it prepareMaterial(); keeping the alias means a shader
 			// written either way compiles.
 			<< "void prepareMaterial(out MaterialInputs m) { initMaterial(m); }\n\n"
 			// The shading model's verdict on the inputs. Unlit is the whole slice.
@@ -888,7 +919,7 @@ namespace
 	}
 
 	/** The vertex main: the transform the entry point is not allowed to touch. Copied from
-	 * what Unlit/Standard.mat do by hand today, and from filament's post_process_main.vs for
+	 * what Unlit/Standard.shader do by hand today, and from filament's post_process_main.vs for
 	 * the full-screen case.
 	 *
 	 * Only generated for a stage that does not own its main() - see BuildStage. */
@@ -1206,7 +1237,7 @@ namespace
 
 	/** One complete stage source: version, defines, prelude, the entry point, main.
 	 *
-	 * The #line directives point back into the .mat the user wrote, so a compile error names
+	 * The #line directives point back into the .shader the user wrote, so a compile error names
 	 * the file and the line it came from rather than a line of this concatenation - the same
 	 * job filament's Includes.cpp does for #include.
 	 *
@@ -1226,6 +1257,7 @@ namespace
 		const std::string& p_prelude,
 		const std::string& p_fileName,
 		const std::vector<std::string>& p_includeDirs,
+		const IncludeResolver& p_includeResolver,
 		std::string& p_error,
 		bool p_shared = false)
 	{
@@ -1276,7 +1308,7 @@ namespace
 		// compiled - there is no runtime pass left to do it once it is a package.
 		std::set<std::string> visited;
 		std::string expanded;
-		if (!ExpandIncludes(out.str(), p_includeDirs, p_fileName, visited, expanded, p_error))
+		if (!ExpandIncludes(out.str(), p_includeDirs, p_includeResolver, p_fileName, visited, expanded, p_error))
 		{
 			return {};
 		}
@@ -1394,6 +1426,7 @@ namespace
 	const std::string& dumpGlslDir = p_options.dumpGlslDir;
 	const std::string& dumpJsonPath = p_options.dumpJsonPath;
 	const std::vector<std::string>& includeDirs = p_options.includeDirs;
+	const IncludeResolver& includeResolver = p_options.includeResolver;
 	const bool preprocessOnly = p_options.preprocessOnly;
 
 	const std::string& text = p_sourceText;
@@ -1510,16 +1543,28 @@ namespace
 	std::string commonPrelude;
 	for (const std::string& relative : { "Common/Buffers/EngineUBO.glsl", "Common/Utils.glsl" })
 	{
-		for (const std::string& dir : includeDirs)
+		std::string content;
+		bool found = false;
+		if (includeResolver)
 		{
-			bool found = false;
-			const std::string candidate = (std::filesystem::path(dir) / relative).string();
-			const std::string content = ReadFile(candidate, found);
-			if (found)
+			std::string origin;
+			found = includeResolver(relative, content, origin);
+		}
+		if (!found)
+		{
+			for (const std::string& dir : includeDirs)
 			{
-				commonPrelude += "\n#line 1 \"" + relative + "\"\n" + content + "\n";
-				break;
+				const std::string candidate = (std::filesystem::path(dir) / relative).string();
+				content = ReadFile(candidate, found);
+				if (found)
+				{
+					break;
+				}
 			}
+		}
+		if (found)
+		{
+			commonPrelude += "\n#line 1 \"" + relative + "\"\n" + content + "\n";
 		}
 	}
 	commonPrelude += "\n#line 1 \"<material inputs>\"\n" + MaterialInputsPrelude(material.shadingModel);
@@ -1533,7 +1578,8 @@ namespace
 		for (const Stage stage : { Stage::Vertex, Stage::Fragment })
 		{
 			std::string text = BuildStage(
-				stage, material, none, commonPrelude, nameForLines, includeDirs, error, true);
+				stage, material, none, commonPrelude, nameForLines, includeDirs,
+				includeResolver, error, true);
 			if (text.empty())
 			{
 				result.error = error;
@@ -1544,7 +1590,8 @@ namespace
 		if (!material.geometryBody.empty())
 		{
 			std::string text = BuildStage(
-				Stage::Geometry, material, none, commonPrelude, nameForLines, includeDirs, error, true);
+				Stage::Geometry, material, none, commonPrelude, nameForLines, includeDirs,
+				includeResolver, error, true);
 			if (text.empty())
 			{
 				result.error = error;

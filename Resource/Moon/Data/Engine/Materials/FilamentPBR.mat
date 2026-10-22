@@ -1,5 +1,5 @@
 <root>
-    <shader>:Shaders\FilamentPBR.mat</shader>
+    <shader>:Shaders\FilamentPBR.shader</shader>
     <settings>
         <support_orthographic>true</support_orthographic>
         <support_perspective>true</support_perspective>
@@ -19,9 +19,9 @@
         <uniform>
             <name>u_Albedo</name>
             <value>
-                <x>0.7216</x>
-                <y>0.7216</y>
-                <z>0.7216</z>
+                <x>0.7215686</x>
+                <y>0.7215686</y>
+                <z>0.7215686</z>
                 <w>1</w>
             </value>
         </uniform>
@@ -40,9 +40,9 @@
         <uniform>
             <name>u_EmissiveColor</name>
             <value>
-                <x>1</x>
-                <y>1</y>
-                <z>1</z>
+                <x>0</x>
+                <y>0</y>
+                <z>0</z>
             </value>
         </uniform>
         <uniform>

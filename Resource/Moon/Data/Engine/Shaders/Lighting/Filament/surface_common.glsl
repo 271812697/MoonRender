@@ -19,6 +19,11 @@ float saturate(float x)
     return clamp(x, 0.0, 1.0);
 }
 
+vec3 saturate(vec3 x)
+{
+    return clamp(x, 0.0, 1.0);
+}
+
 // Filament's normalFiltering() (Kaplanyan 2016, Tokuyoshi 2017): widen the roughness where the
 // shading normal changes quickly across a pixel, so a high-gloss surface does not sparkle along
 // silhouettes and normal-map seams.

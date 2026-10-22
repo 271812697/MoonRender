@@ -6,7 +6,7 @@
 
 namespace
 {
-	/** Old .ovmat files still point at the pre-rename ".ovfx" shader files. The assets are
+	/** Old .mat files still point at the pre-rename ".ovfx" shader files. The assets are
 	 * migrated in place on load, so a user's saved material keeps working. */
 	void MigrateLegacyShaderPath(const std::string& p_path)
 	{
@@ -26,12 +26,12 @@ namespace
 		std::string migrated = text;
 		for (size_t at = migrated.find(".ovfx"); at != std::string::npos; at = migrated.find(".ovfx", at + 4))
 		{
-			migrated.replace(at, 5, ".mat");
+			migrated.replace(at, 5, ".shader");
 		}
 
 		std::ofstream out(p_path, std::ios::binary | std::ios::trunc);
 		out << migrated;
-		std::cout << "[MATERIAL] \"" << p_path << "\": migrated .ovfx to .mat" << std::endl;
+		std::cout << "[MATERIAL] \"" << p_path << "\": migrated .ovfx to .shader" << std::endl;
 	}
 }
 

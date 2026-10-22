@@ -162,7 +162,7 @@ poly.switchNextBlock({0,1,0,1}, "YPlane");
 
 ### 4.4 固定屏幕尺寸（FIXED_SCALE）
 
-gizmo 用 `GizmoCell.mat` 的 `FIXED_SCALE` 特性绘制，保证控件在任意相机距离下占用恒定像素数。原理与公式的详细推导见 [ClipPlane.cpp](../Moon/Interactive/Widgets/ClipPlane.cpp) 中 `ComputeGizmoFixedScaleRatio` 上方的注释：缩放后 1 个网格单位恒等于 200 像素。
+gizmo 用 `GizmoCell.shader` 的 `FIXED_SCALE` 特性绘制，保证控件在任意相机距离下占用恒定像素数。原理与公式的详细推导见 [ClipPlane.cpp](../Moon/Interactive/Widgets/ClipPlane.cpp) 中 `ComputeGizmoFixedScaleRatio` 上方的注释：缩放后 1 个网格单位恒等于 200 像素。
 
 这也是 ClipPlane 旋转圆弧必须用同一个 ratio 缩放的原因——否则控件固定大小、圆弧却随距离缩放，两者会脱节。
 
@@ -208,7 +208,7 @@ renderer->pushMatrix(faces[i].model * scaleMat);                          // 绕
 `PickingRenderPass`（渲染顺序 `Last`）每帧把 gizmo 网格画进**独立的拾取 framebuffer**（`actorPickingFramebuffer`）。核心是 `ImRenderer::drawMeshPick()`：以 `PICKING_PASS` 特性渲染 `drawMeshList`，片元输出编码：
 
 ```glsl
-// GizmoCell.mat（PICKING_PASS）
+// GizmoCell.shader（PICKING_PASS）
 fResult = vec4(0, int(round(fs_in.pos.w)) / 255.0, polygonId / 255.0, 254.0 / 255.0);
 //           R=0      G=blockId（顶点 w）          B=polygonId           A=254（gizmo 标记）
 ```

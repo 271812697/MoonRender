@@ -28,13 +28,15 @@ material {
         // designer and the actor inspector read them instead of guessing from the name.
         { type : sampler2D, name : u_AlbedoMap, label : "Albedo Map", group : "Textures" },
         { type : bool,      name : u_HasAlbedoMap, default : false, ui : false },
-        { type : float4,    name : u_Albedo, default : vec4(1.0), label : "Base Color", group : "Base", color : true },
+        // Defaults match Qt-Filament's MaterialPreview(): base colour 184/255 (#b8b8b8),
+        // metallic 0 and roughness 0.40, so a fresh instance starts from the reference values.
+        { type : float4,    name : u_Albedo, default : vec4(0.7215686, 0.7215686, 0.7215686, 1.0), label : "Base Color", group : "Base", color : true },
         { type : sampler2D, name : u_MetallicMap, label : "Metallic Map", group : "Textures" },
         { type : bool,      name : u_HasMetallicMap, default : false, ui : false },
         { type : float,     name : u_Metallic, default : 0.0, label : "Metallic", group : "Base", min : 0.0, max : 1.0, step : 0.005 },
         { type : sampler2D, name : u_RoughnessMap, label : "Roughness Map", group : "Textures" },
         { type : bool,      name : u_HasRoughnessMap, default : false, ui : false },
-        { type : float,     name : u_Roughness, default : 0.5, label : "Roughness", group : "Base", min : 0.0, max : 1.0, step : 0.005 },
+        { type : float,     name : u_Roughness, default : 0.4, label : "Roughness", group : "Base", min : 0.0, max : 1.0, step : 0.005 },
         { type : float,     name : u_Reflectance, default : 0.5, label : "Reflectance", group : "Base", min : 0.0, max : 1.0, step : 0.005 },
         { type : float,     name : u_SpecularFactor, default : 1.0, label : "Specular Factor", group : "Base", min : 0.0, max : 1.0, step : 0.005 },
         { type : float3,    name : u_SpecularColorFactor, default : vec3(1.0), label : "Specular Color Factor", group : "Base", color : true },
@@ -47,8 +49,12 @@ material {
         // from the variant's parameters, and a map only read under a feature is optimized
         // out of the default variant, so it never showed up in the panel.
         { type : bool,      name : u_UseNormalMap, default : false, label : "Use Normal Map", group : "Base" },
+        // Filament's material flag `specularAntiAliasing` (GEOMETRIC_SPECULAR_AA). It is off
+        // for the Qt-Filament reference material (aiDefaultMat does not declare it), so the
+        // alignment preview keeps it off; a CAD material may turn it on.
+        { type : bool,      name : u_SpecularAA, default : false, label : "Specular AA", group : "Base" },
         { type : sampler2D, name : u_EmissiveMap, label : "Emissive Map", group : "Textures" },
-        { type : float3,    name : u_EmissiveColor, default : vec3(1.0), label : "Emissive Color", group : "Base", color : true },
+        { type : float3,    name : u_EmissiveColor, default : vec3(0.0), label : "Emissive Color", group : "Base", color : true },
         { type : float,     name : u_EmissiveIntensity, default : 0.0, label : "Emissive Intensity", group : "Base", min : 0.0, max : 10.0, step : 0.01 },
         { type : float,     name : u_Transmission, default : 0.0, label : "Transmission", group : "Base", min : 0.0, max : 1.0, step : 0.005 },
         { type : float3,    name : u_Absorption, default : vec3(0.0), label : "Absorption", group : "Parameters", color : true },
@@ -131,6 +137,7 @@ fragment {
         material.emissive = emissive;
 
         vec3 n = normalize(fs_in.Normal);
+        const vec3 geometricNormal = n;
         const vec3 v = normalize(ubo_ViewPos - fs_in.FragPos);
 
         if (u_UseNormalMap)
@@ -140,12 +147,19 @@ fragment {
             n = normalize(fs_in.TBN * tangentNormal);
         }
 
-        // Filament's specular AA: widen the roughness by how fast the normal changes across
-        // this pixel, which keeps glossy silhouettes and normal seams from sparkling.
+        // Filament's specular AA (GEOMETRIC_SPECULAR_AA): widen the roughness by how fast the
+        // *geometric* normal changes across this pixel. Filament enables it per material, and
+        // the reference material leaves it off.
         FilamentMaterialInputs filteredMaterial = material;
-        filteredMaterial.roughness = normalFiltering(material.roughness, n);
+        if (u_SpecularAA)
+        {
+            filteredMaterial.roughness = normalFiltering(material.roughness, geometricNormal);
+            filteredMaterial.clearCoatRoughness =
+                normalFiltering(material.clearCoatRoughness, geometricNormal);
+        }
 
-        const PixelParams pixel = preparePixelParams(filteredMaterial, n, v, _BRDFLut);
+        const PixelParams pixel = preparePixelParams(
+            filteredMaterial, n, v, _BRDFLut, geometricNormal);
 
         vec3 color = evaluateFilamentSurface(
             material, pixel, fs_in.FragPos, n, v,

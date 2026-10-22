@@ -28,7 +28,8 @@
 #include <QVBoxLayout>
 
 #include "Core/Global/ServiceLocator.h"
-#include "editor/UI/DockWidgetTitleBar.h"
+#include "Core/Resources/Material.h"
+#include "Rendering/Resources/ShaderArchive.h"
 #include "renderer/Context.h"
 #include "Rendering/Context/Driver.h"
 #include "Rendering/Resources/Loaders/ShaderLoader.h"
@@ -46,7 +47,7 @@ namespace
 	const QColor kLogError(0xe0, 0x6c, 0x75);
 	const QColor kStatusIdle(0x6f, 0x75, 0x7e);
 
-	/** ":Shaders\\PostProcess\\Blur.mat" for "PostProcess/Blur.mat", which is what the archive
+	/** ":Shaders\\PostProcess\\Blur.shader" for "PostProcess/Blur.shader", which is what the archive
 	 * and the shader manager are keyed by. */
 	std::string ToShaderKey(const std::string& p_relative)
 	{
@@ -56,6 +57,13 @@ namespace
 			key += (c == '/' ? '\\' : c);
 		}
 		return key;
+	}
+
+	/** #include resolution for a release: the .shader sources and .glsl headers are packed in
+	 * the executable, so MoonMatc asks the archive instead of the (absent) Shaders folder. */
+	bool ResolveShaderInclude(const std::string& p_name, std::string& p_text, std::string& p_origin)
+	{
+		return Rendering::Resources::ReadShaderSource(p_name, p_text, &p_origin);
 	}
 
 	/** A section strip in the flat style of Inviwo's processor headers: a shade darker than the
@@ -106,21 +114,9 @@ public:
 
 	void BuildUi()
 	{
-		// Side by side needs the width: below this the halves stop being useful, so the dock asks
-		// for it instead of squeezing and eliding everything. The Material page adds its browser
-		// column next to the form, so it asks for a little more than the source page alone.
+		// Side by side needs the width: below this the halves stop being useful, so the window
+		// asks for it instead of squeezing and eliding everything.
 		m_owner->setMinimumWidth(600);
-
-		// The dock's own title bar, like the other panels of the workspace.
-		auto* titleBar = new DockWidgetTitleBar(m_owner);
-		m_owner->setTitleBarWidget(titleBar);
-
-		// A dot next to the title that says, at a glance, what the last compile did.
-		m_status = new QFrame(titleBar);
-		m_status->setFixedSize(8, 8);
-		m_status->setStyleSheet(QString::fromLatin1("background: #6f757e; border-radius: 4px;"));
-		m_status->setToolTip(QStringLiteral("Nothing compiled yet"));
-		titleBar->addTitleWidget(m_status);
 
 		auto* content = new QWidget(m_owner);
 		content->setObjectName("MaterialEditorContent");
@@ -339,7 +335,12 @@ public:
 
 		layout->addWidget(columns, 1);
 		content->setLayout(layout);
-		m_owner->setWidget(content);
+
+		// The panel is a window now, not a dock: its content is the only child.
+		auto* root = new QVBoxLayout(m_owner);
+		root->setContentsMargins(0, 0, 0, 0);
+		root->setSpacing(0);
+		root->addWidget(content);
 
 		ApplyStyle(content);
 
@@ -374,6 +375,18 @@ public:
 
 		QObject::connect(m_designer, &::MOON::MaterialDesigner::materialShown, m_owner,
 			[this](Core::Resources::Material* p_material) {
+				// The window title is the material name, so the editor never leaves it ambiguous
+				// which .mat the form and the preview belong to.
+				if (p_material != nullptr)
+				{
+					m_owner->setWindowTitle(QString::fromStdString(
+						std::filesystem::path(p_material->path).stem().string()));
+				}
+				else
+				{
+					m_owner->setWindowTitle(QStringLiteral("Material Editor"));
+				}
+
 				if (m_rightStack->currentIndex() == 1)
 				{
 					m_preview->ShowMaterial(p_material);
@@ -386,11 +399,12 @@ public:
 			});
 		QObject::connect(m_designer, &::MOON::MaterialDesigner::materialEdited, m_owner, [this] {
 			// The designer changed the instance in place; the preview just has to paint it again,
-			// and the browser's thumbnail follows the edit.
+			// and the content browser's tile for this material is stale.
 			if (m_rightStack->currentIndex() == 1)
 			{
 				m_preview->RequestThumbnail();
 			}
+			emit m_owner->materialThumbnailDirty(QString::fromStdString(m_designer->CurrentKey()));
 		});
 		QObject::connect(m_designer, &::MOON::MaterialDesigner::statusMessage, m_owner,
 			[this](const QString& p_text, bool p_error) {
@@ -554,20 +568,91 @@ public:
 		m_filePicker->clear();
 		m_relativePaths.clear();
 
-		std::error_code error;
-		for (const auto& entry : std::filesystem::recursive_directory_iterator(m_shaderRoot, error))
+		// The release build packs every .shader into the binary (Tools/ShaderPack), so the
+		// shader folder may not exist at all. The archive is the source of truth; a source
+		// checkout additionally contributes files added since the last build.
+		std::vector<std::string> names;
+		const Rendering::Resources::ShaderArchive& archive = Rendering::Resources::GetShaderArchive();
+		for (uint32_t i = 0; i < archive.count; ++i)
 		{
-			if (!entry.is_regular_file() || entry.path().extension() != ".mat")
+			std::string name = archive.files[i].name;
+			std::replace(name.begin(), name.end(), '\\', '/');
+			// Source/ entries are the editor's copies of the .shader text; the package under
+			// the plain name is the one to list.
+			if (name.rfind("Source/", 0) == 0)
 			{
 				continue;
 			}
-			m_relativePaths.push_back(std::filesystem::relative(entry.path(), m_shaderRoot).generic_string());
+			if (name.ends_with(".shader"))
+			{
+				names.push_back(std::move(name));
+			}
 		}
-		std::ranges::sort(m_relativePaths);
+
+		std::error_code error;
+		if (std::filesystem::exists(m_shaderRoot))
+		{
+			for (const auto& entry : std::filesystem::recursive_directory_iterator(m_shaderRoot, error))
+			{
+				if (entry.is_regular_file() && entry.path().extension() == ".shader")
+				{
+					names.push_back(
+						std::filesystem::relative(entry.path(), m_shaderRoot).generic_string());
+				}
+			}
+		}
+
+		std::ranges::sort(names);
+		names.erase(std::unique(names.begin(), names.end()), names.end());
+		m_relativePaths = std::move(names);
 		for (const std::string& relative : m_relativePaths)
 		{
 			m_filePicker->addItem(QString::fromStdString(relative));
 		}
+	}
+
+	void OpenShader(const std::string& p_key)
+	{
+		if (m_filePicker == nullptr)
+		{
+			return;
+		}
+
+		// ":Shaders\\Sub\\Name.shader" -> "Sub/Name.shader", the picker's relative form.
+		std::string relative = p_key;
+		for (char& c : relative)
+		{
+			if (c == '\\')
+			{
+				c = '/';
+			}
+		}
+		const std::string prefix = ":Shaders/";
+		if (relative.rfind(prefix, 0) == 0)
+		{
+			relative = relative.substr(prefix.size());
+		}
+
+		// The content browser may have just created the file: rescan before giving up.
+		RefreshFileList();
+		int index = -1;
+		for (size_t i = 0; i < m_relativePaths.size(); ++i)
+		{
+			if (m_relativePaths[i] == relative)
+			{
+				index = static_cast<int>(i);
+				break;
+			}
+		}
+		if (index < 0)
+		{
+			Log("shader not found: " + relative, kLogError);
+			SetStatus(kLogError, QStringLiteral("Cannot find the shader"));
+			return;
+		}
+
+		m_filePicker->setCurrentIndex(index);
+		OnFileSelected(index);
 	}
 
 	void OnFileSelected(int p_row)
@@ -587,17 +672,19 @@ public:
 			return;
 		}
 
-		std::ifstream stream(m_shaderRoot / m_current, std::ios::binary);
-		if (!stream)
+		// The archive holds the source of every shader the release packed; a dev checkout can
+		// also read files that were added since the last build.
+		std::string text;
+		std::string origin;
+		if (!Rendering::Resources::ReadShaderSource((m_shaderRoot / m_current).string(), text, &origin))
 		{
 			Log("cannot read " + m_current, kLogError);
 			SetStatus(kLogError, QStringLiteral("Cannot read the file"));
 			return;
 		}
-		const std::string text{ std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>() };
 		m_source->setPlainText(QString::fromStdString(text));
-		Log("loaded " + m_current, kLogInfo);
-		SetStatus(kStatusIdle, QStringLiteral("Loaded %1").arg(QString::fromStdString(m_current)));
+		Log("loaded " + origin, kLogInfo);
+		SetStatus(kStatusIdle, QStringLiteral("Loaded %1").arg(QString::fromStdString(origin)));
 
 		// The preview renders with the render module's context, which the viewport creates: the
 		// first one waits for showEvent (OnFirstShow), the rest follow every file change.
@@ -616,6 +703,7 @@ public:
 		Moon::Matc::CompileOptions options;
 		options.displayName = std::filesystem::path(m_current).filename().string();
 		options.includeDirs = { m_shaderRoot.string() };
+		options.includeResolver = ResolveShaderInclude;
 
 		const std::string source = m_source->toPlainText().toStdString();
 		const Moon::Matc::CompileResult result = Moon::Matc::CompileSource(source, options);
@@ -699,6 +787,7 @@ public:
 		Moon::Matc::CompileOptions options;
 		options.displayName = std::filesystem::path(m_current).filename().string();
 		options.includeDirs = { m_shaderRoot.string() };
+		options.includeResolver = ResolveShaderInclude;
 
 		const Moon::Matc::CompileResult result = Moon::Matc::CompileSource(
 			m_source->toPlainText().toStdString(), options);
@@ -735,6 +824,10 @@ public:
 
 	void SetStatus(const QColor& p_color, const QString& p_tooltip)
 	{
+		if (m_status == nullptr)
+		{
+			return;
+		}
 		m_status->setStyleSheet(
 			QStringLiteral("background: %1; border-radius: 4px;").arg(p_color.name()));
 		m_status->setToolTip(p_tooltip);
@@ -779,16 +872,54 @@ public:
 };
 
 MOON::MaterialEditorPanel::MaterialEditorPanel(QWidget* p_parent)
-	: QDockWidget(p_parent)
+	: QWidget(p_parent)
 	, mInternal(new MaterialEditorPanelInternal(this))
 {
-	// The View menu toggles this panel through the service locator, like the other docks.
+	// A window of its own rather than a dock: materials are opened from the content browser,
+	// so the editor is a place you go to, not a panel that shares the workspace's layout.
+	setWindowFlags(Qt::Window);
+	setWindowTitle(QStringLiteral("Material Editor"));
+	resize(1120, 720);
+
 	RegService(MaterialEditorPanel, *this);
+}
+
+void MOON::MaterialEditorPanel::OpenShader(const std::string& p_key)
+{
+	if (mInternal == nullptr)
+	{
+		return;
+	}
+
+	show();
+	raise();
+	activateWindow();
+	mInternal->m_modeShader->setChecked(true);
+	mInternal->SetMode(false);
+	mInternal->OpenShader(p_key);
+}
+
+void MOON::MaterialEditorPanel::OpenMaterial(const std::string& p_key)
+{
+	if (mInternal == nullptr)
+	{
+		return;
+	}
+
+	show();
+	raise();
+	activateWindow();
+	mInternal->m_modeMaterial->setChecked(true);
+	mInternal->SetMode(true);
+	if (mInternal->m_designer != nullptr)
+	{
+		mInternal->m_designer->OpenMaterial(p_key);
+	}
 }
 
 void MOON::MaterialEditorPanel::showEvent(QShowEvent* p_event)
 {
-	QDockWidget::showEvent(p_event);
+	QWidget::showEvent(p_event);
 	if (mInternal != nullptr)
 	{
 		mInternal->OnFirstShow();

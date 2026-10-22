@@ -11,7 +11,7 @@ static ::Rendering::Resources::Model* sphere = nullptr;
 Editor::Rendering::PointRenderPass::PointRenderPass(::Rendering::Core::CompositeRenderer& p_renderer)
 	: ::Rendering::Core::ARenderPass(p_renderer)
 {
-	m_PointMaterial.SetShader(::Core::Global::ServiceLocator::Get<Editor::Core::Context>().shaderManager[":Shaders\\Point.mat"]);
+	m_PointMaterial.SetShader(::Core::Global::ServiceLocator::Get<Editor::Core::Context>().shaderManager[":Shaders\\Point.shader"]);
 	m_PointMaterial.SetDepthTest(true);
 	sphere= ::Core::Global::ServiceLocator::Get<Editor::Core::Context>().modelManager[":Models/Sphere.fbx"];
 

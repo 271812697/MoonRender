@@ -6,14 +6,14 @@
 | `Tools/ShaderPack`锛坆lob 鈫?`shader.h` / `shader.cpp`锛屽鏍?`resgen`锛?| 鉁?宸插畬鎴?|
 | `ShaderArchive`锛堣繍琛屾椂鎸夊悕瀛楀彇婧愮爜锛屽綊妗ｄ紭鍏?纾佺洏鍏滃簳锛?| 鉁?宸插畬鎴?|
 | `#include` 灞曞紑 + `#line` 琛屽彿鏄犲皠锛堝鏍?`Includes.cpp`锛?| 鉁?宸插畬鎴?|
-| `MoonMatc`锛堝鏍?`matc`锛夈€佹柊 `.mat` 璇硶銆乧hunk 鍖呫€佽繍琛屾椂 chunk reader | 猬?鏈枃鍐呭 |
+| `MoonMatc`锛堝鏍?`matc`锛夈€佹柊 `.shader` 璇硶銆乧hunk 鍖呫€佽繍琛屾椂 chunk reader | 猬?鏈枃鍐呭 |
 
 ---
 
 ## 1. 娴佹按绾匡紙涓夌骇锛屼竴涓€瀵瑰簲锛?
 ```
-X.mat 鈹€鈹€[MoonMatc]鈹€鈹€鈻?X.ovshader 鈹€鈹€[ShaderPack]鈹€鈹€鈻?shader.h + shader.cpp 鈹€鈹€鈻?閾炬帴
-        閫愭枃浠?           姣忎釜 .mat 涓€涓寘        澶氬寘鍚堝苟锛堝凡鏈夛級          杩?exe
+X.shader 鈹€鈹€[MoonMatc]鈹€鈹€鈻?X.ovshader 鈹€鈹€[ShaderPack]鈹€鈹€鈻?shader.h + shader.cpp 鈹€鈹€鈻?閾炬帴
+        閫愭枃浠?           姣忎釜 .shader 涓€涓寘        澶氬寘鍚堝苟锛堝凡鏈夛級          杩?exe
                             鈹?                            鈹斺攢 杩愯鏃讹細璇?chunk 鈫?glShaderSource 鈫?glCompileShader
 ```
 
@@ -28,9 +28,9 @@ X.mat 鈹€鈹€[MoonMatc]鈹€鈹€鈻?X.ovshader 鈹€鈹€[ShaderPack]�
 鏄庢枃婧愮爜锛屽彧鏈夌紪璇戝寘锛涜繍琛屾椂涓嶅啀鍋?`2^n` 鍙樹綋鍏ㄧ粍鍚堛€佷笉鍐嶆嫾瀹忋€佷笉鍐嶆壂鏂囨湰銆?
 ---
 
-## 2. 鏂?`.mat` 璇硶
+## 2. 鏂?`.shader` 璇硶
 
-鐓?`lit.mat`锛坄android/samples/sample-lit-cube/.../lit.mat`锛夌殑鍥涗釜閮ㄥ垎銆傛枃浠跺悕浠嶄负 `.mat`锛?閲嶆瀯瀹屾垚鍚庡彲鏁翠綋鏀瑰悕 `.mat`銆?
+鐓?`lit.shader`锛坄android/samples/sample-lit-cube/.../lit.shader`锛夌殑鍥涗釜閮ㄥ垎銆傛枃浠跺悕浠嶄负 `.shader`锛?閲嶆瀯瀹屾垚鍚庡彲鏁翠綋鏀瑰悕 `.shader`銆?
 ### 2.1 涓変釜鍧?
 ```glsl
 material {
@@ -72,7 +72,7 @@ fragment {
   锛堣 搂3锛夈€?
 ### 2.2 `MaterialInputs`锛堢収鎶?`shaders/src/surface_material_inputs.fs`锛?
 鎸?`shadingModel` 瑁佸壀瀛楁鈥斺€擣ilament 灏辨槸杩欎箞鍋氱殑锛坄#if !defined(SHADING_MODEL_UNLIT)` 绛夛級锛?
-| 瀛楁 | 鍑虹幇鏉′欢 | 鎴戜滑鐨?`Standard.mat` 浠婂ぉ鎬庝箞鍐欑殑 |
+| 瀛楁 | 鍑虹幇鏉′欢 | 鎴戜滑鐨?`Standard.shader` 浠婂ぉ鎬庝箞鍐欑殑 |
 |---|---|---|
 | `vec4 baseColor` | 鎬绘槸 | `u_Albedo * u_AlbedoMap` |
 | `float roughness` | lit 涓旈潪 specular-glossiness | `u_Roughness * u_RoughnessMap` |
@@ -107,22 +107,22 @@ fragment {
 
 ## 3. prelude锛氭垜浠殑"鐢熸垚楠ㄦ灦"
 
-Filament 鐨勯鏋跺湪 `filament/src/materials/`锛坄surface_shading_model_standard.fs`銆?`surface_lighting.fs`銆乣surface_shadowing.fs` 鈥︼級锛岀敱 matc 鎷艰繘鍘汇€傛垜浠殑楠ㄦ灦灏辨槸鐜版湁鐨?`Shaders/Common/*.glsl` + `Standard.mat` 閲岄偅娈靛厜鐓э紝鏁寸悊鎴?matc 鍐呯疆鏂囦欢锛?
+Filament 鐨勯鏋跺湪 `filament/src/materials/`锛坄surface_shading_model_standard.fs`銆?`surface_lighting.fs`銆乣surface_shadowing.fs` 鈥︼級锛岀敱 matc 鎷艰繘鍘汇€傛垜浠殑楠ㄦ灦灏辨槸鐜版湁鐨?`Shaders/Common/*.glsl` + `Standard.shader` 閲岄偅娈靛厜鐓э紝鏁寸悊鎴?matc 鍐呯疆鏂囦欢锛?
 | prelude | 鏉ユ簮 | 鍐呭 |
 |---|---|---|
 | `prelude/buffers.glsl` | `Common/Buffers/EngineUBO.glsl`銆乣LightsSSBO.glsl`銆乣ReflectionUBO.glsl` | 甯?鐏?鍙嶅皠 UBO |
 | `prelude/common.glsl` | `Common/Constants.glsl`銆乣Utils.glsl`銆乣Physics.glsl` | 甯搁噺涓庡伐鍏峰嚱鏁?|
 | `prelude/material.glsl` | 鏂板啓锛堢収 `surface_material_inputs.fs`锛?| `MaterialInputs` / `prepareMaterial()` / `materialParams` |
-| `prelude/surface.glsl` | `Standard.mat` 鐨勫厜鐓ф + `Lighting/PBR.glsl`銆乣IBL.glsl`銆乣Shadow.glsl` | 鐢?`shadingModel` 閫変腑鐨勭潃鑹叉ā鍨?|
+| `prelude/surface.glsl` | `Standard.shader` 鐨勫厜鐓ф + `Lighting/PBR.glsl`銆乣IBL.glsl`銆乣Shadow.glsl` | 鐢?`shadingModel` 閫変腑鐨勭潃鑹叉ā鍨?|
 | `prelude/variants.glsl` | 鏂板啓锛堢収 `Variant.h`锛?| 鍙樹綋浣嶅搴旂殑 `#define` |
-| `prelude/output.glsl` | `Standard.mat` 鏈熬 | 鑹茶皟鏄犲皠/alpha 绛夋敹灏?|
+| `prelude/output.glsl` | `Standard.shader` 鏈熬 | 鑹茶皟鏄犲皠/alpha 绛夋敹灏?|
 
 matc 鎷兼帴椤哄簭锛堢収 Filament锛夛細`#version` 鈫?椤剁偣/鐗囧厓灞炴€?鈫?鍙樹綋浣?`#define` 鈫?`buffers` 鈫?`common` 鈫?`material` 鈫?`surface` 鈫?鐢ㄦ埛鍏ュ彛鍑芥暟锛坄main` 涔嬪墠锛夆啋 鐢熸垚鐨?`main()`銆?
 ---
 
 ## 4. 鍙樹綋妯″瀷锛堢収 `Variant.h` + `MaterialVariants.cpp`锛?
 Filament锛? 浣嶆帺鐮?+ 鐧藉悕鍗?+ **鍥哄畾鏋氫妇**锛坄determineSurfaceVariants(filter, isLit, ...)`锛夛紝
-**浠庝笉鍋?2^n 鍏ㄧ粍鍚?*銆傛垜浠幇鍦?`Standard.mat` 鐨?64 涓彉浣撳氨鏄繖涔堟潵鐨勶紙`AssembleShader` 鐨?骞傞泦寰幆锛夛紝杩欐槸鏈€璇ユ浛鎹㈢殑涓€澶勩€?
+**浠庝笉鍋?2^n 鍏ㄧ粍鍚?*銆傛垜浠幇鍦?`Standard.shader` 鐨?64 涓彉浣撳氨鏄繖涔堟潵鐨勶紙`AssembleShader` 鐨?骞傞泦寰幆锛夛紝杩欐槸鏈€璇ユ浛鎹㈢殑涓€澶勩€?
 鎴戜滑鐨勫彉浣撲綅锛堝垵鐗堬紝澶熺敤鍗冲彲锛屽悗缁寜闇€鍔狅級锛?
 | 浣?| 鍚?| 鍚箟 |
 |---|---|---|
@@ -193,10 +193,10 @@ ShaderManager[key]
 
 ## 7. 杩佺Щ璁″垝锛堝瀭鐩村垏鐗囦紭鍏堬級
 
-1. **鍒囩墖**锛歚Unlit.mat` 璧伴€氬叏閾捐矾锛堟柊璇硶 鈫?MoonMatc 鈫?`.ovshader` 鈫?ShaderPack 鈫?   杩愯鏃惰 chunk 鈫?鐢婚潰姝ｅ父锛夈€傛闃舵鏂版棫涓ゅ骞跺瓨銆?2. 鍚庡鐞嗙被锛圔loom / FXAA / ToneMap / HZB / Blit 鈥︼級锛歚shadingModel : unlit` + 鍏ㄥ睆 pass锛?   浣撻噺灏忋€侀闄╀綆鈥斺€旂収 `filament/src/materials/` 閲屽悓鍚嶇殑 `.mat` 鎶勭粨鏋勩€?3. 宸ュ叿绫伙紙Grid / Line / Picking / Section / Skybox锛夛細澶у涔熸槸 unlit锛屽悓涓娿€?4. `Standard.mat` 鏈€鍚庡仛锛圥BR/IBL/闃村奖/鍙樹綋鏈€澶氾級銆?5. 鍏ㄩ儴杩佸畬鍚庡啀鍒犳棫瑙ｆ瀽璺緞锛屽苟鎶?`.mat` 鏀瑰悕涓?`.mat`銆?
+1. **鍒囩墖**锛歚Unlit.shader` 璧伴€氬叏閾捐矾锛堟柊璇硶 鈫?MoonMatc 鈫?`.ovshader` 鈫?ShaderPack 鈫?   杩愯鏃惰 chunk 鈫?鐢婚潰姝ｅ父锛夈€傛闃舵鏂版棫涓ゅ骞跺瓨銆?2. 鍚庡鐞嗙被锛圔loom / FXAA / ToneMap / HZB / Blit 鈥︼級锛歚shadingModel : unlit` + 鍏ㄥ睆 pass锛?   浣撻噺灏忋€侀闄╀綆鈥斺€旂収 `filament/src/materials/` 閲屽悓鍚嶇殑 `.shader` 鎶勭粨鏋勩€?3. 宸ュ叿绫伙紙Grid / Line / Picking / Section / Skybox锛夛細澶у涔熸槸 unlit锛屽悓涓娿€?4. `Standard.shader` 鏈€鍚庡仛锛圥BR/IBL/闃村奖/鍙樹綋鏈€澶氾級銆?5. 鍏ㄩ儴杩佸畬鍚庡啀鍒犳棫瑙ｆ瀽璺緞锛屽苟鎶?`.shader` 鏀瑰悕涓?`.shader`銆?
 瀹屾垚鎯呭喌锛?-4 宸插仛瀹岋紙`Engine/Shaders` 涓?44 / 48 涓?`material{}` 褰㈠紡锛屽墿 4 涓?PathTrace 瀹氫负
-姘镐箙渚嬪锛岃 搂8锛夛紱绗?5 姝?*涓嶅仛**鈥斺€旀棫鐨勬枃浠剁増瑙ｆ瀽璺緞杩樿鐣欑粰 PathTrace锛宍.mat` 涔熷洜姝や笉鏀瑰悕
-`.mat`銆?
+姘镐箙渚嬪锛岃 搂8锛夛紱绗?5 姝?*涓嶅仛**鈥斺€旀棫鐨勬枃浠剁増瑙ｆ瀽璺緞杩樿鐣欑粰 PathTrace锛宍.shader` 涔熷洜姝や笉鏀瑰悕
+`.shader`銆?
 > 涔嬫墍浠ュ仠鍦?涓ゆ潯璺苟瀛?鑰屼笉鏄交搴曞垏鎹細鍓╀笅閭?4 涓矾寰勮拷韪?shader 鐨勫姞杞芥柟寮忔槸
 > "杩愯鏃跺線婧愮爜閲屾彃 define 鍐嶇紪"锛屽拰鏋勫缓鏈熷嚭鍖呯殑妯″瀷澶╃劧鍐茬獊锛涘喅瀹氱瓑**璺緞杩借釜鍣ㄦ暣浣撻噸鏋?*鏃?> 杩炲姞杞芥柟寮忎竴璧锋崲锛岀幇鍦ㄨ縼绉诲睘浜庣櫧鏀癸紙璇﹁ 搂8 "鍓╀綑"锛夈€?
 ---
@@ -211,7 +211,7 @@ ShaderManager[key]
 | 杩愯鏃?`ShaderArchive` / `ShaderPackage` / `ShaderLoader` | 鉁?褰掓。浼樺厛銆乣MOONSDR1` 鍒嗘祦銆佹寜鍙樹綋娓呭崟缂栬瘧锛堥《鐐?鐗囧厓/鍑犱綍涓夋锛屽嚑浣曞彲閫夛級 |
 | **宸茶縼绉伙紙44 / 48锛?* | 鉁?`Unlit` `Standard` `GeomertySurface` `GeomertySurfacePick` `GeomertyLine` `GeomertyPoint` `GizmoCell` `Gizmo` `GizmoLine` `GizmoPoint` `GizmoTriangle` `Grid` `Line` `Point` `Billboard` `Atmosphere` `Skysphere` `SkyboxConvert` `SkyboxIrrandiance` `SkyboxPrefilter` `BrdfLut` `ClearBackground` `PickingFallback` `OutlineFallback` `ShadowFallback` `MirrorPlaneShadow` `SectionCap` `SectionContour` `SectionFace` `SectionParity` `gbuffer` `ssao` `ssaoblur`锛沗PostProcess/` 鍏ㄩ儴 12 涓?|
 
-`Resource/Moon/Data/Engine/Shaders` 涓嬪叡 48 涓?`.mat`锛? 10 涓?`.glsl`锛屽叡 58 涓簮鎵撹繘褰掓。锛夈€?
+`Resource/Moon/Data/Engine/Shaders` 涓嬪叡 48 涓?`.shader`锛? 10 涓?`.glsl`锛屽叡 58 涓簮鎵撹繘褰掓。锛夈€?
 ### 鍓╀綑锛堥兘宸插畾妗堬紝涓嶆槸寰呭姙锛?
 **1. D 缁?4 涓紙PathTrace锛夛細瀹氫负姘镐箙渚嬪锛屼笉杩併€?*
 
@@ -225,15 +225,15 @@ ShaderManager[key]
   `OPT_UNIFORM_LIGHT` `OPT_OPENGL_NORMALMAP` `OPT_ROUGHNESS_MOLLIFICATION`锛夊綋 features 鐢紝
   骞傞泦鏄?2^12 = 4096 涓彉浣?脳 姣忎唤 53 KB 脳 2 闃舵锛涜€屼笖 `PropertyWidget` 鍏佽杩愯鏃朵换鎰?  `AddFeature`锛屾墍浠?鍙紪鐪熶細鐢ㄧ殑缁勫悎"涔熶笉灏侀棴锛?- 瑙勬ā锛歚PathTrace` / `PathTraceLowRes` 鍚?1926 / 1905 琛屻€佸悇 28 澶?`OPT_*` 瀹堝崼锛? 涓?`#else`锛夛紝
   `ToneMap` 2 澶勶紝`Output` 0 澶勩€傝鎶婂畠浠縼鎴?1 涓彉浣?+ uniform 甯冨皵"锛屽厛寰楀仛瀹岃繖浠朵簨鍐嶈窇
-  benchmark鈥斺€旂暀缁欒矾寰勮拷韪櫒閲嶆瀯锛?- 闄勫甫濂藉锛歚OPT_RR_DEPTH` 閭ｄ釜甯﹀弬鏁扮殑 define 鍏跺疄娌¤ shader 鐢ㄥ埌锛坄PathTrace.mat` 閲屽彧鏈?  `OPT_RR` 鍜屼竴涓?`RR_DEPTH` uniform锛夛紝鎵€浠ュ皢鏉ュ彧闇€瑕佸鐞?12 涓函甯冨皵銆?
+  benchmark鈥斺€旂暀缁欒矾寰勮拷韪櫒閲嶆瀯锛?- 闄勫甫濂藉锛歚OPT_RR_DEPTH` 閭ｄ釜甯﹀弬鏁扮殑 define 鍏跺疄娌¤ shader 鐢ㄥ埌锛坄PathTrace.shader` 閲屽彧鏈?  `OPT_RR` 鍜屼竴涓?`RR_DEPTH` uniform锛夛紝鎵€浠ュ皢鏉ュ彧闇€瑕佸鐞?12 涓函甯冨皵銆?
 鍥犱负杩欐潯鍐冲畾锛?*`ShaderLoader` 鐨勬枃浠剁増鏃цВ鏋愯矾寰勶紙`CompileShaderFromFile` 鈫?`ParseShader` 鈫?`AssembleShader`锛変繚鐣?*锛屄? 鐨勭 5 姝ワ紙鍒犳棫璺緞锛夌浉搴旀悂缃€?
 **閮ㄧ讲褰㈡€佷篃璺熺潃鍙樹簡**锛氬紩鎿庣潃鑹插櫒鐜板湪鍙湪 exe 閲岋紙`Moon/CMakeLists.txt` 鐨勮祫婧愭嫹璐濇楠ゆ妸
-`Data/Engine/Shaders/` 鎺掗櫎鎺変簡锛夛紝杩愯鐩綍閲屽彧鍓?`Data/Engine/Shaders/PathTrace/*.mat`
+`Data/Engine/Shaders/` 鎺掗櫎鎺変簡锛夛紝杩愯鐩綍閲屽彧鍓?`Data/Engine/Shaders/PathTrace/*.shader`
 锛? 涓紝涓婇潰鐨勬案涔呬緥澶栵級杩樿浠庣鐩樿銆傛敼閭ｆ鎷疯礉瑙勫垯鏃跺埆鍐嶄竴鍒€鍒囥€?
 **2. `Resource/Moon/Data/Editor/Shaders/` 涓嬮偅 5 涓€佸壇鏈細宸插垹銆?*
 
 `Grid` `Gizmo` `Billboard` `PickingFallback` `OutlineFallback` 鍘熸潵鐢?`EditorResources` 鏋勯€犳椂
-鍔犺浇锛坄m_shaders`锛夛紝浣?`EditorResources::GetShader()` **鍏ㄥ伐绋?0 涓皟鐢ㄧ偣**鈥斺€斿畠浠彧琚姞杞姐€?浠庢潵娌¤鐢ㄦ潵鐢昏繃浠讳綍涓滆タ锛坄GridRenderPass` 鐢ㄧ殑鏄?`ShaderManager[":Shaders/Grid.mat"]`锛屼篃灏辨槸
+鍔犺浇锛坄m_shaders`锛夛紝浣?`EditorResources::GetShader()` **鍏ㄥ伐绋?0 涓皟鐢ㄧ偣**鈥斺€斿畠浠彧琚姞杞姐€?浠庢潵娌¤鐢ㄦ潵鐢昏繃浠讳綍涓滆タ锛坄GridRenderPass` 鐢ㄧ殑鏄?`ShaderManager[":Shaders/Grid.shader"]`锛屼篃灏辨槸
 `Engine/Shaders` 閭ｄ唤锛沗DebugSceneRenderer` 鍙槸 include 浜嗗ご鏂囦欢锛夈€傚凡杩炲悓 `m_shaders` 鎴愬憳銆?`GetShader()`銆乣CreateShader()` helper銆佷袱涓棤鐢ㄧ殑 `#include`銆佺洰褰曟湰韬拰 CMake 閲岀殑鎷疯礉/IDE 鎸傝浇
 涓€璧峰垹鎺夈€傞『甯︾殑濂藉锛氬惎鍔ㄥ皯缂?5 涓?shader锛岃繍琛岀洰褰曚笉鐢ㄥ啀甯﹀畠浠€?
 ### 浠ｄ环锛堟湰杞紩鍏ワ紝蹇呴』浜や唬锛?
@@ -273,13 +273,13 @@ cmake --build Build --target Moon --config Release -- /nologo /m:1
 1. 娓呮帀璇?shader 鐨?dump 鐩綍锛堥伩鍏嶆嬁涓婁竴杞殑娈嬬暀闃舵鍘绘牎楠岋級锛?2. `MoonMatc --dump-glsl <dir>` 鈥斺€?姣忎釜 (pass, 鍙樹綋, 闃舵) 涓€涓?`.glsl`锛?3. `ValidateGlslStages.cmake` 瀵规瘡涓枃浠惰窇 `glslangValidator -S vert|frag|geom`锛屾湁澶辫触灏?   `FATAL_ERROR`锛屽苟鎶?glslang 鐨勮緭鍑哄師鏍锋墦鍑烘潵銆?
 鎵句笉鍒?`glslangValidator` 鏃跺彧鎵撲竴琛?`STATUS`锛堚€渨ill NOT be validated at build time鈥濓級锛?鍏跺畠琛屼负涓嶅彉鈥斺€旀墍浠ヨ繖鏄竴鏉″彲閫変緷璧栵紝涓嶅紩鍏?glslang 搴擄紙filament 鏄嚜宸遍摼鎺?glslang + SPIRV-Tools锛夈€?
 鍓嶇疆鐨勪竴浠朵簨锛歚MoonMatc` 鐜板湪鍦ㄦ瘡涓樁娈靛紑澶达紙`#version` 涔嬪悗锛夎緭鍑?`#extension GL_GOOGLE_cpp_style_line_directive : enable`锛堢収 filament 鐨?`CodeGenerator.cpp:125-127`锛夈€傛病鏈夊畠 glslang 鐩存帴鎷掔粷甯︽枃浠跺悕鐨?`#line`锛宒ump 鍑烘潵鐨勪笢瑗垮氨鍠備笉杩?validator锛涢┍鍔ㄤ晶鏈潵灏辨帴鍙椼€?
-瀹炴祴锛堟晠鎰忓湪 `ssaoblur.mat:27` 鍐欏潖涓€琛岋級锛?
+瀹炴祴锛堟晠鎰忓湪 `ssaoblur.shader:27` 鍐欏潖涓€琛岋級锛?
 ```
-CUSTOMBUILD : error : ssaoblur.mat:27: '' :  syntax error, unexpected IDENTIFIER ...
-ssaoblur.mat: 1 stage(s) do not compile (glslangValidator). The dump is under ...
+CUSTOMBUILD : error : ssaoblur.shader:27: '' :  syntax error, unexpected IDENTIFIER ...
+ssaoblur.shader: 1 stage(s) do not compile (glslangValidator). The dump is under ...
 ```
 
-琛屽彿鎸囧洖 `.mat` 鑷繁锛屾瀯寤?exit 1銆?*浠ｄ环**锛氬彧鏈夋敼鍔ㄧ殑 shader 浼氶噸鏂版牎楠岋紝浣嗗崟涓ぇ shader 涓嶄究瀹?鈥斺€擿Standard`锛?92 鍙樹綋銆?80 涓樁娈碉級閲嶆柊鏍￠獙 + 閲嶆柊鎵撳寘 + 閾炬帴绾?**50 s**锛涘叏閲忔竻鐞嗗悗閲嶅缓浼氭牎楠?鍏ㄩ儴 1002 涓樁娈点€傚珜鎱㈢殑璇濇妸 `GLSLANG_VALIDATOR` 缂撳瓨鍙橀噺缃┖鍗冲彲鍏虫帀銆?
+琛屽彿鎸囧洖 `.shader` 鑷繁锛屾瀯寤?exit 1銆?*浠ｄ环**锛氬彧鏈夋敼鍔ㄧ殑 shader 浼氶噸鏂版牎楠岋紝浣嗗崟涓ぇ shader 涓嶄究瀹?鈥斺€擿Standard`锛?92 鍙樹綋銆?80 涓樁娈碉級閲嶆柊鏍￠獙 + 閲嶆柊鎵撳寘 + 閾炬帴绾?**50 s**锛涘叏閲忔竻鐞嗗悗閲嶅缓浼氭牎楠?鍏ㄩ儴 1002 涓樁娈点€傚珜鎱㈢殑璇濇妸 `GLSLANG_VALIDATOR` 缂撳瓨鍙橀噺缃┖鍗冲彲鍏虫帀銆?
 鍐?*甯︿竴涓伐绋嬪惎鍔?*锛岃瑙嗗彛鐪熺殑鐢诲抚锛堜笉寮€宸ョ▼鍋滃湪棣栭〉鏃讹紝涓€鍗?shader 鏍规湰涓嶄細琚姞杞斤級锛?
 ```powershell
 Start-Process Build\bin\Release\Moon.exe -ArgumentList '"D:\Project\UseQt\SketchExample\1.moon"' `
@@ -289,7 +289,7 @@ Start-Process Build\bin\Release\Moon.exe -ArgumentList '"D:\Project\UseQt\Sketch
 鎯冲崟鐙獙璇佹煇涓?shader锛堟瀯寤烘湡娌″紑鏍￠獙銆佹垨鎯虫墜宸ョ湅 dump锛夛細
 
 ```powershell
-Build\bin\Release\MoonMatc.exe -i <X.mat> -o Build\verify\X.ovshader -I Resource\Moon\Data\Engine\Shaders `
+Build\bin\Release\MoonMatc.exe -i <X.shader> -o Build\verify\X.ovshader -I Resource\Moon\Data\Engine\Shaders `
     --dump-glsl Build\verify --dump-json Build\verify\X.json
 ```
 dump 鍑烘潵鐨?`.glsl` **鐩存帴**灏辫兘鍠?validator锛堥樁娈靛紑澶村凡缁忔湁閭ｈ
@@ -306,7 +306,7 @@ materials: 44 ; stages validated: 1002 ; failures: 0
 5. 鑰佺殑 geometry-stage 璺宠繃 hack 渚濊禆"`#version` 鍚庣涓€琛屾槸 `#if defined`"锛屾彃 `#line` 浼氱牬鍧忓畠锛堝凡鍦ㄦ壂鎻忓墠璺宠繃 `#line` / `//`锛夈€?6. 鍏ュ彛鐐瑰弬鏁板彨 `m`锛坄void material(inout MaterialInputs m)`锛夛紝shader 閲屽師鏉ョ殑灞€閮ㄥ彉閲?`m`
    **蹇呴』鏀瑰悕**锛歚BloomDownsampling` 鐨勯噰鏍锋湰鏉ュ氨鍙?`m`锛屾敼鍚嶆垚 `mm`锛堝眬閮ㄥ彉閲忎細閬斀鍚屽悕鐨勫舰鍙傦紝
    灏卞湴鏀瑰畬涔熻兘缂栵紝浣嗚璧锋潵鏄伨闅撅級锛?7. `uniform float u_X = 0.5;` 杩欑**澹版槑澶勯粯璁ゅ€?*蹇呴』缈昏瘧鎴?`default :`锛屼笉鑳界洿鎺ュ垹锛?   `Grid` 鐨?`u_GridSize`/`u_GridOpacity`/`u_FadeDistance`銆乣SectionCap` 鐨?   `u_Albedo`/`u_environmentIntensity`銆乣Billboard` 鐨?4 涓€乣Standard`/`GeomertySurface`/
-   `SectionFace` 鐨勪竴澶хエ 鈥斺€?鍏ㄩ兘娌℃湁浠讳綍 C++ 鎴?`.ovmat` 璁捐繃锛屽垹鎺夊氨闈欓粯鍙?0锛堢綉鏍?spacing
+   `SectionFace` 鐨勪竴澶хエ 鈥斺€?鍏ㄩ兘娌℃湁浠讳綍 C++ 鎴?`.mat` 璁捐繃锛屽垹鎺夊氨闈欓粯鍙?0锛堢綉鏍?spacing
    鍙?0 鈫?`fwidth(coord/0)`锛岀洿鎺ュ潖锛夈€傚彧鏈夌‘璁ゆ瘡甯?`SetProperty` 鐨勶紙`ssaoblur` 鐨?   `u_BlurDepthTolerance`锛夋墠鍙互鍒狅紱
 8. **geometry 鍧楅粯璁?姣忎釜鍙樹綋閮芥湁"**锛歁oonMatc 缁欏０鏄庝簡 geometry 鐨勬潗璐ㄥ湪**鎵€鏈?*鍙樹綋閲屽啓鍑犱綍
    闃舵锛岃€岃€佽矾寰勬湁涓?hack 鈥斺€?stage 浣撲互 `#if defined(WITH_EDGE)` 寮€澶存椂锛宖eature 娌″紑鐨勫彉浣?   鏁存璺宠繃銆傜幇鍦ㄧ殑瑙勫垯锛坄WantsGeometryStage`锛夛細**鍙湁褰撴暣涓?geometry 鍧楃殑绗竴涓潪绌鸿鏄?   鍗?feature 鐨勫畧鍗€佷笖閰嶅鐨?`#endif` 灏辨槸鍧楀熬**鏃讹紝鎵嶆寜鍙樹綋瑁佹帀锛涘叾浣欐儏鍐典竴寰嬬収鍐欙紙鎷夸笉鍑嗗氨
@@ -342,7 +342,7 @@ materials: 44 ; stages validated: 1002 ; failures: 0
 
 ## 11. 鏉愯川缂栬緫鍣紙绠＄嚎楠岃瘉锛?
 `Moon/editor/UI/MaterialPanel/MaterialEditorPanel`锛歞ock 闈㈡澘锛岄€変竴涓?`Engine/Shaders` 涓嬬殑
-`.mat`銆佹敼婧愮爜銆丄pply 鐑噸杞姐€傚畠瀛樺湪鐨勬剰涔夋槸鎶?鏋勫缓鏈熷嚭鍖?鈫?杩愯鏃跺彧璇诲寘"杩欐潯閾惧湪缂栬緫鍣ㄩ噷
+`.shader`銆佹敼婧愮爜銆丄pply 鐑噸杞姐€傚畠瀛樺湪鐨勬剰涔夋槸鎶?鏋勫缓鏈熷嚭鍖?鈫?杩愯鏃跺彧璇诲寘"杩欐潯閾惧湪缂栬緫鍣ㄩ噷
 璺戦€氫竴閬嶏紝椤哄甫璇佹槑鍙嶅皠/閿欒鍥炴寚閮界湡鐨勮兘鐢ㄣ€?
 閾捐矾锛?
 ```
@@ -359,5 +359,5 @@ materials: 44 ; stages validated: 1002 ; failures: 0
    鏋勯€犵殑锛岃繖涓ょ鎿嶄綔閮戒細璁╁惎鍔ㄦ寕浣忋€傞瑙堣绛夎鍙ｄ笂涓嬫枃灏辩华锛氶潰鏉跨敤 300 ms 杞
    `ViewerWidget::HasGLContext()`锛屽氨缁悗鍐嶅仛绗竴娆￠瑙堬紱
 3. **NVIDIA 椹卞姩涓嶈 `GL_GOOGLE_cpp_style_line_directive`**锛屽彧缁欎竴鏉?warning 骞跺拷鐣?`#line` 閲岀殑
-   鏂囦欢鍚嶃€備絾瀹炴祴鎶ラ敊浠嶇劧鏄?`Unlit.mat(39) : error C0000: ...`锛堢紪璇戝櫒鐢ㄧ殑鏄?`#line` 鐨勮鍙烽儴鍒嗭級銆?   鏋勫缓鏈?glslang 鍒欐槸瀹屾暣鏀寔锛坄ssaoblur.mat:27` 閭ｇ锛夈€傛墍浠ヨ鍙峰洖鎸囧湪涓や釜绔兘鎴愮珛锛屽彧鏄?   椹卞姩渚т細澶氫竴琛屾棤瀹冲憡璀︺€?
+   鏂囦欢鍚嶃€備絾瀹炴祴鎶ラ敊浠嶇劧鏄?`Unlit.shader(39) : error C0000: ...`锛堢紪璇戝櫒鐢ㄧ殑鏄?`#line` 鐨勮鍙烽儴鍒嗭級銆?   鏋勫缓鏈?glslang 鍒欐槸瀹屾暣鏀寔锛坄ssaoblur.shader:27` 閭ｇ锛夈€傛墍浠ヨ鍙峰洖鎸囧湪涓や釜绔兘鎴愮珛锛屽彧鏄?   椹卞姩渚т細澶氫竴琛屾棤瀹冲憡璀︺€?
 棰勮鐢ㄧ殑鐞冧綋鍜岀浉鏈哄湪 `Core::Rendering::MaterialPreviewRenderer`锛堣嚜甯?FBO銆佽嚜甯?`EngineUBO`銆?绋嬪簭鍖?UV 鐞冿級锛屽拰鍦烘櫙鍏辩敤 `Core/Rendering/EngineUBO.h` 鐨勫竷灞€锛坰td140 鍋忕Щ鐢?static_assert 閽変綇锛夈€?娌℃湁鐏厜锛歚Standard` 杩欑被 lit 鏉愯川棰勮浼氭槸榛戠殑锛寀nlit 鐨勬甯搞€?

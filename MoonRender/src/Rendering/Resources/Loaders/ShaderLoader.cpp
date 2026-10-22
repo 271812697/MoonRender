@@ -900,7 +900,7 @@ void main()
 	 *
 	 * p_error, when given, collects what the driver said. The editor's hot reload needs that
 	 * text: a material being edited is compiled into a package and loaded here, and the failure
-	 * has to be shown - with the .mat line the #line directives point at. */
+	 * has to be shown - with the .shader line the #line directives point at. */
 	Rendering::Resources::Shader::Variants AssembleFromPackage(
 		const Rendering::Resources::ShaderPackage& p_package,
 		std::string* p_error = nullptr)

@@ -1,6 +1,6 @@
 # 截面绘制（Clip Section）原理
 
-> 本文基于 `MoonRender/src/Core/Rendering/SceneRenderer.cpp` 中的 `SectionCapRenderPass` / `SectionContourRenderPass`，以及 `Resource/Moon/Data/Engine/Shaders/` 下的 `SectionCap.mat`、`SectionParity.mat`、`SectionContour.mat` 整理。
+> 本文基于 `MoonRender/src/Core/Rendering/SceneRenderer.cpp` 中的 `SectionCapRenderPass` / `SectionContourRenderPass`，以及 `Resource/Moon/Data/Engine/Shaders/` 下的 `SectionCap.shader`、`SectionParity.shader`、`SectionContour.shader` 整理。
 
 ---
 
@@ -45,13 +45,13 @@
 - **保留侧（可见）**：`f(P) <= 0`
 - **移除侧（被剪掉）**：`f(P) > 0`
 
-这与 `GeomertySurface.mat` 中的 `if (offsetw > 0) discard;` 一致。`ClipPlane` 控件通过 `SetClipPlane(zAxis, -zAxis·center)` 设置平面，即法线为控件 z 轴、过控件中心。
+这与 `GeomertySurface.shader` 中的 `if (offsetw > 0) discard;` 一致。`ClipPlane` 控件通过 `SetClipPlane(zAxis, -zAxis·center)` 设置平面，即法线为控件 z 轴、过控件中心。
 
 ---
 
 ## 4. 截线：几何着色器逐三角形求交
 
-`SectionContour.mat` 的几何着色器对每个三角形独立处理：
+`SectionContour.shader` 的几何着色器对每个三角形独立处理：
 
 1. 计算三个顶点到平面的有向距离 `d[i] = dot(plane.xyz, V[i]) + plane.w`；
 2. 若三个 `d[i]` 同号（三角形完全在一侧），跳过；
@@ -96,7 +96,7 @@ m_renderer.Clear(false, false, true, Maths::FVector4(0.0f));
 
 **② 奇偶填充：模型表面逐片元 INVERT**
 
-用 `SectionParity.mat` 重绘所有不透明三角形（双面、关闭深度测试/深度写入/颜色写入），模板状态为：
+用 `SectionParity.shader` 重绘所有不透明三角形（双面、关闭深度测试/深度写入/颜色写入），模板状态为：
 
 ```cpp
 p_pso.stencilTest   = true;
@@ -237,8 +237,8 @@ else {                                               // 正交
 | 文件 | 职责 |
 | --- | --- |
 | `MoonRender/src/Core/Rendering/SceneRenderer.cpp` | `SectionCapRenderPass`（模板奇偶 + 画截面）、`SectionContourRenderPass`（GS 截线） |
-| `Resource/Moon/Data/Engine/Shaders/SectionParity.mat` | 奇偶填充片元：保留比平面近的表面 |
-| `Resource/Moon/Data/Engine/Shaders/SectionCap.mat` | 截面：平面求交、深度、剖面线、IBL |
-| `Resource/Moon/Data/Engine/Shaders/SectionContour.mat` | 截线：GS 逐三角形求交 |
+| `Resource/Moon/Data/Engine/Shaders/SectionParity.shader` | 奇偶填充片元：保留比平面近的表面 |
+| `Resource/Moon/Data/Engine/Shaders/SectionCap.shader` | 截面：平面求交、深度、剖面线、IBL |
+| `Resource/Moon/Data/Engine/Shaders/SectionContour.shader` | 截线：GS 逐三角形求交 |
 | `MoonRender/include/Rendering/Settings/ERenderPassOrder.h` | Pass 顺序（`SectionCap = 25000`，`SectionContour = 25001`） |
 | `Moon/Interactive/Widgets/ClipPlane.cpp` | 剖切平面控件，实时更新平面 UBO |

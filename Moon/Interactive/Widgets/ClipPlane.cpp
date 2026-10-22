@@ -39,7 +39,7 @@ namespace MOON {
 
 		// ---------------------------------------------------------------------------
 	// Fixed-scale gizmo principle (matches the FIXED_SCALE feature of
-	// GizmoCell.mat)
+	// GizmoCell.shader)
 	// ---------------------------------------------------------------------------
 	// The clip-plane widget meshes are drawn through the FIXED_SCALE shader
 	// path: every model-space vertex is scaled by
@@ -139,7 +139,7 @@ class ClipPlane::ClipPlaneInternal {
 			if (seg.size() > 0) {
 				// The rotation path must keep a constant screen size like the
 				// gizmo meshes: scale the arc radius with the camera distance
-				// using the same FIXED_SCALE factor as GizmoCell.mat.
+				// using the same FIXED_SCALE factor as GizmoCell.shader.
 				const float ratio = ComputeGizmoFixedScaleRatio(*m_sceneView, m_internal->center);
 				constexpr float kGizmoScale = 0.1f;      // drawOneMesh scale below
 				constexpr float kRingMeshRadius = 7.93f; // res.obj cylinder offset in TransformAxis()

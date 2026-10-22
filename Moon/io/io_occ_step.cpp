@@ -87,7 +87,7 @@ namespace MOON {
 
 				// ??:?? nmlSize == ptSize ?????????????
 				// ????(???????)???????????,???????
-				// (0,0,0),? Standard.mat ? normalize(0) ??? NaN,???????
+				// (0,0,0),? Standard.shader ? normalize(0) ??? NaN,???????
 				if (nmlSize == ptSize) {
 					for (size_t i = 0; i < ptSize; i++) {
 						dom.vertex[i].normals = {
@@ -164,7 +164,7 @@ namespace MOON {
 				auto tempMat = new Core::Resources::Material();
 
 
-				tempMat->SetShader(GetShaderService[":Shaders\\Standard.mat"]);
+				tempMat->SetShader(GetShaderService[":Shaders\\Standard.shader"]);
 				// Overrides after SetShader: the state now starts from the material block.
 				tempMat->SetBackfaceCulling(false);
 				tempMat->SetCastShadows(false);

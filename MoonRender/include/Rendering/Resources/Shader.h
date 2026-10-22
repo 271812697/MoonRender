@@ -75,7 +75,7 @@ namespace Rendering::Resources
 		 * it, and the instance keeps the engine's default.
 		 *
 		 * This is the definition's state, not the instance's: a material starts from it and may
-		 * override it afterwards (a .ovmat's settings, or the call site's Set* calls). */
+		 * override it afterwards (a .mat's settings, or the call site's Set* calls). */
 		struct State
 		{
 			std::optional<bool> blendable;        // blending: opaque = false, transparent = true

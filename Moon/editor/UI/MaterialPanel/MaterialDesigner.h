@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <QIcon>
 #include <QImage>
 #include <QString>
@@ -12,6 +12,7 @@
 #include <Rendering/Data/FeatureSet.h>
 #include <Rendering/Data/Material.h>
 
+class QComboBox;
 class QLabel;
 class QListWidget;
 class QScrollArea;
@@ -24,17 +25,19 @@ namespace MOON
 {
 	class PropertyComponent;
 
-	/** The material designer: an .ovmat asset edited through the parameters its shader declares.
+	/** The material designer: an .mat asset edited through the parameters its shader declares.
 	 *
 	 * Why it exists: a material is an instance of a shader - the shader's package knows the
 	 * parameters (name, type, texture slot, default), so the form is generated instead of
 	 * hand-written, and it stays correct when the shader gains a parameter (the same reflection
 	 * Material reads, see Shader::GetParameters).
 	 *
-	 * The asset lives where the engine keeps its materials (Moon/Data/Engine/Materials): the list
-	 * is scanned from disk, an entry is loaded through the MaterialManager (so every actor that
-	 * references it shares the instance), edits are pushed into the loaded material as they
-	 * happen - the preview shows them live - and Save writes the .ovmat back.
+	 * The asset lives where the engine keeps its materials (Moon/Data/Engine/Materials): the
+	 * designer edits whichever material the content browser opened (see OpenMaterial) or the
+	 * first one in that folder when it is opened on its own, the entry is loaded through the
+	 * MaterialManager (so every actor that references it shares the instance), edits are pushed
+	 * into the loaded material as they happen - the preview shows them live - and Save writes
+	 * the .mat back.
 	 *
 	 * Assign gives the material to the selected actor (or to the AllFaces anchor of a topology
 	 * shape), which is the point where a designed material becomes part of the scene. */
@@ -46,11 +49,18 @@ namespace MOON
 		~MaterialDesigner() override;
 
 		Core::Resources::Material* GetMaterial() const;
+		/** The resource key of the material being edited (":Materials/Name.mat"). */
+		std::string CurrentKey() const;
 
 		/** Re-scans the material and texture folders and rebuilds the form for the current
 		 * material. Called when the panel switches to this page, so a shader that was hot
 		 * reloaded in the Shader page shows its new parameters here. */
 		void Refresh();
+
+		/** Selects an existing .mat (the key is the serializer's resource path,
+		 * ":Materials/Name.mat") and loads it into the designer. The content browser uses
+		 * this to open a material it just listed. */
+		void OpenMaterial(const std::string& p_key);
 
 		/** The preview's last frame, downscaled. The browser shows it next to the material's name,
 		 * so the list reads as a set of look previews rather than as file names. */
@@ -94,15 +104,20 @@ namespace MOON
 		void ScanTextures();
 
 		void RefreshMaterialList(const std::string& p_select = {});
-		void OnMaterialSelected(int p_index);
+		/** Loads p_key (":Materials/Name.mat") into the form. The content browser picks the
+		 * material; RefreshMaterialList resolves the default when the panel opens on its own. */
+		void LoadMaterial(const std::string& p_key);
 		void RebuildForm();
 
-		void NewMaterial();
-		void DuplicateMaterial();
 		void RevertMaterial();
-		void DeleteMaterial();
 		void SaveMaterial();
-		void AssignToSelection();
+
+		/** Points the material at another shader (the .mat stores which .shader it instances)
+		 * and rebuilds the form from that shader's parameters. Marked dirty; Save writes it. */
+		void SetShader(const std::string& p_key);
+		void PopulateShaderPicker();
+		/** The current material's shader as the picker/asset key (":Shaders\\Name.shader"). */
+		std::string CurrentShaderKey() const;
 
 		Snapshot Capture() const;
 		void ApplySnapshot(const Snapshot& p_snapshot);
@@ -123,12 +138,10 @@ namespace MOON
 		 * offering every declared feature, not just the enabled ones. */
 		std::map<std::string, std::vector<std::string>> m_declaredFeatures;
 
-		QListWidget* m_browser = nullptr;
-		QToolButton* m_new = nullptr;
-		QToolButton* m_duplicate = nullptr;
 		QToolButton* m_revert = nullptr;
 		QToolButton* m_save = nullptr;
-		QToolButton* m_assign = nullptr;
+		/** The shader the material instances; changing it re-links the .mat. */
+		QComboBox* m_shaderPicker = nullptr;
 		QScrollArea* m_scroll = nullptr;
 		QWidget* m_form = nullptr;
 		QVBoxLayout* m_formLayout = nullptr;
@@ -138,11 +151,7 @@ namespace MOON
 		std::string m_shadersRoot;
 		std::string m_texturesRoot;
 		std::string m_selectedKey;
-		std::vector<std::string> m_materialKeys;
 		std::vector<TextureAsset> m_textures;
-		/** The last preview of each material the designer has shown, keyed by resource path.
-		 * Filled as materials are visited and refreshed whenever the current one is edited. */
-		std::map<std::string, QIcon> m_thumbnails;
 		Core::Resources::Material* m_material = nullptr;
 		std::unique_ptr<PropertyComponent> m_component;
 		bool m_dirty = false;

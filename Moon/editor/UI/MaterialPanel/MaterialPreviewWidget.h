@@ -67,7 +67,7 @@ namespace MOON
 
 	signals:
 		/** Emitted after a paint in which the shader failed to build, so the panel can log the
-		 * driver's message (it carries the .mat line numbers). */
+		 * driver's message (it carries the .shader line numbers). */
 		void shaderFailed(const QString& p_error);
 
 		/** The last painted frame, downscaled for the material browser. */

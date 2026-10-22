@@ -93,29 +93,38 @@ vec3 evaluateIBL(
     const vec3 r = getSpecularDominantDirection(n, reflect(-v, n), pixel.roughness);
     const float NoV = max(dot(n, v), 1.0e-4);
 
+    // Filament applies singleBounceAO() (= 1 when multi-bounce AO is on) and then
+    // multiBounceSpecularAO(), which is the same GTAO polynomial with f0 as the albedo.
     vec3 Fr = E * prefilteredRadiance(prefilterCube, r, pixel.perceptualRoughness)
-        * pixel.energyCompensation * specularAO(NoV, ao, pixel.perceptualRoughness);
+        * pixel.energyCompensation
+        * multiBounceAO(specularAO(NoV, ao, pixel.perceptualRoughness), pixel.f0);
     // Diffuse from the engine's irradiance cube, not from the prefilter's roughness-one mip
     // (see diffuseIrradianceRoughnessOne for why).
     vec3 Fd = pixel.diffuseColor * diffuseIrradiance(irradianceCube, n)
         * (1.0 - E) * multiBounceAO(ao, pixel.diffuseColor);
 
     // Filament isEvaluateClearCoatIBL(): the clear coat is its own specular layer with
-    // F0 = 0.04, evaluated at clearCoatPerceptualRoughness (its own DFG lookup), and the
-    // base lobes are attenuated by (1 - Fc).
+    // F0 = 0.04, evaluated at clearCoatPerceptualRoughness (its own DFG lookup and its own
+    // reflection vector), and the base lobes are attenuated by (1 - Fc). With a normal map
+    // the coat uses the geometric normal.
     if (pixel.clearCoat > 0.0)
     {
         const float ccRoughness = pixel.clearCoatRoughness;
-        vec2 ccDfg = textureLod(dfgLut, vec2(NoV, ccRoughness), 0.0).rg;
+        const vec3 ccN = pixel.clearCoatNormal;
+        const float ccNoV = max(dot(ccN, v), 1.0e-4);
+        const float ccAlpha = ccRoughness * ccRoughness;
+        const vec3 ccR = getSpecularDominantDirection(ccN, reflect(-v, ccN), ccAlpha);
+        vec2 ccDfg = textureLod(dfgLut, vec2(ccNoV, ccRoughness), 0.0).rg;
         ccDfg = clamp(ccDfg, 0.0, 1.0);
         const vec3 Ecc = specularDFG(vec3(0.04), ccDfg);
         const vec3 ccEnergy = vec3(1.0) + vec3(0.04)
             * (1.0 / max(ccDfg.x + ccDfg.y, 1.0e-4) - 1.0);
-        const float Fc = F_Schlick(0.04, 1.0, NoV) * pixel.clearCoat;
-        const vec3 cc = prefilteredRadiance(prefilterCube, r, ccRoughness);
+        const float Fc = F_Schlick(0.04, 1.0, ccNoV) * pixel.clearCoat;
+        const vec3 cc = prefilteredRadiance(prefilterCube, ccR, ccRoughness);
+        const vec3 ccAO = multiBounceAO(specularAO(ccNoV, ao, ccRoughness), vec3(0.04));
         Fd *= (1.0 - Fc);
         Fr *= (1.0 - Fc);
-        Fr += Ecc * cc * ccEnergy * specularAO(NoV, ao, ccRoughness) * pixel.clearCoat;
+        Fr += Ecc * cc * ccEnergy * ccAO * pixel.clearCoat;
     }
 
     vec3 Ft = vec3(0.0);

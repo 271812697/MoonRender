@@ -31,9 +31,9 @@ Core::Rendering::PostProcess::AutoExposureEffect::AutoExposureEffect(
 		true // <-- use mipmaps
 	);
 
-	m_luminanceMaterial.SetShader(GetService(Core::ResourceManagement::ShaderManager)[":Shaders\\PostProcess\\Luminance.mat"]);
-	m_exposureMaterial.SetShader(GetService(Core::ResourceManagement::ShaderManager)[":Shaders\\PostProcess\\AutoExposure.mat"]);
-	m_compensationMaterial.SetShader(GetService(Core::ResourceManagement::ShaderManager)[":Shaders\\PostProcess\\ApplyExposure.mat"]);
+	m_luminanceMaterial.SetShader(GetService(Core::ResourceManagement::ShaderManager)[":Shaders\\PostProcess\\Luminance.shader"]);
+	m_exposureMaterial.SetShader(GetService(Core::ResourceManagement::ShaderManager)[":Shaders\\PostProcess\\AutoExposure.shader"]);
+	m_compensationMaterial.SetShader(GetService(Core::ResourceManagement::ShaderManager)[":Shaders\\PostProcess\\ApplyExposure.shader"]);
 }
 
 void Core::Rendering::PostProcess::AutoExposureEffect::Draw(

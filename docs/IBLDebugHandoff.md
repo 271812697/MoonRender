@@ -42,7 +42,7 @@ studio 的窗帘/柔光箱结构，于是球面出现大理石纹。第 2~3 级�
    - `omegaP` 改用 **源 cubemap 的 base 宽度**（1024），并且**所有 level 共用**；
    - 新增 `baseLod = log2(sourceWidth / 256) = 2`，给 mirror level（roughness 0、只有
      1 个 sample、没有核宽度）用，等价于 Filament 第 0 级对自己的 256 源做一次滤波拷贝。
-2. `SkyboxPrefilter.mat`：加 `baseLod` 参数，`sampleLod = (roughness<=0.0001) ? baseLod : l + lodOffset`。
+2. `SkyboxPrefilter.shader`：加 `baseLod` 参数，`sampleLod = (roughness<=0.0001) ? baseLod : l + lodOffset`。
 3. prefilter FBO 只 attach **一个** COLOR（当前 face），不再 attach 6 个 face。原来 6 个
    face 只在“一次画 6 个 face”时需要；逐 face 绘制时，某些驱动会把 framebuffer 尺寸取成
    最小 attachment，per-mip 切换 level 时会裁掉大 mip 的绘制/回读（本次 dump 就踩到了）。
@@ -68,7 +68,7 @@ studio 的窗帘/柔光箱结构，于是球面出现大理石纹。第 2~3 级�
 ## 第二轮：预览 IBL 强度（已修）
 
 结构对上之后，两颗球的**形状/高光位置**基本一致，但 Moon 整颗球更亮。把两张截图反推过
-ACES 之后（engine 的 `Tonemapping.mat` 是 Filament ACES，输入先乘 `_Exposure`）：
+ACES 之后（engine 的 `Tonemapping.shader` 是 Filament ACES，输入先乘 `_Exposure`）：
 
 | | 截图 sRGB（球均值） | 反推 pre-ACES 场景值 |
 |---|---|---|
@@ -125,7 +125,7 @@ preview 自己那份 prefilter mip 是否真的生成了。
 
 2026-10-21 两张截图并排看：
 
-- Moon 左侧列表选中的是 **"Filamen..."**（`FilamentPBR.mat`），Metallic **1**、Roughness 0；
+- Moon 左侧列表选中的是 **"Filamen..."**（`FilamentPBR.shader`），Metallic **1**、Roughness 0；
 - Qt-Filament 右侧标题写的是 **"Previewing: Assimp Default PBR"**，左侧列表高亮的是第一项
   **"Atmosph..."**（Atmosphere/Assimp 内置材质），Metallic **0**、Roughness 0，而且面板上
   标着 **read-only**。

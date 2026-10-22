@@ -287,7 +287,7 @@ void Rendering::Data::Material::SetShader(Rendering::Resources::Shader* p_shader
 
 	// Rebinding to a shader re-creates the instance's state from the definition: the package's
 	// material block is the authority for blending / culling / depth writing, and whatever the
-	// call site (or a .ovmat's settings) sets afterwards is the override.
+	// call site (or a .mat's settings) sets afterwards is the override.
 	ResetStateToShader();
 
 	if (m_shader)
@@ -712,6 +712,44 @@ void Rendering::Data::Material::BindGlobalTexture(const std::string& p_name, Ren
 			return;
 		}
 	}
+}
+
+bool Rendering::Data::Material::ResetPropertyToDefault(const std::string& p_name)
+{
+	if (m_shader == nullptr || !m_shader->HasParameterTable())
+	{
+		return false;
+	}
+
+	for (const Rendering::Resources::Shader::Parameter& parameter : m_shader->GetParameters())
+	{
+		if (parameter.name != p_name)
+		{
+			continue;
+		}
+		if (!parameter.isUi)
+		{
+			return false;
+		}
+
+		const MaterialPropertyType value = ParameterDefaultValue(parameter);
+		if (std::holds_alternative<std::monostate>(value))
+		{
+			return false;
+		}
+
+		if (HasProperty(p_name))
+		{
+			SetProperty(p_name, value);
+		}
+		else
+		{
+			m_properties.emplace(p_name, MaterialProperty{ .value = value, .singleUse = false });
+			InvalidatePropertySignature();
+		}
+		return true;
+	}
+	return false;
 }
 
 void Rendering::Data::Material::UpdateProperties()

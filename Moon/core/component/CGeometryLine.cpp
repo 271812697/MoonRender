@@ -128,7 +128,7 @@ namespace Core::ECS::Components
 
         auto lineMat = new Core::Resources::Material();
         Core::Global::ServiceLocator::Get<Core::ResourceManagement::MaterialManager>().RegisterResource(owner.GetName() + std::string("_lineMat"), lineMat);
-        lineMat->SetShader(Core::Global::ServiceLocator::Get<Editor::Core::Context>().shaderManager[":Shaders\\Line.mat"]);
+        lineMat->SetShader(Core::Global::ServiceLocator::Get<Editor::Core::Context>().shaderManager[":Shaders\\Line.shader"]);
         lineMat->SetBackfaceCulling(false);
         lineMat->SetCastShadows(false);
         lineMat->SetReceiveShadows(false);

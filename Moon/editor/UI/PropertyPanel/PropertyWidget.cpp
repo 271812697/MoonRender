@@ -746,10 +746,16 @@ namespace MOON {
 			if (mat == nullptr || mat->GetShader() == nullptr) {
 				return;
 			}
-			// Rebuild the property map from the shader's declared initializers. This keeps the
-			// material state and features; only the parameters (including texture slots) reset.
-			mat->GetProperties().clear();
-			mat->UpdateProperties();
+			// Reset only the parameters the panel edits. Clearing the whole property map and
+			// rebuilding it from the shader defaults also recreated the engine-owned samplers
+			// (_IrradianceCube, _PrefilterCube, _BRDFLut, _ShadowMap, the CAD domain colour
+			// buffer and the depth-peel textures) as null textures: the next draw then bound
+			// the empty 2D fallback to their units, which crashed on the CAD material.
+			for (const auto& parameter : mat->GetShader()->GetParameters()) {
+				if (parameter.isUi) {
+					mat->ResetPropertyToDefault(parameter.name);
+				}
+			}
 			for (auto* property : mProperties) {
 				property->updateWidgetValue(getPropertyValue(property->getPropertyName()));
 			}

@@ -90,8 +90,10 @@ namespace MOON {
 				faceMat->SetPolygonOffsetFill(true);
 				//tempMat->SetBlendable(true);
 				//tempMat->SetDepthWriting(false);
-				faceMat->SetShader(GetShaderService[":Shaders\\GeomertySurface.mat"]);
-				faceMat->SetProperty("u_Albedo",Maths::FVector4(1,1,1,1));
+				faceMat->SetShader(GetShaderService[":Shaders\\GeomertySurface.shader"]);
+				// The CAD face starts from the same base colour as FilamentPBR / Qt-Filament's
+				// MaterialPreview (#b8b8b8); a per-shape colour can still override it later.
+				faceMat->SetProperty("u_Albedo", Maths::FVector4(0.7215686f, 0.7215686f, 0.7215686f, 1.0f));
 				// Everything else stays at the shader's declared defaults.
 				faceMat->TrySetProperty("_IrradianceCube", renderer.GetIrradianceCube());
 				faceMat->TrySetProperty("_PrefilterCube", renderer.GetPrefilterCube());
@@ -101,7 +103,7 @@ namespace MOON {
 				faceTransparentMat->SetReceiveShadows(false);
 				//tempMat->SetBlendable(true);
 				//tempMat->SetDepthWriting(false);
-				faceTransparentMat->SetShader(GetShaderService[":Shaders\\GeomertySurface.mat"]);
+				faceTransparentMat->SetShader(GetShaderService[":Shaders\\GeomertySurface.shader"]);
 				faceTransparentMat->SetProperty("u_Albedo", Maths::FVector4(1, 0, 0, 0.5));
 				// Everything else stays at the shader's declared defaults.
 
@@ -112,7 +114,7 @@ namespace MOON {
 				faceTransparentMat->SetDepthWriting(true);
 			}
 			{
-				lineMat->SetShader(Core::Global::ServiceLocator::Get<Editor::Core::Context>().shaderManager[":Shaders\\GeomertyLine.mat"]);
+				lineMat->SetShader(Core::Global::ServiceLocator::Get<Editor::Core::Context>().shaderManager[":Shaders\\GeomertyLine.shader"]);
 				lineMat->SetBackfaceCulling(false);
 				lineMat->SetCastShadows(false);
 				lineMat->SetReceiveShadows(false);
@@ -128,7 +130,7 @@ namespace MOON {
 				// on the corner it belongs to instead of z-fighting with the faces
 				// that meet there. Both the colour and the size are material
 				// properties: they are what the material panel of this actor edits.
-				vertexMat->SetShader(Core::Global::ServiceLocator::Get<Editor::Core::Context>().shaderManager[":Shaders\\GeomertyPoint.mat"]);
+				vertexMat->SetShader(Core::Global::ServiceLocator::Get<Editor::Core::Context>().shaderManager[":Shaders\\GeomertyPoint.shader"]);
 				vertexMat->SetBackfaceCulling(false);
 				vertexMat->SetCastShadows(false);
 				vertexMat->SetReceiveShadows(false);

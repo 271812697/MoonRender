@@ -5,14 +5,14 @@
 > 项目定位：CAD 建模与渲染，渲染侧参考 Filament。SSR、fog、sheen/anisotropy/subsurface/cloth
 > 等高级效果按用户决定**后置**，当前优先保证基础 PBR/IBL、材质与贴图链路。
 >
-> 最终目标：`FilamentPBR.mat` 只作为对齐/验证材质；CAD 几何实际使用的 `GeomertySurface.mat`
+> 最终目标：`FilamentPBR.shader` 只作为对齐/验证材质；CAD 几何实际使用的 `GeomertySurface.shader`
 > 逐步吸收同一套 Filament shading，迁移计划见下方“GeomertySurface 迁移”。
 
 ## 已完成（当前状态）
 
 - 变体系统：`EVariant` 7 位（DIR/DYN/SHADOW/FOG/PICKING/SSR/DEPTH）、MoonMatc keyed 变体、`SHDRFEAT`、`--features`、`defaultFeatures`；材质 feature 编译期固定，设计师勾选触发重编译。
-- 顶点属性：`.mat` 的 `vertexAttributes` + `HAS_ATTRIBUTE_*`，Standard/CAD/FilamentPBR 等已迁移。
-- PBR/IBL 核心：GGX / Smith / Schlick / DFG LUT / 能量补偿 / prefilter LOD / Filament 无 SH 时的 roughness-one prefiltered cubemap 漫反射 / specular AO / multiBounce AO / clear coat（直接光 + IBL）/ reflectance / transmission / refractionIndex / thickness / specular AA（normalFiltering）。
+- 顶点属性：`.shader` 的 `vertexAttributes` + `HAS_ATTRIBUTE_*`，Standard/CAD/FilamentPBR 等已迁移。
+- PBR/IBL 核心：GGX / Smith / Schlick / DFG LUT / 能量补偿 / prefilter LOD / specular AO / multiBounce AO / clear coat（直接光 + IBL）/ reflectance / transmission / refractionIndex / thickness / specular AA（normalFiltering）。漫反射当前用 irradiance cube，Filament 无 SH 时的 roughness-one prefiltered cubemap 路径保留为 `diffuseIrradianceRoughnessOne`，属于已知偏差（见下方 2026-10-21 条目）。
 - 后处理：Filament ACES + triangle-noise dithering。
 - 预览：Studio.hdr IBL、sun（强度 1.0、方向 -0.35,-0.85,-0.55）、曝光 1.2、背景 0.032、相机 3/4 姿态 (1.5,0.82,3.65)；Reset View 按钮已实现并由用户确认正常（2026-10-20）。
 - 环境 cubemap 方位：已修并**目视确认**（2026-10-20，用户确认“正常了”）；结论与验证见下方“环境 cube 方位”。
@@ -20,7 +20,7 @@
   `specularColorFactor`（F0/F90 与 IBL DFG）；`absorption`（Beer-Lambert，折射路径）；
   点光/聚光的 Filament `getDistanceAttenuation` / `getAngleAttenuation`（仅 FilamentPBR；
   Standard 的共享 `Light.glsl` 未动）。MoonMatc 128 variants、ShaderPack 的
-  `glslangValidator` 校验和完整 `Moon` 构建均通过。新参数已进 `FilamentPBR.mat` / `.ovmat`，
+  `glslangValidator` 校验和完整 `Moon` 构建均通过。新参数已进 `FilamentPBR.shader` / `.mat`，
   面板会自动出现；参考侧尚未暴露，视觉 A/B 见待办 1。点光/聚光只有有限 effect range 用
   Filament 公式，`range == 0` 保留引擎的 inverse-polynomial（preview rig 的 constant fill），
   这是唯一的例外。
@@ -29,7 +29,7 @@
   derivative TBN 保留。旧的 alpha clipping/dither、SSAO、UV tiling/offset、mask、内置
   tonemap/gamma、SPECULAR_WORKFLOW / Specular / Glossiness 已删除，后续再单独对齐。
   MoonMatc 8 variants，完整 `Moon` 构建通过。迁移前检查点提交为 `3c451d9d`。
-- 材质参数元数据（2026-10-20）：`FilamentPBR.mat` / `GeomertySurface.mat` 的 UI 参数补齐
+- 材质参数元数据（2026-10-20）：`FilamentPBR.shader` / `GeomertySurface.shader` 的 UI 参数补齐
   `label` / `group` / `min` / `max` / `step` / `color`；颜色参数（`u_Albedo`、`u_EmissiveColor`、
   `edgeColor`、`u_SpecularColorFactor`、`u_Absorption`）显式标 `color : true`，引擎内部纹理/
   uniform 标 `ui : false`。MaterialDesigner 和 Actor Property 面板都改为读元数据，删掉了
@@ -73,12 +73,12 @@
   取掠射值（电介质看起来像全镜面，metallic 0 / roughness 0 反射过强），`reflect(-v, n)`
   在 v≈-n 时退化成 `n`（环境按法线采样，表现为 **cubemap 左右反转**）。绕序改为
   `{a, a+1, b, a+1, b+1, b}`，底座 `addBaseTriangle` 的法线对齐方向同步反过来。验证用
-  `FilamentPBR.mat` 的临时 `u_DebugView`：修复前 signed NoV 全为 -1、`FragPos` 编码显示
+  `FilamentPBR.shader` 的临时 `u_DebugView`：修复前 signed NoV 全为 -1、`FragPos` 编码显示
   远半球（z<0）；修复后金属球右边缘高光/底部亮斑与参考同侧。调试参数已删除。
   其它预览网格已逐一核对：Ball 用的 `material_sphere.obj` 有向体积 +0.948（CCW），
   Cube 六面、Plane 的几何法线都与面法线同向（dot=1.000），无需修改；只有程序化球体
   （`BuildUVSphere`）和 `BuildMaterialBall` 的球/底座是反的。
-  `SkyboxConvert.mat` 的 v 号同时改回 `0.5 + asin`（14:08 的翻转是在绕序 bug 干扰下判错的，
+  `SkyboxConvert.shader` 的 v 号同时改回 `0.5 + asin`（14:08 的翻转是在绕序 bug 干扰下判错的，
   它把 studio 的顶光翻到了底部，表现为参考左上角的柔光箱高光消失）。
 - **DFG LUT 每帧绑定（2026-10-21）**：sampler 只在材质签名变化时随上传绑定，预览第一帧
   sky pass 还没烘出 LUT，白色空纹理就留住了。`ABaseRenderer::DrawEntity` 现在每次 draw
@@ -88,7 +88,22 @@
   roughness-one mip，但预览里该 mip 曾被测到是黑的，diffuse 归零。现在
   `surface_light_indirect.glsl` 的 `diffuseIrradiance` 采样 `_IrradianceCube`；
   Filament 那条路径保留为 `diffuseIrradianceRoughnessOne` 备查。
-- Qt-Filament 参考工程（`D:\Project\C++\Qt-Filament`）：材质面板已对齐 Base Color / Metallic / Roughness / Reflectance / Clear Coat / Clear Coat Roughness / Transmission / Refraction Index / Thickness 及六张贴图槽；`aiDefaultMat.mat`（samples + filamentapp）已同步，运行时包会重新生成。
+- **GeomertySurface / Filament shading 参数补齐（2026-10-21 晚）**：按 Filament 的
+  `get*PixelParams()` 补齐 clear coat 链路，两个材质共享：
+  - `getRoughnessPixelParams()` 的耦合：底层 perceptual roughness ≥ clearCoatRoughness，
+    按 clearCoat 混合（CAD 基线 0.4 / 0.53 实际用 **0.53**）；
+  - `CLEAR_COAT_IOR_CHANGE`（Filament `MaterialBuilder` 默认开）：`f0ClearCoatToSurface()`
+    把底层 F0 从 air→1.5 换到 1.5→1.5，金属/介质的 F0 都会略降；
+  - clear coat 的直接光和 IBL 改用**几何法线**（有法线贴图时 coat 不吃贴图细节），coat 的
+    DFG / 反射方向 / NoV 用 clearCoatRoughness 自己的值；
+  - IBL 的 specular AO 改为 Filament 的 `multiBounceSpecularAO`（GTAO 多项式，albedo 传 f0）；
+  - specular AA 按 Filament 的 per-material `specularAntiAliasing`（`GEOMETRIC_SPECULAR_AA`）
+    做成 `u_SpecularAA`：FilamentPBR 默认 **false**（参考 `aiDefaultMat` 没声明它），
+    GeomertySurface 默认 **true**（保留 CAD 原观感）；AA 作用在几何法线和 coat 粗糙度上；
+  - 双面 + 法线贴图的 TBN 在背面翻转 T/B，得到 Filament 的 (-T,-B,-N)。
+  MoonMatc 两个材质通过、ShaderPack 的 glslang 校验和完整 `Moon` 构建通过（21:45）。
+  预期观感：CAD 金属面反射更柔、F0 略降；FilamentPBR 预览轮廓略锐（AA 关，与参考一致）。
+- Qt-Filament 参考工程（`D:\Project\C++\Qt-Filament`）：材质面板已对齐 Base Color / Metallic / Roughness / Reflectance / Clear Coat / Clear Coat Roughness / Transmission / Refraction Index / Thickness 及六张贴图槽；`aiDefaultMat.shader`（samples + filamentapp）已同步，运行时包会重新生成。
 
 ## 环境 cube 方位（2026-10-20，已确认）
 
@@ -96,18 +111,18 @@
   `IBLPrefilterContext::EquirectangularToCubemap` 默认 `mirror = true`，`cmgen` 默认也镜像）：
   cube 中方向 `(x,y,z)` 的纹素来自 equirect 的 `(-x,y,z)`。Qt-Filament 的反射和 diffuse
   都用这个镜像 cube。
-- 旧实现：`SkyboxConvert.mat` 用 `u = (π + atan2(z,x))/2π`，把 +Z 内容放进 +X 面（相对
+- 旧实现：`SkyboxConvert.shader` 用 `u = (π + atan2(z,x))/2π`，把 +Z 内容放进 +X 面（相对
   Filament 的镜像 cube 表现为一次 90° 方位旋转）；`computeIrradianceSH` 受 stb 全局垂直
   翻转影响，第 0 行按顶行处理（上下颠倒），且没有跟着做 X 镜像。
-- 修正：`SkyboxConvert.mat` 用 `u = 0.5 + atan2(-x,z)/2π`、`v = 0.5 + asin(y)/π`；
+- 修正：`SkyboxConvert.shader` 用 `u = 0.5 + atan2(-x,z)/2π`、`v = 0.5 + asin(y)/π`；
   `computeIrradianceSH` 显式 `stbi_set_flip_vertically_on_load(true)` 并把第 0 行映射到 -Y，
-  basis 的 x 取 `-x`。prefilter/irradiance 的面方向公式本来就和 Filament `iblprefilter.mat`
+  basis 的 x 取 `-x`。prefilter/irradiance 的面方向公式本来就和 Filament `iblprefilter.shader`
   一致，未改。
 - 验证：`Build/_skytest/SkyID.hdr`（颜色编码方向）+ `cmgen --extract` 参考 cube：旧公式
   每面最大误差 71°–91°、平均 49°–80°；新公式最大 1.4°、平均 <1°；SH 与 cmgen cube 直接
   积分的相对差 0.7%。
 - 注：Filament 的镜像约定意味着可见 skybox 本身也是镜像的。若以后要让天空和“真实”equirect
-  一致而不再和 Filament 反射一致，把 `SkyboxConvert.mat` 的 `-d.x` 改回 `d.x`，并同步去掉
+  一致而不再和 Filament 反射一致，把 `SkyboxConvert.shader` 的 `-d.x` 改回 `d.x`，并同步去掉
   SH 的 x 负号（两处必须一起改）。
 
 ## 待办（按优先级）
@@ -123,7 +138,7 @@
      里启用了 probe，需要先接受“无盒投影/局部限制”的退化，或补上。
 2. **新增材质参数的视觉 A/B（小项）**
    - `u_SpecularFactor` / `u_SpecularColorFactor` / `u_Absorption` 需要 Qt-Filament 的
-     `aiDefaultMat.mat` 和面板先暴露，再做和参考的对比；Moon 侧默认值中性，正常材质外观不变。
+     `aiDefaultMat.shader` 和面板先暴露，再做和参考的对比；Moon 侧默认值中性，正常材质外观不变。
 3. **材质 DSL 机制**
    - `constants` / `variables` / `outputs` 声明尚未支持（Filament 有）。
    - 多输出 MRT、postProcess 之外的 domain 对齐。
@@ -138,7 +153,7 @@
 
 - **SSR**：做法已讨论（Filament 的 forward SSR variant + 上一帧 HDR history + 当前 G-buffer
   structure + 主 shader 按 `Fr * (1 - a) + E * ssr.rgb` 混合）。Moon 目前只有 `EVariant::SSR`
-  位和 `FilamentPBR.mat` 的 variantFilter，没有 pass / shader；等 CAD 基础链路稳定后再做。
+  位和 `FilamentPBR.shader` 的 variantFilter，没有 pass / shader；等 CAD 基础链路稳定后再做。
 - **fog**：未接；变体位已有，shader 未用。
 - **sheen / anisotropy / subsurface / cloth**：独立的 BRDF / shading model，需要新的 material
   inputs 和变体，工作量大，后置。
@@ -146,9 +161,9 @@
 
 ## GeomertySurface 迁移（2026-10-20 已直接替换，待 CAD 视图验证）
 
-- 角色：`FilamentPBR.mat` 是对齐 Filament / Qt-Filament 的参考材质；CAD 拓扑面实际走
-  `GeomertySurface.mat`。用户要求把 FilamentPBR 的 shading 直接搬进 GeomertySurface。
-- 已做：`GeomertySurface.mat` 的 `#include PBR.glsl` + `PBRLighting(...)` 已替换为
+- 角色：`FilamentPBR.shader` 是对齐 Filament / Qt-Filament 的参考材质；CAD 拓扑面实际走
+  `GeomertySurface.shader`。用户要求把 FilamentPBR 的 shading 直接搬进 GeomertySurface。
+- 已做：`GeomertySurface.shader` 的 `#include PBR.glsl` + `PBRLighting(...)` 已替换为
   `#include Lighting/Filament/surface_lighting.glsl` + `preparePixelParams` /
   `evaluateFilamentSurface`。新增 `u_Reflectance` / `u_ClearCoat` / `u_ClearCoatRoughness` /
   `u_Thickness` / `u_SpecularFactor` / `u_SpecularColorFactor` / `u_Absorption`，默认中性。
@@ -180,10 +195,10 @@
 
 ## 关键文件
 
-- shader：`Resource/Moon/Data/Engine/Shaders/FilamentPBR.mat`、`Lighting/Filament/*.glsl`、`SkyboxConvert.mat`、`SkyboxPrefilter.mat`、`SkyboxIrrandiance.mat`、`PostProcess/Tonemapping.mat`
+- shader：`Resource/Moon/Data/Engine/Shaders/FilamentPBR.shader`、`Lighting/Filament/*.glsl`、`SkyboxConvert.shader`、`SkyboxPrefilter.shader`、`SkyboxIrrandiance.shader`、`PostProcess/Tonemapping.shader`
 - 天空盒/SH：`MoonRender/src/Core/Rendering/SkyboxRenderPass.cpp`
 - 预览：`MoonRender/src/Rendering/View/PreviewView.cpp`、`Moon/editor/UI/MaterialPanel/MaterialPreviewWidget.cpp`、`MaterialEditorPanel.cpp`
-- 参考工程：`D:\Project\C++\Qt-Filament`（`test/core/MaterialPreview.cpp`、`test/resource/shaders/DefaultMaterial.mat.txt`、`filament/samples/materials/aiDefaultMat.mat`）
+- 参考工程：`D:\Project\C++\Qt-Filament`（`test/core/MaterialPreview.cpp`、`test/resource/shaders/DefaultMaterial.shader.txt`、`filament/samples/materials/aiDefaultMat.shader`）
 - 参考源码：`D:\Project\C++\filament\out\shaders\minified\*.fs`（surface_brdf / surface_shading_lit / surface_light_indirect / surface_shading_model_standard）
 - 方位测试（临时，未入库）：`Build/_skytest/SkyID.hdr` 方向编码 HDR、
   `Build/_skytest/skyid.py`（生成/读 HDR）、`Build/_skytest/verify_orientation.py`

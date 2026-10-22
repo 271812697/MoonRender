@@ -67,7 +67,7 @@ namespace Rendering::Resources
 			Geometry
 		};
 
-		/** True when the blob the archive holds is a package rather than a raw .mat, which
+		/** True when the blob the archive holds is a package rather than a raw .shader, which
 		 * is what a shader that has not been migrated yet still is. */
 		static bool IsPackage(const void* p_data, uint32_t p_size);
 
