@@ -281,8 +281,14 @@ namespace MOON {
 				designModelingToolbar->setVisible(modeling);
 			};
 			QObject::connect(mTabs, &QTabBar::currentChanged, self, showPage);
-			mTabs->setCurrentIndex(1);
-			showPage(1);
+			// Which page comes up first. MOON_RIBBON_PAGE overrides it, which is how a review
+			// screenshot of the sketch page can be taken without anyone clicking the tab.
+			int initialPage = 1;
+			if (const char* p_page = std::getenv("MOON_RIBBON_PAGE")) {
+				initialPage = std::atoi(p_page);
+			}
+			mTabs->setCurrentIndex(initialPage);
+			showPage(initialPage);
 
 		}
 		void retranslateUi() {

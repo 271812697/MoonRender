@@ -3,6 +3,9 @@
 #include "GeometryInit.h"
 #include "core/JobSystem.h"
 #include <QApplication>
+#include <QTabBar>
+#include <QDockWidget>
+#include <QPixmap>
 #include <QFileInfo>
 #include <QFontDatabase>
 #include <QImage>
@@ -85,6 +88,13 @@ int main(int argc, char* argv[])
 		// TEMPORARY PROBE (see applyClipDemo in viewerwidget.cpp): MOON_SHOT=<png> saves the
 		// viewport's frame on the way out, so two headless runs (a section with and without
 		// something) can be compared pixel by pixel. Remove with the rest of the probe.
+		if (const char* p_windowShot = std::getenv("MOON_WINDOW_SHOT"); p_windowShot != nullptr && *p_windowShot != '\0') {
+			const QPixmap window = GetViewerWidget.window()->grab();
+			if (!window.isNull()) {
+				window.save(QString::fromLocal8Bit(p_windowShot));
+				CORE_INFO("[UI] window saved to {0}", p_windowShot);
+			}
+		}
 		if (const char* p_shot = std::getenv("MOON_SHOT"); p_shot != nullptr && *p_shot != '\0') {
 			const QImage frame = GetViewerWidget.grabFramebuffer();
 			if (!frame.isNull()) {

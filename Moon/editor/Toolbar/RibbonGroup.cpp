@@ -1,4 +1,5 @@
 #include "editor/Toolbar/RibbonGroup.h"
+#include "editor/UiScale.h"
 
 #include <QAction>
 #include <QGridLayout>
@@ -13,39 +14,44 @@ namespace MOON
 {
 	namespace
 	{
-		// A button has to be wide enough for its label: the widest labels here are four
-		// Chinese characters ("加法管道"), about 48 px at the application font. 64 px
-		// leaves a row readable; the two-row groups keep the ribbon within the window.
-		constexpr int kButtonWidth = 64;
-		constexpr int kButtonHeight = 54;
-		constexpr int kIconSize = 22;
+		// Metrics at UI scale 1.0. Every use multiplies them by UiScale(), together with the
+		// application font, so the icons and the labels keep their ratio on any screen.
+		constexpr int kButtonWidth = 58;
+		constexpr int kButtonHeight = 50;
+		constexpr int kIconSize = 23;
+		constexpr int kLabelPointPx = 11;
+		constexpr int kCaptionHeight = 14;
 
 		// The rule between groups, and the hover/checked looks. The palette here is
 		// DarkStyle's (window 53,53,53; highlight 42,130,218); the ribbon is drawn with
 		// it rather than with a second theme of its own.
-		const QColor kSeparatorColor(82, 82, 82);
+		const QColor kSeparatorColor(42, 48, 56);
 
+		// The icons are colourful and carry no check state of their own, so the checked plate is
+		// a tint behind the icon rather than a second picture of it.
 		const char* const kButtonStyle = R"(
 			QToolButton {
-				color: #d8d8d8;
+				color: #cfd6df;
+				font-size: %FONTPX%px;
 				background: transparent;
 				border: 1px solid transparent;
-				border-radius: 4px;
-				padding: 1px;
+				border-radius: 5px;
+				padding: 2px;
 			}
 			QToolButton:hover {
-				background: rgba(255, 255, 255, 0.07);
-				border-color: #5c5c5c;
+				background: rgba(255, 255, 255, 0.06);
+				border-color: #343c46;
 			}
 			QToolButton:pressed {
-				background: rgba(255, 255, 255, 0.12);
+				background: rgba(255, 255, 255, 0.11);
 			}
 			QToolButton:checked {
-				background: rgba(42, 130, 218, 0.22);
-				border-color: #2a82da;
+				background: rgba(79, 156, 240, 0.22);
+				border-color: #3d6f9e;
+				color: #ffffff;
 			}
 			QToolButton:disabled {
-				color: #6f6f6f;
+				color: #66707c;
 			}
 		)";
 	}
@@ -56,7 +62,7 @@ namespace MOON
 		setObjectName("ribbonGroup");
 
 		auto* layout = new QVBoxLayout(this);
-		layout->setContentsMargins(6, 2, 6, 2);
+		layout->setContentsMargins(std::lround(6 * UiScale()), std::lround(2 * UiScale()), std::lround(6 * UiScale()), std::lround(2 * UiScale()));
 		layout->setSpacing(1);
 
 		m_grid = new QGridLayout();
@@ -69,12 +75,12 @@ namespace MOON
 		caption->setObjectName("ribbonGroupCaption");
 		caption->setAlignment(Qt::AlignHCenter | Qt::AlignVCenter);
 		QFont captionFont = caption->font();
-		captionFont.setPointSizeF(std::max(7.0, captionFont.pointSizeF() - 1.0));
+		captionFont.setPointSizeF(std::max(7.0, captionFont.pointSizeF() - 1.5));
+		captionFont.setLetterSpacing(QFont::AbsoluteSpacing, 0.4 * UiScale());
 		caption->setFont(captionFont);
-		QPalette captionPalette = caption->palette();
-		captionPalette.setColor(QPalette::WindowText,
-			captionPalette.color(QPalette::Disabled, QPalette::WindowText));
-		caption->setPalette(captionPalette);
+		// A caption labels the group; it stays quieter than the buttons beside it.
+		caption->setStyleSheet("color: #8b95a3;");
+		caption->setFixedHeight(std::lround(kCaptionHeight * UiScale()));
 		layout->addWidget(caption, 0);
 
 		setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
@@ -82,15 +88,26 @@ namespace MOON
 
 	QToolButton* RibbonGroup::addAction(QAction* p_action)
 	{
+		const float scale = UiScale();
 		auto* button = new QToolButton(this);
 		button->setDefaultAction(p_action);
 		button->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
-		button->setIconSize(QSize(kIconSize, kIconSize));
-		button->setFixedSize(kButtonWidth, kButtonHeight);
+		const int iconSize = std::lround(kIconSize * scale);
+		button->setIconSize(QSize(iconSize, iconSize));
+		// Width comes from the content (icon above, label below) instead of a fixed column: a
+		// one-character label like "点" does not need the room four characters do, and at a large
+		// UI scale that difference is what keeps the sketch page's groups beside each other
+		// rather than behind the toolbar's overflow button.
+		button->setMinimumHeight(std::lround(kButtonHeight * scale));
+		button->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
 		button->setAutoRaise(true);
 		button->setFocusPolicy(Qt::NoFocus);
 		button->setCursor(Qt::PointingHandCursor);
-		button->setStyleSheet(kButtonStyle);
+		// The label size follows the UI scale; it is the one metric that lives in the style
+		// string rather than in a setter.
+		QString style = QString::fromLatin1(kButtonStyle);
+		style.replace("%FONTPX%", QString::number(std::lround(kLabelPointPx * scale)));
+		button->setStyleSheet(style);
 		m_buttons.append(button);
 		relayout();
 		return button;
@@ -130,7 +147,7 @@ namespace MOON
 		// row of buttons keeps the caption of the two-row groups beside it in line.
 		for (int row = 0; row < m_rows; ++row)
 		{
-			m_grid->setRowMinimumHeight(row, kButtonHeight);
+			m_grid->setRowMinimumHeight(row, std::lround(kButtonHeight * UiScale()));
 		}
 	}
 
