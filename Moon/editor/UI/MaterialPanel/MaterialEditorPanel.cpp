@@ -11,7 +11,9 @@
 #include <string>
 #include <vector>
 
+#include <QApplication>
 #include <QButtonGroup>
+#include <QClipboard>
 #include <QComboBox>
 #include <QFrame>
 #include <QHBoxLayout>
@@ -22,6 +24,7 @@
 #include <QShortcut>
 #include <QSplitter>
 #include <QStackedWidget>
+#include <QTabWidget>
 #include <QTextCharFormat>
 #include <QTextCursor>
 #include <QToolButton>
@@ -30,6 +33,7 @@
 #include "Core/Global/ServiceLocator.h"
 #include "Core/Resources/Material.h"
 #include "Rendering/Resources/ShaderArchive.h"
+#include "Rendering/Resources/ShaderPackage.h"
 #include "renderer/Context.h"
 #include "Rendering/Context/Driver.h"
 #include "Rendering/Resources/Loaders/ShaderLoader.h"
@@ -159,37 +163,123 @@ public:
 		modesLayout->addStretch(1);
 		layout->addWidget(modes);
 
-		// --- the file and the two actions ------------------------------------------------
-		auto* toolbar = new QWidget(content);
-		toolbar->setObjectName("MaterialToolbar");
-		toolbar->setAttribute(Qt::WA_StyledBackground, true);
-		auto* toolbarLayout = new QHBoxLayout(toolbar);
-		toolbarLayout->setContentsMargins(6, 5, 6, 5);
-		toolbarLayout->setSpacing(4);
+		// --- the shader page: the .shader source and the GLSL it generates --------------------
+		// Laid out like a code viewer (the same shape as Qt-Filament's ShaderPanel): an info
+		// strip with the shader and its line count, then the editable source on the left and
+		// one read-only tab per generated stage on the right.
+		auto* infoBar = new QWidget(content);
+		infoBar->setObjectName("ShaderInfoBar");
+		infoBar->setAttribute(Qt::WA_StyledBackground, true);
+		auto* infoLayout = new QHBoxLayout(infoBar);
+		infoLayout->setContentsMargins(8, 3, 8, 3);
+		infoLayout->setSpacing(8);
 
-		m_filePicker = new QComboBox(toolbar);
+		m_filePicker = new QComboBox(infoBar);
 		m_filePicker->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
 		m_filePicker->setMinimumContentsLength(14);
 		m_filePicker->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLength);
 		m_filePicker->setMaxVisibleItems(18);
-		m_filePicker->setToolTip(QStringLiteral("The material under Engine/Shaders being edited"));
+		m_filePicker->setToolTip(QStringLiteral("The shader being edited (the archive when the folder is not shipped)"));
 
-		m_apply = new QToolButton(toolbar);
+		m_shaderMeta = new QLabel(QStringLiteral("OpenGL 4.5 core / desktop - read-only"), infoBar);
+		m_shaderMeta->setObjectName("ShaderMeta");
+
+		m_glslStats = new QLabel(infoBar);
+		m_glslStats->setObjectName("ShaderStats");
+
+		m_copyGlsl = new QToolButton(infoBar);
+		m_copyGlsl->setObjectName("MaterialButton");
+		m_copyGlsl->setText(QStringLiteral("Copy GLSL"));
+		m_copyGlsl->setCursor(Qt::PointingHandCursor);
+		m_copyGlsl->setToolTip(QStringLiteral("Copy the active GLSL stage"));
+
+		infoLayout->addWidget(m_filePicker, 1);
+		infoLayout->addWidget(m_shaderMeta);
+		infoLayout->addWidget(m_glslStats);
+		infoLayout->addWidget(m_copyGlsl);
+
+		auto* codeSplitter = new QSplitter(Qt::Horizontal);
+		codeSplitter->setHandleWidth(4);
+		codeSplitter->setChildrenCollapsible(false);
+
+		auto* materialPane = new QWidget(codeSplitter);
+		auto* materialLayout = new QVBoxLayout(materialPane);
+		materialLayout->setContentsMargins(0, 0, 0, 0);
+		materialLayout->setSpacing(0);
+
+		auto* materialHeader = new QWidget(materialPane);
+		materialHeader->setObjectName("ShaderSubHeader");
+		materialHeader->setAttribute(Qt::WA_StyledBackground, true);
+		auto* materialHeaderLayout = new QHBoxLayout(materialHeader);
+		materialHeaderLayout->setContentsMargins(8, 3, 8, 3);
+		materialHeaderLayout->setSpacing(8);
+
+		auto* materialTitle = new QLabel(QStringLiteral("Material (.shader)"), materialHeader);
+		materialTitle->setObjectName("ShaderSubTitle");
+		m_materialStats = new QLabel(materialHeader);
+		m_materialStats->setObjectName("ShaderStats");
+		m_position = new QLabel(QStringLiteral("Ln 1, Col 1"), materialHeader);
+		m_position->setObjectName("MaterialSectionHint");
+
+		m_reload = new QToolButton(materialHeader);
+		m_reload->setObjectName("MaterialButton");
+		m_reload->setText(QStringLiteral("Revert"));
+		m_reload->setToolTip(QStringLiteral("Discard the edits and read the file (or the archive) again"));
+		m_reload->setCursor(Qt::PointingHandCursor);
+
+		m_apply = new QToolButton(materialHeader);
 		m_apply->setObjectName("MaterialPrimaryButton");
-		m_apply->setText(QStringLiteral("Apply"));
+		m_apply->setText(QStringLiteral("Compile"));
 		m_apply->setToolTip(QStringLiteral("Compile the source and reload the shader wherever it is used (Ctrl+Enter)"));
 		m_apply->setCursor(Qt::PointingHandCursor);
 
-		m_reload = new QToolButton(toolbar);
-		m_reload->setObjectName("MaterialButton");
-		m_reload->setText(QStringLiteral("Revert"));
-		m_reload->setToolTip(QStringLiteral("Discard the edits and read the file from disk again"));
-		m_reload->setCursor(Qt::PointingHandCursor);
+		m_copyMaterial = new QToolButton(materialHeader);
+		m_copyMaterial->setObjectName("MaterialButton");
+		m_copyMaterial->setText(QStringLiteral("Copy"));
+		m_copyMaterial->setCursor(Qt::PointingHandCursor);
+		m_copyMaterial->setToolTip(QStringLiteral("Copy the .shader source"));
 
-		toolbarLayout->addWidget(m_filePicker, 1);
-		toolbarLayout->addWidget(m_apply);
-		toolbarLayout->addWidget(m_reload);
-		// (the toolbar is added to the shader page below, under the mode bar)
+		materialHeaderLayout->addWidget(materialTitle);
+		materialHeaderLayout->addWidget(m_materialStats);
+		materialHeaderLayout->addWidget(m_position);
+		materialHeaderLayout->addStretch(1);
+		materialHeaderLayout->addWidget(m_reload);
+		materialHeaderLayout->addWidget(m_apply);
+		materialHeaderLayout->addWidget(m_copyMaterial);
+
+		m_compileStatus = new QLabel(QStringLiteral("Ready - edit the .shader and press Compile"), materialPane);
+		m_compileStatus->setObjectName("ShaderStats");
+		m_compileStatus->setContentsMargins(8, 0, 8, 2);
+
+		m_source = new ::MOON::MaterialCodeEditor(materialPane);
+		materialLayout->addWidget(materialHeader);
+		materialLayout->addWidget(m_compileStatus);
+		materialLayout->addWidget(m_source, 1);
+
+		auto* glslPane = new QWidget(codeSplitter);
+		auto* glslLayout = new QVBoxLayout(glslPane);
+		glslLayout->setContentsMargins(0, 0, 0, 0);
+		glslLayout->setSpacing(0);
+
+		m_glslTabs = new QTabWidget(glslPane);
+		m_glslTabs->setDocumentMode(true);
+		m_vertexEditor = new ::MOON::MaterialCodeEditor(m_glslTabs);
+		m_fragmentEditor = new ::MOON::MaterialCodeEditor(m_glslTabs);
+		m_geometryEditor = new ::MOON::MaterialCodeEditor(m_glslTabs);
+		for (::MOON::MaterialCodeEditor* editor : { m_vertexEditor, m_fragmentEditor, m_geometryEditor })
+		{
+			editor->setReadOnly(true);
+		}
+		m_glslTabs->addTab(m_vertexEditor, QStringLiteral("Vertex"));
+		m_glslTabs->addTab(m_fragmentEditor, QStringLiteral("Fragment"));
+		m_glslTabs->addTab(m_geometryEditor, QStringLiteral("Geometry"));
+		glslLayout->addWidget(m_glslTabs);
+
+		codeSplitter->addWidget(materialPane);
+		codeSplitter->addWidget(glslPane);
+		codeSplitter->setStretchFactor(0, 2);
+		codeSplitter->setStretchFactor(1, 3);
+		codeSplitter->setSizes({ 300, 430 });
 
 		// --- preview on the left, source and output on the right --------------------------
 		// Side by side on purpose: the panel exists to compare what the material looks like
@@ -263,24 +353,11 @@ public:
 		m_preview = new ::MOON::MaterialPreviewWidget(previewFrame);
 		previewFrameLayout->addWidget(m_preview);
 		previewLayout->addWidget(previewFrame, 1);
+		// The preview belongs to the Material page only; the Shader page is all code.
+		m_previewColumn = preview;
 
-		// The right hand side: the source with the output under it, so the log stays next to
-		// the code that produced it.
-		auto* rightColumn = new QSplitter(Qt::Vertical);
-		rightColumn->setHandleWidth(4);
-		rightColumn->setChildrenCollapsible(false);
-
-		auto* source = new QWidget(rightColumn);
-		auto* sourceLayout = new QVBoxLayout(source);
-		sourceLayout->setContentsMargins(0, 0, 0, 0);
-		sourceLayout->setSpacing(0);
-		m_position = new QLabel(QStringLiteral("Ln 1, Col 1"), source);
-		m_position->setObjectName("MaterialSectionHint");
-		sourceLayout->addWidget(MakeSectionHeader(QStringLiteral("SOURCE"), source, m_position));
-		m_source = new ::MOON::MaterialCodeEditor(source);
-		sourceLayout->addWidget(m_source, 1);
-
-		auto* output = new QWidget(rightColumn);
+		// The output log under the code, like the console under an IDE.
+		auto* output = new QWidget();
 		auto* outputLayout = new QVBoxLayout(output);
 		outputLayout->setContentsMargins(0, 0, 0, 0);
 		outputLayout->setSpacing(0);
@@ -307,19 +384,22 @@ public:
 		m_log->setPalette(logPalette);
 		outputLayout->addWidget(m_log, 1);
 
-		rightColumn->addWidget(source);
-		rightColumn->addWidget(output);
-		rightColumn->setStretchFactor(0, 1);
-		rightColumn->setStretchFactor(1, 0);
-		rightColumn->setSizes({ 420, 130 });
+		auto* shaderBody = new QSplitter(Qt::Vertical);
+		shaderBody->setHandleWidth(4);
+		shaderBody->setChildrenCollapsible(false);
+		shaderBody->addWidget(codeSplitter);
+		shaderBody->addWidget(output);
+		shaderBody->setStretchFactor(0, 1);
+		shaderBody->setStretchFactor(1, 0);
+		shaderBody->setSizes({ 520, 120 });
 
-		// The shader page: the file toolbar and, under it, the source over the output.
+		// The shader page: the info strip over the code, with the log under both.
 		auto* shaderPage = new QWidget(columns);
 		auto* shaderPageLayout = new QVBoxLayout(shaderPage);
 		shaderPageLayout->setContentsMargins(0, 0, 0, 0);
 		shaderPageLayout->setSpacing(0);
-		shaderPageLayout->addWidget(toolbar);
-		shaderPageLayout->addWidget(rightColumn, 1);
+		shaderPageLayout->addWidget(infoBar);
+		shaderPageLayout->addWidget(shaderBody, 1);
 
 		m_rightStack = new QStackedWidget(columns);
 		m_rightStack->addWidget(shaderPage);
@@ -417,6 +497,32 @@ public:
 					m_designer->SetThumbnail(p_image);
 				}
 			});
+
+		QObject::connect(m_copyGlsl, &QToolButton::clicked, m_owner, [this] {
+			if (::MOON::MaterialCodeEditor* editor = CurrentGlslEditor())
+			{
+				QApplication::clipboard()->setText(editor->toPlainText());
+			}
+		});
+		QObject::connect(m_copyMaterial, &QToolButton::clicked, m_owner, [this] {
+			QApplication::clipboard()->setText(m_source->toPlainText());
+		});
+		QObject::connect(m_glslTabs, &QTabWidget::currentChanged, m_owner,
+			[this](int) { UpdateGlslStats(); });
+		QObject::connect(m_source, &QPlainTextEdit::textChanged, m_owner, [this] {
+			if (m_materialStats != nullptr)
+			{
+				m_materialStats->setText(QStringLiteral("%1 lines").arg(m_source->blockCount()));
+			}
+			if (m_compileStatus != nullptr)
+			{
+				m_compileStatus->setText(QStringLiteral("Modified - press Compile to reload"));
+			}
+		});
+
+		// The Shader page is the default and it has no preview: the code takes the window.
+		SetMode(false);
+		UpdateGlslStats();
 	}
 
 	/** Switches what sits next to the preview. The preview widget is the same in both modes: it
@@ -429,6 +535,10 @@ public:
 		}
 
 		m_rightStack->setCurrentIndex(p_material ? 1 : 0);
+		if (m_previewColumn != nullptr)
+		{
+			m_previewColumn->setVisible(p_material);
+		}
 
 		if (p_material)
 		{
@@ -444,7 +554,98 @@ public:
 		else
 		{
 			m_preview->ShowMaterial(nullptr);
+			// Coming back to the source after the shader changed elsewhere: fill the GLSL
+			// tabs if they are empty (the first show compiles them as well).
+			if (m_ready && m_vertexEditor != nullptr && m_vertexEditor->document()->isEmpty())
+			{
+				Preview();
+			}
 		}
+	}
+
+	::MOON::MaterialCodeEditor* CurrentGlslEditor() const
+	{
+		if (m_glslTabs == nullptr)
+		{
+			return nullptr;
+		}
+		switch (m_glslTabs->currentIndex())
+		{
+		case 0: return m_vertexEditor;
+		case 1: return m_fragmentEditor;
+		default: return m_geometryEditor;
+		}
+	}
+
+	void UpdateGlslStats()
+	{
+		if (m_glslStats == nullptr)
+		{
+			return;
+		}
+		const ::MOON::MaterialCodeEditor* editor = CurrentGlslEditor();
+		m_glslStats->setText(editor != nullptr
+			? QStringLiteral("%1 lines").arg(editor->blockCount()) : QString());
+	}
+
+	/** Fills the read-only stage tabs from one compiled package. A material has a variant per
+	 * pass/feature set; the viewer shows the default one (no features), like Qt-Filament's
+	 * ShaderPanel does with the package it extracts from the .filamat. */
+	void UpdateGlslTabs(const std::string& p_package)
+	{
+		const auto clearTabs = [this] {
+			if (m_vertexEditor != nullptr) { m_vertexEditor->clear(); }
+			if (m_fragmentEditor != nullptr) { m_fragmentEditor->clear(); }
+			if (m_geometryEditor != nullptr) { m_geometryEditor->clear(); }
+			if (m_glslTabs != nullptr) { m_glslTabs->setTabVisible(2, false); }
+			UpdateGlslStats();
+		};
+
+		if (p_package.empty())
+		{
+			clearTabs();
+			return;
+		}
+
+		const Rendering::Resources::ShaderPackage package(
+			p_package.data(), static_cast<uint32_t>(p_package.size()));
+		if (!package.IsValid() || package.Variants().empty())
+		{
+			clearTabs();
+			return;
+		}
+
+		Rendering::Resources::ShaderPackage::Variant chosen = package.Variants().front();
+		for (const auto& variant : package.Variants())
+		{
+			// The default pass has no name in MoonMatc's model (the material's passes list is
+			// empty for it); older packages spell it "Default".
+			if ((variant.pass.empty() || variant.pass == "Default") && variant.features.empty())
+			{
+				chosen = variant;
+				break;
+			}
+		}
+
+		const std::string vertex = package.Source(
+			chosen, Rendering::Resources::ShaderPackage::Stage::Vertex);
+		const std::string fragment = package.Source(
+			chosen, Rendering::Resources::ShaderPackage::Stage::Fragment);
+		const std::string geometry = package.Source(
+			chosen, Rendering::Resources::ShaderPackage::Stage::Geometry);
+
+		m_vertexEditor->setPlainText(QString::fromStdString(vertex));
+		m_fragmentEditor->setPlainText(QString::fromStdString(fragment));
+		m_geometryEditor->setPlainText(QString::fromStdString(geometry));
+		if (m_glslTabs->count() > 2)
+		{
+			m_glslTabs->setTabVisible(2, !geometry.empty());
+			if (geometry.empty() && m_glslTabs->currentIndex() == 2)
+			{
+				m_glslTabs->setCurrentIndex(1);
+			}
+		}
+		UpdateGlslStats();
 	}
 
 	/** The panel's own stylesheet: flat strips, a hairline between the areas, the gradient
@@ -558,6 +759,23 @@ public:
 				background: #2b2c27;
 				border: none;
 			}
+			QWidget#ShaderInfoBar { background: #2b2b2e; border-bottom: 1px solid #1b1b1d; }
+			QWidget#ShaderSubHeader { background: #2b2b2e; border-bottom: 1px solid #1b1b1d; }
+			QLabel#ShaderSubTitle { color: #d8dbe0; font-weight: 600; }
+			QLabel#ShaderMeta, QLabel#ShaderStats { color: #7d8288; }
+			QTabWidget::pane { border: none; background: #1e1f23; }
+			QTabBar::tab {
+				background: #2b2b2e;
+				color: #aeb3b9;
+				padding: 4px 14px;
+				border: none;
+			}
+			QTabBar::tab:selected {
+				background: #1e1f23;
+				color: #e8e8e8;
+				border-top: 1px solid #268bd2;
+			}
+			QTabBar::tab:hover { color: #ffffff; }
 			QSplitter::handle { background: #2b2b2d; }
 			QSplitter::handle:hover { background: #268bd2; }
 		)"));
@@ -683,8 +901,20 @@ public:
 			return;
 		}
 		m_source->setPlainText(QString::fromStdString(text));
+		if (m_materialStats != nullptr)
+		{
+			m_materialStats->setText(QStringLiteral("%1 lines").arg(m_source->blockCount()));
+		}
+		if (m_compileStatus != nullptr)
+		{
+			m_compileStatus->setText(QStringLiteral("Ready - edit the .shader and press Compile"));
+		}
 		Log("loaded " + origin, kLogInfo);
 		SetStatus(kStatusIdle, QStringLiteral("Loaded %1").arg(QString::fromStdString(origin)));
+		if (!m_ready)
+		{
+			UpdateGlslTabs({});
+		}
 
 		// The preview renders with the render module's context, which the viewport creates: the
 		// first one waits for showEvent (OnFirstShow), the rest follow every file change.
@@ -712,7 +942,18 @@ public:
 			Log(std::string("[MoonMatc] ") + (result.error.empty() ? "not a material (passthrough)" : result.error),
 				kLogWarning);
 			SetStatus(kLogWarning, QStringLiteral("Compile failed"));
+			if (m_compileStatus != nullptr)
+			{
+				m_compileStatus->setText(QStringLiteral("Compile failed - see OUTPUT"));
+			}
 			return;
+		}
+
+		UpdateGlslTabs(result.package);
+		if (m_compileStatus != nullptr)
+		{
+			m_compileStatus->setText(QStringLiteral("Compiled %1 variant(s)")
+				.arg(result.variantCount));
 		}
 
 		// The shader belongs to the resource manager and is reloaded *in place*: every material
@@ -796,10 +1037,21 @@ public:
 			Log(std::string("[MoonMatc] ") + (result.error.empty() ? "not a material (passthrough)" : result.error),
 				kLogWarning);
 			SetStatus(kLogWarning, QStringLiteral("Compile failed"));
+			if (m_compileStatus != nullptr)
+			{
+				m_compileStatus->setText(QStringLiteral("Compile failed - see OUTPUT"));
+			}
 			m_preview->SetShaderPackage({}, {});
+			UpdateGlslTabs({});
 			return;
 		}
 
+		UpdateGlslTabs(result.package);
+		if (m_compileStatus != nullptr)
+		{
+			m_compileStatus->setText(QStringLiteral("Compiled %1 variant(s)")
+				.arg(result.variantCount));
+		}
 		m_preview->SetShaderPackage(result.package, ToShaderKey(m_current));
 	}
 
@@ -867,8 +1119,22 @@ public:
 	QLabel* m_position = nullptr;
 	/** The surface the preview view is shown on: it renders on the module's context and pastes. */
 	::MOON::MaterialPreviewWidget* m_preview = nullptr;
+	/** The left column with the preview; hidden while the Shader page is active. */
+	QWidget* m_previewColumn = nullptr;
 	::MOON::MaterialCodeEditor* m_source = nullptr;
 	QPlainTextEdit* m_log = nullptr;
+
+	/** The Shader page's code viewer: one editable source, one read-only tab per GLSL stage. */
+	QLabel* m_shaderMeta = nullptr;
+	QLabel* m_materialStats = nullptr;
+	QLabel* m_glslStats = nullptr;
+	QLabel* m_compileStatus = nullptr;
+	QToolButton* m_copyGlsl = nullptr;
+	QToolButton* m_copyMaterial = nullptr;
+	QTabWidget* m_glslTabs = nullptr;
+	::MOON::MaterialCodeEditor* m_vertexEditor = nullptr;
+	::MOON::MaterialCodeEditor* m_fragmentEditor = nullptr;
+	::MOON::MaterialCodeEditor* m_geometryEditor = nullptr;
 };
 
 MOON::MaterialEditorPanel::MaterialEditorPanel(QWidget* p_parent)
