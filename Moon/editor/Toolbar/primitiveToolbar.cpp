@@ -46,13 +46,13 @@ namespace MOON {
 		}
 		void setup() {
 			box = new CreatePrimitiveCommand(self, "PrimitiveBox");
-			box->setIcon(":/widgets/icons/parametric/Part_Box_Parametric.svg");
+			box->setIcon(":/widgets/icons/model32/Part_Box_Parametric.svg");
 			cone = new CreatePrimitiveCommand(self, "PrimitiveCone");
-			cone->setIcon(":/widgets/icons/parametric/Part_Cone_Parametric.svg");
+			cone->setIcon(":/widgets/icons/model32/Part_Cone_Parametric.svg");
 			cylinder = new CreatePrimitiveCommand(self, "PrimitiveCylinder");
-			cylinder->setIcon(":/widgets/icons/parametric/Part_Cylinder_Parametric.svg");
+			cylinder->setIcon(":/widgets/icons/model32/Part_Cylinder_Parametric.svg");
 			sphere = new CreatePrimitiveCommand(self, "PrimitiveSphere");
-			sphere->setIcon(":/widgets/icons/parametric/Part_Sphere_Parametric.svg");
+			sphere->setIcon(":/widgets/icons/model32/Part_Sphere_Parametric.svg");
 
 			self->setMovable(false);
 			self->setFloatable(false);

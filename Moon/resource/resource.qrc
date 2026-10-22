@@ -1,4 +1,4 @@
-﻿<RCC>
+<RCC>
     <qresource prefix="/">
         <file>darkstyle/Ubuntu-R.ttf</file>
         <file>darkstyle/darkstyle.qss</file>
@@ -90,6 +90,65 @@
         <file>icons/constraint/Constraint_Vertical.svg</file>
         <file>icons/constraint/Constraint_Parallel.svg</file>
         <file>icons/constraint/Constraint_Perpendicular.svg</file>
+        <file>icons/constraint32/Constraint_Block.svg</file>
+        <file>icons/constraint32/Constraint_Coincident.svg</file>
+        <file>icons/constraint32/Constraint_Diameter.svg</file>
+        <file>icons/constraint32/Constraint_Dimension.svg</file>
+        <file>icons/constraint32/Constraint_DistanceX.svg</file>
+        <file>icons/constraint32/Constraint_EqualLength.svg</file>
+        <file>icons/constraint32/Constraint_Horizontal.svg</file>
+        <file>icons/constraint32/Constraint_InternalAngle.svg</file>
+        <file>icons/constraint32/Constraint_Length.svg</file>
+        <file>icons/constraint32/Constraint_Parallel.svg</file>
+        <file>icons/constraint32/Constraint_Perpendicular.svg</file>
+        <file>icons/constraint32/Constraint_PointOnObject.svg</file>
+        <file>icons/constraint32/Constraint_Radius.svg</file>
+        <file>icons/constraint32/Constraint_Symmetric.svg</file>
+        <file>icons/constraint32/Constraint_Tangent.svg</file>
+        <file>icons/constraint32/Constraint_Vertical.svg</file>
+        <file>icons/sketch32/Sketcher_CreateArc.svg</file>
+        <file>icons/sketch32/Sketcher_CreateArcSlot.svg</file>
+        <file>icons/sketch32/Sketcher_CreateBSpline.svg</file>
+        <file>icons/sketch32/Sketcher_CreateCircle.svg</file>
+        <file>icons/sketch32/Sketcher_CreateEllipseByCenter.svg</file>
+        <file>icons/sketch32/Sketcher_CreateFillet.svg</file>
+        <file>icons/sketch32/Sketcher_CreateLine.svg</file>
+        <file>icons/sketch32/Sketcher_CreatePoint.svg</file>
+        <file>icons/sketch32/Sketcher_CreatePolyline.svg</file>
+        <file>icons/sketch32/Sketcher_CreateRectangle_Constr.svg</file>
+        <file>icons/sketch32/Sketcher_CreateRegularPolygon.svg</file>
+        <file>icons/sketch32/Sketcher_CreateSlot.svg</file>
+        <file>icons/sketch32/Sketcher_Intersection.svg</file>
+        <file>icons/sketch32/Sketcher_Offset.svg</file>
+        <file>icons/sketch32/Sketcher_Projection.svg</file>
+        <file>icons/sketch32/Sketcher_Rotate.svg</file>
+        <file>icons/sketch32/Sketcher_Symmetry.svg</file>
+        <file>icons/sketch32/Sketcher_ToggleConstruction.svg</file>
+        <file>icons/sketch32/Sketcher_Translate.svg</file>
+        <file>icons/sketch32/Sketcher_Trimming.svg</file>
+        <file>icons/model32/Part_Box_Parametric.svg</file>
+        <file>icons/model32/Part_Cone_Parametric.svg</file>
+        <file>icons/model32/Part_Cylinder_Parametric.svg</file>
+        <file>icons/model32/Part_Sphere_Parametric.svg</file>
+        <file>icons/model32/PartDesign_AdditiveHelix.svg</file>
+        <file>icons/model32/PartDesign_AdditiveLoft.svg</file>
+        <file>icons/model32/PartDesign_AdditivePipe.svg</file>
+        <file>icons/model32/PartDesign_Chamfer.svg</file>
+        <file>icons/model32/PartDesign_Fillet.svg</file>
+        <file>icons/model32/PartDesign_Groove.svg</file>
+        <file>icons/model32/PartDesign_Line.svg</file>
+        <file>icons/model32/PartDesign_LinearPattern.svg</file>
+        <file>icons/model32/PartDesign_Mirror.svg</file>
+        <file>icons/model32/PartDesign_Pad.svg</file>
+        <file>icons/model32/PartDesign_Plane.svg</file>
+        <file>icons/model32/PartDesign_Pocket.svg</file>
+        <file>icons/model32/PartDesign_PolarPattern.svg</file>
+        <file>icons/model32/PartDesign_Revolution.svg</file>
+        <file>icons/model32/PartDesign_SubtractiveHelix.svg</file>
+        <file>icons/model32/PartDesign_SubtractiveLoft.svg</file>
+        <file>icons/model32/PartDesign_SubtractivePipe.svg</file>
+        <file>icons/model32/PartDesign_Thickness.svg</file>
+        <file>icons/constraint32/Constraint_VerticalDistance.svg</file>
         <file>icons/constraint/Constraint_DistanceX.svg</file>
         <file>icons/constraint/Constraint_VerticalDistance.svg</file>
         <file>icons/constraint/Constraint_Tangent.svg</file>

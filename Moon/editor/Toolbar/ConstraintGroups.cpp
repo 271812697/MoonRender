@@ -1064,40 +1064,41 @@ namespace MOON {
 			}
 		}
 	};
+
 	void AddConstraintGroups(QToolBar* p_toolbar, QObject* p_owner)
 	{
 		auto* coincident = new CoincidentConstraint(p_owner);
-		coincident->setIcon(":/widgets/icons/constraint/Constraint_Coincident.svg");
+		coincident->setIcon(":/widgets/icons/constraint32/Constraint_Coincident.svg");
 		auto* horizontal = new HorizontalConstraint(p_owner);
-		horizontal->setIcon(":/widgets/icons/constraint/Constraint_Horizontal.svg");
+		horizontal->setIcon(":/widgets/icons/constraint32/Constraint_Horizontal.svg");
 		auto* vertical = new VerticalConstraint(p_owner);
-		vertical->setIcon(":/widgets/icons/constraint/Constraint_Vertical.svg");
+		vertical->setIcon(":/widgets/icons/constraint32/Constraint_Vertical.svg");
 		auto* parallel = new ParallelConstraint(p_owner);
-		parallel->setIcon(":/widgets/icons/constraint/Constraint_Parallel.svg");
+		parallel->setIcon(":/widgets/icons/constraint32/Constraint_Parallel.svg");
 		auto* perpendicular = new PerpendicularConstraint(p_owner);
-		perpendicular->setIcon(":/widgets/icons/constraint/Constraint_Perpendicular.svg");
+		perpendicular->setIcon(":/widgets/icons/constraint32/Constraint_Perpendicular.svg");
 		auto* distanceX = new DistanceXConstraint(p_owner);
-		distanceX->setIcon(":/widgets/icons/constraint/Constraint_DistanceX.svg");
+		distanceX->setIcon(":/widgets/icons/constraint32/Constraint_DistanceX.svg");
 		auto* distanceY = new DistanceYConstraint(p_owner);
-		distanceY->setIcon(":/widgets/icons/constraint/Constraint_VerticalDistance.svg");
+		distanceY->setIcon(":/widgets/icons/constraint32/Constraint_VerticalDistance.svg");
 		auto* tangent = new TangentConstraint(p_owner);
-		tangent->setIcon(":/widgets/icons/constraint/Constraint_Tangent.svg");
+		tangent->setIcon(":/widgets/icons/constraint32/Constraint_Tangent.svg");
 		auto* equal = new EqualConstraint(p_owner);
-		equal->setIcon(":/widgets/icons/constraint/Constraint_EqualLength.svg");
+		equal->setIcon(":/widgets/icons/constraint32/Constraint_EqualLength.svg");
 		auto* symmetric = new SymmetricConstraint(p_owner);
-		symmetric->setIcon(":/widgets/icons/constraint/Constraint_Symmetric.svg");
+		symmetric->setIcon(":/widgets/icons/constraint32/Constraint_Symmetric.svg");
 		auto* length = new LengthConstraint(p_owner);
-		length->setIcon(":/widgets/icons/constraint/Constraint_Length.svg");
+		length->setIcon(":/widgets/icons/constraint32/Constraint_Length.svg");
 		auto* radius = new RadiusConstraint(p_owner);
-		radius->setIcon(":/widgets/icons/constraint/Constraint_Radius.svg");
+		radius->setIcon(":/widgets/icons/constraint32/Constraint_Radius.svg");
 		auto* diameter = new DiameterConstraint(p_owner);
-		diameter->setIcon(":/widgets/icons/constraint/Constraint_Diameter.svg");
+		diameter->setIcon(":/widgets/icons/constraint32/Constraint_Diameter.svg");
 		auto* block = new BlockConstraint(p_owner);
-		block->setIcon(":/widgets/icons/constraint/Constraint_Block.svg");
+		block->setIcon(":/widgets/icons/constraint32/Constraint_Block.svg");
 		auto* angle = new AngleConstraint(p_owner);
-		angle->setIcon(":/widgets/icons/constraint/Constraint_InternalAngle.svg");
+		angle->setIcon(":/widgets/icons/constraint32/Constraint_InternalAngle.svg");
 		auto* smartDimension = new SmartDimensionCommand(p_owner);
-		smartDimension->setIcon(":/widgets/icons/constraint/Constraint_Dimension.svg");
+		smartDimension->setIcon(":/widgets/icons/constraint32/Constraint_Dimension.svg");
 
 		const auto addGroup = [p_toolbar](const QString& p_title, int p_columns,
 			std::initializer_list<QAction*> p_actions) {

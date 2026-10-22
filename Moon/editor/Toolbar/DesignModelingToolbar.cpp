@@ -110,48 +110,41 @@ namespace MOON {
 		}
 		void setup() {
 			padCommand = new DesignModelCommand(self, "Pad");
-			padCommand->setIcon(":/widgets/icons/partdesign/PartDesign_Pad.svg");
+			padCommand->setIcon(":/widgets/icons/model32/PartDesign_Pad.svg");
 			revolveCommand = new DesignModelCommand(self,"Revolve");
-			revolveCommand->setIcon(":/widgets/icons/partdesign/PartDesign_Revolution.svg");
+			revolveCommand->setIcon(":/widgets/icons/model32/PartDesign_Revolution.svg");
 			thicknessCommand = new DesignModelCommand(self,"Thickness");
-			thicknessCommand->setIcon(":/widgets/icons/partdesign/PartDesign_Thickness.svg");
+			thicknessCommand->setIcon(":/widgets/icons/model32/PartDesign_Thickness.svg");
 			filletCommand = new DesignModelCommand(self,"Fillet");
-			filletCommand->setIcon(":/widgets/icons/partdesign/PartDesign_Fillet.svg");
+			filletCommand->setIcon(":/widgets/icons/model32/PartDesign_Fillet.svg");
 			chamferCommand = new DesignModelCommand(self, "Chamfer");
-			chamferCommand->setIcon(":/widgets/icons/partdesign/PartDesign_Chamfer.svg");
+			chamferCommand->setIcon(":/widgets/icons/model32/PartDesign_Chamfer.svg");
 			pocketCommand = new DesignModelCommand(self,"Pocket");
-			pocketCommand->setIcon(":/widgets/icons/partdesign/PartDesign_Pocket.svg");
+			pocketCommand->setIcon(":/widgets/icons/model32/PartDesign_Pocket.svg");
 			grooveCommand = new DesignModelCommand(self,"Groove");
-			grooveCommand->setIcon(":/widgets/icons/partdesign/PartDesign_Groove.svg");
+			grooveCommand->setIcon(":/widgets/icons/model32/PartDesign_Groove.svg");
 			additivePipeCommand = new DesignModelCommand(self, "Pipe");
-			additivePipeCommand->setIcon(":/widgets/icons/partdesign/PartDesign_AdditivePipe.svg");
+			additivePipeCommand->setIcon(":/widgets/icons/model32/PartDesign_AdditivePipe.svg");
 			subtractivePipeCommand = new DesignModelCommand(self, "PipeCut");
-			subtractivePipeCommand->setIcon(":/widgets/icons/partdesign/PartDesign_SubtractivePipe.svg");
+			subtractivePipeCommand->setIcon(":/widgets/icons/model32/PartDesign_SubtractivePipe.svg");
 			additiveLoftCommand = new DesignModelCommand(self, "Loft");
-			additiveLoftCommand->setIcon(
-				":/widgets/icons/partdesign/PartDesign_AdditiveLoft.svg");
+			additiveLoftCommand->setIcon(":/widgets/icons/model32/PartDesign_AdditiveLoft.svg");
 			subtractiveLoftCommand = new DesignModelCommand(self, "LoftCut");
-			subtractiveLoftCommand->setIcon(
-				":/widgets/icons/partdesign/PartDesign_SubtractiveLoft.svg");
+			subtractiveLoftCommand->setIcon(":/widgets/icons/model32/PartDesign_SubtractiveLoft.svg");
 			additiveHelixCommand = new DesignModelCommand(self, "Helix");
-			additiveHelixCommand->setIcon(
-				":/widgets/icons/partdesign/PartDesign_AdditiveHelix.svg");
+			additiveHelixCommand->setIcon(":/widgets/icons/model32/PartDesign_AdditiveHelix.svg");
 			subtractiveHelixCommand = new DesignModelCommand(self, "HelixCut");
-			subtractiveHelixCommand->setIcon(
-				":/widgets/icons/partdesign/PartDesign_SubtractiveHelix.svg");
+			subtractiveHelixCommand->setIcon(":/widgets/icons/model32/PartDesign_SubtractiveHelix.svg");
 			datumLineCommand = new DesignModelCommand(self, "DatumLine");
-			datumLineCommand->setIcon(":/widgets/icons/partdesign/PartDesign_Line.svg");
+			datumLineCommand->setIcon(":/widgets/icons/model32/PartDesign_Line.svg");
 			datumPlaneCommand = new DesignModelCommand(self, "DatumPlane");
-			datumPlaneCommand->setIcon(":/widgets/icons/partdesign/PartDesign_Plane.svg");
+			datumPlaneCommand->setIcon(":/widgets/icons/model32/PartDesign_Plane.svg");
 			polarPatternCommand = new DesignModelCommand(self, "PolarPattern");
-			polarPatternCommand->setIcon(
-				":/widgets/icons/partdesign/PartDesign_PolarPattern.svg");
+			polarPatternCommand->setIcon(":/widgets/icons/model32/PartDesign_PolarPattern.svg");
 			mirrorCommand = new DesignModelCommand(self, "Mirror");
-			mirrorCommand->setIcon(
-				":/widgets/icons/partdesign/PartDesign_Mirrored.svg");
+			mirrorCommand->setIcon(":/widgets/icons/model32/PartDesign_Mirror.svg");
 			linearPatternCommand = new DesignModelCommand(self, "LinearPattern");
-			linearPatternCommand->setIcon(
-				":/widgets/icons/partdesign/PartDesign_LinearPattern.svg");
+			linearPatternCommand->setIcon(":/widgets/icons/model32/PartDesign_LinearPattern.svg");
 			// The toolbar is a ribbon: one group per theme, in the order a part is
 			// actually built in. The old flat row put all eighteen icons together,
 			// where the only way to find one was to read its tooltip.
