@@ -1,6 +1,8 @@
 #pragma once
 #include <cstdint>
-#include <ThirdParty/imgui/imgui/imgui.h>
+
+#include <Rendering/Overlay/Im2D.h>
+#include <Rendering/Overlay/Im2DFont.h>
 
 namespace Rendering::Context {
 	class Driver;
@@ -8,20 +10,19 @@ namespace Rendering::Context {
 
 namespace Rendering::Overlay
 {
-	/** A 2D draw list drawn straight into the frame, in screen space.
+	/** The GL side of Im2D: uploads one frame of screen-space geometry and draws it.
 	 *
-	 * It is ImGui's draw list without ImGui's windows: the editor draws its own overlay geometry
-	 * (handles, guides, selection boxes) through this. The drawing is GL + the render module's
-	 * driver - no window toolkit - so it belongs here with the rest of the overlay drawing.
-	 *
-	 * NewFrame() opens the list, GetDrawList() is what callers append to, EndFrame() uploads and
-	 * draws it. Both must run with the render module's context current, inside its frame. */
+	 * This used to hand ImGui's ImDrawList to a shader; it now owns the draw list and the font
+	 * (see Im2D.h). No ImGui context, no ImGui draw data, no window layer: NewFrame() opens the
+	 * list, callers append to it through GetDrawList(), EndFrame() uploads and draws it. Both
+	 * calls must run with the render module's context current, inside its frame. */
 	class Im2DRender
 	{
 	public:
 		static Im2DRender& Instance();
 
-		ImDrawList* GetDrawList();
+		Im2D::DrawList& GetDrawList();
+		Im2D::Font& GetFont();
 
 		void NewFrame();
 		/** Draws what was collected. p_viewWidth/Height are the view's size in pixels: the
