@@ -133,7 +133,10 @@ namespace MOON
 		/** Cursor shown while hovering a shape (Arrow leaves it to others). */
 		void SetHoverCursor(ImGuiMouseCursor p_cursor) { mHoverCursor = p_cursor; }
 		/** Draw every shape with the style, highlighting the hovered one. */
-		void DrawShapes(::Rendering::Overlay::Im2D::DrawList& p_drawList, const ScreenRect& p_rect);
+		/** Index of the shape the cursor is on, -1 when none is hot. */
+	int HotShapeIndex() const { return mHotShape; }
+
+	void DrawShapes(::Rendering::Overlay::Im2D::DrawList& p_drawList, const ScreenRect& p_rect);
 		void SetShapeStyle(const ScreenShapeStyle& p_style) { mShapeStyle = p_style; }
 
 	private:

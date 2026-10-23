@@ -75,6 +75,52 @@ namespace MOON
 		void drawPoint(const Eigen::Vector3f& pos, float size);
 		void drawPointList(const std::vector<Eigen::Vector3f>& position, float size, Eigen::Vector4<uint8_t> color);
 		void drawLineList(const std::vector<Eigen::Vector3f>& position, float _size, Eigen::Vector4<uint8_t> _color);
+
+		/** World-space lines drawn with a dash pattern.
+		 * The endpoints stay world space, so a dashed curve goes through exactly the pipeline a
+		 * solid one does (same depth test, size and colour stacks); only the dash rhythm is
+		 * measured in screen pixels, which keeps the pattern size constant under zoom.
+		 * p_position holds endpoint pairs, p_phase lets a strip continue the pattern across its
+		 * segments. */
+		/** Draws UTF-8 text in world space. p_right and p_up span the glyph quads, so the caller
+		 * chooses the orientation (screen facing or lying on a sketch plane) and the size.
+		 * p_position is the baseline start. Text goes into its own vertex list and is drawn with
+		 * its own material; the point/line/triangle lists and their passes are untouched. */
+		void drawText3D(const Eigen::Vector3f& p_position, const char* p_text, float p_pixelSize,
+			Eigen::Vector4<uint8_t> p_color,
+			const Eigen::Vector3f& p_right, const Eigen::Vector3f& p_up,
+			float p_worldPerPixel = 1.0f);
+
+		/** Screen facing text whose glyphs stay at p_pixelSize pixels whatever the zoom: the basis
+		 * comes from the camera and the world scale from the projection at p_position. This is
+		 * what labels (dimensions, sketch annotations) use. */
+		void drawText3D(const Eigen::Vector3f& p_position, const char* p_text, float p_pixelSize,
+			Eigen::Vector4<uint8_t> p_color, bool p_overlay = false);
+
+		/** Text anchored to a world point but nudged by an offset given in screen pixels - what
+		 * annotations need, since their layout (dragging, avoiding geometry) is authored in
+		 * screen space while the anchor is a point on the sketch plane. The offset is applied
+		 * with the camera basis, so it keeps its pixel meaning under any view. */
+		void drawLabel3D(const Eigen::Vector3f& p_anchor, const char* p_text, float p_pixelSize,
+			Eigen::Vector4<uint8_t> p_color, float p_offsetXPx, float p_offsetYPx, bool p_overlay = true);
+
+		/** The same, but the glyphs are laid along p_basisRight/p_basisUp instead of the camera's
+		 * axes - text that belongs to a plane (a sketch annotation) and has to turn with it when
+		 * the view rotates, rather than staying screen aligned. */
+		void drawLabel3D(const Eigen::Vector3f& p_anchor, const char* p_text, float p_pixelSize,
+			Eigen::Vector4<uint8_t> p_color, float p_offsetXPx, float p_offsetYPx,
+			const Eigen::Vector3f& p_basisRight, const Eigen::Vector3f& p_basisUp, bool p_overlay = true);
+
+		void drawDashedLineList(const std::vector<Eigen::Vector3f>& p_position, float p_size,
+			Eigen::Vector4<uint8_t> p_color, float p_dashPx, float p_gapPx, float p_phase = 0.0f);
+
+		/** Dashed version of a continuous polyline (a strip of points, not pairs). */
+		void drawDashedPolyline(const std::vector<Eigen::Vector3f>& p_points, float p_size,
+			Eigen::Vector4<uint8_t> p_color, float p_dashPx, float p_gapPx, float p_phase = 0.0f);
+
+		/** Same, with the current size and colour. */
+		void drawDashedPolyline(const std::vector<Eigen::Vector3f>& p_points,
+			float p_dashPx, float p_gapPx, float p_phase = 0.0f);
 		void drawTriangleList(const std::vector<Eigen::Vector3f>& position, float _size, Eigen::Vector4<uint8_t> _color);
 		void drawLine(const Eigen::Vector3f& _a, const Eigen::Vector3f& _b, float _size, Eigen::Vector4<uint8_t> _color);
 		void drawLine(const Eigen::Vector3f& _a, const Eigen::Vector3f& _b, float _size);
@@ -164,6 +210,8 @@ namespace MOON
 		void test();
 		void drawUnsort();
 		void drawSort();
+		/** Uploads the text vertices and draws them, one pass per atlas. */
+		void drawText();
 		void drawMesh();
 		void drawMeshPick();
 		void newFrame(Editor::Panels::SceneView* view);
@@ -316,6 +364,12 @@ namespace MOON
 		std::vector<VertexList*> vertexData[2];
 		//lit
 		VertexList litVertexArray;
+		/** Set by the overlay overload for the glyphs it emits next. */
+		bool pendingTextOverlay = false;
+		std::vector<TextVertex> textVertexArray;
+		std::vector<TextRun> textRuns;
+		std::vector<Rendering::Resources::Texture*> textAtlasTextures;
+		Rendering::Data::Material* mTextMaterial = nullptr;
 		int vertexDataIndex;
 		std::vector<unsigned int> layerIdMap;
 		int layerIndex;

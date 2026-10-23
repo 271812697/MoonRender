@@ -26,7 +26,13 @@
         <file>darkstyle/icon_radiobutton_checked_disabled.png</file>
         <file>darkstyle/icon_radiobutton_unchecked_disabled.png</file>
         <file>icons/pqIsometricView.svg</file>
-    </qresource>
+        <file>widgets/icons/viewcube32/ViewCube_RotateUp.svg</file>
+    <file>widgets/icons/viewcube32/ViewCube_RotateRight.svg</file>
+    <file>widgets/icons/viewcube32/ViewCube_RotateDown.svg</file>
+    <file>widgets/icons/viewcube32/ViewCube_RotateLeft.svg</file>
+    <file>widgets/icons/viewcube32/ViewCube_RollRight.svg</file>
+    <file>widgets/icons/viewcube32/ViewCube_RollLeft.svg</file>
+  </qresource>
     <qresource prefix="/widgets">
         <file>icons/awesomeface.png</file>
 		    <file>icons/Geomerty.png</file>
@@ -190,9 +196,21 @@
 
 
 
-	</qresource>
+	    <file>widgets/icons/viewcube32/ViewCube_RotateUp.svg</file>
+    <file>widgets/icons/viewcube32/ViewCube_RotateRight.svg</file>
+    <file>widgets/icons/viewcube32/ViewCube_RotateDown.svg</file>
+    <file>widgets/icons/viewcube32/ViewCube_RotateLeft.svg</file>
+    <file>widgets/icons/viewcube32/ViewCube_RollRight.svg</file>
+    <file>widgets/icons/viewcube32/ViewCube_RollLeft.svg</file>
+  </qresource>
     <qresource prefix="/entityTree">
         <file>icons/pqEyeball.svg</file>
         <file>icons/pqEyeballClosed.svg</file>
-    </qresource>
+        <file>widgets/icons/viewcube32/ViewCube_RotateUp.svg</file>
+    <file>widgets/icons/viewcube32/ViewCube_RotateRight.svg</file>
+    <file>widgets/icons/viewcube32/ViewCube_RotateDown.svg</file>
+    <file>widgets/icons/viewcube32/ViewCube_RotateLeft.svg</file>
+    <file>widgets/icons/viewcube32/ViewCube_RollRight.svg</file>
+    <file>widgets/icons/viewcube32/ViewCube_RollLeft.svg</file>
+  </qresource>
 </RCC>

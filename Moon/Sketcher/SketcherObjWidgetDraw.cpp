@@ -19,7 +19,7 @@ namespace MOON {
     namespace {
         /** Annotation text size. The font atlas is baked at 24px, so this is crisp and the
          * exponent labels (1.4x) are only slightly magnified. */
-        constexpr float kAnnotationFontSize = 20.0f;
+        constexpr float kAnnotationFontSize = 26.0f;
 
         Im2D::DrawList& AnnotationDrawList()
         {
@@ -67,35 +67,17 @@ namespace MOON {
         if (!renderer || points.size() < 2) {
             return;
         }
-        const float cycle = dashPx + gapPx;
-        float phase = 0.0f;
-        for (int i = 0; i + 1 < static_cast<int>(points.size()); i++) {
-            const Eigen::Vector3f wa = plane.valueEigen(points[i].x, points[i].y);
-            const Eigen::Vector3f wb = plane.valueEigen(points[i + 1].x, points[i + 1].y);
-            const Eigen::Vector2f aS = renderer->worldToScreen(wa);
-            const Eigen::Vector2f bS = renderer->worldToScreen(wb);
-            const float len = (bS - aS).norm();
-            if (len < 0.05f) {
-                continue;
-            }
-            float t = 0.0f;
-            while (t < len - 0.1f) {
-                const bool ink = phase < dashPx;
-                const float stateRemain = ink ? (dashPx - phase) : (cycle - phase);
-                const float step = std::min(stateRemain, len - t);
-                if (ink && step > 0.1f) {
-                    const float u0 = t / len;
-                    const float u1 = (t + step) / len;
-                    renderer->drawLine(wa + (wb - wa) * u0, wa + (wb - wa) * u1);
-                }
-                t += step;
-                phase += step;
-                if (phase >= cycle) {
-                    phase -= cycle;
-                }
-            }
+        // The dash pattern is a renderer feature now (ImRenderer::drawDashedPolyline): it keeps
+        // the points in world space, so a construction line goes through the same pipeline as a
+        // solid one, and only the dash rhythm is measured in screen pixels.
+        std::vector<Eigen::Vector3f> world;
+        world.reserve(points.size());
+        for (const Base::Vector3d& point : points) {
+            world.push_back(plane.valueEigen(point.x, point.y));
         }
+        renderer->drawDashedPolyline(world, dashPx, gapPx);
     }
+
     // Default screen-space offset (in pixels) applied to the auto anchor when
     // the user has not moved the label manually.
     void defaultLabelOffsetPx(const Sketcher::Constraint* c, float& dx, float& dy)
@@ -2368,7 +2350,34 @@ namespace MOON {
                 : hovered ? Im2D::ColorU32(255, 255, 140, 255) : Im2D::ColorU32(255, 255, 255, 42);
             //drawList->AddRectFilled(boxMin, boxMax, Im2D::ColorU32(24, 24, 30, 178), 4.0f);
             //drawList->AddRect(boxMin, boxMax, borderCol, 4.0f);
-            drawList->AddText(AnnotationFont(), kAnnotationFontSize, Im2D::Vec2(sx - ts.x * 0.5f, sy - ts.y * 0.5f), textCol, text.c_str());
+            // The label is anchored to a point on the sketch plane and nudged by the same
+            // screen offset the 2D box used, so it follows the model instead of the window.
+            // Drawing it through the 3D text pass keeps annotations and geometry in one space.
+            const Im2D::ImU32 rawCol = textCol;
+            const Eigen::Vector4<uint8_t> labelRgba(
+                static_cast<uint8_t>((rawCol >> 16) & 0xFF),
+                static_cast<uint8_t>((rawCol >> 8) & 0xFF),
+                static_cast<uint8_t>(rawCol & 0xFF),
+                static_cast<uint8_t>((rawCol >> 24) & 0xFF));
+            const float ascent = AnnotationFont().GetAscent(kAnnotationFontSize);
+            const Eigen::Vector3f labelAnchor = m_sketch->plane().valueEigen(anchor);
+            const auto& sketchPlane = m_sketch->plane();
+            const Eigen::Vector3f planeRight(
+                static_cast<float>(sketchPlane.xAxis.x),
+                static_cast<float>(sketchPlane.xAxis.y),
+                static_cast<float>(sketchPlane.xAxis.z));
+            const Eigen::Vector3f planeUp(
+                static_cast<float>(sketchPlane.yAxis.x),
+                static_cast<float>(sketchPlane.yAxis.y),
+                static_cast<float>(sketchPlane.yAxis.z));
+            // The label centre (sx, sy) carries the anchor offset and the user's drag; move it
+            // into pixels relative to the anchor so the 3D text lands exactly where the 2D one
+            // used to be.
+            const Eigen::Vector2f anchorScreen = renderer->worldToScreen(labelAnchor);
+            const float labelOffX = sx - anchorScreen.x();
+            const float labelOffY = sy - anchorScreen.y();
+            renderer->drawLabel3D(labelAnchor, text.c_str(), kAnnotationFontSize, labelRgba,
+                labelOffX - ts.x * 0.5f, labelOffY - ts.y * 0.5f + ascent, planeRight, planeUp, true);
         }
     }
     void SketcherObjWidget::editConstraintValue(int constrId)

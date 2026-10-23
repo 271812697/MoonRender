@@ -155,6 +155,7 @@ namespace MOON
 		//shader leak
 		std::string shaderPath =Tools::Utils::PathParser::GetExeDirectory()+"/Moon/Data/Engine/Shaders/";
 		
+		mTextMaterial = new Rendering::Data::Material(Rendering::Resources::Loaders::ShaderLoader::Create(shaderPath + "/GizmoText.shader"));
 		mLineMaterial = new Rendering::Data::Material(Rendering::Resources::Loaders::ShaderLoader::Create(shaderPath + "/GizmoLine.shader"));
 		mPointMaterial = new Rendering::Data::Material(Rendering::Resources::Loaders::ShaderLoader::Create(shaderPath + "/GizmoPoint.shader"));
 		mTriangleMaterial = new Rendering::Data::Material(Rendering::Resources::Loaders::ShaderLoader::Create(shaderPath + "/GizmoTriangle.shader"));
@@ -427,6 +428,316 @@ namespace MOON
 		}
 		VertexList* vertexList = vertexData[vertexDataIndex][layerIndex * DrawPrimitiveCount + DrawPrimitivePoints];
 		vertexList->insert(vertexList->end(), vd.begin(), vd.end());
+	}
+
+	void ImRenderer::drawText3D(const Eigen::Vector3f& p_position, const char* p_text,
+		float p_pixelSize, Eigen::Vector4<uint8_t> p_color,
+		const Eigen::Vector3f& p_right, const Eigen::Vector3f& p_up, float p_worldPerPixel)
+	{
+		if (p_text == nullptr || *p_text == '\0' || p_pixelSize <= 0.0f)
+		{
+			return;
+		}
+		auto& font = Rendering::Overlay::Im2DRender::Instance().GetFont();
+		if (!font.IsLoaded())
+		{
+			return;
+		}
+
+		const Eigen::Vector3f right = p_right.norm() > 0.0f ? p_right.normalized() : Eigen::Vector3f(1, 0, 0);
+		const Eigen::Vector3f up = p_up.norm() > 0.0f ? p_up.normalized() : Eigen::Vector3f(0, 1, 0);
+		int runAtlas = -1;
+		float penX = 0.0f;
+		float penY = 0.0f;
+		const float lineHeight = font.GetLineHeight(p_pixelSize);
+
+		// UTF-8, one glyph at a time; the font bakes the atlas for this size on first use.
+		const unsigned char* it = reinterpret_cast<const unsigned char*>(p_text);
+		while (*it != 0)
+		{
+			uint32_t codepoint = 0;
+			if (*it < 0x80) { codepoint = *it++; }
+			else if ((*it & 0xE0) == 0xC0) { codepoint = ((*it & 0x1F) << 6) | (it[1] & 0x3F); it += 2; }
+			else if ((*it & 0xF0) == 0xE0) { codepoint = ((*it & 0x0F) << 12) | ((it[1] & 0x3F) << 6) | (it[2] & 0x3F); it += 3; }
+			else { codepoint = ((*it & 0x07) << 18) | ((it[1] & 0x3F) << 12) | ((it[2] & 0x3F) << 6) | (it[3] & 0x3F); it += 4; }
+
+			if (codepoint == '\n')
+			{
+				penX = 0.0f;
+				penY += lineHeight;
+				continue;
+			}
+			const Rendering::Overlay::Im2D::Glyph* glyph = font.FindGlyph(codepoint, p_pixelSize);
+			if (glyph == nullptr)
+			{
+				continue;
+			}
+			if (glyph->atlasIndex != runAtlas)
+			{
+				textRuns.push_back({ static_cast<int>(textVertexArray.size()), 0, glyph->atlasIndex, pendingTextOverlay });
+				runAtlas = glyph->atlasIndex;
+			}
+
+			// offsetY is measured from the baseline down, up is up: the quad's top edge is the
+			// baseline lifted by offsetY, its bottom edge one glyph height below that.
+			const float scale = p_worldPerPixel > 0.0f ? p_worldPerPixel : 1.0f;
+			const Eigen::Vector3f origin = p_position
+				+ right * ((penX + glyph->offsetX) * scale)
+				- up * ((glyph->offsetY + penY) * scale);
+			const Eigen::Vector3f across = right * (glyph->width * scale);
+			const Eigen::Vector3f down = up * (-glyph->height * scale);
+			const Eigen::Vector3f corners[4] = { origin, origin + across, origin + across + down, origin + down };
+			const Eigen::Vector2f uvs[4] = { { glyph->u0, glyph->v0 }, { glyph->u1, glyph->v0 },
+				{ glyph->u1, glyph->v1 }, { glyph->u0, glyph->v1 } };
+			const int indices[6] = { 0, 1, 2, 0, 2, 3 };
+			for (int i = 0; i < 6; ++i)
+			{
+				textVertexArray.emplace_back(corners[indices[i]], p_pixelSize, p_color, uvs[indices[i]]);
+			}
+			textRuns.back().count += 6;
+			penX += glyph->advanceX;
+		}
+	}
+
+	void ImRenderer::drawText3D(const Eigen::Vector3f& p_position, const char* p_text,
+		float p_pixelSize, Eigen::Vector4<uint8_t> p_color, bool p_overlay)
+	{
+		// Camera basis: columns of the inverse view are right/up/back in world space.
+		const Eigen::Vector3f right(cameraParam.inverseView(0, 0), cameraParam.inverseView(1, 0), cameraParam.inverseView(2, 0));
+		const Eigen::Vector3f up(cameraParam.inverseView(0, 1), cameraParam.inverseView(1, 1), cameraParam.inverseView(2, 1));
+		const Eigen::Vector3f back(cameraParam.inverseView(0, 2), cameraParam.inverseView(1, 2), cameraParam.inverseView(2, 2));
+
+		float worldPerPixel = 1.0f;
+		const float projY = cameraParam.proj(1, 1) != 0.0f ? cameraParam.proj(1, 1) : 1.0f;
+		if (cameraParam.orthProj)
+		{
+			worldPerPixel = (2.0f / projY) / std::max(1.0f, cameraParam.viewportHeight);
+		}
+		else
+		{
+			// Depth along the view direction decides how much world one pixel covers.
+			const float depth = std::abs((p_position - cameraParam.eye).dot(back));
+			worldPerPixel = (2.0f * depth / projY) / std::max(1.0f, cameraParam.viewportHeight);
+		}
+		pendingTextOverlay = p_overlay;
+		drawText3D(p_position, p_text, p_pixelSize, p_color, right, up, worldPerPixel);
+		pendingTextOverlay = false;
+	}
+
+	void ImRenderer::drawLabel3D(const Eigen::Vector3f& p_anchor, const char* p_text,
+		float p_pixelSize, Eigen::Vector4<uint8_t> p_color, float p_offsetXPx, float p_offsetYPx,
+		bool p_overlay)
+	{
+		const Eigen::Vector3f right(cameraParam.inverseView(0, 0), cameraParam.inverseView(1, 0), cameraParam.inverseView(2, 0));
+		const Eigen::Vector3f up(cameraParam.inverseView(0, 1), cameraParam.inverseView(1, 1), cameraParam.inverseView(2, 1));
+		const Eigen::Vector3f back(cameraParam.inverseView(0, 2), cameraParam.inverseView(1, 2), cameraParam.inverseView(2, 2));
+
+		const float projY = cameraParam.proj(1, 1) != 0.0f ? cameraParam.proj(1, 1) : 1.0f;
+		float worldPerPixel = 1.0f;
+		if (cameraParam.orthProj)
+		{
+			worldPerPixel = (2.0f / projY) / std::max(1.0f, cameraParam.viewportHeight);
+		}
+		else
+		{
+			const float depth = std::abs((p_anchor - cameraParam.eye).dot(back));
+			worldPerPixel = (2.0f * depth / projY) / std::max(1.0f, cameraParam.viewportHeight);
+		}
+
+		// The caller's offset is in pixels with y pointing down, the basis' up points up.
+		const Eigen::Vector3f origin = p_anchor
+			+ right * (p_offsetXPx * worldPerPixel)
+			- up * (p_offsetYPx * worldPerPixel);
+		drawText3D(origin, p_text, p_pixelSize, p_color, right, up, worldPerPixel);
+	}
+
+	void ImRenderer::drawLabel3D(const Eigen::Vector3f& p_anchor, const char* p_text,
+		float p_pixelSize, Eigen::Vector4<uint8_t> p_color, float p_offsetXPx, float p_offsetYPx,
+		const Eigen::Vector3f& p_basisRight, const Eigen::Vector3f& p_basisUp, bool p_overlay)
+	{
+		// Same pixel scale as the camera aligned version (so the label stays readable), but the
+		// quads follow the caller's basis: a sketch annotation turns with its plane.
+		const Eigen::Vector3f back(cameraParam.inverseView(0, 2), cameraParam.inverseView(1, 2), cameraParam.inverseView(2, 2));
+		const float projY = cameraParam.proj(1, 1) != 0.0f ? cameraParam.proj(1, 1) : 1.0f;
+		float worldPerPixel = 1.0f;
+		if (cameraParam.orthProj)
+		{
+			worldPerPixel = (2.0f / projY) / std::max(1.0f, cameraParam.viewportHeight);
+		}
+		else
+		{
+			const float depth = std::abs((p_anchor - cameraParam.eye).dot(back));
+			worldPerPixel = (2.0f * depth / projY) / std::max(1.0f, cameraParam.viewportHeight);
+		}
+
+		const Eigen::Vector3f right = p_basisRight.norm() > 0.0f ? p_basisRight.normalized() : Eigen::Vector3f(1, 0, 0);
+		const Eigen::Vector3f up = p_basisUp.norm() > 0.0f ? p_basisUp.normalized() : Eigen::Vector3f(0, 1, 0);
+		// Offsets are given in screen pixels with y pointing down, while the basis' up points up.
+		const Eigen::Vector3f origin = p_anchor
+			+ right * (p_offsetXPx * worldPerPixel)
+			- up * (p_offsetYPx * worldPerPixel);
+		pendingTextOverlay = p_overlay;
+		drawText3D(origin, p_text, p_pixelSize, p_color, right, up, worldPerPixel);
+		pendingTextOverlay = false;
+	}
+
+	void ImRenderer::drawText()
+	{
+		if (!textVertexArray.empty() && mTextMaterial != nullptr)
+		{
+			auto& font = Rendering::Overlay::Im2DRender::Instance().GetFont();
+			const Eigen::Matrix4f viewProjT = cameraParam.viewProj.transpose();
+			auto* driver = Core::Global::ServiceLocator::Get<Editor::Core::Context>().driver.get();
+			auto depthTested = driver->CreatePipelineState();
+			depthTested.depthTest = true;
+			depthTested.depthWriting = false;
+			depthTested.blending = true;
+			depthTested.blendingSrcFactor = Rendering::Settings::EBlendingFactor::SRC_ALPHA;
+			depthTested.blendingDestFactor = Rendering::Settings::EBlendingFactor::ONE_MINUS_SRC_ALPHA;
+			depthTested.culling = 0;
+			auto alwaysOnTop = depthTested;
+			bool currentOverlay = false;
+			alwaysOnTop.depthTest = false;
+
+			for (const TextRun& run : textRuns)
+			{
+				if (run.count <= 0 || run.atlas < 0 || run.atlas >= font.GetAtlasCount())
+				{
+					continue;
+				}
+				if (static_cast<int>(textAtlasTextures.size()) <= run.atlas)
+				{
+					textAtlasTextures.resize(run.atlas + 1, nullptr);
+				}
+				Rendering::Resources::Texture* texture = textAtlasTextures[run.atlas];
+				const std::vector<uint8_t>& pixels = font.GetAtlasPixels(run.atlas);
+				if (texture == nullptr)
+				{
+					texture = Rendering::Resources::Loaders::TextureLoader::CreateMutable(
+						static_cast<uint32_t>(font.GetAtlasWidth(run.atlas)),
+						static_cast<uint32_t>(font.GetAtlasHeight(run.atlas)),
+						pixels.data(),
+						Rendering::Settings::ETextureFilteringMode::LINEAR,
+						Rendering::Settings::ETextureFilteringMode::LINEAR,
+						Rendering::Settings::ETextureWrapMode::CLAMP_TO_EDGE,
+						Rendering::Settings::ETextureWrapMode::CLAMP_TO_EDGE,
+						false);
+					textAtlasTextures[run.atlas] = texture;
+				}
+				else if (font.ConsumeAtlasDirty(run.atlas))
+				{
+					texture->GetTexture().Upload(pixels.data(),
+						Rendering::Settings::EFormat::RGBA,
+						Rendering::Settings::EPixelDataType::UNSIGNED_BYTE);
+				}
+				if (texture == nullptr)
+				{
+					continue;
+				}
+				if (driver != nullptr && run.overlay != currentOverlay)
+				{
+					currentOverlay = run.overlay;
+					driver->SetPipelineState(currentOverlay ? alwaysOnTop : depthTested);
+				}
+				mTextMaterial->SetProperty("uAtlas", texture);
+				mTextMaterial->Bind(&mEmptyTexture2D, &mEmptyTextureCube);
+				mTextMaterial->UploadProperties(true, true, &mEmptyTexture2D, &mEmptyTextureCube);
+				m_overlayGl.Draw(*mTextMaterial, GL_TRIANGLES, false,
+					textVertexArray.data() + run.first, run.count, sizeof(VertexFormat),
+					viewProjT.data(), cameraParam.viewportWidth, cameraParam.viewportHeight);
+				mTextMaterial->Unbind();
+			}
+		}
+		textVertexArray.clear();
+		textRuns.clear();
+	}
+
+	void ImRenderer::drawDashedLineList(const std::vector<Eigen::Vector3f>& p_position, float p_size,
+		Eigen::Vector4<uint8_t> p_color, float p_dashPx, float p_gapPx, float p_phase)
+	{
+		if (p_position.size() < 2 || p_dashPx <= 0.0f)
+		{
+			return;
+		}
+		const float cycle = p_dashPx + std::max(0.0f, p_gapPx);
+		std::vector<Eigen::Vector3f> dashes;
+		dashes.reserve(p_position.size() * 4);
+		float phase = std::fmod(std::max(0.0f, p_phase), cycle);
+		for (size_t i = 0; i + 1 < p_position.size(); i += 2)
+		{
+			const Eigen::Vector3f& a = p_position[i];
+			const Eigen::Vector3f& b = p_position[i + 1];
+			const Eigen::Vector2f aScreen = worldToScreen(a);
+			const Eigen::Vector2f bScreen = worldToScreen(b);
+			const float length = (bScreen - aScreen).norm();
+			// The projection can hand back a non finite or absurd screen length for points just
+			// behind the camera: splitting that would spin for years, so those segments are skipped.
+			if (!std::isfinite(length) || length > 20000.0f)
+			{
+				continue;
+			}
+			if (length < 0.05f)
+			{
+				continue;
+			}
+			const Eigen::Vector3f dir = b - a;
+			float t = 0.0f;
+			while (t < length - 0.1f)
+			{
+				const bool ink = phase < p_dashPx;
+				const float remain = ink ? (p_dashPx - phase) : (cycle - phase);
+				// A zero or negative remain (phase landing exactly on a boundary, or drifting past
+				// it) would make step 0 and spin here forever: restart the cycle instead.
+				if (remain <= 0.0f)
+				{
+					phase = 0.0f;
+					continue;
+				}
+				const float step = std::min(remain, length - t);
+				if (dashes.size() > 200000)
+				{
+					break;
+				}
+				if (ink && step > 0.1f)
+				{
+					dashes.push_back(a + dir * (t / length));
+					dashes.push_back(a + dir * ((t + step) / length));
+				}
+				t += step;
+				phase += step;
+				if (phase >= cycle)
+				{
+					phase -= cycle;
+				}
+			}
+		}
+		if (!dashes.empty())
+		{
+			drawLineList(dashes, p_size, p_color);
+		}
+	}
+
+	void ImRenderer::drawDashedPolyline(const std::vector<Eigen::Vector3f>& p_points, float p_size,
+		Eigen::Vector4<uint8_t> p_color, float p_dashPx, float p_gapPx, float p_phase)
+	{
+		if (p_points.size() < 2)
+		{
+			return;
+		}
+		std::vector<Eigen::Vector3f> pairs;
+		pairs.reserve((p_points.size() - 1) * 2);
+		for (size_t i = 0; i + 1 < p_points.size(); ++i)
+		{
+			pairs.push_back(p_points[i]);
+			pairs.push_back(p_points[i + 1]);
+		}
+		drawDashedLineList(pairs, p_size, p_color, p_dashPx, p_gapPx, p_phase);
+	}
+
+	void ImRenderer::drawDashedPolyline(const std::vector<Eigen::Vector3f>& p_points,
+		float p_dashPx, float p_gapPx, float p_phase)
+	{
+		drawDashedPolyline(p_points, sizeStack.back(), colorStack.back(), p_dashPx, p_gapPx, p_phase);
 	}
 
 	void ImRenderer::drawLineList(const std::vector<Eigen::Vector3f>& position, float _size, Eigen::Vector4<uint8_t> _color)
@@ -3897,6 +4208,10 @@ namespace MOON
 
 	void ImRenderer::test()
 	{
+		// TEMPORARY PROBE: MOON_TEXT_PROBE=1 draws one line of world-space text so the text pass
+		// can be checked without a caller yet.
+		
+
 		
 	
 		
@@ -4176,6 +4491,7 @@ namespace MOON
 		drawMesh();
 		drawSort();
 		drawUnsort();
+		drawText();
 	}
 	void ImRenderer::newImgui()
 	{

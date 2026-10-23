@@ -63,6 +63,32 @@ namespace MOON
 		{
 		}
 	};
+
+	/** A text glyph quad: the position of its top-left corner plus the glyph size in
+	 * positionSize.w? No - the size travels in uv's partner fields, see the shader. Kept as a
+	 * distinct type from VertexFormat so a text list cannot be confused with a line one, but the
+	 * memory layout is VertexFormat's, which is what the overlay GL path uploads unchanged. */
+	/** One batch of text vertices that share an atlas (a font bakes one per pixel size). */
+	struct TextRun
+	{
+		int first = 0;
+		int count = 0;
+		int atlas = 0;
+		/** Drawn after the depth tested runs, with the depth test off. */
+		bool overlay = false;
+	};
+
+	struct TextVertex : VertexFormat
+	{
+		TextVertex() = default;
+		TextVertex(const Eigen::Vector3f& p_pos, float p_size, const Eigen::Vector4<uint8_t>& p_color,
+			const Eigen::Vector2f& p_uv)
+			: VertexFormat(p_pos, p_size, p_color)
+		{
+			uv = p_uv;
+		}
+	};
+
 	typedef std::vector<VertexFormat> VertexList;
 	enum DrawPrimitiveType
 	{

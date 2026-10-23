@@ -1,4 +1,5 @@
 #include "Interactive/Widgets/ViewCubeWidget.h"
+#include "editor/UI/IconCache.h"
 #include "Interactive/Im3DType.h"
 #include "Interactive/Screen/ScreenPath.h"
 #include "Interactive/Screen/ShapeBuilder.h"
@@ -15,8 +16,9 @@ namespace MOON
 		/** Ring the buttons sit on: distance from the cube center to the center
 		 * line of a slot, and half the width of a slot. The cube silhouette stays
 		 * inside a 51px radius in the worst case, so the ring is clear of it. */
-		constexpr float kSlotRadius = 70.0f;
-		constexpr float kSlotHalfWidth = 7.0f;
+		constexpr float kSlotRadius = 58.0f;
+		constexpr float kHalfPi = 1.5707963267948966f;
+		constexpr float kSlotHalfWidth = 11.0f;
 		/** How far a slot reaches on either side of the axis it belongs to. The
 		 * four side buttons sit 90 degrees apart, so they can afford a wide slot;
 		 * the two roll buttons are squeezed between them at 45 degrees and are cut
@@ -258,7 +260,88 @@ namespace MOON
 
 	void ViewCubeWidget::DrawContent(::Rendering::Overlay::Im2D::DrawList& p_drawList, const ScreenRect& p_rect)
 	{
-		DrawShapes(p_drawList, p_rect);
+		// The slots are hit targets only now: the buttons are the icons themselves, so the white
+		// pills the slots used to be drawn as would just be a background behind them.
+		DrawIcons(p_drawList, p_rect);
+	}
+
+	void ViewCubeWidget::DrawIcons(::Rendering::Overlay::Im2D::DrawList& p_drawList, const ScreenRect& p_rect)
+	{
+		// One glyph per button, centred on the slot the hit test already uses (the ring at
+		// kSlotRadius). The icons are drawn white and tinted here, which is what lets a button
+		// light up on hover without a second asset.
+		struct IconFor { ViewCubeWidget::EAction action; const char* path; };
+		static const IconFor kIcons[] = {
+			{ ViewCubeWidget::EAction::OrbitUp,              ":/widgets/icons/viewcube32/ViewCube_RotateUp.svg" },
+			{ ViewCubeWidget::EAction::OrbitRight,           ":/widgets/icons/viewcube32/ViewCube_RotateRight.svg" },
+			{ ViewCubeWidget::EAction::OrbitDown,            ":/widgets/icons/viewcube32/ViewCube_RotateDown.svg" },
+			{ ViewCubeWidget::EAction::OrbitLeft,            ":/widgets/icons/viewcube32/ViewCube_RotateLeft.svg" },
+			{ ViewCubeWidget::EAction::RollClockwise,        ":/widgets/icons/viewcube32/ViewCube_RollRight.svg" },
+			{ ViewCubeWidget::EAction::RollCounterClockwise, ":/widgets/icons/viewcube32/ViewCube_RollLeft.svg" },
+		};
+
+		const float cubeCenter = static_cast<float>(kViewCubeSize) * 0.5f;
+		const int hot = HotShapeIndex();
+
+		for (int index = 0; index < static_cast<int>(std::size(kButtonDefinitions)); ++index)
+		{
+			const ButtonDefinition& definition = kButtonDefinitions[index];
+			const IconFor* icon = nullptr;
+			for (const IconFor& candidate : kIcons)
+			{
+				if (candidate.action == definition.action)
+				{
+					icon = &candidate;
+					break;
+				}
+			}
+			if (icon == nullptr)
+			{
+				continue;
+			}
+			const auto texture = MOON::IconCache::Instance().Get(QString::fromLatin1(icon->path), 20);
+			if (texture == 0)
+			{
+				continue;
+			}
+
+			const float axis = definition.placementDeg * kDegToRad;
+			const float cx = p_rect.x + cubeCenter + std::cos(axis) * kSlotRadius;
+			const float cy = p_rect.y + cubeCenter + std::sin(axis) * kSlotRadius;
+			const ::Rendering::Overlay::Im2D::ImU32 tint = (index == hot)
+				? ::Rendering::Overlay::Im2D::ColorU32(255, 214, 102, 255)
+				: ::Rendering::Overlay::Im2D::ColorU32(255, 255, 255, 240);
+			const float centreX = cx;
+			const float centreY = cy;
+			// The roll glyphs are an arc plus a head, which reads smaller than a solid arrow at the
+			// same box size; they get a wider box so the head is still legible.
+			const bool isRoll = definition.action == EAction::RollClockwise
+				|| definition.action == EAction::RollCounterClockwise;
+			const float iconHalf = isRoll ? 16.0f : 13.0f;
+			// The glyph itself points along +X, so each button gets the quarter turn that makes
+			// it point the way it turns the view: the two vertical buttons carry vertical
+			// arrows, the two horizontal ones horizontal arrows, the roll buttons stay upright.
+			float glyphDegrees = 0.0f;
+			switch (definition.action)
+			{
+			case EAction::OrbitUp:    glyphDegrees = 90.0f;  break;
+			case EAction::OrbitDown:  glyphDegrees = -90.0f; break;
+			case EAction::OrbitLeft:  glyphDegrees = 0.0f;   break;
+			case EAction::OrbitRight: glyphDegrees = 180.0f; break;
+			default:                  glyphDegrees = 0.0f;   break;
+			}
+			const float glyphRad = glyphDegrees * kDegToRad;
+			const float rightX = std::cos(glyphRad);
+			const float rightY = std::sin(glyphRad);
+			const float upX = -rightY;
+			const float upY = rightX;
+			p_drawList.AddImageQuad(texture,
+				::Rendering::Overlay::Im2D::Vec2(centreX - rightX * iconHalf - upX * iconHalf, centreY - rightY * iconHalf - upY * iconHalf),
+				::Rendering::Overlay::Im2D::Vec2(centreX + rightX * iconHalf - upX * iconHalf, centreY + rightY * iconHalf - upY * iconHalf),
+				::Rendering::Overlay::Im2D::Vec2(centreX + rightX * iconHalf + upX * iconHalf, centreY + rightY * iconHalf + upY * iconHalf),
+				::Rendering::Overlay::Im2D::Vec2(centreX - rightX * iconHalf + upX * iconHalf, centreY - rightY * iconHalf + upY * iconHalf),
+				tint);
+		}
 	}
 
 	bool ViewCubeWidget::IsInteractionEnabled() const
