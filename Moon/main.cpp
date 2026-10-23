@@ -58,6 +58,8 @@ int main(int argc, char* argv[])
 	}
 	MOON::Language::Initialize();
 	MOON::Theme::Initialize();
+
+
 	// TEMPORARY PROBE: MOON_VCUBE_ATLAS=<png> dumps the runtime view-cube label atlas and exits.
 	if (const char* p_atlas = std::getenv("MOON_VCUBE_ATLAS"); p_atlas != nullptr && *p_atlas != '\0') {
 		const QImage atlas = MOON::ViewCubeLabels::BuildAtlas(256);

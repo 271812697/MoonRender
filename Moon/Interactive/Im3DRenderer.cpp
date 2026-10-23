@@ -581,12 +581,105 @@ namespace MOON
 		pendingTextOverlay = false;
 	}
 
+	void ImRenderer::drawIcon3D(const Eigen::Vector3f& p_position,
+		Rendering::Resources::Texture* p_texture, float p_pixelSize,
+		Eigen::Vector4<uint8_t> p_color, bool p_overlay)
+	{
+		if (p_texture == nullptr || p_pixelSize <= 0.0f)
+		{
+			return;
+		}
+		const Eigen::Vector3f right(cameraParam.inverseView(0, 0), cameraParam.inverseView(1, 0), cameraParam.inverseView(2, 0));
+		const Eigen::Vector3f up(cameraParam.inverseView(0, 1), cameraParam.inverseView(1, 1), cameraParam.inverseView(2, 1));
+		const Eigen::Vector3f back(cameraParam.inverseView(0, 2), cameraParam.inverseView(1, 2), cameraParam.inverseView(2, 2));
+
+		const float projY = cameraParam.proj(1, 1) != 0.0f ? cameraParam.proj(1, 1) : 1.0f;
+		float worldPerPixel = 1.0f;
+		if (cameraParam.orthProj)
+		{
+			worldPerPixel = (2.0f / projY) / std::max(1.0f, cameraParam.viewportHeight);
+		}
+		else
+		{
+			const float depth = std::abs((p_position - cameraParam.eye).dot(back));
+			worldPerPixel = (2.0f * depth / projY) / std::max(1.0f, cameraParam.viewportHeight);
+		}
+
+		const float half = p_pixelSize * 0.5f * worldPerPixel;
+		const Eigen::Vector3f corners[4] = {
+			p_position - right * half + up * half,
+			p_position + right * half + up * half,
+			p_position + right * half - up * half,
+			p_position - right * half - up * half };
+		const Eigen::Vector2f uvs[4] = { { 0.0f, 0.0f }, { 1.0f, 0.0f }, { 1.0f, 1.0f }, { 0.0f, 1.0f } };
+		const int indices[6] = { 0, 1, 2, 0, 2, 3 };
+
+		if (textRuns.empty() || textRuns.back().texture != p_texture)
+		{
+			textRuns.push_back({ static_cast<int>(textVertexArray.size()), 0, -1, p_overlay, p_texture });
+		}
+		for (int i = 0; i < 6; ++i)
+		{
+			textVertexArray.emplace_back(corners[indices[i]], p_pixelSize, p_color, uvs[indices[i]]);
+		}
+		textRuns.back().count += 6;
+	}
+
+	void ImRenderer::drawIcon3D(const Eigen::Vector3f& p_position,
+		Rendering::Resources::Texture* p_texture, float p_pixelSize,
+		Eigen::Vector4<uint8_t> p_color, const Eigen::Vector3f& p_basisRight,
+		const Eigen::Vector3f& p_basisUp, float p_offsetXPx, float p_offsetYPx, bool p_overlay)
+	{
+		if (p_texture == nullptr || p_pixelSize <= 0.0f)
+		{
+			return;
+		}
+		const Eigen::Vector3f back(cameraParam.inverseView(0, 2), cameraParam.inverseView(1, 2), cameraParam.inverseView(2, 2));
+		const float projY = cameraParam.proj(1, 1) != 0.0f ? cameraParam.proj(1, 1) : 1.0f;
+		float worldPerPixel = 1.0f;
+		if (cameraParam.orthProj)
+		{
+			worldPerPixel = (2.0f / projY) / std::max(1.0f, cameraParam.viewportHeight);
+		}
+		else
+		{
+			const float depth = std::abs((p_position - cameraParam.eye).dot(back));
+			worldPerPixel = (2.0f * depth / projY) / std::max(1.0f, cameraParam.viewportHeight);
+		}
+
+		const Eigen::Vector3f right = p_basisRight.norm() > 0.0f ? p_basisRight.normalized() : Eigen::Vector3f(1, 0, 0);
+		const Eigen::Vector3f up = p_basisUp.norm() > 0.0f ? p_basisUp.normalized() : Eigen::Vector3f(0, 1, 0);
+		const Eigen::Vector3f centre = p_position
+			+ right * (p_offsetXPx * worldPerPixel)
+			- up * (p_offsetYPx * worldPerPixel);
+
+		const float half = p_pixelSize * 0.5f * worldPerPixel;
+		const Eigen::Vector3f corners[4] = {
+			centre - right * half + up * half,
+			centre + right * half + up * half,
+			centre + right * half - up * half,
+			centre - right * half - up * half };
+		const Eigen::Vector2f uvs[4] = { { 0.0f, 0.0f }, { 1.0f, 0.0f }, { 1.0f, 1.0f }, { 0.0f, 1.0f } };
+		const int indices[6] = { 0, 1, 2, 0, 2, 3 };
+
+		if (textRuns.empty() || textRuns.back().texture != p_texture || textRuns.back().overlay != p_overlay)
+		{
+			textRuns.push_back({ static_cast<int>(textVertexArray.size()), 0, -1, p_overlay, p_texture });
+		}
+		for (int i = 0; i < 6; ++i)
+		{
+			textVertexArray.emplace_back(corners[indices[i]], p_pixelSize, p_color, uvs[indices[i]]);
+		}
+		textRuns.back().count += 6;
+	}
+
 	void ImRenderer::drawText()
 	{
 		if (!textVertexArray.empty() && mTextMaterial != nullptr)
 		{
 			auto& font = Rendering::Overlay::Im2DRender::Instance().GetFont();
 			const Eigen::Matrix4f viewProjT = cameraParam.viewProj.transpose();
+
 			auto* driver = Core::Global::ServiceLocator::Get<Editor::Core::Context>().driver.get();
 			auto depthTested = driver->CreatePipelineState();
 			depthTested.depthTest = true;
@@ -596,44 +689,52 @@ namespace MOON
 			depthTested.blendingDestFactor = Rendering::Settings::EBlendingFactor::ONE_MINUS_SRC_ALPHA;
 			depthTested.culling = 0;
 			auto alwaysOnTop = depthTested;
-			bool currentOverlay = false;
 			alwaysOnTop.depthTest = false;
+			bool currentOverlay = false;
 
 			for (const TextRun& run : textRuns)
 			{
-				if (run.count <= 0 || run.atlas < 0 || run.atlas >= font.GetAtlasCount())
+				if (run.count <= 0)
 				{
 					continue;
 				}
-				if (static_cast<int>(textAtlasTextures.size()) <= run.atlas)
+
+				// One run, one texture: the font atlas for text, the icon's own texture for an
+				// image. This range is the draw command boundary, the way ImGui splits its list.
+				Rendering::Resources::Texture* texture = run.texture;
+				if (texture == nullptr && run.atlas >= 0 && run.atlas < font.GetAtlasCount())
 				{
-					textAtlasTextures.resize(run.atlas + 1, nullptr);
-				}
-				Rendering::Resources::Texture* texture = textAtlasTextures[run.atlas];
-				const std::vector<uint8_t>& pixels = font.GetAtlasPixels(run.atlas);
-				if (texture == nullptr)
-				{
-					texture = Rendering::Resources::Loaders::TextureLoader::CreateMutable(
-						static_cast<uint32_t>(font.GetAtlasWidth(run.atlas)),
-						static_cast<uint32_t>(font.GetAtlasHeight(run.atlas)),
-						pixels.data(),
-						Rendering::Settings::ETextureFilteringMode::LINEAR,
-						Rendering::Settings::ETextureFilteringMode::LINEAR,
-						Rendering::Settings::ETextureWrapMode::CLAMP_TO_EDGE,
-						Rendering::Settings::ETextureWrapMode::CLAMP_TO_EDGE,
-						false);
-					textAtlasTextures[run.atlas] = texture;
-				}
-				else if (font.ConsumeAtlasDirty(run.atlas))
-				{
-					texture->GetTexture().Upload(pixels.data(),
-						Rendering::Settings::EFormat::RGBA,
-						Rendering::Settings::EPixelDataType::UNSIGNED_BYTE);
+					if (static_cast<int>(textAtlasTextures.size()) <= run.atlas)
+					{
+						textAtlasTextures.resize(run.atlas + 1, nullptr);
+					}
+					texture = textAtlasTextures[run.atlas];
+					const std::vector<uint8_t>& pixels = font.GetAtlasPixels(run.atlas);
+					if (texture == nullptr)
+					{
+						texture = Rendering::Resources::Loaders::TextureLoader::CreateMutable(
+							static_cast<uint32_t>(font.GetAtlasWidth(run.atlas)),
+							static_cast<uint32_t>(font.GetAtlasHeight(run.atlas)),
+							pixels.data(),
+							Rendering::Settings::ETextureFilteringMode::LINEAR,
+							Rendering::Settings::ETextureFilteringMode::LINEAR,
+							Rendering::Settings::ETextureWrapMode::CLAMP_TO_EDGE,
+							Rendering::Settings::ETextureWrapMode::CLAMP_TO_EDGE,
+							false);
+						textAtlasTextures[run.atlas] = texture;
+					}
+					else if (font.ConsumeAtlasDirty(run.atlas))
+					{
+						texture->GetTexture().Upload(pixels.data(),
+							Rendering::Settings::EFormat::RGBA,
+							Rendering::Settings::EPixelDataType::UNSIGNED_BYTE);
+					}
 				}
 				if (texture == nullptr)
 				{
 					continue;
 				}
+
 				if (driver != nullptr && run.overlay != currentOverlay)
 				{
 					currentOverlay = run.overlay;

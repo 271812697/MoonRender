@@ -43,7 +43,9 @@ fragment {
 
     void main()
     {
-        vec4 glyph = texture(uAtlas, vUv);
-        fragColor = vec4(vColor.rgb, vColor.a * glyph.a);
+        // Full RGBA multiply, the way ImGui does it: the glyph atlas is white with the coverage in
+        // alpha, so text comes out exactly as before, while an icon keeps its own colours.
+        vec4 texel = texture(uAtlas, vUv);
+        fragColor = vec4(texel.rgb * vColor.rgb, texel.a * vColor.a);
     }
 }

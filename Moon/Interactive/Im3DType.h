@@ -76,6 +76,9 @@ namespace MOON
 		int atlas = 0;
 		/** Drawn after the depth tested runs, with the depth test off. */
 		bool overlay = false;
+			/** Set for icon runs: the texture this range samples. Null means the font atlas at
+		 * index `atlas`. One material binds it per run, which is the draw command boundary. */
+		Rendering::Resources::Texture* texture = nullptr;
 	};
 
 	struct TextVertex : VertexFormat

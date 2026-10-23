@@ -111,6 +111,22 @@ namespace MOON
 			Eigen::Vector4<uint8_t> p_color, float p_offsetXPx, float p_offsetYPx,
 			const Eigen::Vector3f& p_basisRight, const Eigen::Vector3f& p_basisUp, bool p_overlay = true);
 
+		/** Draws a texture as a camera facing quad of p_pixelSize pixels, centred on
+		 * p_position. Same material and vertex list as the text: the only difference
+		 * between a glyph and an icon is which texture the run samples. */
+		void drawIcon3D(const Eigen::Vector3f& p_position,
+			::Rendering::Resources::Texture* p_texture, float p_pixelSize,
+			Eigen::Vector4<uint8_t> p_color, bool p_overlay = true);
+
+		/** The same quad laid along p_basisRight/p_basisUp instead of the camera's axes, and
+		 * nudged by a pixel offset - an icon that belongs to a plane (a sketch constraint marker)
+		 * has to turn with it. */
+		void drawIcon3D(const Eigen::Vector3f& p_position,
+			::Rendering::Resources::Texture* p_texture, float p_pixelSize,
+			Eigen::Vector4<uint8_t> p_color,
+			const Eigen::Vector3f& p_basisRight, const Eigen::Vector3f& p_basisUp,
+			float p_offsetXPx = 0.0f, float p_offsetYPx = 0.0f, bool p_overlay = true);
+
 		void drawDashedLineList(const std::vector<Eigen::Vector3f>& p_position, float p_size,
 			Eigen::Vector4<uint8_t> p_color, float p_dashPx, float p_gapPx, float p_phase = 0.0f);
 

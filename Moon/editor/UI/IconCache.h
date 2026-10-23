@@ -5,6 +5,8 @@
 
 #include <Rendering/Overlay/Im2D.h>
 
+namespace Rendering::Resources { class Texture; }
+
 namespace MOON
 {
 	/** Caches the GL textures the 2D overlay draws icons from.
@@ -21,12 +23,16 @@ namespace MOON
 	public:
 		static IconCache& Instance();
 
-		/** Texture for p_path at p_pixelSize (already multiplied by the UI scale by the caller).
-		 * Returns 0 when the SVG cannot be loaded. */
+		/** The texture object for p_path at p_pixelSize. The 3D overlay binds it as a material
+		 * property, the 2D one only needs its GL name (see Get). nullptr when the SVG cannot be
+		 * loaded. */
+		::Rendering::Resources::Texture* GetTexture(const QString& p_path, int p_pixelSize);
+
+		/** GL name for the same texture, for Im2D's AddImage. 0 when it cannot be loaded. */
 		::Rendering::Overlay::Im2D::TextureId Get(const QString& p_path, int p_pixelSize);
 
 	private:
 		IconCache() = default;
-		QHash<QString, ::Rendering::Overlay::Im2D::TextureId> mTextures;
+		QHash<QString, ::Rendering::Resources::Texture*> mTextures;
 	};
 }
