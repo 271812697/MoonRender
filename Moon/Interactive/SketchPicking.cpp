@@ -425,17 +425,22 @@ namespace MOON {
 
         // How big one sketch unit is on screen: one unit along an axis covers that
         // axis' view-space length, and the viewport is 2 * halfH high. Face on both
-        // lengths are 1, which is the plain zoom-based spacing. Tilted, the axes are
-        // foreshortened by different amounts, and the step is sized by the *smaller*
-        // of the two: the family of lines running across the foreshortened axis is the
-        // one that piles up, so a cell measured against the smaller scale is what keeps
-        // that family at the target spacing and lets the other one spread out. (The
-        // geometric mean this replaced sized the product of the two spacings, so one of
-        // them always ended up at target^2 / the other: a dense band of lines as soon as
-        // the view was tilted.)
+        // lengths are 1, which is the plain zoom-based spacing.
+        //
+        // The step is sized by the *larger* of the two. Tilting the view foreshortens
+        // one axis and leaves the other alone, so a step measured against the larger one
+        // barely moves while the camera orbits: the cell keeps its size on screen for a
+        // rotation that does not zoom, which is what a grid is expected to do. Sizing it
+        // against the smaller one (what this used to do) kept the crowded family at the
+        // target spacing instead, but every few degrees of tilt pushed the step over a
+        // ladder rung and the cells jumped to twice or five times their size.
+        //
+        // The price is that the family running across the foreshortened axis does crowd
+        // as the view turns: drawBackground() fades that one out by its own spacing, so
+        // it thins away instead of turning into moire.
         const float scaleU = std::sqrt(uX * uX + uY * uY);
         const float scaleV = std::sqrt(vX * vX + vY * vY);
-        const float scale = std::max(std::min(scaleU, scaleV), 1.0e-6f);
+        const float scale = std::max(std::max(scaleU, scaleV), 1.0e-6f);
         // The spacing the sketch asks for, in screen pixels (the panel sets it); the
         // same number drawBackground() draws its lattice with.
         const float targetStep = sketch.gridTargetPx() * 2.0f * halfH / (screenH * scale);

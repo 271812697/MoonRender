@@ -176,7 +176,7 @@ namespace MOON
 	}
 
 	void HitShape::Draw(
-		ImDrawList* p_drawList,
+		::Rendering::Overlay::Im2D::DrawList* p_drawList,
 		const ImVec2& p_offset,
 		ImU32 p_fill,
 		ImU32 p_outline,
@@ -199,10 +199,10 @@ namespace MOON
 			}
 			if (p_outlineWidth > 0.0f)
 			{
-				// Argument order is explicit: rounding, thickness, flags. The two
-				// ImDrawList implementations in the tree differ here, and the
-				// swapped-meaning legacy overloads are easy to bind to by accident.
-				p_drawList->AddRect(min, max, p_outline, 0.0f, p_outlineWidth, 0);
+				// Argument order is explicit: rounding, thickness, flags. Im2D keeps that order
+				// (ImGui's newer overloads put the flags before the thickness, which is easy to
+				// bind to by accident).
+				p_drawList->AddRect(min, max, p_outline, 0.0f, p_outlineWidth, ::Rendering::Overlay::Im2D::DrawFlags::None);
 			}
 			break;
 		}
@@ -229,7 +229,7 @@ namespace MOON
 			}
 			// Approximate the band with a polyline of the given thickness.
 			const int segmentCount = std::max(6, static_cast<int>(std::ceil(std::abs(sweepAngleDeg) / 5.0f)));
-			std::vector<ImVec2> arcPoints;
+			std::vector<::Rendering::Overlay::Im2D::Vec2> arcPoints;
 			arcPoints.reserve(segmentCount + 1);
 			const float startRad = startAngleDeg * kDegToRad;
 			const float sweepRad = sweepAngleDeg * kDegToRad;
@@ -237,7 +237,7 @@ namespace MOON
 			{
 				const float t = static_cast<float>(i) / static_cast<float>(segmentCount);
 				const float angle = startRad + sweepRad * t;
-				arcPoints.push_back(ImVec2(
+				arcPoints.push_back(::Rendering::Overlay::Im2D::Vec2(
 					p_offset.x + center.x + radius * cosf(angle),
 					p_offset.y + center.y + radius * sinf(angle)));
 			}
@@ -246,7 +246,7 @@ namespace MOON
 				static_cast<int>(arcPoints.size()),
 				p_fill != 0 ? p_fill : p_outline,
 				bandHalfWidth * 2.0f,
-				0);
+				::Rendering::Overlay::Im2D::DrawFlags::None);
 			break;
 		}
 
@@ -257,7 +257,7 @@ namespace MOON
 			{
 				break;
 			}
-			std::vector<ImVec2> outline;
+			std::vector<::Rendering::Overlay::Im2D::Vec2> outline;
 			outline.reserve(points.size());
 			for (const ImVec2& point : points)
 			{
@@ -274,7 +274,7 @@ namespace MOON
 					static_cast<int>(outline.size()),
 					p_outline,
 					p_outlineWidth,
-					ImDrawFlags_Closed);
+					::Rendering::Overlay::Im2D::DrawFlags::Closed);
 			}
 			break;
 		}
@@ -311,7 +311,7 @@ namespace MOON
 				}
 			}
 
-			std::vector<ImVec2> scratch;
+			std::vector<::Rendering::Overlay::Im2D::Vec2> scratch;
 			for (size_t loopIndex = 0; loopIndex < path->loops.size(); ++loopIndex)
 			{
 				const std::vector<ImVec2>& loop = path->loops[loopIndex];
@@ -323,7 +323,7 @@ namespace MOON
 				scratch.reserve(loop.size());
 				for (const ImVec2& point : loop)
 				{
-					scratch.push_back(ImVec2(p_offset.x + point.x, p_offset.y + point.y));
+					scratch.push_back(::Rendering::Overlay::Im2D::Vec2(p_offset.x + point.x, p_offset.y + point.y));
 				}
 
 				if (strokeColor != 0 && strokeThickness > 0.0f)
@@ -335,7 +335,7 @@ namespace MOON
 						static_cast<int>(scratch.size()),
 						strokeColor,
 						strokeThickness,
-						loopClosed ? ImDrawFlags_Closed : 0);
+						loopClosed ? ::Rendering::Overlay::Im2D::DrawFlags::Closed : ::Rendering::Overlay::Im2D::DrawFlags::None);
 				}
 			}
 			break;

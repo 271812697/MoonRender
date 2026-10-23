@@ -579,7 +579,7 @@ Core::Rendering::SceneRenderer::SceneDescriptor Editor::Panels::SceneView::Creat
 			auto& sceneCamera = mainCameraComponent->GetCamera();
 			m_camera.SetFrustumGeometryCulling(sceneCamera.HasFrustumGeometryCulling());
 			m_camera.SetFrustumLightCulling(sceneCamera.HasFrustumLightCulling());
-			descriptor.frustumerride = sceneCamera.GetFrustum();
+			descriptor.frustumOverride = sceneCamera.GetFrustum();
 		}
 	}
 

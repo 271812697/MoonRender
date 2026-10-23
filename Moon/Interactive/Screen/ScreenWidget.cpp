@@ -1,6 +1,7 @@
 #include "Interactive/Screen/ScreenWidget.h"
 #include "Interactive/Interactive/RenderWindowInteractor.h"
 #include "Interactive/Screen/ScreenOverlayRegistry.h"
+#include <Rendering/Overlay/Im2DRender.h>
 #include <ThirdParty/imgui/imgui/imgui.h>
 #include <cmath>
 
@@ -279,7 +280,7 @@ namespace MOON
 			return;
 		}
 
-		ImDrawList* drawList = ImGui::GetForegroundDrawList();
+		::Rendering::Overlay::Im2D::DrawList* drawList = &::Rendering::Overlay::Im2DRender::Instance().GetDrawList();
 		if (drawList == nullptr)
 		{
 			return;
@@ -356,7 +357,7 @@ namespace MOON
 		SetState(EScreenState::Stop);
 	}
 
-	void ScreenWidget::DrawShapes(ImDrawList& p_drawList, const ScreenRect& p_rect)
+	void ScreenWidget::DrawShapes(::Rendering::Overlay::Im2D::DrawList& p_drawList, const ScreenRect& p_rect)
 	{
 		EnsureGeometry();
 		const ImVec2 offset = p_rect.TopLeft();

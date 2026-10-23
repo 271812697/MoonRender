@@ -6,7 +6,11 @@
 #include <QtWidgets/QDockWidget>
 #include <QStackedWidget>
 #include <QStackedLayout>
+#include <QTabBar>
+#include <QVariantList>
 #include "editor.h"
+#include "editor/Language.h"
+#include "editor/Theme.h"
 #include "UI/TreeViewPanel/hierarchypanel.h"
 #include "UI/SettingPanel/SettingPanel.h"
 #include "UI/PropertyPanel/PropertyPanel.h"
@@ -17,7 +21,6 @@
 #include "UI/ContentBrowser/ContentBrowserPanel.h"
 #include "UI/TaskPanel/TaskViewPanel.h"
 #include "editor/Toolbar/sketchToolbar.h"
-#include "editor/Toolbar/ContraintToolbar.h"
 #include "editor/Toolbar/primitiveToolbar.h"
 #include "editor/Toolbar/DesignModelingToolbar.h"
 #include "Command/menubar/openFile.h"
@@ -200,21 +203,106 @@ namespace MOON {
 		void buildViewMenu() {
 			auto visible=new VisibleViewCommand(menu_View);
 			visible->setUp(menu_View);
+
+			// Colour scheme. Both entries re-apply the palette, the stylesheet and the icons in
+			// place, so the switch is immediate; the choice is remembered in QSettings.
+			QMenu* themeMenu = menu_View->addMenu(QStringLiteral("主题"));
+			MOON::Language::SetLabel(themeMenu->menuAction(), QStringLiteral("主题"), QStringLiteral("Theme"));
+			auto* darkAction = themeMenu->addAction(QStringLiteral("深色"));
+			auto* lightAction = themeMenu->addAction(QStringLiteral("浅色"));
+			MOON::Language::SetLabel(darkAction, QStringLiteral("深色"), QStringLiteral("Dark"));
+			MOON::Language::SetLabel(lightAction, QStringLiteral("浅色"), QStringLiteral("Light"));
+			darkAction->setCheckable(true);
+			lightAction->setCheckable(true);
+			darkAction->setChecked(MOON::Theme::Current() == MOON::Theme::ETheme::Dark);
+			lightAction->setChecked(MOON::Theme::Current() == MOON::Theme::ETheme::Light);
+			const auto switchTheme = [darkAction, lightAction](MOON::Theme::ETheme p_theme) {
+				MOON::Theme::Set(p_theme);
+				MOON::Theme::Apply(qApp);
+				darkAction->setChecked(p_theme == MOON::Theme::ETheme::Dark);
+				lightAction->setChecked(p_theme == MOON::Theme::ETheme::Light);
+			};
+			QObject::connect(darkAction, &QAction::triggered, self,
+				[switchTheme] { switchTheme(MOON::Theme::ETheme::Dark); });
+			QObject::connect(lightAction, &QAction::triggered, self,
+				[switchTheme] { switchTheme(MOON::Theme::ETheme::Light); });
+
+			// Language. Every caption and button remembered its two spellings, so the switch
+			// rewrites the whole ribbon without rebuilding it.
+			QMenu* languageMenu = menu_View->addMenu(QStringLiteral("语言"));
+			MOON::Language::SetLabel(languageMenu->menuAction(), QStringLiteral("语言"), QStringLiteral("Language"));
+			auto* chineseAction = languageMenu->addAction(QStringLiteral("中文"));
+			auto* englishAction = languageMenu->addAction(QStringLiteral("英文"));
+			MOON::Language::SetLabel(chineseAction, QStringLiteral("中文"), QStringLiteral("Chinese"));
+			MOON::Language::SetLabel(englishAction, QStringLiteral("英文"), QStringLiteral("English"));
+			chineseAction->setCheckable(true);
+			englishAction->setCheckable(true);
+			chineseAction->setChecked(MOON::Language::Current() == MOON::Language::ELanguage::Chinese);
+			englishAction->setChecked(MOON::Language::Current() == MOON::Language::ELanguage::English);
+			const auto switchLanguage = [chineseAction, englishAction](MOON::Language::ELanguage p_language) {
+				MOON::Language::Set(p_language);
+				MOON::Language::Apply(qApp);
+				chineseAction->setChecked(p_language == MOON::Language::ELanguage::Chinese);
+				englishAction->setChecked(p_language == MOON::Language::ELanguage::English);
+			};
+			QObject::connect(chineseAction, &QAction::triggered, self,
+				[switchLanguage] { switchLanguage(MOON::Language::ELanguage::Chinese); });
+			QObject::connect(englishAction, &QAction::triggered, self,
+				[switchLanguage] { switchLanguage(MOON::Language::ELanguage::English); });
 		}
 		void buildSketchMenu() {
 			auto sketchCommand = new SketchCommand(self);
 			menu_sketch->addAction(sketchCommand->action());
 		}
 		void buildMenu() {
-			mMenubar = new QMenuBar(self);
-			mMenubar->setObjectName(QString::fromUtf8("menubar"));
-			//mMenubar->setGeometry(QRect(0, 0, 1152, 20));
+			// The menu bar and the ribbon tabs share one row. The tabs are part of the
+			// top bar rather than a toolbar of their own, so the ribbon starts right
+			// under the menus instead of two strips below them.
+			mTopBar = new QWidget(self);
+			mTopBar->setObjectName("ribbonTopBar");
+			// The template is kept on the widget so Theme::Apply can re-evaluate it when the
+			// colour scheme changes (see the moonStyle loop there).
+			mTopBar->setProperty("moonStyle", QStringLiteral(
+				"#ribbonTopBar {"
+				"  background: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
+				"    stop:0 @barTop, stop:1 @barBottom);"
+				"  border-bottom: 2px solid @barBorder; }"
+				"QMenuBar { background: transparent; border: none; }"));
+			mTopBar->setStyleSheet(MOON::Theme::Style(mTopBar->property("moonStyle").toString()));
+			auto* topLayout = new QHBoxLayout(mTopBar);
+			topLayout->setContentsMargins(0, 0, 0, 0);
+			topLayout->setSpacing(4);
 
-			self->setMenuBar(mMenubar);
+			mMenubar = new QMenuBar(mTopBar);
+			mMenubar->setObjectName(QString::fromUtf8("menubar"));
+			topLayout->addWidget(mMenubar, 0);
+
+			mTabs = new QTabBar(mTopBar);
+			mTabs->setDocumentMode(true);
+			mTabs->setDrawBase(false);
+			mTabs->setExpanding(false);
+			mTabs->setFocusPolicy(Qt::NoFocus);
+			mTabs->setProperty("moonStyle", QStringLiteral(
+				"QTabBar { background: transparent; }"
+				"QTabBar::tab { background: transparent; color: @textDim; padding: 4px 14px;"
+				"  margin-right: 2px; border: none; border-bottom: 2px solid transparent; }"
+				"QTabBar::tab:hover { color: @text; }"
+				"QTabBar::tab:selected { color: @text; border-bottom: 2px solid @accent;"
+				"  background: @hoverWash; }"));
+			mTabs->setStyleSheet(MOON::Theme::Style(mTabs->property("moonStyle").toString()));
+			topLayout->addWidget(mTabs, 0, Qt::AlignVCenter);
+			topLayout->addStretch(1);
+			self->setMenuWidget(mTopBar);
+
 			menu_File = new QMenu(mMenubar);
 			menu_Display = new QMenu(mMenubar);
 			menu_View = new QMenu(mMenubar);
 			menu_sketch = new QMenu(mMenubar);
+			// Menu titles carry both spellings, so switching the language rewrites the bar too.
+			MOON::Language::SetLabel(menu_File->menuAction(), QStringLiteral("文件"), QStringLiteral("File"));
+			MOON::Language::SetLabel(menu_Display->menuAction(), QStringLiteral("显示"), QStringLiteral("Display"));
+			MOON::Language::SetLabel(menu_View->menuAction(), QStringLiteral("视图"), QStringLiteral("View"));
+			MOON::Language::SetLabel(menu_sketch->menuAction(), QStringLiteral("草图"), QStringLiteral("Sketch"));
 			mMenubar->addAction(menu_File->menuAction());
 			mMenubar->addAction(menu_Display->menuAction());
 			mMenubar->addAction(menu_View->menuAction());
@@ -226,18 +314,42 @@ namespace MOON {
 	
 		}
 		void buildToolBar() {
-			QToolBar* sketchtoolBar = new SketchToolbar(self);
-			sketchtoolBar->layout()->setSpacing(0);
-			self->addToolBar(Qt::TopToolBarArea, sketchtoolBar);
-			QToolBar* sketchContraintToolBar = new ConstraintToolbar(self);
-			sketchContraintToolBar->layout()->setSpacing(0);
-			self->addToolBar(Qt::TopToolBarArea, sketchContraintToolBar);
-			QToolBar* primitiveToolBar = new PrimitiveToolbar(self);
-			primitiveToolBar->layout()->setSpacing(0);
-			self->addToolBar(Qt::TopToolBarArea, primitiveToolBar);
-			DesignModelingToolbar* designModelingToolbar = new DesignModelingToolbar(self);
-			designModelingToolbar->layout()->setSpacing(0);
-			self->addToolBar(Qt::TopToolBarArea, designModelingToolbar);
+			// The ribbon has two pages: the sketch page carries the drawing tools, the
+			// edit tools, the references and the constraints (a sketch needs them
+			// together), and the model page the features that turn a sketch into a
+			// solid. Groups are two rows tall, which is what lets the whole sketch page
+			// fit in one row of groups.
+			auto* sketchToolbar = new SketchToolbar(self);
+			auto* primitiveToolbar = new PrimitiveToolbar(self);
+			auto* designModelingToolbar = new DesignModelingToolbar(self);
+
+			const QList<QToolBar*> pageToolbars = {
+				sketchToolbar, primitiveToolbar, designModelingToolbar };
+			for (QToolBar* toolbar : pageToolbars) {
+				toolbar->layout()->setSpacing(0);
+				self->addToolBar(Qt::TopToolBarArea, toolbar);
+			}
+
+			// Each tab remembers both spellings; Language::Apply rewrites them on a switch.
+			mTabs->setProperty("moonTabs", QVariantList{
+				QStringLiteral("草图|Sketch"), QStringLiteral("模型|Model") });
+			mTabs->addTab(MOON::Language::Pick(QStringLiteral("草图"), QStringLiteral("Sketch")));
+			mTabs->addTab(MOON::Language::Pick(QStringLiteral("模型"), QStringLiteral("Model")));
+			const auto showPage = [=](int p_index) {
+				sketchToolbar->setVisible(p_index == 0);
+				const bool modeling = p_index == 1;
+				primitiveToolbar->setVisible(modeling);
+				designModelingToolbar->setVisible(modeling);
+			};
+			QObject::connect(mTabs, &QTabBar::currentChanged, self, showPage);
+			// Which page comes up first. MOON_RIBBON_PAGE overrides it, which is how a review
+			// screenshot of the sketch page can be taken without anyone clicking the tab.
+			int initialPage = 1;
+			if (const char* p_page = std::getenv("MOON_RIBBON_PAGE")) {
+				initialPage = std::atoi(p_page);
+			}
+			mTabs->setCurrentIndex(initialPage);
+			showPage(initialPage);
 
 		}
 		void retranslateUi() {
@@ -253,6 +365,9 @@ namespace MOON {
 		Editor* self = nullptr;
 		QSplitter* vert_splitter_ = nullptr;
 		QMenuBar* mMenubar;
+		/** The menu bar and the ribbon tabs, as one row (see buildMenu). */
+		QWidget* mTopBar = nullptr;
+		QTabBar* mTabs = nullptr;
 		QMenu* menu_File;
 		QMenu* menu_Display;
 		QMenu* menu_View;

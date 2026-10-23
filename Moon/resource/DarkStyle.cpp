@@ -13,6 +13,9 @@
 
 #include "DarkStyle.h"
 
+#include "editor/Theme.h"
+#include "editor/UiScale.h"
+
 DarkStyle::DarkStyle() : DarkStyle(styleBase()) {}
 
 DarkStyle::DarkStyle(QStyle *style) : QProxyStyle(style) {}
@@ -26,48 +29,41 @@ QStyle *DarkStyle::styleBase(QStyle *style) const {
 QStyle *DarkStyle::baseStyle() const { return styleBase(); }
 
 void DarkStyle::polish(QPalette &palette) {
-  // modify palette to dark
-  palette.setColor(QPalette::Window, QColor(53, 53, 53));
-  palette.setColor(QPalette::WindowText, Qt::white);
-  palette.setColor(QPalette::Disabled, QPalette::WindowText,
-                   QColor(127, 127, 127));
-  palette.setColor(QPalette::Base, QColor(42, 42, 42));
-  palette.setColor(QPalette::AlternateBase, QColor(66, 66, 66));
-  palette.setColor(QPalette::ToolTipBase, Qt::white);
-  palette.setColor(QPalette::ToolTipText, QColor(53, 53, 53));
-  palette.setColor(QPalette::Text, Qt::white);
-  palette.setColor(QPalette::Disabled, QPalette::Text, QColor(127, 127, 127));
-  palette.setColor(QPalette::Dark, QColor(35, 35, 35));
-  palette.setColor(QPalette::Shadow, QColor(20, 20, 20));
-  palette.setColor(QPalette::Button, QColor(53, 53, 53));
-  palette.setColor(QPalette::ButtonText, Qt::white);
-  palette.setColor(QPalette::Disabled, QPalette::ButtonText,
-                   QColor(127, 127, 127));
-  palette.setColor(QPalette::BrightText, Qt::red);
-  palette.setColor(QPalette::Link, QColor(42, 130, 218));
-  palette.setColor(QPalette::Highlight, QColor(42, 130, 218));
-  palette.setColor(QPalette::Disabled, QPalette::Highlight, QColor(80, 80, 80));
-  palette.setColor(QPalette::HighlightedText, Qt::white);
-  palette.setColor(QPalette::Disabled, QPalette::HighlightedText,
-                   QColor(127, 127, 127));
+  // The colours live in Theme (there is a light scheme as well); this only installs them.
+  const MOON::ThemeTokens &t = MOON::Theme::Tokens();
+  palette.setColor(QPalette::Window, t.window);
+  palette.setColor(QPalette::WindowText, t.text);
+  palette.setColor(QPalette::Disabled, QPalette::WindowText, t.textDisabled);
+  palette.setColor(QPalette::Base, t.well);
+  palette.setColor(QPalette::AlternateBase, t.surface);
+  palette.setColor(QPalette::ToolTipBase, t.surface);
+  palette.setColor(QPalette::ToolTipText, t.text);
+  palette.setColor(QPalette::Text, t.text);
+  palette.setColor(QPalette::Disabled, QPalette::Text, t.textDisabled);
+  palette.setColor(QPalette::Dark, t.window.darker(115));
+  palette.setColor(QPalette::Shadow, t.window.darker(135));
+  palette.setColor(QPalette::Mid, t.border);
+  palette.setColor(QPalette::Light, t.surface.lighter(115));
+  palette.setColor(QPalette::Button, t.surface);
+  palette.setColor(QPalette::ButtonText, t.text);
+  palette.setColor(QPalette::Disabled, QPalette::ButtonText, t.textDisabled);
+  palette.setColor(QPalette::BrightText, Qt::white);
+  palette.setColor(QPalette::Link, t.accent);
+  palette.setColor(QPalette::Highlight, t.accent);
+  palette.setColor(QPalette::HighlightedText, t.accentText);
+  palette.setColor(QPalette::Disabled, QPalette::Highlight, t.border);
+  palette.setColor(QPalette::Disabled, QPalette::HighlightedText, t.textDisabled);
 }
-
 void DarkStyle::polish(QApplication *app) {
   if (!app) return;
 
-  // increase font size for better reading,
-  // setPointSize was reduced from +2 because when applied this way in Qt5, the
-  // font is larger than intended for some reason
+  // The whole chrome is sized off this font, so it is where the UI scale is applied: the
+  // ribbon reads its own metrics from UiScale(), which keeps the two in step.
   QFont defaultFont = QApplication::font();
-  defaultFont.setPointSize(defaultFont.pointSize() + 1);
+  defaultFont.setPointSizeF((defaultFont.pointSizeF() + 1.0) * MOON::UiScale());
   app->setFont(defaultFont);
 
-  // loadstylesheet
-  QFile qfDarkstyle(QStringLiteral(":/darkstyle/darkstyle.qss"));
-  if (qfDarkstyle.open(QIODevice::ReadOnly | QIODevice::Text)) {
-    // set stylesheet
-    QString qsStylesheet = QString::fromLatin1(qfDarkstyle.readAll());
-    app->setStyleSheet(qsStylesheet);
-    qfDarkstyle.close();
-  }
+  // Palette, stylesheet tokens and the icons all come from the same table, so the scheme can be
+  // switched at runtime (View > 主题) without rebuilding anything.
+  MOON::Theme::Apply(app);
 }

@@ -2,6 +2,7 @@
 #include "Interactive/Im3DRenderer.h"
 #include "Interactive/MathUtil/MathUtil.h"
 #include "renderer/SceneView.h"
+#include <Rendering/Overlay/Im2DRender.h>
 #include <Core/Rendering/EngineBufferRenderFeature.h>
 #include "Interactive/Interactive/ExecuteCommand.h"
 #include "Interactive/Interactive/RenderWindowInteractor.h"
@@ -134,7 +135,12 @@ class ClipPlane::ClipPlaneInternal {
 			float degree = -angle * 180 / 3.14159265358979323846f;
 			std::string text = std::to_string(degree) + " degree\n";
 			auto pos = renderer->getFrameParam().cursor;
-			ImGui::GetForegroundDrawList()->AddText({ pos.x(),pos.y() - 20 }, IM_COL32(255, 255, 0, 255), text.c_str());
+			{
+				auto& render2d = Rendering::Overlay::Im2DRender::Instance();
+				render2d.GetDrawList().AddText(render2d.GetFont(), 20.0f,
+					{ pos.x(), pos.y() - 20 },
+					Rendering::Overlay::Im2D::ColorU32(255, 255, 0, 255), text.c_str());
+			}
 			auto seg = m_internal->axisRPick.getRotationArc();
 			if (seg.size() > 0) {
 				// The rotation path must keep a constant screen size like the

@@ -1,6 +1,7 @@
 #include "Interactive/Widgets/Measurement.h"
 #include "Interactive/Im3DRenderer.h"
 #include "renderer/SceneView.h"
+#include <Rendering/Overlay/Im2DRender.h>
 #include <ThirdParty/imgui/imgui/imgui.h>
 #include "Interactive/Interactive/Event.h"
 #include "Interactive/Interactive/ExecuteCommand.h"
@@ -40,7 +41,12 @@ namespace MOON {
 			Eigen::Vector3f mid = (m.start + m.end) * 0.5f;
 			Eigen::Vector2f spos=renderer->worldToScreen(mid);
 			std::string text = std::to_string(distance) + "\n" + "x:"+ std::to_string(abs(delta.x())) + "\n" + "y:" + std::to_string(abs(delta.y())) + "\n" + "z:" + std::to_string(abs(delta.z()));
-			ImGui::GetForegroundDrawList()->AddText({spos.x(),spos.y()}, IM_COL32(255, 255, 0, 255), text.c_str());
+			{
+				auto& render2d = Rendering::Overlay::Im2DRender::Instance();
+				render2d.GetDrawList().AddText(render2d.GetFont(), 20.0f,
+					{ spos.x(), spos.y() },
+					Rendering::Overlay::Im2D::ColorU32(255, 255, 0, 255), text.c_str());
+			}
 			//renderer->drawText3D(mid, std::to_string(distance), Eigen::Vector4<uint8_t>{ 255, 255, 255, 255 }, 16);
 		}
 		//auto rc = m_sceneView->GetRoaterCenter();

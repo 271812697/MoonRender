@@ -5,6 +5,7 @@
 #include <ThirdParty/imgui/implot/implotCustom.h>
 #include <ThirdParty/imgui/implot/imGuizmo.h>
 #include "Im3DRenderer.h"
+#include <Rendering/Overlay/Im2DRender.h>
 #include "Interactive/MathUtil/MathUtil.h"
 #include "Settings/DebugSetting.h"
 #include "core/Global/ServiceLocator.h"
@@ -3728,11 +3729,12 @@ namespace MOON
 		static unsigned int mid = makeId("Mid");
 		Eigen::Vector2f m = (a + b) / 2;
 		Eigen::Vector2f delta = m - a;
-	    auto drawList=ImGui::GetForegroundDrawList();
-		drawList->AddCircleFilled(ImVec2(a.x(),a.y()),8,isHot2D(sid)?c1:c2);
-		drawList->AddCircleFilled(ImVec2(b.x(), b.y()), 8, isHot2D(eid) ? c1 : c2);
-		drawList->AddCircleFilled(ImVec2(m.x(), m.y()), 8, isHot2D(mid) ? c1 : c2);
-		drawList->AddLine(ImVec2(a.x(), a.y()), ImVec2(b.x(), b.y()), IM_COL32(255, 255, 0, 255));
+	    Rendering::Overlay::Im2D::DrawList& drawList = Rendering::Overlay::Im2DRender::Instance().GetDrawList();
+		drawList.AddCircleFilled(Rendering::Overlay::Im2D::Vec2(a.x(), a.y()), 8.0f, isHot2D(sid) ? c1 : c2);
+		drawList.AddCircleFilled(Rendering::Overlay::Im2D::Vec2(b.x(), b.y()), 8.0f, isHot2D(eid) ? c1 : c2);
+		drawList.AddCircleFilled(Rendering::Overlay::Im2D::Vec2(m.x(), m.y()), 8.0f, isHot2D(mid) ? c1 : c2);
+		drawList.AddLine(Rendering::Overlay::Im2D::Vec2(a.x(), a.y()), Rendering::Overlay::Im2D::Vec2(b.x(), b.y()),
+			Rendering::Overlay::Im2D::ColorU32(255, 255, 0, 255));
 		bool ret = false;
 		ret |= drawTranslate2D(sid,a);
 		ret |= drawTranslate2D(eid, b);

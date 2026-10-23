@@ -68,8 +68,8 @@ namespace Core::Rendering
 		struct SceneDescriptor
 		{
 			Core::SceneSystem::Scene& scene;
-			Tools::Utils::OptRef<const ::Rendering::Data::Frustum> frustumerride;
-			Tools::Utils::OptRef<::Rendering::Data::Material> errideMaterial;
+			Tools::Utils::OptRef<const ::Rendering::Data::Frustum> frustumOverride;
+			Tools::Utils::OptRef<::Rendering::Data::Material> overrideMaterial;
 			Tools::Utils::OptRef<::Rendering::Data::Material> fallbackMaterial;
 		};
 
@@ -119,8 +119,8 @@ namespace Core::Rendering
 		struct SceneDrawablesFilteringInput
 		{
 			const ::Rendering::Entities::Camera& camera;
-			Tools::Utils::OptRef<const ::Rendering::Data::Frustum> frustumerride;
-			Tools::Utils::OptRef<::Rendering::Data::Material> errideMaterial;
+			Tools::Utils::OptRef<const ::Rendering::Data::Frustum> frustumOverride;
+			Tools::Utils::OptRef<::Rendering::Data::Material> overrideMaterial;
 			Tools::Utils::OptRef<::Rendering::Data::Material> fallbackMaterial;
 			EVisibilityFlags requiredVisibilityFlags = EVisibilityFlags::NONE;
 			bool includeUI = true; // Whether to include UI drawables in the filtering

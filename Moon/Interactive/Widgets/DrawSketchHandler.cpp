@@ -1,6 +1,7 @@
 #pragma once
 #include "DrawSketchHandler.h"
 #include "Interactive/Im3DRenderer.h"
+#include <Rendering/Overlay/Im2DRender.h>
 #include "Sketcher/SketcherObjManager.h"
 #include "Sketcher/SketcherObj.h"
 #include "Interactive/SketchPicking.h"
@@ -42,12 +43,14 @@ namespace MOON
            //renderer->drawPoint2D({ onSketchPos.x,onSketchPos.y }, Eigen::Vector4<uint8_t>(255,0,255,0), 16,gizmoPlane);
        }
        if (drawSketchPos) {
-            auto drawList=ImGui::GetForegroundDrawList();
+            Rendering::Overlay::Im2DRender& render2d = Rendering::Overlay::Im2DRender::Instance();
+            Rendering::Overlay::Im2D::DrawList& drawList = render2d.GetDrawList();
             Maths::FVector2 screenPos=m_sceneView->worldToScreen(getWorldPosFromSketchPos(drawPos));
             screenPos.y -= 7;
 		    screenPos.x += 5;
 		    std::string posText = "(" + std::to_string(drawPos.x) + "," + std::to_string(drawPos.y) + ")";
-            drawList->AddText(nullptr,0,ImVec2(screenPos.x,screenPos.y), IM_COL32(0, 0, 0, 255),posText.c_str());
+            drawList.AddText(render2d.GetFont(), 20.0f, Rendering::Overlay::Im2D::Vec2(screenPos.x, screenPos.y),
+                Rendering::Overlay::Im2D::ColorU32(0, 0, 0, 255), posText.c_str());
        }
        renderer->pushColor({255,255,0,255});
        renderer->pushSize(3);
@@ -114,12 +117,14 @@ namespace MOON
     }
     void DrawSketchHandler::drawFloatValue(float value)
     {
-        auto drawList = ImGui::GetForegroundDrawList();
+        Rendering::Overlay::Im2DRender& render2d = Rendering::Overlay::Im2DRender::Instance();
+        Rendering::Overlay::Im2D::DrawList& drawList = render2d.GetDrawList();
         Maths::FVector2 screenPos = m_sceneView->worldToScreen(getWorldPosFromSketchPos(onSketchPos));
         screenPos.y -= 7;
         screenPos.x += 5;
         std::string posText = std::to_string(value);
-        drawList->AddText(nullptr, 0, ImVec2(screenPos.x, screenPos.y), IM_COL32(0, 0, 0, 255), posText.c_str());
+        drawList.AddText(render2d.GetFont(), 20.0f, Rendering::Overlay::Im2D::Vec2(screenPos.x, screenPos.y),
+            Rendering::Overlay::Im2D::ColorU32(0, 0, 0, 255), posText.c_str());
     }
     int DrawSketchHandler::getPreselectCurve() const
     {

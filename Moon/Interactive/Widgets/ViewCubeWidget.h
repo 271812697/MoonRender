@@ -50,7 +50,7 @@ namespace MOON
 	protected:
 		ScreenLayout BuildLayout() const override;
 		void BuildShapes(std::vector<HitShape>& p_outShapes) const override;
-		void DrawContent(ImDrawList& p_drawList, const ScreenRect& p_rect) override;
+		void DrawContent(::Rendering::Overlay::Im2D::DrawList& p_drawList, const ScreenRect& p_rect) override;
 		void OnAction(int p_action) override;
 		/** Hidden while the camera is locked, e.g. while sketching. */
 		bool IsInteractionEnabled() const override;

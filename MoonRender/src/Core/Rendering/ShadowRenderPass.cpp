@@ -119,7 +119,7 @@ void Core::Rendering::ShadowRenderPass::_DrawShadows(
 							drawable.mesh = *mesh;
 							drawable.material = targetMaterial;
 
-							// Generate the state mask for the target material, and erride
+							// Generate the state mask for the target material, and override
 							// its properties to ensure the shadow pass is rendered correctly.
 							drawable.stateMask = targetMaterial.GenerateStateMask();
 							drawable.stateMask.blendable = false; // The shadow pass should never use blending.

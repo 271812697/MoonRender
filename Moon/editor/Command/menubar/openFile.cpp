@@ -1,4 +1,5 @@
-﻿#include "openFile.h"
+#include "openFile.h"
+#include "editor/Language.h"
 #include "editor/View/sceneview/viewerwidget.h"
 #include "Core/Global/ServiceLocator.h"
 #include "core/log.h"
@@ -61,7 +62,7 @@ namespace MOON {
 		auto openfile=new QAction(this);
 		setAction(openfile);
 		openfile->setObjectName(QString::fromUtf8("actionFileOpen"));
-		openfile->setText("&Open");
+		MOON::Language::SetLabel(openfile, QStringLiteral("\u6253\u5f00"), QStringLiteral("&Open"));
 		openfile->setStatusTip("Open");
 		openfile->setShortcut(QCoreApplication::translate("pqFileMenuBuilder", "Ctrl+O", nullptr));
 		QIcon icon9;

@@ -43,7 +43,7 @@ target_include_directories(${TARGET_NAME} PUBLIC
     ${LibDIR}/freetype/include
 )
 
-target_compile_options(${TARGET_NAME} PRIVATE /bigobj)
+target_compile_options(${TARGET_NAME} PRIVATE /bigobj /utf-8)
 set_target_properties(${TARGET_NAME} PROPERTIES CXX_STANDARD 20)
 
 set(OIDN_LIBRARIES "OpenImageDenoise")
@@ -59,20 +59,20 @@ target_link_libraries(${TARGET_NAME} PUBLIC ${OIDN_LIBRARIES}  ${FREETYPE_LIBRAR
 )
 
 add_custom_command(
-    TARGET ${TARGET_NAME}  # 鏇挎崲鎴愪綘鐨別xe鐩爣鍚嶏紝姣斿 main
-    POST_BUILD  # 缂栬瘧鍓嶆墽琛岋紙鍙€夛細POST_BUILD 缂栬瘧鍚庢墽琛岋級
+    TARGET ${TARGET_NAME}
+    POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${LibDIR}/oidn/lib/OpenImageDenoise.dll" "${TARGET_EXE_DIR}"
     COMMENT "Copying OpenImageDenoise.dll"
 )
 add_custom_command(
-    TARGET ${TARGET_NAME}  # 鏇挎崲鎴愪綘鐨別xe鐩爣鍚嶏紝姣斿 main
-    POST_BUILD  # 缂栬瘧鍓嶆墽琛岋紙鍙€夛細POST_BUILD 缂栬瘧鍚庢墽琛岋級
+    TARGET ${TARGET_NAME}
+    POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${LibDIR}/freetype/bin/freetype.dll" "${TARGET_EXE_DIR}"
     COMMENT "Copying freetype.dll"
 )
 add_custom_command(
-    TARGET ${TARGET_NAME}  # 鏇挎崲鎴愪綘鐨別xe鐩爣鍚嶏紝姣斿 main
-    POST_BUILD  # 缂栬瘧鍓嶆墽琛岋紙鍙€夛細POST_BUILD 缂栬瘧鍚庢墽琛岋級
+    TARGET ${TARGET_NAME}
+    POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${LibDIR}/oidn/lib/tbb.dll" "${TARGET_EXE_DIR}"
     COMMENT "Copying tbb.dll"
 )
@@ -93,8 +93,8 @@ if(RESOURCE_FILES)
         set(TARGET_DIR "${TARGET_EXE_DIR}/${FILE_DIR}")
         
         add_custom_command(
-            TARGET ${TARGET_NAME}  # 鏇挎崲鎴愪綘鐨別xe鐩爣鍚嶏紝姣斿 main
-            POST_BUILD  # 缂栬瘧鍓嶆墽琛岋紙鍙€夛細POST_BUILD 缂栬瘧鍚庢墽琛岋級
+            TARGET ${TARGET_NAME}
+            POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E make_directory "${TARGET_DIR}"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${FILE}" "${TARGET_DIR}"
             COMMENT "Copying resource file: ${REL_FILE_PATH}"

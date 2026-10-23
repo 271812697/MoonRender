@@ -4,19 +4,19 @@
 
 namespace ImPlotCustom {
 
-    // 2D 浣嶇疆+鏃嬭浆鍙樻崲缁撴瀯浣擄紙閫傞厤 ImGui 鑷畾涔夌粯鍒讹級
-    // 瑙勮寖鍛藉悕锛歍ransform 鑰岄潪 TransForm锛岀鍚圕++澶ч┘宄拌鑼?
+    // 2D 位置+旋转变换结构体（适配 ImGui 自定义绘制）
+    // 规范命名：Transform 而非 TransForm，符合C++大驼峰规范
     struct Transform
     {
-        // 浣嶇疆鍧愭爣
+        // 位置坐标
         ImVec2 pos;
-        // 鏃嬭浆寮у害锛堝唴閮ㄧ粺涓€瀛樺偍寮у害锛岄伩鍏嶅弽澶嶈浆鎹級
+        // 旋转弧度（内部统一存储弧度，避免反复转换）
         float angleRad;
 
-        // 榛樿鏋勯€狅細褰掗浂
+        // 默认构造：归零
         Transform() : pos(ImVec2(0, 0)), angleRad(0.0f) {}
 
-        // 鏋勯€犲嚱鏁帮細浼犲叆XY鍧愭爣 + 瑙掑害(搴︽暟)
+        // 构造函数：传入XY坐标 + 角度(度数)
         Transform(float x, float y, float degree)
         {
             pos.x = x;
@@ -24,39 +24,39 @@ namespace ImPlotCustom {
             setDegree(degree);
         }
 
-        // 鏋勯€犲嚱鏁帮細浼犲叆鍧愭爣鍚戦噺 + 瑙掑害(搴︽暟)
+        // 构造函数：传入坐标向量 + 角度(度数)
         Transform(const ImVec2& p, float degree)
         {
             pos = p;
             setDegree(degree);
         }
 
-        // 璁剧疆鍧愭爣
+        // 设置坐标
         void setPos(float x, float y)
         {
             pos.x = x;
             pos.y = y;
         }
 
-        // 璁剧疆鍧愭爣锛堝悜閲忛噸杞斤級
+        // 设置坐标（向量重载）
         void setPos(const ImVec2& p)
         {
             pos = p;
         }
 
-        // 璁剧疆鏃嬭浆瑙掑害锛堜紶鍏?瑙掑害锛岃嚜鍔ㄨ浆寮у害锛?
+        // 设置旋转角度（传入角度，自动转弧度）
         void setDegree(float degree)
         {
             angleRad = degree / 180.0f * 3.1415926535f;
         }
 
-        // 鑾峰彇褰撳墠瑙掑害锛堝害鏁帮級
+        // 获取当前角度（度数）
         float getDegree() const
         {
             return angleRad * 180.0f / 3.1415926535f;
         }
 
-        // 鑾峰彇涓夎鍑芥暟锛堢紦瀛樿绠楋紝閬垮厤閲嶅姹傚€硷級
+        // 获取三角函数（缓存计算，避免重复求值）
         void getSinCos(float& outSin, float& outCos) const;
 
         void move(float x, float y) {

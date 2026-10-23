@@ -48,16 +48,20 @@ namespace MOON {
 		Eigen::Vector4<uint8_t> xAxisColor { 255, 0, 0, 255 };
 		Eigen::Vector4<uint8_t> yAxisColor { 255, 0, 255, 0 };
 		/** The background grid: the minor lines are the subdivisions of a major
-		 * cell, so the major ones are the stronger pair. Both are the same grey and
-		 * only the alpha differs: blending the same colour more or less strongly
-		 * keeps that hierarchy whatever the viewport background is (a fixed pair of
-		 * greys is only right on one of a dark or a light one - the sketch view has a
-		 * gradient behind it, so no pair of greys is right everywhere).
+		 * cell, so the major ones are the darker pair.
+		 *
+		 * Both are opaque. A blended grid fades out wherever the background approaches the
+		 * line colour: the sketch view has a gradient behind it (the skybox), and at the
+		 * dimmer edges and corners a 35%-alpha grey line had no contrast left at all, which
+		 * is what made the grid look like it faded towards the viewport border. With full
+		 * alpha the two colours below are the whole story; they are picked to stay clearly
+		 * darker than the dimmest part of that background (about 133, measured on the
+		 * corners), so the lattice stays visible everywhere.
 		 * The step, i.e. how far apart the lines are, is not here: it belongs to
 		 * the sketch (SketcherObj::gridTargetPx), because the snapping reads the
 		 * same lattice and the two have to agree. */
-		Eigen::Vector4<uint8_t> gridMinorColor { 90, 128, 128, 128 };
-		Eigen::Vector4<uint8_t> gridMajorColor { 200, 128, 128, 128 };
+		Eigen::Vector4<uint8_t> gridMinorColor { 255, 118, 118, 118 };
+		Eigen::Vector4<uint8_t> gridMajorColor { 255, 78, 78, 78 };
 		float curveLineWidth = 4.0f;
 		/** The axes are a backdrop, but they are what a sketch is laid out against,
 		 * so they are drawn a little heavier than the curves on top of them. */

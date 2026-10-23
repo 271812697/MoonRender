@@ -1,4 +1,7 @@
-﻿#include "editor/Toolbar/sketchToolbar.h"
+#include "editor/Toolbar/sketchToolbar.h"
+#include "editor/Toolbar/RibbonGroup.h"
+#include "editor/Language.h"
+#include "editor/Toolbar/ConstraintGroups.h"
 #include "editor/Command/command.h"
 #include "Core/Global/ServiceLocator.h"
 #include "renderer/SceneView.h"
@@ -9,6 +12,7 @@
 #include "core/log.h"
 #include <QCoreApplication>
 #include <algorithm>
+#include <initializer_list>
 #include <vector>
 namespace MOON {
 
@@ -241,46 +245,44 @@ namespace MOON {
 			toggleConstruction = new ToggleConstructionCommand(self);
 			external = new AddExternalGeometryCommand(self, /*intersection*/ false);
 			externalIntersection = new AddExternalGeometryCommand(self, /*intersection*/ true);
-			point->setIcon(":/widgets/icons/Sketcher_CreatePoint.svg");
-		    line->setIcon(":/widgets/icons/Sketcher_CreateLine.svg");
-			lineSet->setIcon(":/widgets/icons/Sketcher_CreatePolyline.svg");
-			circle->setIcon(":/widgets/icons/Sketcher_CreateCircle.svg");
-			arc->setIcon(":/widgets/icons/Sketcher_CreateArc.svg");
-			arcSlot->setIcon(":/widgets/icons/Sketcher_CreateArcSlot.svg");
-			ellipse->setIcon(":/widgets/icons/Sketcher_CreateEllipseByCenter.svg");
-			bspline->setIcon(":/widgets/icons/Sketcher_CreateBSpline.svg");
-			rectangle->setIcon(":/widgets/icons/Sketcher_CreateRectangle_Constr.svg");
-			polygon->setIcon(":/widgets/icons/Sketcher_CreateRegularPolygon.svg");
-			slot->setIcon(":/widgets/icons/Sketcher_CreateSlot.svg");
-			trimming->setIcon(":/widgets/icons/Sketcher_Trimming.svg");
-			rotate->setIcon(":/widgets/icons/Sketcher_Rotate.svg");
-			translate->setIcon(":/widgets/icons/Sketcher_Translate.svg");
-			symmetry->setIcon(":/widgets/icons/Sketcher_Symmetry.svg");
-			fillet->setIcon(":/widgets/icons/Sketcher_CreateFillet.svg");
-			offset->setIcon(":/widgets/icons/Sketcher_Offset.svg");
-			toggleConstruction->setIcon(":/widgets/icons/Sketcher_ToggleConstruction.svg");
-			external->setIcon(":/widgets/icons/Sketcher_Projection.svg");
-			externalIntersection->setIcon(":/widgets/icons/Sketcher_Intersection.svg");
-			self->addAction(point->action());
-			self->addAction(line->action());
-			self->addAction(lineSet->action());
-			self->addAction(arc->action());
-			self->addAction(arcSlot->action());
-			self->addAction(ellipse->action());
-			self->addAction(bspline->action());
-			self->addAction(circle->action());
-			self->addAction(rectangle->action());
-			self->addAction(polygon->action());
-			self->addAction(slot->action());
-			self->addAction(trimming->action());
-			self->addAction(rotate->action());
-			self->addAction(translate->action());
-			self->addAction(symmetry->action());
-			self->addAction(fillet->action());
-			self->addAction(offset->action());
-			self->addAction(toggleConstruction->action());
-			self->addAction(external->action());
-			self->addAction(externalIntersection->action());
+			point->setIcon(":/widgets/icons/sketch32/Sketcher_CreatePoint.svg");
+		    line->setIcon(":/widgets/icons/sketch32/Sketcher_CreateLine.svg");
+			lineSet->setIcon(":/widgets/icons/sketch32/Sketcher_CreatePolyline.svg");
+			circle->setIcon(":/widgets/icons/sketch32/Sketcher_CreateCircle.svg");
+			arc->setIcon(":/widgets/icons/sketch32/Sketcher_CreateArc.svg");
+			arcSlot->setIcon(":/widgets/icons/sketch32/Sketcher_CreateArcSlot.svg");
+			ellipse->setIcon(":/widgets/icons/sketch32/Sketcher_CreateEllipseByCenter.svg");
+			bspline->setIcon(":/widgets/icons/sketch32/Sketcher_CreateBSpline.svg");
+			rectangle->setIcon(":/widgets/icons/sketch32/Sketcher_CreateRectangle_Constr.svg");
+			polygon->setIcon(":/widgets/icons/sketch32/Sketcher_CreateRegularPolygon.svg");
+			slot->setIcon(":/widgets/icons/sketch32/Sketcher_CreateSlot.svg");
+			trimming->setIcon(":/widgets/icons/sketch32/Sketcher_Trimming.svg");
+			rotate->setIcon(":/widgets/icons/sketch32/Sketcher_Rotate.svg");
+			translate->setIcon(":/widgets/icons/sketch32/Sketcher_Translate.svg");
+			symmetry->setIcon(":/widgets/icons/sketch32/Sketcher_Symmetry.svg");
+			fillet->setIcon(":/widgets/icons/sketch32/Sketcher_CreateFillet.svg");
+			offset->setIcon(":/widgets/icons/sketch32/Sketcher_Offset.svg");
+			toggleConstruction->setIcon(":/widgets/icons/sketch32/Sketcher_ToggleConstruction.svg");
+			external->setIcon(":/widgets/icons/sketch32/Sketcher_Projection.svg");
+			externalIntersection->setIcon(":/widgets/icons/sketch32/Sketcher_Intersection.svg");
+			self->setMovable(false);
+			self->setFloatable(false);
+			self->setIconSize(QSize(22, 22));
+
+			// The sketch page, split by what the tool does: what is drawn, what edits
+			// existing geometry, what brings geometry in from outside the sketch, and
+			// the constraints. Two rows per group are what keeps the whole page within
+			// a normal window: the constraints belong to the sketch theme, so they sit
+			// beside the drawing tools instead of on a page of their own.
+			addGroup("绘制", 6, { point->action(), line->action(), lineSet->action(),
+				arc->action(), arcSlot->action(), ellipse->action(), bspline->action(),
+				circle->action(), rectangle->action(), polygon->action(), slot->action() });
+			addGroup("编辑", 3, { trimming->action(), rotate->action(), translate->action(),
+				symmetry->action(), fillet->action(), offset->action() });
+			addGroup("参考", 3, { toggleConstruction->action(),
+				external->action(), externalIntersection->action() });
+			// The constraints append two more groups to this toolbar.
+			AddConstraintGroups(self, self);
 			// A draw handler takes the clicks back, so it ends the external geometry
 			// mode (the two would otherwise fight over the same button presses).
 			const auto leaveExternalMode = [this]() {
@@ -305,27 +307,44 @@ namespace MOON {
 			}
 			retranslateUi();
 		}
+		RibbonGroup* addGroup(const QString& p_title, int p_columns,
+			std::initializer_list<QAction*> p_actions) {
+			auto* group = new RibbonGroup(p_title, self);
+			for (auto* action : p_actions) {
+				group->addAction(action);
+			}
+			group->setGrid(p_columns, 2);
+			QAction* groupAction = self->addWidget(group);
+			groupAction->setText(p_title);
+			return group;
+		}
+		void setLabel(QAction* p_action, const QString& p_text, const QString& p_english) {
+			MOON::Language::SetLabel(p_action, p_text, p_english);
+		}
 		void retranslateUi() {
-			point->action()->setText(QCoreApplication::translate("SketchToolbar", "Point", nullptr));
-			line->action()->setText(QCoreApplication::translate("SketchToolbar", "Line", nullptr));
-			lineSet->action()->setText(QCoreApplication::translate("SketchToolbar", "LineSet", nullptr));
-			circle->action()->setText(QCoreApplication::translate("SketchToolbar", "Circle", nullptr));
-			arc->action()->setText(QCoreApplication::translate("SketchToolbar", "Arc", nullptr));
-			arcSlot->action()->setText(QCoreApplication::translate("SketchToolbar", "ArcSlot", nullptr));
-			ellipse->action()->setText(QCoreApplication::translate("SketchToolbar", "Ellipse", nullptr));
-			bspline->action()->setText(QCoreApplication::translate("SketchToolbar", "Bspline", nullptr));
-			rectangle->action()->setText(QCoreApplication::translate("SketchToolbar", "Rectangle", nullptr));
-			polygon->action()->setText(QCoreApplication::translate("SketchToolbar", "Polygon", nullptr));
-			slot->action()->setText(QCoreApplication::translate("SketchToolbar", "Slot", nullptr));
-			trimming->action()->setText(QCoreApplication::translate("SketchToolbar", "Trimming", nullptr));
-			rotate->action()->setText(QCoreApplication::translate("SketchToolbar", "Rotate", nullptr));
-			translate->action()->setText(QCoreApplication::translate("SketchToolbar", "Translate", nullptr));
-			symmetry->action()->setText(QCoreApplication::translate("SketchToolbar", "Symmetry", nullptr));
-			fillet->action()->setText(QCoreApplication::translate("SketchToolbar", "Fillet", nullptr));
-			offset->action()->setText(QCoreApplication::translate("SketchToolbar", "Offset", nullptr));
-			toggleConstruction->action()->setText(QCoreApplication::translate("SketchToolbar", "Toggle Construction Geometry", nullptr));
-			external->action()->setText(QCoreApplication::translate("SketchToolbar", "External Geometry", nullptr));
-			externalIntersection->action()->setText(QCoreApplication::translate("SketchToolbar", "External Intersection", nullptr));
+			setLabel(point->action(), QStringLiteral("点"), QStringLiteral("Point"));
+			setLabel(line->action(), QStringLiteral("直线"), QStringLiteral("Line"));
+			setLabel(lineSet->action(), QStringLiteral("折线"), QStringLiteral("Polyline"));
+			setLabel(arc->action(), QStringLiteral("圆弧"), QStringLiteral("Arc"));
+			setLabel(arcSlot->action(), QStringLiteral("圆弧槽"), QStringLiteral("Arc Slot"));
+			setLabel(ellipse->action(), QStringLiteral("椭圆"), QStringLiteral("Ellipse"));
+			setLabel(bspline->action(), QStringLiteral("样条"), QStringLiteral("BSpline"));
+			setLabel(circle->action(), QStringLiteral("圆"), QStringLiteral("Circle"));
+			setLabel(rectangle->action(), QStringLiteral("矩形"), QStringLiteral("Rectangle"));
+			setLabel(polygon->action(), QStringLiteral("正多边形"), QStringLiteral("Polygon"));
+			setLabel(slot->action(), QStringLiteral("槽"), QStringLiteral("Slot"));
+			setLabel(trimming->action(), QStringLiteral("修剪"), QStringLiteral("Trimming"));
+			setLabel(rotate->action(), QStringLiteral("旋转"), QStringLiteral("Rotate"));
+			setLabel(translate->action(), QStringLiteral("平移"), QStringLiteral("Translate"));
+			setLabel(symmetry->action(), QStringLiteral("对称"), QStringLiteral("Symmetry"));
+			setLabel(fillet->action(), QStringLiteral("圆角"), QStringLiteral("Fillet"));
+			setLabel(offset->action(), QStringLiteral("偏移"), QStringLiteral("Offset"));
+			setLabel(toggleConstruction->action(), QStringLiteral("构造几何"),
+				QStringLiteral("Construction"));
+			setLabel(external->action(), QStringLiteral("外部几何"),
+				QStringLiteral("External Geom"));
+			setLabel(externalIntersection->action(), QStringLiteral("外部相交"),
+				QStringLiteral("External X"));
 		}
 	private:
 		friend class SketchToolbar;

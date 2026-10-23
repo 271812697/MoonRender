@@ -1,4 +1,5 @@
 #include "editor/Command/menubar/saveFile.h"
+#include "editor/Language.h"
 
 #include "feature/MoonDocument.h"
 #include "editor/UI/HomePanel/RecentProjects.h"
@@ -20,7 +21,9 @@ namespace MOON {
 		setAction(action);
 		action->setObjectName(QString::fromUtf8(
 			p_saveAs ? "actionFileSaveAs" : "actionFileSave"));
-		action->setText(p_saveAs ? "Save &As..." : "&Save");
+		MOON::Language::SetLabel(action,
+			p_saveAs ? QStringLiteral("另存为...") : QStringLiteral("保存"),
+			p_saveAs ? QStringLiteral("Save &As...") : QStringLiteral("&Save"));
 		action->setStatusTip(
 			p_saveAs ? "Save the document under another name" : "Save the document");
 		action->setShortcut(QCoreApplication::translate(

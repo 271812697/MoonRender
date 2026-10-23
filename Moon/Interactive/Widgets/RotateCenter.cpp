@@ -39,13 +39,6 @@ namespace MOON {
 				Eigen::Vector3f{ 0.1f,0.1f,0.1f },
 				"CoordAxis");
 		}
-		if (drawRect&&false) {
-			static ImU32 c1 = ImGui::ColorConvertFloat4ToU32({ 1, 1, 0, 0.3 });
-			static ImU32 c2 = ImGui::ColorConvertFloat4ToU32({ 1, 1, 0, 1.0 });
-			auto drawList=ImGui::GetForegroundDrawList();
-			drawList->AddRectFilled({sx,sy},{ex,ey},c1);
-			drawList->AddRect({ sx,sy }, { ex,ey }, c1,0,0,3.0);
-		}
 		for (int i = 0;i < lineSeg.size();i ++) {
 			renderer->drawPoint(lineSeg[i], 7);
 		}

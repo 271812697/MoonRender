@@ -256,7 +256,7 @@ namespace MOON
 		}
 	}
 
-	void ViewCubeWidget::DrawContent(ImDrawList& p_drawList, const ScreenRect& p_rect)
+	void ViewCubeWidget::DrawContent(::Rendering::Overlay::Im2D::DrawList& p_drawList, const ScreenRect& p_rect)
 	{
 		DrawShapes(p_drawList, p_rect);
 	}

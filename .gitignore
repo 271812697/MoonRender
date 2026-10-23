@@ -1,2 +1,11 @@
 
 Build/*
+
+# Visual Studio / IDE state
+.vs/
+*.user
+*.suo
+*.VC.db
+
+# Local CMake presets
+CMakeUserPresets.json

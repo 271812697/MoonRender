@@ -1,4 +1,5 @@
 #include "bodyCommand.h"
+#include "editor/Language.h"
 #include "Core/Global/ServiceLocator.h"
 #include "editor/View/sceneview/viewerwidget.h"
 #include "feature/Feature.h"
@@ -16,7 +17,7 @@ namespace MOON
 		auto* action = new QAction(this);
 		setAction(action);
 		action->setObjectName(QString::fromUtf8("actionNewBody"));
-		action->setText("New &Body");
+		MOON::Language::SetLabel(action, QStringLiteral("\u65b0\u5efa\u5b9e\u4f53"), QStringLiteral("New &Body"));
 		action->setStatusTip("Make a body: a chain of features of its own");
 		// The same icon the body wears in the tree (FreeCAD's body icon).
 		action->setIcon(QIcon(":/widgets/icons/partdesign/PartDesign_Body.svg"));
