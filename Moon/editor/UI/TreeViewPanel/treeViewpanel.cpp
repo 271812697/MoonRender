@@ -1,5 +1,6 @@
 #pragma once
 #include "treeViewpanel.h"
+#include "editor/Language.h"
 #include "editor/UI/TreeViewPanel/EntityTreeModel.h"
 #include "editor/UI/TreeViewPanel/EntityTreeStyle.h"
 #include "editor/UI/PropertyPanel/PropertyWidget.h"
@@ -331,25 +332,26 @@ namespace MOON {
 		}
 		FeatureBody* clickedBody = FeatureBody::Of(actor);
 		QMenu menu(this);
-		QAction* remove = menu.addAction(QString::fromUtf8("Delete"));
+		QAction* remove = menu.addAction(QString());
 		remove->setEnabled(canDeleteActor(actor));
 		// A feature and a body both carry a name of their own - it is what the tree shows
 		// and what a document writes down - so either can be renamed here.
-		QAction* rename = menu.addAction(QString::fromUtf8("Rename"));
+		QAction* rename = menu.addAction(QString());
 		rename->setEnabled(named != nullptr || clickedBody != nullptr);
 		// A body can be copied and pasted: the copy is a body of its own, with every
 		// feature of the one it came from built again and its links landing on the copies
 		// (see MoonDocument::copyBody / pasteBody).
-		QAction* copyBody = menu.addAction(QString::fromUtf8("Copy"));
+		QAction* copyBody = menu.addAction(QString());
 		copyBody->setEnabled(clickedBody != nullptr);
-		QAction* pasteBody = menu.addAction(QString::fromUtf8("Paste"));
+		QAction* pasteBody = menu.addAction(QString());
 		pasteBody->setEnabled(!g_copiedBody.empty());
 		// A body node gets the one thing a body has that the tree can switch: whether new
 		// features are made into it. The entry is a check box, so the menu says which body
 		// is active and one click makes another one active (FreeCAD's "active body").
 		QAction* makeActive = nullptr;
 		if (clickedBody != nullptr) {
-			makeActive = menu.addAction(QString::fromUtf8("Active Body"));
+			makeActive = menu.addAction(QString());
+			MOON::Language::SetLabel(makeActive, QStringLiteral("设为活动实体"), QStringLiteral("Active Body"));
 			makeActive->setCheckable(true);
 			makeActive->setChecked(clickedBody == FeatureBody::Active());
 			menu.addSeparator();
@@ -372,8 +374,16 @@ namespace MOON {
 				break;
 			}
 		}
-		QAction* moveUp = menu.addAction(QString::fromUtf8("Move Up"));
-		QAction* moveDown = menu.addAction(QString::fromUtf8("Move Down"));
+		QAction* moveUp = menu.addAction(QString());
+		QAction* moveDown = menu.addAction(QString());
+		// The context menu follows the UI language like the rest of the chrome.
+		MOON::Language::SetLabel(remove, QStringLiteral("删除"), QStringLiteral("Delete"));
+		MOON::Language::SetLabel(rename, QStringLiteral("重命名"), QStringLiteral("Rename"));
+		MOON::Language::SetLabel(copyBody, QStringLiteral("复制"), QStringLiteral("Copy"));
+		MOON::Language::SetLabel(pasteBody, QStringLiteral("粘贴"), QStringLiteral("Paste"));
+		MOON::Language::SetLabel(moveUp, QStringLiteral("上移"), QStringLiteral("Move Up"));
+		MOON::Language::SetLabel(moveDown, QStringLiteral("下移"), QStringLiteral("Move Down"));
+
 		moveUp->setEnabled(chainIndex > 0);
 		moveDown->setEnabled(chainIndex >= 0
 			&& chainIndex + 1 < static_cast<int>(chain.size()));

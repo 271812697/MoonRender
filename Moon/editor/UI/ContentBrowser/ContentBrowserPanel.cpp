@@ -1,4 +1,5 @@
 #include "ContentBrowserPanel.h"
+#include "editor/Language.h"
 #include "MaterialThumbnailRenderer.h"
 
 #include "Core/Global/ServiceLocator.h"
@@ -382,7 +383,7 @@ namespace MOON
 		RegService(ContentBrowserPanel, *this);
 
 		setObjectName(QStringLiteral("ContentBrowserPanel"));
-		setWindowTitle(tr("Content Browser"));
+		MOON::Language::SetWindowTitle(this, QStringLiteral("内容浏览器"), QStringLiteral("Content Browser"));
 		setAllowedAreas(Qt::AllDockWidgetAreas);
 
 		BuildUi();

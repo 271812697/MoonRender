@@ -1,4 +1,7 @@
-﻿#include "Interactive/Im3DType.h"
+#include "Interactive/Im3DType.h"
+#include "editor/ViewCubeLabels.h"
+#include <Rendering/Resources/Loaders/TextureLoader.h>
+#include <QImage>
 #include "Interactive/MathUtil/MathUtil.h"
 #include "Core/Global/ServiceLocator.h"
 #include "Core/ResourceManagement/TextureManager.h"
@@ -330,24 +333,35 @@ namespace MOON {
 			Eigen::Vector3f F11 = { -halflen + 2 * shift, -halflen , halflen - shift };
 			Eigen::Vector3f F12 = { halflen - 2 * shift, -halflen , halflen - shift };
 
-			PolygonFace cell;
-			cell.addPoint(A1, { (2 * ratio) / 3,(1 - ratio) / 2 });
-			cell.addPoint(A2, { (ratio) / 3,(1 - 2 * ratio) / 2 });
-			cell.addPoint(D2, { (ratio) / 3,(2 * ratio) / 2 });
-			cell.addPoint(D1, { (2 * ratio) / 3,(ratio) / 2 });
-			cell.addPoint(C1, { (1 - 2 * ratio) / 3,(ratio) / 2 });
-			cell.addPoint(C2, { (1 - ratio) / 3,(2 * ratio) / 2 });
-			cell.addPoint(B2, { (1 - ratio) / 3,(1 - 2 * ratio) / 2 });
-			cell.addPoint(B1, { (1 - 2 * ratio) / 3,(1 - ratio) / 2 });
-			cell.n = n;
-			cell.tranformUV(2.0 / 3, 0.0);
-			viewCube.addCell(cell);
-			viewCube.addCell(cell.transform(EulerXYZToMatrix4Degree({ 90, 0, 0 }), -1.0 / 3.0, 0.5));
-			viewCube.addCell(cell.transform(EulerXYZToMatrix4Degree({ 180, 0, 0 }), 0.0, 0.5));
-			viewCube.addCell(cell.transform(EulerXYZToMatrix4Degree({ 270, 0, 0 }), -1.0 / 3.0, 0));
-			viewCube.addCell(cell.transform(EulerXYZToMatrix4Degree({ 0, 90, 0 }), -2.0 / 3.0, 0.0));
-			viewCube.addCell(cell.transform(EulerXYZToMatrix4Degree({ 0, 270, 0 }), -2.0 / 3.0, 0.5));
+			// One face per atlas cell. The UVs are read from the same table the labels are
+			// painted with (ViewCubeLabels::FaceUvRect), so the picture and what the geometry
+			// samples cannot drift apart - no hand measured offsets left here.
+			auto makeFace = [&](int p_face) {
+				float u0 = 0.0f, v0 = 0.0f, uw = 1.0f, vh = 1.0f;
+				MOON::ViewCubeLabels::FaceUvRect(p_face, u0, v0, uw, vh);
+				const auto uv = [&](float p_rx, float p_ry) {
+					return Eigen::Vector2f(u0 + p_rx * uw, v0 + p_ry * vh);
+				};
+				PolygonFace face;
+				face.n = n;
+				face.addPoint(A1, uv(0.125f, 1.0f));
+				face.addPoint(A2, uv(0.000f, 0.875f));
+				face.addPoint(D2, uv(0.000f, 0.125f));
+				face.addPoint(D1, uv(0.125f, 0.0f));
+				face.addPoint(C1, uv(0.875f, 0.0f));
+				face.addPoint(C2, uv(1.000f, 0.125f));
+				face.addPoint(B2, uv(1.000f, 0.875f));
+				face.addPoint(B1, uv(0.875f, 1.0f));
+				return face;
+			};
 
+			viewCube.addCell(makeFace(0));
+			viewCube.addCell(makeFace(1).transform(EulerXYZToMatrix4Degree({ 90, 0, 0 })));
+			viewCube.addCell(makeFace(2).transform(EulerXYZToMatrix4Degree({ 180, 0, 0 })));
+			viewCube.addCell(makeFace(3).transform(EulerXYZToMatrix4Degree({ 270, 0, 0 })));
+			viewCube.addCell(makeFace(4).transform(EulerXYZToMatrix4Degree({ 0, 90, 0 })));
+			viewCube.addCell(makeFace(5).transform(EulerXYZToMatrix4Degree({ 0, 270, 0 })));
+			PolygonFace cell;   // the chamfer quads below reuse it
 			cell.clear();
 			cell.n = Eigen::Vector3f(1, 1, 1).normalized();
 			cell.addPointArray({ F1,F2,F3,F4,F5,F6 }, { { 0, 0 }, { 0,0 }, { 0,0 }, { 0,0 }, { 0,0 }, { 0,0 } });
@@ -386,6 +400,51 @@ namespace MOON {
 		}
 		return viewCube;
 	}
+	void UpdateViewCubeLabels()
+	{
+		using namespace Rendering::Resources;
+		namespace Settings = Rendering::Settings;
+
+		GuiWidgetPolyMesh& cube = NavigateCube();
+		// The atlas is generated at 3x2 cells; 256 px per cell is far more than the cube covers on
+		// screen, which is what keeps the labels crisp instead of resampled from a fixed PNG.
+		// One cell per face at roughly twice the on-screen size: bigger than that and the mip chain
+		// blurs the labels instead of sharpening them.
+		QImage atlas = MOON::ViewCubeLabels::BuildAtlas(192);
+		// The file textures go through stb_image with a vertical flip, so the generated one is
+		// flipped the same way for the cube's UVs to line up.
+		atlas = atlas.mirrored(false, true);
+		atlas.convertToFormat(QImage::Format_RGBA8888);
+
+		static Rendering::Resources::Texture* s_labelTexture = nullptr;
+		if (s_labelTexture == nullptr)
+		{
+			s_labelTexture = Loaders::TextureLoader::CreateMutable(
+				static_cast<uint32_t>(atlas.width()),
+				static_cast<uint32_t>(atlas.height()),
+				atlas.constBits(),
+				Settings::ETextureFilteringMode::LINEAR,
+				Settings::ETextureFilteringMode::LINEAR,
+				Settings::ETextureWrapMode::CLAMP_TO_EDGE,
+				Settings::ETextureWrapMode::CLAMP_TO_EDGE,
+				false);
+		}
+		else
+		{
+			s_labelTexture->GetTexture().Upload(
+				atlas.constBits(),
+				Settings::EFormat::RGBA,
+				Settings::EPixelDataType::UNSIGNED_BYTE);
+
+		}
+
+		if (s_labelTexture != nullptr)
+		{
+			cube.texture = s_labelTexture;
+		}
+		MOON::ViewCubeLabels::MarkClean();
+	}
+
 	PolygonMesh& CoordAxis()
 	{
 		static PolygonMesh viewAxis;

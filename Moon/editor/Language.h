@@ -4,6 +4,7 @@
 
 class QAction;
 class QApplication;
+class QWidget;
 
 namespace MOON
 {
@@ -44,6 +45,14 @@ namespace MOON
 		/** Sets an action's label for the current language and remembers both spellings so a
 		 * later switch can rewrite it (this is what the toolbars' setLabel helpers call). */
 		void SetLabel(QAction* p_action, const QString& p_zh, const QString& p_en);
+
+		/** The same for a plain widget with a text (a button): both spellings are remembered and
+		 * Apply() rewrites it on a switch. */
+		void SetText(QWidget* p_widget, const QString& p_zh, const QString& p_en);
+
+		/** Window and dock titles: a dock's title is drawn by its title bar widget, not by an
+		 * action, so it needs its own remember-and-rewrite path. */
+		void SetWindowTitle(QWidget* p_widget, const QString& p_zh, const QString& p_en);
 
 		/** Rewrites every action, caption and tab that remembered both spellings. */
 		void Apply(QApplication* p_app);

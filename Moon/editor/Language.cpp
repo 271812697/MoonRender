@@ -1,5 +1,8 @@
 #include "editor/Language.h"
+#include "editor/ViewCubeLabels.h"
 
+#include <QAbstractButton>
+#include <QComboBox>
 #include <QAction>
 #include <QApplication>
 #include <QByteArray>
@@ -73,6 +76,9 @@ MOON::Language::ELanguage MOON::Language::Current()
 
 void MOON::Language::Set(ELanguage p_language, bool p_persist)
 {
+	// The view cube face labels are drawn from the language; the renderer rebuilds them on the
+	// next frame (see UpdateViewCubeLabels).
+	ViewCubeLabels::Invalidate();
 	gCurrent = p_language;
 	if (p_persist)
 	{
@@ -150,6 +156,42 @@ QString MOON::Language::English(const QString& p_chinese)
 			{ QStringLiteral("Type"), QStringLiteral("类型") },
 			{ QStringLiteral("Use ALL Edges"), QStringLiteral("使用全部边") },
 			{ QStringLiteral("Width"), QStringLiteral("宽度") },
+			// property/task group titles
+			{ QStringLiteral("PathTrace Mat"), QStringLiteral("路径追踪材质") },
+			{ QStringLiteral("Debug Setting"), QStringLiteral("调试设置") },
+			{ QStringLiteral("Render Pass Setting"), QStringLiteral("渲染通道设置") },
+			{ QStringLiteral("mat"), QStringLiteral("材质") },
+			{ QStringLiteral("Extrude"), QStringLiteral("拉伸") },
+			{ QStringLiteral("Pad"), QStringLiteral("凸台") },
+			{ QStringLiteral("Pocket"), QStringLiteral("凹槽") },
+			{ QStringLiteral("Revolution"), QStringLiteral("旋转") },
+			{ QStringLiteral("Groove"), QStringLiteral("开槽") },
+			{ QStringLiteral("Fillet"), QStringLiteral("圆角") },
+			{ QStringLiteral("Chamfer"), QStringLiteral("倒角") },
+			{ QStringLiteral("Thickness"), QStringLiteral("抽壳") },
+			{ QStringLiteral("Helix"), QStringLiteral("螺旋") },
+			{ QStringLiteral("Pipe"), QStringLiteral("管道") },
+			{ QStringLiteral("Loft"), QStringLiteral("放样") },
+			{ QStringLiteral("Datum Line"), QStringLiteral("基准线") },
+			{ QStringLiteral("Datum Plane"), QStringLiteral("基准面") },
+			{ QStringLiteral("Polar Pattern"), QStringLiteral("环形阵列") },
+			{ QStringLiteral("Linear Pattern"), QStringLiteral("线性阵列") },
+			{ QStringLiteral("Mirror"), QStringLiteral("镜像") },
+			{ QStringLiteral("Sketch"), QStringLiteral("草图") },
+			{ QStringLiteral("Profile"), QStringLiteral("轮廓") },
+			{ QStringLiteral("Constraints"), QStringLiteral("约束") },
+			{ QStringLiteral("Dimensions"), QStringLiteral("尺寸") },
+			// enum values in the feature panels
+			{ QStringLiteral("Through All"), QStringLiteral("贯通") },
+			{ QStringLiteral("UpToFace"), QStringLiteral("到面") },
+			{ QStringLiteral("Forward"), QStringLiteral("正向") },
+			{ QStringLiteral("Double"), QStringLiteral("双向") },
+			{ QStringLiteral("Sysmetric"), QStringLiteral("对称") },
+			{ QStringLiteral("Symmetric"), QStringLiteral("对称") },
+			{ QStringLiteral("Two Sides"), QStringLiteral("两侧") },
+			{ QStringLiteral("Normal"), QStringLiteral("法向") },
+			{ QStringLiteral("Tangent"), QStringLiteral("相切") },
+			{ QStringLiteral("One Side"), QStringLiteral("单侧") },
 		};
 		return dictionary;
 	}
@@ -182,6 +224,31 @@ void MOON::Language::SetLabel(QAction* p_action, const QString& p_zh, const QStr
 	p_action->setToolTip(QStringLiteral("%1 (%2)").arg(p_zh, p_en));
 }
 
+void MOON::Language::SetText(QWidget* p_widget, const QString& p_zh, const QString& p_en)
+{
+	p_widget->setProperty("moonZh", p_zh);
+	p_widget->setProperty("moonEn", p_en);
+	if (auto* button = qobject_cast<QAbstractButton*>(p_widget))
+	{
+		button->setText(Pick(p_zh, p_en));
+	}
+	else if (auto* label = qobject_cast<QLabel*>(p_widget))
+	{
+		label->setText(Pick(p_zh, p_en));
+	}
+}
+
+void MOON::Language::SetWindowTitle(QWidget* p_widget, const QString& p_zh, const QString& p_en)
+{
+	if (p_widget == nullptr)
+	{
+		return;
+	}
+	p_widget->setProperty("moonTitleZh", p_zh);
+	p_widget->setProperty("moonTitleEn", p_en);
+	p_widget->setWindowTitle(Pick(p_zh, p_en));
+}
+
 void MOON::Language::Apply(QApplication* p_app)
 {
 	if (p_app == nullptr)
@@ -201,6 +268,20 @@ void MOON::Language::Apply(QApplication* p_app)
 				action->setToolTip(QStringLiteral("%1 (%2)").arg(zh.toString(), english));
 			}
 		}
+		const QVariant titleZh = widget->property("moonTitleZh");
+		if (titleZh.isValid())
+		{
+			widget->setWindowTitle(Pick(titleZh.toString(), widget->property("moonTitleEn").toString()));
+		}
+		if (auto* button = qobject_cast<QAbstractButton*>(widget))
+		{
+			const QVariant zh = button->property("moonZh");
+			const QVariant en = button->property("moonEn");
+			if (zh.isValid() && en.isValid())
+			{
+				button->setText(Pick(zh.toString(), en.toString()));
+			}
+		}
 		if (auto* label = qobject_cast<QLabel*>(widget))
 		{
 			const QVariant zh = label->property("moonZh");
@@ -209,6 +290,18 @@ void MOON::Language::Apply(QApplication* p_app)
 				const QVariant en = label->property("moonEn");
 				const QString english = en.isValid() ? en.toString() : English(zh.toString());
 				label->setText(Pick(zh.toString(), english));
+			}
+		}
+		if (auto* combo = qobject_cast<QComboBox*>(widget))
+		{
+			const QStringList pairs = combo->property("moonItems").toStringList();
+			for (int index = 0; index < pairs.size() && index < combo->count(); ++index)
+			{
+				const QStringList pair = pairs.at(index).split('|');
+				if (pair.size() == 2)
+				{
+					combo->setItemText(index, Pick(pair.at(0), pair.at(1)));
+				}
 			}
 		}
 		if (auto* tabs = qobject_cast<QTabBar*>(widget))

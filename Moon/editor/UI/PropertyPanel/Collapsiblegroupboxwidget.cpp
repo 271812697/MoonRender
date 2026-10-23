@@ -179,7 +179,12 @@ namespace MOON {
 	};
 	CollapsibleGroupBoxWidget::CollapsibleGroupBoxWidget(const QString& name,QWidget* parent):QWidget(parent),mInternal(new CollapsibleGroupBoxWidgetInternal(this))
 	{
-		mInternal->label_->setText(name);
+		// Feature group titles are authored in English (Extrude, Fillet, Render Pass Setting);
+		// both spellings are kept on the label so a language switch rewrites it (Language::Apply).
+		const QString localized = MOON::Language::Localize(name);
+		mInternal->label_->setText(localized);
+		mInternal->label_->setProperty("moonZh", localized);
+		mInternal->label_->setProperty("moonEn", name);
 		connect(mInternal->btnCollapse_, &QToolButton::toggled, this, &CollapsibleGroupBoxWidget::setCollapsed);
 		mInternal->setCollapsed(true);
 	}

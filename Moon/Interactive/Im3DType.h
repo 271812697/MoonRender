@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <Eigen/Core>
 #include <Maths/FMatrix4.h>
 namespace Rendering {
@@ -271,6 +271,11 @@ namespace MOON
 
 	};
 	GuiWidgetPolyMesh& NavigateCube();
+
+	/** Rebuilds the view cube's face labels from the current language and uploads them into a
+	 * mutable texture. Needs the render context current, so the renderer calls it from a draw
+	 * (see ViewCubeLabels::IsDirty). */
+	void UpdateViewCubeLabels();
 	PolygonMesh& CoordAxis();
 	PolygonMesh& TransformAxis();
 	PolygonMesh& GizmoSketchPlane();
@@ -280,7 +285,7 @@ namespace MOON
 	 * around the cube and stick out past the cube rectangle. */
 	constexpr int kViewCubeMargin = 24;
 	/** Side length of the square viewport the navigation cube renders into. */
-	constexpr int kViewCubeSize = 125;
+	constexpr int kViewCubeSize = 100;
 
 	/** Screen space placement of the navigation cube.
 	 *

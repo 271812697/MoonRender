@@ -1,5 +1,6 @@
-﻿#include "Widgets/ComboBox.h"
+#include "Widgets/ComboBox.h"
 #include<QHBoxLayout>
+#include "editor/Language.h"
 namespace MOON {
 	ComboBox::ComboBox(QWidget* parent, WidgetProperty* prop):PropertyQtWidget(parent,prop)
 	{
@@ -15,9 +16,17 @@ namespace MOON {
 	}
 	void ComboBox::addComboList(const QList<QString>& list)
 	{
+		// Values are authored in English ("Through All", "UpToFace"); the widget stores the index,
+		// so only the text is translated. Both spellings are kept on the combo box, which lets
+		// Language::Apply rewrite the items when the language changes.
+		QStringList pairs;
 		for (int i = 0; i < list.size(); i++) {
-			myCbox->addItem(list[i]);
+			const QString english = list[i];
+			const QString chinese = MOON::Language::Localize(english);
+			myCbox->addItem(MOON::Language::Pick(chinese, english));
+			pairs << chinese + "|" + english;
 		}
+		myCbox->setProperty("moonItems", pairs);
 	}
 	int ComboBox::getCurrentIndex()
 	{

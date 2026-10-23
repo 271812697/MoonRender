@@ -72,25 +72,25 @@ namespace MOON {
 
 			auto hierarchypanel = new Hierarchypanel(self);
 			hierarchypanel->setAllowedAreas(Qt::AllDockWidgetAreas);
-			hierarchypanel->setWindowTitle(QApplication::translate("Hierarchypanel", "Hierarchy", nullptr));
+			MOON::Language::SetWindowTitle(hierarchypanel, QStringLiteral("层级"), QStringLiteral("Hierarchy"));
 			
 			auto settingPanel = new SettingPanel(self);
 			settingPanel->setAllowedAreas(Qt::AllDockWidgetAreas);
-			settingPanel->setWindowTitle(QApplication::translate("Settingpanel", "Setting", nullptr));
+			MOON::Language::SetWindowTitle(settingPanel, QStringLiteral("设置"), QStringLiteral("Setting"));
 			
 			auto propertyPanel=new PropertyPanel(self);
 			propertyPanel->setAllowedAreas(Qt::AllDockWidgetAreas);
-			propertyPanel->setWindowTitle(QApplication::translate("Propertypanel", "Property", nullptr));
+			MOON::Language::SetWindowTitle(propertyPanel, QStringLiteral("属性"), QStringLiteral("Property"));
 
 			// The material editor: pick a shader, edit it, apply, and watch the preview - it
 			// compiles the source in process (MoonMatcLib), so the pipeline is exercised end to
 			// end without a rebuild.
 			auto materialPanel = new MaterialEditorPanel(self);
-			materialPanel->setWindowTitle(QApplication::translate("MaterialEditorPanel", "Material", nullptr));
+			MOON::Language::SetWindowTitle(materialPanel, QStringLiteral("材质编辑器"), QStringLiteral("Material Editor"));
 
 			auto taskViewPanel = new TaskViewPanel(self);
 			taskViewPanel->setAllowedAreas(Qt::AllDockWidgetAreas);
-			taskViewPanel->setWindowTitle(QApplication::translate("TaskViewPanel", "Task View", nullptr));
+			MOON::Language::SetWindowTitle(taskViewPanel, QStringLiteral("任务视图"), QStringLiteral("Task View"));
 
 			self->addDockWidget(Qt::LeftDockWidgetArea, hierarchypanel);
 			self->addDockWidget(Qt::LeftDockWidgetArea, settingPanel);
@@ -354,11 +354,13 @@ namespace MOON {
 		}
 		void retranslateUi() {
 			
-			self->setWindowTitle(QCoreApplication::translate("Editor", "MainWindow", nullptr));
-			menu_File->setTitle("&File");
-			menu_Display->setTitle("&Display");
-			menu_View->setTitle("&View");
-			menu_sketch->setTitle("&Sketch");
+			self->setWindowTitle(QStringLiteral("MOON"));
+			// Through the language helper: a plain setTitle here would overwrite what buildMenu
+			// put on the menu actions, and the bar would go back to English.
+			MOON::Language::SetLabel(menu_File->menuAction(), QStringLiteral("文件"), QStringLiteral("File"));
+			MOON::Language::SetLabel(menu_Display->menuAction(), QStringLiteral("显示"), QStringLiteral("Display"));
+			MOON::Language::SetLabel(menu_View->menuAction(), QStringLiteral("视图"), QStringLiteral("View"));
+			MOON::Language::SetLabel(menu_sketch->menuAction(), QStringLiteral("草图"), QStringLiteral("Sketch"));
 		
 		}
 	private:

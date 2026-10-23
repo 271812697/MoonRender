@@ -1,4 +1,5 @@
 #include "editor/UI/HomePanel/HomePanel.h"
+#include "editor/Language.h"
 
 #include <functional>
 #include <algorithm>
@@ -147,8 +148,8 @@ namespace
 			: QFrame(p_parent)
 			, m_path(p_project.path)
 			, m_name(p_project.name)
-			, m_when(QObject::tr("Opened %1").arg(
-				p_project.lastOpened.toString(QStringLiteral("yyyy-MM-dd HH:mm"))))
+			, m_when(MOON::Language::Pick(QStringLiteral("打开于 %1"), QStringLiteral("Opened %1"))
+				.arg(p_project.lastOpened.toString(QStringLiteral("yyyy-MM-dd HH:mm"))))
 			, m_preview(p_project.preview)
 		{
 			setObjectName(QStringLiteral("ProjectCard"));
@@ -164,7 +165,7 @@ namespace
 			auto* forget = new QToolButton(this);
 			forget->setText(QStringLiteral("\u2715"));
 			forget->setAutoRaise(true);
-			forget->setToolTip(QObject::tr("Take this project off the list"));
+			forget->setToolTip(MOON::Language::Pick(QStringLiteral("从列表中移除这个项目"), QStringLiteral("Take this project off the list")));
 			forget->setCursor(Qt::ArrowCursor);
 			forget->setGeometry(kCardWidth - kForgetButtonSize - 4, 4,
 				kForgetButtonSize, kForgetButtonSize);
@@ -356,17 +357,20 @@ namespace MOON
 		title->setStyleSheet(
 			QStringLiteral("color: #e6e8ea; font-size: 34px; font-weight: 700;"));
 		column->addWidget(title);
-		auto* subtitle = new QLabel(
-			tr("Parametric modelling and CAE meshing - make a project, or open one"),
-			this);
+		auto* subtitle = new QLabel(this);
+		MOON::Language::SetText(subtitle,
+			QStringLiteral("参数化建模与 CAE 网格划分 —— 新建或打开一个项目"),
+			QStringLiteral("Parametric modelling and CAE meshing - make a project, or open one"));
 		subtitle->setAlignment(Qt::AlignHCenter);
 		subtitle->setStyleSheet(QStringLiteral("color: #9aa0a6; font-size: 13px;"));
 		column->addWidget(subtitle);
 
 		auto* tiles = new QHBoxLayout();
 		tiles->addStretch();
-		auto* makeNew = makeTile(tr("New Project"), tr("Start an empty project"), this);
-		auto* open = makeTile(tr("Open Project..."), tr("Open a .moon document"), this);
+		auto* makeNew = makeTile(QString(), QString(), this);
+		MOON::Language::SetText(makeNew, QStringLiteral("新建项目"), QStringLiteral("New Project"));
+		auto* open = makeTile(QString(), QString(), this);
+		MOON::Language::SetText(open, QStringLiteral("打开项目..."), QStringLiteral("Open Project..."));
 		tiles->addWidget(makeNew);
 		tiles->addSpacing(16);
 		tiles->addWidget(open);
@@ -374,7 +378,8 @@ namespace MOON
 		column->addLayout(tiles);
 		column->addSpacing(10);
 
-		auto* recentLabel = new QLabel(tr("Recent projects"), this);
+		auto* recentLabel = new QLabel(this);
+		MOON::Language::SetText(recentLabel, QStringLiteral("最近的项目"), QStringLiteral("Recent projects"));
 		recentLabel->setStyleSheet(QStringLiteral("color: #c8ccd0; font-size: 14px;"));
 		column->addWidget(recentLabel);
 
@@ -452,7 +457,10 @@ namespace MOON
 		}
 		if (projects.empty()) {
 			auto* none = new QLabel(
-				tr("No project has been opened yet - make one, or open one."), this);
+				QString(), this);
+			MOON::Language::SetText(none,
+				QStringLiteral("还没有打开过项目 —— 可以新建一个，或打开一个。"),
+				QStringLiteral("No project has been opened yet - make one, or open one."));
 			none->setStyleSheet(QStringLiteral("color: #8a9096;"));
 			mInternal->cards->addWidget(none);
 			mInternal->cardWidgets.push_back(none);

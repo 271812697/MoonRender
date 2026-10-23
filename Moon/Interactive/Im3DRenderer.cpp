@@ -1,4 +1,6 @@
 #include <glad/glad.h>
+#include <cstdlib>
+#include "editor/ViewCubeLabels.h"
 #include "Qtimgui/imguiwidgets/QtImGui.h"
 #include <ThirdParty/imgui/imgui/imgui.h>
 #include <ThirdParty/imgui/imgui/imgui_internal.h>
@@ -4033,6 +4035,15 @@ namespace MOON
 
 		//draw lit vertex data
 		{
+			// The labels are generated at runtime (language-aware), so a language or theme switch
+			// only marks them dirty; the upload happens here, where the context is current.
+			// The runtime label atlas is generated (see ViewCubeLabels), but the cube maps only a
+			// sub-rectangle of each cell onto the flat centre of a face, and the generated layout
+			// does not line up with it yet: the baked atlas stays in use until the face UV
+			// rectangles are taken from the geometry instead of assumed to be whole cells.
+			if (MOON::ViewCubeLabels::IsDirty()) {
+				MOON::UpdateViewCubeLabels();
+			}
 			auto& viewCube = NavigateCube();
 			float boxExtent=(viewCube.maxConner - viewCube.minConner).norm();
 			Eigen::Vector3f boxECenter = (viewCube.maxConner + viewCube.minConner) / 2.0;
