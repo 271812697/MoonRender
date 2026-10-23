@@ -1,4 +1,5 @@
 #include "command.h"
+#include "editor/Theme.h"
 namespace MOON {
 	//-----------------------------------------------------------------------------
 	Command::Command(QObject* parent)
@@ -8,18 +9,21 @@ namespace MOON {
 	void Command::setIcon(const QString& path, bool on )
 	{
 		if (mAction) {
-			QIcon icon;
-			icon.addFile(path, QSize(), QIcon::Normal, on?QIcon::On: QIcon::Off);
-			
-			mAction->setIcon(icon);
+			// Through Theme::Icon: the SVGs carry two colour tokens (#LINE#, #EDGE#) that have to
+			// be resolved for the current scheme. The path is remembered so switching the scheme
+			// can re-render every icon in place (see Theme::Apply).
+			Q_UNUSED(on);
+			mAction->setProperty("moonIcon", path);
+			mAction->setIcon(MOON::Theme::Icon(path));
 		}
 	}
 	void Command::setIcon(const QString& p_offPath, const QString& p_onPath)
 	{
 		if (mAction) {
-			QIcon icon;
-			icon.addFile(p_offPath, QSize(), QIcon::Normal, QIcon::Off);
-			icon.addFile(p_onPath, QSize(), QIcon::Normal, QIcon::On);
+			QIcon icon = MOON::Theme::Icon(p_offPath);
+			const QPixmap onPixmap = MOON::Theme::Icon(p_onPath).pixmap(32, 32);
+			icon.addPixmap(onPixmap, QIcon::Normal, QIcon::On);
+			mAction->setProperty("moonIcon", p_offPath);
 			mAction->setIcon(icon);
 		}
 	}

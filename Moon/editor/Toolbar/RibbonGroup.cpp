@@ -1,4 +1,6 @@
 #include "editor/Toolbar/RibbonGroup.h"
+#include "editor/Language.h"
+#include "editor/Theme.h"
 #include "editor/UiScale.h"
 
 #include <QAction>
@@ -22,38 +24,8 @@ namespace MOON
 		constexpr int kLabelPointPx = 11;
 		constexpr int kCaptionHeight = 14;
 
-		// The rule between groups, and the hover/checked looks. The palette here is
-		// DarkStyle's (window 53,53,53; highlight 42,130,218); the ribbon is drawn with
-		// it rather than with a second theme of its own.
-		const QColor kSeparatorColor(42, 48, 56);
-
-		// The icons are colourful and carry no check state of their own, so the checked plate is
-		// a tint behind the icon rather than a second picture of it.
-		const char* const kButtonStyle = R"(
-			QToolButton {
-				color: #cfd6df;
-				font-size: %FONTPX%px;
-				background: transparent;
-				border: 1px solid transparent;
-				border-radius: 5px;
-				padding: 2px;
-			}
-			QToolButton:hover {
-				background: rgba(255, 255, 255, 0.06);
-				border-color: #343c46;
-			}
-			QToolButton:pressed {
-				background: rgba(255, 255, 255, 0.11);
-			}
-			QToolButton:checked {
-				background: rgba(79, 156, 240, 0.22);
-				border-color: #3d6f9e;
-				color: #ffffff;
-			}
-			QToolButton:disabled {
-				color: #66707c;
-			}
-		)";
+		// The colours are the theme's; only the metrics live here. Theme::RibbonButtonStyle()
+		// builds the stylesheet, and Theme::Apply() rebuilds it when the scheme changes.
 	}
 
 	RibbonGroup::RibbonGroup(const QString& p_title, QWidget* p_parent)
@@ -74,12 +46,17 @@ namespace MOON
 		auto* caption = new QLabel(p_title, this);
 		caption->setObjectName("ribbonGroupCaption");
 		caption->setAlignment(Qt::AlignHCenter | Qt::AlignVCenter);
+		// The caption is a plain string; the language module looks its English spelling up in
+		// its dictionary and rewrites the label when the language changes.
+		caption->setProperty("moonZh", p_title);
+		caption->setText(Language::Pick(p_title, Language::English(p_title)));
 		QFont captionFont = caption->font();
 		captionFont.setPointSizeF(std::max(7.0, captionFont.pointSizeF() - 1.5));
 		captionFont.setLetterSpacing(QFont::AbsoluteSpacing, 0.4 * UiScale());
 		caption->setFont(captionFont);
 		// A caption labels the group; it stays quieter than the buttons beside it.
-		caption->setStyleSheet("color: #8b95a3;");
+		caption->setProperty("moonCaption", true);
+		caption->setStyleSheet(QString("color: %1;").arg(Theme::Tokens().textDim.name(QColor::HexRgb)));
 		caption->setFixedHeight(std::lround(kCaptionHeight * UiScale()));
 		layout->addWidget(caption, 0);
 
@@ -103,11 +80,15 @@ namespace MOON
 		button->setAutoRaise(true);
 		button->setFocusPolicy(Qt::NoFocus);
 		button->setCursor(Qt::PointingHandCursor);
-		// The label size follows the UI scale; it is the one metric that lives in the style
-		// string rather than in a setter.
-		QString style = QString::fromLatin1(kButtonStyle);
-		style.replace("%FONTPX%", QString::number(std::lround(kLabelPointPx * scale)));
-		button->setStyleSheet(style);
+		// The label size follows the UI scale, and the stylesheet (hover/checked plates
+		// included) comes from the theme; the property lets Theme::Apply rebuild it when the
+		// scheme changes.
+		// English labels run wider than the two-to-four character Chinese ones, so they get a
+		// slightly smaller size; that is what keeps the sketch page inside the window.
+		const float labelScale = Language::Current() == Language::ELanguage::English ? 0.85f : 1.0f;
+		const int labelPx = std::lround(kLabelPointPx * scale * labelScale);
+		button->setProperty("moonLabelPx", labelPx);
+		button->setStyleSheet(Theme::RibbonButtonStyle(labelPx));
 		m_buttons.append(button);
 		relayout();
 		return button;
@@ -160,7 +141,7 @@ namespace MOON
 		}
 
 		QPainter painter(this);
-		painter.setPen(kSeparatorColor);
+		painter.setPen(Theme::Tokens().separator);
 		painter.drawLine(width() - 1, 4, width() - 1, height() - 5);
 	}
 }

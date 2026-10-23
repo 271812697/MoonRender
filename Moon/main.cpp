@@ -1,8 +1,12 @@
 #include "resource/DarkStyle.h"
+#include "editor/Language.h"
+#include "editor/Theme.h"
 #include "core/log.h"
 #include "GeometryInit.h"
 #include "core/JobSystem.h"
 #include <QApplication>
+#include <QMenuBar>
+#include <QScreen>
 #include <QTabBar>
 #include <QDockWidget>
 #include <QPixmap>
@@ -29,6 +33,30 @@ int main(int argc, char* argv[])
 	// application exists.
 	QCoreApplication::setAttribute(Qt::AA_ShareOpenGLContexts);
 	QApplication app(argc, argv);
+	// TEMPORARY PROBE: MOON_MENU_SHOT=<png> opens the first menu and grabs the screen, so a menu
+	// can be reviewed without anyone clicking. Remove with the other probes.
+	if (const char* p_menuShot = std::getenv("MOON_MENU_SHOT"); p_menuShot != nullptr && *p_menuShot != '\0') {
+		const QString target = QString::fromLocal8Bit(p_menuShot);
+		QTimer::singleShot(3500, &app, [target, &app] {
+			for (QWidget* window : QApplication::topLevelWidgets()) {
+				if (auto* bar = window->findChild<QMenuBar*>()) {
+					if (bar->actions().isEmpty()) { continue; }
+					if (QMenu* menu = bar->actions().first()->menu()) {
+						menu->popup(bar->mapToGlobal(QPoint(0, bar->height())));
+					}
+					break;
+				}
+			}
+			QTimer::singleShot(600, &app, [target, &app] {
+				if (QScreen* screen = QApplication::primaryScreen()) {
+					screen->grabWindow(0).save(target);
+					CORE_INFO("[UI] menu screenshot saved to {0}", target.toStdString());
+				}
+			});
+		});
+	}
+	MOON::Language::Initialize();
+	MOON::Theme::Initialize();
 	app.setStyle(new DarkStyle);
 	const int font_id = QFontDatabase::addApplicationFont(
 		":/darkstyle/Ubuntu-R.ttf");

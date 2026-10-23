@@ -1,4 +1,5 @@
-﻿#include "editor/Command/menubar/exportFile.h"
+#include "editor/Command/menubar/exportFile.h"
+#include "editor/Language.h"
 #include "editor/View/sceneview/viewerwidget.h"
 #include "renderer/SceneView.h"
 #include "Core/Global/ServiceLocator.h"
@@ -15,7 +16,7 @@ namespace MOON {
 		auto openfile=new QAction(this);
 		setAction(openfile);
 		openfile->setObjectName(QString::fromUtf8("actionFileOpen"));
-		openfile->setText("&Export");
+		MOON::Language::SetLabel(openfile, QStringLiteral("\u5bfc\u51fa"), QStringLiteral("&Export"));
 		openfile->setStatusTip("Export");
 		// Ctrl+S belongs to Save (see SaveFileCommand); export is a different action.
 		openfile->setShortcut(QCoreApplication::translate("pqFileMenuBuilder", "Ctrl+E", nullptr));

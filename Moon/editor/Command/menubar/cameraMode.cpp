@@ -1,4 +1,5 @@
-﻿#include "cameraMode.h"
+#include "cameraMode.h"
+#include "editor/Language.h"
 
 #include "Core/Global/ServiceLocator.h"
 #include "core/log.h"
@@ -14,8 +15,10 @@ namespace MOON {
 	CameraModeComand::CameraModeComand(QObject* parentObject)
 		: Command(parentObject)
 	{
-		mActionOrtho = new QAction(Command::tr("Orthographic"), this);
-		mActionPersp = new QAction(Command::tr("Perspective"), this);
+		mActionOrtho = new QAction(this);
+		MOON::Language::SetLabel(mActionOrtho, QStringLiteral("正交"), QStringLiteral("Orthographic"));
+		mActionPersp = new QAction(this);
+		MOON::Language::SetLabel(mActionPersp, QStringLiteral("透视"), QStringLiteral("Perspective"));
 		mActionOrtho->setCheckable(true);
 		mActionPersp->setCheckable(true);
 		auto menu = new QMenu(static_cast<QWidget*>(parentObject));
@@ -33,7 +36,7 @@ namespace MOON {
 		setIcon(":/widgets/icons/pqCamera.svg");
 		
 		action->setObjectName(QString::fromUtf8("actionCameraMode"));
-		action->setText("&Camera Mode");
+		MOON::Language::SetLabel(action, QStringLiteral("相机模式"), QStringLiteral("&Camera Mode"));
 		action->setStatusTip("Switch to Camera Mode");
 		action->setShortcut(QCoreApplication::translate("pqFileMenuBuilder", "Ctrl+M", nullptr));
 

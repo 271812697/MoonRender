@@ -1,5 +1,7 @@
-﻿#include "editor/UI/PropertyPanel/Collapsiblegroupboxwidget.h"
+#include "editor/UI/PropertyPanel/Collapsiblegroupboxwidget.h"
 #include "Widgets/PropertyQtWidgets.h"
+#include "editor/Language.h"
+#include "editor/Theme.h"
 #include "Widgets/utils.h"
 #include <QToolButton>
 #include <QGridLayout>   // for QGridLayout
@@ -120,6 +122,8 @@ namespace MOON {
 			btnCollapse_->setIcon(QIcon(":/widgets/icons/arrow_right.svg"));
 			label_ = new QLabel("set", mSelf);
 			label_->setObjectName("GroupTitle");
+			label_->setProperty("moonTitle", true);
+			label_->setStyleSheet(QString("color: %1;").arg(MOON::Theme::Tokens().text.name(QColor::HexRgb)));
 			updateFocusPolicy();
 			auto* headingWidget = new QWidget(mSelf);
 			headingWidget->setObjectName("GroupTitleBar");
@@ -136,18 +140,19 @@ namespace MOON {
 			layout->addWidget(propertyWidgetGroup_);
 			mSelf->setLayout(layout);
 
-			// Give the title bar its own background so it stays visually distinct
-			// from the content area when the group is expanded (like Inviwo).
-			mSelf->setStyleSheet(R"(
+			// The two plates come from the theme (surface and a lifted variant), so the group
+			// box reads the same in the dark and the light scheme.
+			mSelf->setProperty("moonStyle", QStringLiteral(R"(
 			QWidget#GroupTitleBar {
-			background: #3d3d42;
-			border-bottom: 1px solid #4a4a50;
+			background: @border;
+			border-bottom: 1px solid @border;
 			}
 
 			QWidget#CompositeContents {
-			background: #2e2e32;
+			background: @surface;
 			}
-			)");
+			)"));
+			mSelf->setStyleSheet(MOON::Theme::Style(mSelf->property("moonStyle").toString()));
 		}
 		~CollapsibleGroupBoxWidgetInternal() {
 
@@ -234,11 +239,15 @@ namespace MOON {
 			//else {  // not a collapsible widget
 				//widget->setNestedDepth(this->getNestedDepth());
 				// property widget should only be added to the left column of the layout
+			// The panel's parameter names are authored in English; the two spellings are kept on
+			// the label so a language switch rewrites it in place (see Language::Apply).
 			auto* labelWidget = new PropertyElidedLabel(
-				label,
+				MOON::Language::Localize(label),
 				propertyLabelMaxWidth(this),
 				this
 			);
+			labelWidget->setProperty("moonZh", MOON::Language::Localize(label));
+			labelWidget->setProperty("moonEn", label);
 			layout->addWidget(labelWidget, row, 0);
 			layout->addWidget(widget, row, 1);
 			//}

@@ -1,4 +1,5 @@
 #include "editor/UI/DockWidgetTitleBar.h"
+#include "editor/Theme.h"
 
 #include <QDockWidget>
 #include <QFontMetrics>
@@ -52,13 +53,15 @@ DockWidgetTitleBar::DockWidgetTitleBar(QDockWidget* parent)
     layout->addWidget(floatBtn_);
     layout->addWidget(closeBtn_);
 
-    setStyleSheet(R"(
+    // Colours come from the theme (see Theme::Apply, which re-evaluates this template when the
+    // scheme changes).
+    setProperty("moonStyle", QStringLiteral(R"(
         QWidget#DockWidgetTitleBar {
-            background: #424245;
+            background: @border;
             border: none;
         }
         QLabel#DockWidgetTitleBarLabel {
-            color: #e9e4de;
+            color: @text;
             background: transparent;
             font-weight: 400;
         }
@@ -68,9 +71,10 @@ DockWidgetTitleBar::DockWidgetTitleBar(QDockWidget* parent)
             padding: 2px;
         }
         QToolButton#DockTitleButton:hover {
-            border: 1px solid #268bd2;
+            border: 1px solid @accent;
         }
-    )");
+    )"));
+    setStyleSheet(MOON::Theme::Style(property("moonStyle").toString()));
 
     connect(parent, &QDockWidget::windowTitleChanged, this,
             [this](const QString&) { updateTitle(); });

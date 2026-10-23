@@ -1,5 +1,6 @@
 #include "editor/Toolbar/ConstraintGroups.h"
 #include "editor/Toolbar/RibbonGroup.h"
+#include "editor/Language.h"
 #include "editor/Command/command.h"
 #include "Core/Global/ServiceLocator.h"
 #include "renderer/SceneView.h"
@@ -1121,9 +1122,10 @@ namespace MOON {
 			diameter->action(), angle->action(), smartDimension->action() });
 		lastGroup->setDrawSeparator(false);
 
+		// Both spellings go through Language::SetLabel, so switching the language can rewrite the
+		// button text without rebuilding the toolbar.
 		const auto setLabel = [](QAction* p_action, const QString& p_text, const QString& p_english) {
-			p_action->setText(p_text);
-			p_action->setToolTip(QStringLiteral("%1 (%2)").arg(p_text, p_english));
+			MOON::Language::SetLabel(p_action, p_text, p_english);
 		};
 		setLabel(coincident->action(), QStringLiteral("重合"), QStringLiteral("Coincident"));
 		setLabel(horizontal->action(), QStringLiteral("水平"), QStringLiteral("Horizontal"));

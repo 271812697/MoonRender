@@ -1,5 +1,6 @@
 #include "editor/Toolbar/primitiveToolbar.h"
 #include "editor/Toolbar/RibbonGroup.h"
+#include "editor/Language.h"
 #include "editor/Command/command.h"
 #include "Core/Global/ServiceLocator.h"
 #include "renderer/SceneView.h"
@@ -69,8 +70,7 @@ namespace MOON {
 			retranslateUi();
 		}
 		void setLabel(QAction* p_action, const QString& p_text, const QString& p_english) {
-			p_action->setText(p_text);
-			p_action->setToolTip(QStringLiteral("%1 (%2)").arg(p_text, p_english));
+			MOON::Language::SetLabel(p_action, p_text, p_english);
 		}
 		void retranslateUi() {
 			setLabel(box->action(), QStringLiteral("立方体"), QStringLiteral("Box"));

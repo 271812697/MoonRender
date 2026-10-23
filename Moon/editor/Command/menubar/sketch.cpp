@@ -1,4 +1,5 @@
-﻿#include "TopoShape.h"
+#include "TopoShape.h"
+#include "editor/Language.h"
 #include <gp_Pln.hxx>
 #include "editor/Command/menubar/sketch.h"
 #include "editor/View/sceneview/viewerwidget.h"
@@ -23,7 +24,7 @@ namespace MOON {
 		sketch->setCheckable(true);
 		setAction(sketch);
 		sketch->setObjectName(QString::fromUtf8("createsketch"));
-		sketch->setText("&create sketch");
+		MOON::Language::SetLabel(sketch, QStringLiteral("\u521b\u5efa\u8349\u56fe"), QStringLiteral("&Create Sketch"));
 		sketch->setStatusTip("create sketch");
 		//sketch->setShortcut(QCoreApplication::translate("pqFileMenuBuilder", "Ctrl+O", nullptr));
 		QIcon icon9;

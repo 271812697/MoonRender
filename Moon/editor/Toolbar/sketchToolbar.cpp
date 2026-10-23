@@ -1,5 +1,6 @@
 #include "editor/Toolbar/sketchToolbar.h"
 #include "editor/Toolbar/RibbonGroup.h"
+#include "editor/Language.h"
 #include "editor/Toolbar/ConstraintGroups.h"
 #include "editor/Command/command.h"
 #include "Core/Global/ServiceLocator.h"
@@ -318,17 +319,16 @@ namespace MOON {
 			return group;
 		}
 		void setLabel(QAction* p_action, const QString& p_text, const QString& p_english) {
-			p_action->setText(p_text);
-			p_action->setToolTip(QStringLiteral("%1 (%2)").arg(p_text, p_english));
+			MOON::Language::SetLabel(p_action, p_text, p_english);
 		}
 		void retranslateUi() {
 			setLabel(point->action(), QStringLiteral("点"), QStringLiteral("Point"));
 			setLabel(line->action(), QStringLiteral("直线"), QStringLiteral("Line"));
-			setLabel(lineSet->action(), QStringLiteral("折线"), QStringLiteral("LineSet"));
+			setLabel(lineSet->action(), QStringLiteral("折线"), QStringLiteral("Polyline"));
 			setLabel(arc->action(), QStringLiteral("圆弧"), QStringLiteral("Arc"));
-			setLabel(arcSlot->action(), QStringLiteral("圆弧槽"), QStringLiteral("ArcSlot"));
+			setLabel(arcSlot->action(), QStringLiteral("圆弧槽"), QStringLiteral("Arc Slot"));
 			setLabel(ellipse->action(), QStringLiteral("椭圆"), QStringLiteral("Ellipse"));
-			setLabel(bspline->action(), QStringLiteral("样条"), QStringLiteral("Bspline"));
+			setLabel(bspline->action(), QStringLiteral("样条"), QStringLiteral("BSpline"));
 			setLabel(circle->action(), QStringLiteral("圆"), QStringLiteral("Circle"));
 			setLabel(rectangle->action(), QStringLiteral("矩形"), QStringLiteral("Rectangle"));
 			setLabel(polygon->action(), QStringLiteral("正多边形"), QStringLiteral("Polygon"));
@@ -340,11 +340,11 @@ namespace MOON {
 			setLabel(fillet->action(), QStringLiteral("圆角"), QStringLiteral("Fillet"));
 			setLabel(offset->action(), QStringLiteral("偏移"), QStringLiteral("Offset"));
 			setLabel(toggleConstruction->action(), QStringLiteral("构造几何"),
-				QStringLiteral("Toggle Construction Geometry"));
+				QStringLiteral("Construction"));
 			setLabel(external->action(), QStringLiteral("外部几何"),
-				QStringLiteral("External Geometry"));
+				QStringLiteral("External Geom"));
 			setLabel(externalIntersection->action(), QStringLiteral("外部相交"),
-				QStringLiteral("External Intersection"));
+				QStringLiteral("External X"));
 		}
 	private:
 		friend class SketchToolbar;

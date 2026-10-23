@@ -1,4 +1,5 @@
 #include "editor/Command/menubar/projectCommand.h"
+#include "editor/Language.h"
 
 #include <QAction>
 
@@ -20,7 +21,7 @@ namespace MOON
 		auto* action = new QAction(this);
 		setAction(action);
 		action->setObjectName(QString::fromUtf8("actionNewProject"));
-		action->setText(QString::fromUtf8("New &Project"));
+		MOON::Language::SetLabel(action, QStringLiteral("新建项目"), QStringLiteral("New &Project"));
 		action->setStatusTip("Start a project: an empty scene with one body in it");
 		action->setShortcut(QKeySequence::New);
 	}
@@ -54,7 +55,7 @@ namespace MOON
 		auto* action = new QAction(this);
 		setAction(action);
 		action->setObjectName(QString::fromUtf8("actionCloseProject"));
-		action->setText(QString::fromUtf8("&Close Project"));
+		MOON::Language::SetLabel(action, QStringLiteral("关闭项目"), QStringLiteral("&Close Project"));
 		action->setStatusTip("Close the project and go back to the start page");
 	}
 

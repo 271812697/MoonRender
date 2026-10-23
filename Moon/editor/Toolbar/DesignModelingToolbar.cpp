@@ -1,5 +1,6 @@
 #include "editor/Toolbar/DesignModelingToolbar.h"
 #include "editor/Toolbar/RibbonGroup.h"
+#include "editor/Language.h"
 #include "editor/Command/command.h"
 #include "editor/UI/TaskPanel/TaskViewWidget.h"
 #include "editor/UI/TaskPanel/ExtrudeTaskDialog.h"
@@ -181,10 +182,9 @@ namespace MOON {
 			return group;
 		}
 		void setLabel(DesignModelCommand* p_command, const QString& p_text, const QString& p_english) {
-			p_command->action()->setText(p_text);
-			// The English name is what the feature goes by in the tree and in the task
-			// panels, so the tooltip keeps both rather than the label alone.
-			p_command->action()->setToolTip(QStringLiteral("%1 (%2)").arg(p_text, p_english));
+			// Both spellings are kept on the action: the English name is what the feature goes by
+			// in the tree, and the language switch needs both to rewrite the button.
+			MOON::Language::SetLabel(p_command->action(), p_text, p_english);
 		}
 		void retranslateUi() {
 			setLabel(padCommand, QStringLiteral("凸台"), QStringLiteral("Pad"));
