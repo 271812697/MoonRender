@@ -270,6 +270,67 @@ namespace
 	}
 }
 
+// ---- MaterialInstance: the override-only half of the pair -------------------------------------
+
+Rendering::Data::MaterialInstance::MaterialInstance(Material& p_definition)
+	: m_definition(&p_definition)
+{
+	// An instance answers every question the definition does, with its own values on top. The
+	// property map is seeded from the definition so the upload loops (which iterate this map) keep
+	// working unchanged; a later change on the definition does not reach an existing instance.
+	m_properties = p_definition.Properties();
+	CopyStateFrom(p_definition);
+}
+
+Rendering::Data::MaterialInstance::~MaterialInstance()
+{
+	ReleaseParameterSlice();
+}
+
+const Rendering::Data::MaterialProperty* Rendering::Data::MaterialInstance::FindProperty(const std::string& p_name) const
+{
+	const auto it = m_properties.find(p_name);
+	return it == m_properties.end() ? nullptr : &it->second;
+}
+
+Rendering::Resources::Shader* Rendering::Data::MaterialInstance::ShaderOf() const
+{
+	return m_definition != nullptr ? m_definition->GetShader() : nullptr;
+}
+
+const Rendering::Data::FeatureSet& Rendering::Data::MaterialInstance::FeaturesOf() const
+{
+	static const Data::FeatureSet empty;
+	return m_definition != nullptr ? m_definition->GetFeatures() : empty;
+}
+
+void Rendering::Data::MaterialInstance::CopyStateFrom(const MaterialInstance& p_source)
+{
+	m_supportOrthographic = p_source.m_supportOrthographic;
+	m_supportPerspective = p_source.m_supportPerspective;
+	m_userInterface = p_source.m_userInterface;
+	m_blendable = p_source.m_blendable;
+	m_blendMode = p_source.m_blendMode;
+	m_transparent = p_source.m_transparent;
+	m_backfaceCulling = p_source.m_backfaceCulling;
+	m_frontfaceCulling = p_source.m_frontfaceCulling;
+	m_polygonOffsetFill = p_source.m_polygonOffsetFill;
+	m_depthTest = p_source.m_depthTest;
+	m_depthWriting = p_source.m_depthWriting;
+	m_colorWriting = p_source.m_colorWriting;
+	m_castShadows = p_source.m_castShadows;
+	m_receiveShadows = p_source.m_receiveShadows;
+	m_capturedByReflectionProbes = p_source.m_capturedByReflectionProbes;
+	m_receiveReflections = p_source.m_receiveReflections;
+	m_gpuInstances = p_source.m_gpuInstances;
+	m_drawOrder = p_source.m_drawOrder;
+	m_lineWidth = p_source.m_lineWidth;
+}
+
+std::unique_ptr<Rendering::Data::MaterialInstance> Rendering::Data::Material::CreateInstance()
+{
+	return std::make_unique<MaterialInstance>(*this);
+}
 Rendering::Data::Material::Material(Rendering::Resources::Shader* p_shader)
 {
 	SetShader(p_shader);
@@ -293,7 +354,7 @@ void Rendering::Data::Material::SetShader(Rendering::Resources::Shader* p_shader
 	// call site (or a .mat's settings) sets afterwards is the override.
 	ResetStateToShader();
 
-	if (m_shader)
+	if (m_shader != nullptr)
 	{
 		m_properties.clear();
 		UpdateProperties();
@@ -314,9 +375,9 @@ void Rendering::Data::Material::ResetStateToShader()
 	m_frontfaceCulling = false;
 	m_depthWriting = true;
 
-	if (m_shader != nullptr && m_shader->HasState())
+	if (ShaderOf() != nullptr && ShaderOf()->HasState())
 	{
-		const Rendering::Resources::Shader::State& state = m_shader->GetState();
+		const Rendering::Resources::Shader::State& state = ShaderOf()->GetState();
 
 		if (state.blendable.has_value()) { m_blendable = state.blendable.value(); }
 		if (state.blendMode.has_value())
@@ -334,30 +395,30 @@ void Rendering::Data::Material::ResetStateToShader()
 	}
 }
 
-Tools::Utils::OptRef<Rendering::HAL::ShaderProgram> Rendering::Data::Material::GetVariant(
+Tools::Utils::OptRef<Rendering::HAL::ShaderProgram> Rendering::Data::MaterialInstance::GetVariant(
 	std::optional<const std::string_view> p_pass,
 	Tools::Utils::OptRef<const Data::FeatureSet> p_override
 ) const
 {
-	if (m_shader)
+	if (ShaderOf() != nullptr)
 	{
-		return m_shader->GetVariant(
+		return ShaderOf()->GetVariant(
 			p_pass,
-			p_override.value_or(m_features)
+			p_override.value_or(FeaturesOf())
 		);
 	}
 
 	return std::nullopt;
 }
 
-void Rendering::Data::Material::UploadProperties(bool uploadStableProperties, bool uploadSingleUseProperties, Rendering::HAL::Texture* p_emptyTexture2D, Rendering::HAL::Texture* p_emptyTextureCube, Rendering::HAL::Texture* p_brdfLut, Rendering::HAL::Texture* p_flatNormalTexture)
+void Rendering::Data::MaterialInstance::UploadProperties(bool uploadStableProperties, bool uploadSingleUseProperties, Rendering::HAL::Texture* p_emptyTexture2D, Rendering::HAL::Texture* p_emptyTextureCube, Rendering::HAL::Texture* p_brdfLut, Rendering::HAL::Texture* p_flatNormalTexture)
 {
 	ZoneScoped;
 
 	// Packaged shaders carry their parameters as one std140 block (the per-material descriptor):
 	// write the values by offset into it and bind it once, instead of resolving each name
 	// against the program's reflected uniforms.
-	const bool hasParameterBlock = m_shader != nullptr && m_shader->HasParameterBlock();
+	const bool hasParameterBlock = ShaderOf() != nullptr && ShaderOf()->HasParameterBlock();
 	if (hasParameterBlock)
 	{
 		UploadParameterBlock(uploadStableProperties, uploadSingleUseProperties, p_emptyTexture2D, p_emptyTextureCube, p_brdfLut, p_flatNormalTexture);
@@ -368,7 +429,7 @@ void Rendering::Data::Material::UploadProperties(bool uploadStableProperties, bo
 	const auto fallbackTexture = [this, p_emptyTexture2D, p_emptyTextureCube, p_flatNormalTexture](
 		const std::string& p_name, bool p_isCube) -> Rendering::HAL::Texture*
 	{
-		for (const Rendering::Resources::Shader::Parameter& parameter : m_shader->GetParameters())
+		for (const Rendering::Resources::Shader::Parameter& parameter : ShaderOf()->GetParameters())
 		{
 			if (parameter.isSampler && parameter.name == p_name
 				&& parameter.fallback == static_cast<uint8_t>(Rendering::Resources::ShaderPackage::SamplerFallback::FlatNormal)
@@ -384,7 +445,7 @@ void Rendering::Data::Material::UploadProperties(bool uploadStableProperties, bo
 	// u_ReceiveShadows) are not in the block: they still go through the per-name path below,
 	// while the declared ones were written by UploadParameterBlock.
 	const auto isDeclaredParameter = [this](const std::string& p_name) {
-		for (const Rendering::Resources::Shader::Parameter& parameter : m_shader->GetParameters())
+		for (const Rendering::Resources::Shader::Parameter& parameter : ShaderOf()->GetParameters())
 		{
 			if (parameter.name == p_name || p_name.starts_with(parameter.name + "["))
 			{
@@ -485,9 +546,9 @@ void Rendering::Data::Material::UploadProperties(bool uploadStableProperties, bo
 	}
 }
 
-void Rendering::Data::Material::EnsureParameterSlice()
+void Rendering::Data::MaterialInstance::EnsureParameterSlice()
 {
-	const uint32_t blockSize = m_shader->GetParameterBlockSize();
+	const uint32_t blockSize = ShaderOf()->GetParameterBlockSize();
 	if (blockSize == 0)
 	{
 		ReleaseParameterSlice();
@@ -504,7 +565,7 @@ void Rendering::Data::Material::EnsureParameterSlice()
 	m_parameterSlice = UniformBufferPool::Get().Acquire(blockSize);
 }
 
-void Rendering::Data::Material::ReleaseParameterSlice()
+void Rendering::Data::MaterialInstance::ReleaseParameterSlice()
 {
 	if (m_parameterSlice.IsValid())
 	{
@@ -513,9 +574,9 @@ void Rendering::Data::Material::ReleaseParameterSlice()
 	}
 }
 
-void Rendering::Data::Material::BindParameterBlock()
+void Rendering::Data::MaterialInstance::BindParameterBlock()
 {
-	if (m_shader == nullptr || !m_shader->HasParameterBlock())
+	if (ShaderOf() == nullptr || !ShaderOf()->HasParameterBlock())
 	{
 		return;
 	}
@@ -524,7 +585,7 @@ void Rendering::Data::Material::BindParameterBlock()
 	UniformBufferPool::Get().Bind(m_parameterSlice, kMaterialParameterBinding);
 }
 
-void Rendering::Data::Material::WriteBlockValue(const std::string& p_type, const MaterialPropertyType& p_value, uint32_t p_offset)
+void Rendering::Data::MaterialInstance::WriteBlockValue(const std::string& p_type, const MaterialPropertyType& p_value, uint32_t p_offset)
 {
 	using namespace Maths;
 
@@ -609,7 +670,7 @@ void Rendering::Data::Material::WriteBlockValue(const std::string& p_type, const
 	}
 }
 
-void Rendering::Data::Material::UploadParameterBlock(
+void Rendering::Data::MaterialInstance::UploadParameterBlock(
 	bool p_uploadStableProperties,
 	bool p_uploadSingleUseProperties,
 	Rendering::HAL::Texture* p_emptyTexture2D,
@@ -623,10 +684,10 @@ void Rendering::Data::Material::UploadParameterBlock(
 		return;
 	}
 
-	const uint32_t blockSize = m_shader->GetParameterBlockSize();
+	const uint32_t blockSize = ShaderOf()->GetParameterBlockSize();
 	m_parameterData.assign(blockSize, 0);
 
-	for (const Rendering::Resources::Shader::Parameter& parameter : m_shader->GetParameters())
+	for (const Rendering::Resources::Shader::Parameter& parameter : ShaderOf()->GetParameters())
 	{
 		if (parameter.isSampler || parameter.offset < 0)
 		{
@@ -657,7 +718,7 @@ void Rendering::Data::Material::UploadParameterBlock(
 	UniformBufferPool::Get().Bind(m_parameterSlice, kMaterialParameterBinding);
 
 	// Samplers: one fixed texture unit per declaration, set by the GLSL's layout(binding = N).
-	for (const Rendering::Resources::Shader::Parameter& parameter : m_shader->GetParameters())
+	for (const Rendering::Resources::Shader::Parameter& parameter : ShaderOf()->GetParameters())
 	{
 		if (!parameter.isSampler)
 		{
@@ -707,10 +768,10 @@ void Rendering::Data::Material::UploadParameterBlock(
 		if (std::getenv("MOON_DEBUG_SAMPLERS") != nullptr)
 		{
 			static std::set<std::string> reported;
-			const std::string key = (m_shader != nullptr ? m_shader->path : std::string("?")) + "|" + parameter.name;
+			const std::string key = (ShaderOf() != nullptr ? ShaderOf()->path : std::string("?")) + "|" + parameter.name;
 			if (reported.insert(key).second)
 			{
-				std::cout << "[Sampler] " << (m_shader != nullptr ? m_shader->path : "?") << " "
+				std::cout << "[Sampler] " << (ShaderOf() != nullptr ? ShaderOf()->path : "?") << " "
 					<< parameter.name << " unit " << parameter.binding << " <- "
 					<< (handle != nullptr ? "material texture" : fallbackName) << std::endl;
 			}
@@ -726,12 +787,12 @@ void Rendering::Data::Material::UploadParameterBlock(
 			continue;
 		}
 
-		const auto parameter = std::ranges::find_if(m_shader->GetParameters(),
+		const auto parameter = std::ranges::find_if(ShaderOf()->GetParameters(),
 			[&name](const Rendering::Resources::Shader::Parameter& p_parameter) {
 				return p_parameter.name == name
 					|| name.starts_with(p_parameter.name + "[");
 			});
-		if (parameter != m_shader->GetParameters().end())
+		if (parameter != ShaderOf()->GetParameters().end())
 		{
 			property.value = ParameterDefaultValue(*parameter);
 		}
@@ -742,14 +803,14 @@ void Rendering::Data::Material::UploadParameterBlock(
 	}
 }
 
-void Rendering::Data::Material::BindGlobalTexture(const std::string& p_name, Rendering::HAL::Texture* p_texture)
+void Rendering::Data::MaterialInstance::BindGlobalTexture(const std::string& p_name, Rendering::HAL::Texture* p_texture)
 {
-	if (m_shader == nullptr || p_texture == nullptr)
+	if (ShaderOf() == nullptr || p_texture == nullptr)
 	{
 		return;
 	}
 
-	for (const Rendering::Resources::Shader::Parameter& parameter : m_shader->GetParameters())
+	for (const Rendering::Resources::Shader::Parameter& parameter : ShaderOf()->GetParameters())
 	{
 		if (parameter.isSampler && parameter.name == p_name)
 		{
@@ -760,10 +821,10 @@ void Rendering::Data::Material::BindGlobalTexture(const std::string& p_name, Ren
 			if (std::getenv("MOON_DEBUG_SAMPLERS") != nullptr)
 			{
 				static std::set<std::string> reported;
-				const std::string key = m_shader->path + "|draw|" + parameter.name;
+				const std::string key = ShaderOf()->path + "|draw|" + parameter.name;
 				if (reported.insert(key).second)
 				{
-					std::cout << "[Sampler] " << m_shader->path << " " << parameter.name << " unit "
+					std::cout << "[Sampler] " << ShaderOf()->path << " " << parameter.name << " unit "
 						<< parameter.binding << " <- view texture (per draw)" << std::endl;
 				}
 			}
@@ -772,14 +833,14 @@ void Rendering::Data::Material::BindGlobalTexture(const std::string& p_name, Ren
 	}
 }
 
-bool Rendering::Data::Material::ResetPropertyToDefault(const std::string& p_name)
+bool Rendering::Data::MaterialInstance::ResetPropertyToDefault(const std::string& p_name)
 {
-	if (m_shader == nullptr || !m_shader->HasParameterTable())
+	if (ShaderOf() == nullptr || !ShaderOf()->HasParameterTable())
 	{
 		return false;
 	}
 
-	for (const Rendering::Resources::Shader::Parameter& parameter : m_shader->GetParameters())
+	for (const Rendering::Resources::Shader::Parameter& parameter : ShaderOf()->GetParameters())
 	{
 		if (parameter.name != p_name)
 		{
@@ -810,7 +871,7 @@ bool Rendering::Data::Material::ResetPropertyToDefault(const std::string& p_name
 	return false;
 }
 
-void Rendering::Data::Material::UpdateProperties()
+void Rendering::Data::MaterialInstance::UpdateProperties()
 {
 	InvalidatePropertySignature();
 
@@ -819,9 +880,9 @@ void Rendering::Data::Material::UpdateProperties()
 	// that list keeps it independent of which uniforms a driver happened to keep active in a
 	// given variant - and it is the half of the package's reflection the runtime was not reading
 	// yet (see Shader::HasParameterTable).
-	if (m_shader != nullptr && m_shader->HasParameterTable())
+	if (ShaderOf() != nullptr && ShaderOf()->HasParameterTable())
 	{
-		for (const Rendering::Resources::Shader::Parameter& parameter : m_shader->GetParameters())
+		for (const Rendering::Resources::Shader::Parameter& parameter : ShaderOf()->GetParameters())
 		{
 			const MaterialPropertyType value = ParameterDefaultValue(parameter);
 			if (std::holds_alternative<std::monostate>(value))
@@ -852,7 +913,7 @@ void Rendering::Data::Material::UpdateProperties()
 	// driver's list is the only description of its uniforms.
 	// Collect all uniform names currently used by the shader
 	std::unordered_set<std::string> usedUniforms;
-	auto variants_view = m_shader->GetVariants()
+	auto variants_view = ShaderOf()->GetVariants()
 		| std::views::values
 		| std::views::join
 		| std::views::values;
@@ -877,7 +938,7 @@ void Rendering::Data::Material::UpdateProperties()
 }
 // Note: this function is critical for performance, as it may be called many times during a frame.
 // Avoid using any heavy operations or allocations inside this function.
-Rendering::Data::MaterialSignatureSet Rendering::Data::Material::Bind(
+Rendering::Data::MaterialSignatureSet Rendering::Data::MaterialInstance::Bind(
 	HAL::Texture* p_emptyTexture,
 	HAL::Texture* p_emptyTextureCube,
 	std::optional<const std::string_view> p_pass,
@@ -886,9 +947,9 @@ Rendering::Data::MaterialSignatureSet Rendering::Data::Material::Bind(
 )
 {
 	ZoneScoped;
-	auto& program = m_shader->GetVariant(
+	auto& program = ShaderOf()->GetVariant(
 		p_pass,
-		p_featureSetOverride.value_or(m_features)
+		p_featureSetOverride.value_or(FeaturesOf())
 	);
 
 	const auto signature = CalculateSignature(
@@ -911,7 +972,7 @@ Rendering::Data::MaterialSignatureSet Rendering::Data::Material::Bind(
 	return signature;
 }
 
-void Rendering::Data::Material::Unbind(bool p_resetBoundProgram)
+void Rendering::Data::MaterialInstance::Unbind(bool p_resetBoundProgram)
 {
 	if (p_resetBoundProgram)
 	{
@@ -921,12 +982,12 @@ void Rendering::Data::Material::Unbind(bool p_resetBoundProgram)
 	m_programInUse.reset();
 }
 
-bool Rendering::Data::Material::HasProperty(const std::string& p_name) const
+bool Rendering::Data::MaterialInstance::HasProperty(const std::string& p_name) const
 {
 	return m_properties.contains(p_name);
 }
 
-void Rendering::Data::Material::SetProperty(const std::string p_name, const MaterialPropertyType& p_value, bool p_singleUse)
+void Rendering::Data::MaterialInstance::SetProperty(const std::string p_name, const MaterialPropertyType& p_value, bool p_singleUse)
 {
 	m_properties[p_name].value = p_value;
 	m_properties[p_name].singleUse = p_singleUse;
@@ -947,12 +1008,12 @@ void Rendering::Data::Material::LateUpdateTexture(const std::string& p_name, con
 		auto& prop = m_properties[p_name];
 		if (auto texture = std::holds_alternative<Rendering::Resources::Texture*>(prop.value))
 		{
-			lateLoadTextures[p_name] = p_path;
+			m_lateLoadTextures[p_name] = p_path;
 		}
 	}
 }
 
-bool Rendering::Data::Material::TrySetProperty(const std::string& p_name, const MaterialPropertyType& p_value, bool p_singleUse)
+bool Rendering::Data::MaterialInstance::TrySetProperty(const std::string& p_name, const MaterialPropertyType& p_value, bool p_singleUse)
 {
 	if (HasProperty(p_name))
 	{
@@ -962,7 +1023,7 @@ bool Rendering::Data::Material::TrySetProperty(const std::string& p_name, const 
 	return false;
 }
 
-Tools::Utils::OptRef<const Rendering::Data::MaterialProperty> Rendering::Data::Material::GetProperty(const std::string p_key) const
+Tools::Utils::OptRef<const Rendering::Data::MaterialProperty> Rendering::Data::MaterialInstance::GetProperty(const std::string p_key) const
 {
 	if (m_properties.find(p_key) != m_properties.end())
 	{
@@ -971,37 +1032,32 @@ Tools::Utils::OptRef<const Rendering::Data::MaterialProperty> Rendering::Data::M
 	return std::nullopt;
 }
 
-Rendering::Resources::Shader*& Rendering::Data::Material::GetShader()
-{
-	return m_shader;
-}
-
 bool Rendering::Data::Material::HasShader() const
 {
-	return m_shader;
+	return m_shader != nullptr;
 }
 
-bool Rendering::Data::Material::IsValid() const
+bool Rendering::Data::MaterialInstance::IsValid() const
 {
-	return HasShader();
+	return ShaderOf() != nullptr;
 }
 
-void Rendering::Data::Material::SetOrthographicSupport(bool p_supportOrthographic)
+void Rendering::Data::MaterialInstance::SetOrthographicSupport(bool p_supportOrthographic)
 {
 	m_supportOrthographic = p_supportOrthographic;
 }
 
-void Rendering::Data::Material::SetPerspectiveSupport(bool p_supportPerspective)
+void Rendering::Data::MaterialInstance::SetPerspectiveSupport(bool p_supportPerspective)
 {
 	m_supportPerspective = p_supportPerspective;
 }
 
-void Rendering::Data::Material::SetDrawOrder(int p_order)
+void Rendering::Data::MaterialInstance::SetDrawOrder(int p_order)
 {
 	m_drawOrder = p_order;
 }
 
-void Rendering::Data::Material::SetBlendable(bool p_transparent)
+void Rendering::Data::MaterialInstance::SetBlendable(bool p_transparent)
 {
 	m_blendable = p_transparent;
 
@@ -1017,12 +1073,7 @@ void Rendering::Data::Material::SetBlendable(bool p_transparent)
 	}
 }
 
-Rendering::Settings::EBlendMode Rendering::Data::Material::GetBlendMode() const
-{
-	return m_blendMode;
-}
-
-void Rendering::Data::Material::SetBlendMode(Rendering::Settings::EBlendMode p_blendMode)
+void Rendering::Data::MaterialInstance::SetBlendMode(Rendering::Settings::EBlendMode p_blendMode)
 {
 	// The blend mode is about factors only. Queue membership (the depth-peel pass) stays an
 	// explicit instance decision - SetTransparent - because not every shader implements the
@@ -1031,137 +1082,127 @@ void Rendering::Data::Material::SetBlendMode(Rendering::Settings::EBlendMode p_b
 	m_blendable = p_blendMode != Rendering::Settings::EBlendMode::BLEND_OPAQUE;
 }
 
-void Rendering::Data::Material::SetUserInterface(bool p_userInterface)
+void Rendering::Data::MaterialInstance::SetUserInterface(bool p_userInterface)
 {
 	m_userInterface = p_userInterface;
 }
 
-void Rendering::Data::Material::SetBackfaceCulling(bool p_backfaceCulling)
+void Rendering::Data::MaterialInstance::SetBackfaceCulling(bool p_backfaceCulling)
 {
 	m_backfaceCulling = p_backfaceCulling;
 }
 
-void Rendering::Data::Material::SetPolygonOffsetFill(bool p_polygonOffsetFill)
+void Rendering::Data::MaterialInstance::SetPolygonOffsetFill(bool p_polygonOffsetFill)
 {
 	m_polygonOffsetFill = p_polygonOffsetFill;
 }
 
-void Rendering::Data::Material::SetFrontfaceCulling(bool p_frontfaceCulling)
+void Rendering::Data::MaterialInstance::SetFrontfaceCulling(bool p_frontfaceCulling)
 {
 	m_frontfaceCulling = p_frontfaceCulling;
 }
 
-void Rendering::Data::Material::SetDepthTest(bool p_depthTest)
+void Rendering::Data::MaterialInstance::SetDepthTest(bool p_depthTest)
 {
 	m_depthTest = p_depthTest;
 }
 
-void Rendering::Data::Material::SetDepthWriting(bool p_depthWriting)
+void Rendering::Data::MaterialInstance::SetDepthWriting(bool p_depthWriting)
 {
 	m_depthWriting = p_depthWriting;
 }
 
-void Rendering::Data::Material::SetColorWriting(bool p_colorWriting)
+void Rendering::Data::MaterialInstance::SetColorWriting(bool p_colorWriting)
 {
 	m_colorWriting = p_colorWriting;
 }
 
-void Rendering::Data::Material::SetCastShadows(bool p_castShadows)
+void Rendering::Data::MaterialInstance::SetCastShadows(bool p_castShadows)
 {
 	m_castShadows = p_castShadows;
 }
 
-void Rendering::Data::Material::SetReceiveShadows(bool p_receiveShadows)
+void Rendering::Data::MaterialInstance::SetReceiveShadows(bool p_receiveShadows)
 {
 	m_receiveShadows = p_receiveShadows;
 }
 
-void Rendering::Data::Material::SetCapturedByReflectionProbes(bool p_capturedByReflectionProbes)
+void Rendering::Data::MaterialInstance::SetCapturedByReflectionProbes(bool p_capturedByReflectionProbes)
 {
 	m_capturedByReflectionProbes = p_capturedByReflectionProbes;
 }
 
-void Rendering::Data::Material::SetReceiveReflections(bool p_receiveReflections)
+void Rendering::Data::MaterialInstance::SetReceiveReflections(bool p_receiveReflections)
 {
 	m_receiveReflections = p_receiveReflections;
 }
 
-void Rendering::Data::Material::SetGPUInstances(int p_instances)
+void Rendering::Data::MaterialInstance::SetGPUInstances(int p_instances)
 {
 	m_gpuInstances = p_instances;
 }
 
-int Rendering::Data::Material::GetDrawOrder() const
-{
-	return m_drawOrder;
-}
-
-bool Rendering::Data::Material::IsBlendable() const
+bool Rendering::Data::MaterialInstance::IsBlendable() const
 {
 	return m_blendable;
 }
 
-bool Rendering::Data::Material::IsTransparent() const
+bool Rendering::Data::MaterialInstance::IsTransparent() const
 {
 	return m_transparent;
 }
 
-bool Rendering::Data::Material::IsUserInterface() const
+bool Rendering::Data::MaterialInstance::IsUserInterface() const
 {
 	return m_userInterface;
 }
 
-bool Rendering::Data::Material::HasBackfaceCulling() const
+bool Rendering::Data::MaterialInstance::HasBackfaceCulling() const
 {
 	return m_backfaceCulling;
 }
 
-bool Rendering::Data::Material::HasFrontfaceCulling() const
+bool Rendering::Data::MaterialInstance::HasFrontfaceCulling() const
 {
 	return m_frontfaceCulling;
 }
 
-bool Rendering::Data::Material::HasDepthTest() const
+bool Rendering::Data::MaterialInstance::HasDepthTest() const
 {
 	return m_depthTest;
 }
 
-bool Rendering::Data::Material::HasDepthWriting() const
+bool Rendering::Data::MaterialInstance::HasDepthWriting() const
 {
 	return m_depthWriting;
 }
 
-bool Rendering::Data::Material::HasColorWriting() const
+bool Rendering::Data::MaterialInstance::HasColorWriting() const
 {
 	return m_colorWriting;
 }
 
-bool Rendering::Data::Material::IsShadowCaster() const
+bool Rendering::Data::MaterialInstance::IsShadowCaster() const
 {
 	return m_castShadows;
 }
 
-bool Rendering::Data::Material::IsShadowReceiver() const
+bool Rendering::Data::MaterialInstance::IsShadowReceiver() const
 {
 	return m_receiveShadows;
 }
 
-bool Rendering::Data::Material::IsCapturedByReflectionProbes() const
+bool Rendering::Data::MaterialInstance::IsCapturedByReflectionProbes() const
 {
 	return m_capturedByReflectionProbes;
 }
 
-bool Rendering::Data::Material::IsReflectionReceiver() const
+bool Rendering::Data::MaterialInstance::IsReflectionReceiver() const
 {
 	return m_receiveReflections;
 }
 
-int Rendering::Data::Material::GetGPUInstances() const
-{
-	return m_gpuInstances;
-}
-
-const Rendering::Data::StateMask Rendering::Data::Material::GenerateStateMask() const
+const Rendering::Data::StateMask Rendering::Data::MaterialInstance::GenerateStateMask() const
 {
 	StateMask stateMask;
 	stateMask.depthWriting = m_depthWriting;
@@ -1172,18 +1213,8 @@ const Rendering::Data::StateMask Rendering::Data::Material::GenerateStateMask() 
 	stateMask.backfaceCulling = m_backfaceCulling;
 	stateMask.polygonOffsetFill = m_polygonOffsetFill;
 	stateMask.blendMode = m_blendMode;
-	stateMask.lineWidth = lineWitdh;
+	stateMask.lineWidth = m_lineWidth;
 	return stateMask;
-}
-
-Rendering::Data::Material::PropertyMap& Rendering::Data::Material::GetProperties()
-{
-	return m_properties;
-}
-
-Rendering::Data::FeatureSet& Rendering::Data::Material::GetFeatures()
-{
-	return m_features;
 }
 
 void Rendering::Data::Material::SetFeatures(const Data::FeatureSet& p_features)
@@ -1218,25 +1249,15 @@ bool Rendering::Data::Material::HasFeature(const std::string& p_feature) const
 
 bool Rendering::Data::Material::SupportsFeature(const std::string& p_feature) const
 {
-	return m_shader->GetFeatures().contains(p_feature);
+	return ShaderOf()->GetFeatures().contains(p_feature);
 }
 
 bool Rendering::Data::Material::HasPass(const std::string& p_pass) const
 {
-	return m_shader->GetPasses().contains(p_pass);
+	return ShaderOf()->GetPasses().contains(p_pass);
 }
 
-bool Rendering::Data::Material::SupportsOrthographic() const
-{
-	return m_supportOrthographic;
-}
-
-bool Rendering::Data::Material::SupportsPerspective() const
-{
-	return m_supportPerspective;
-}
-
-bool Rendering::Data::Material::SupportsProjectionMode(Rendering::Settings::EProjectionMode p_projectionMode) const
+bool Rendering::Data::MaterialInstance::SupportsProjectionMode(Rendering::Settings::EProjectionMode p_projectionMode) const
 {
 	using enum Rendering::Settings::EProjectionMode;
 	switch (p_projectionMode)
@@ -1247,12 +1268,12 @@ bool Rendering::Data::Material::SupportsProjectionMode(Rendering::Settings::EPro
 	return true;
 }
 
-void Rendering::Data::Material::SetLineWidth(float p_width)
+void Rendering::Data::MaterialInstance::SetLineWidth(float p_width)
 {
-	lineWitdh = p_width;
+	m_lineWidth = p_width;
 }
 
-void Rendering::Data::Material::SetTransparent(bool transparent)
+void Rendering::Data::MaterialInstance::SetTransparent(bool transparent)
 {
 	m_transparent = transparent;
 	if (transparent) {
@@ -1260,13 +1281,13 @@ void Rendering::Data::Material::SetTransparent(bool transparent)
 	}
 }
 
-void Rendering::Data::Material::InvalidatePropertySignature()
+void Rendering::Data::MaterialInstance::InvalidatePropertySignature()
 {
 	++m_stablePropertySignatureVersion;
 	++m_singleUsePropertySignatureVersion;
 }
 
-Rendering::Data::MaterialSignatureSet Rendering::Data::Material::CalculateSignature(Rendering::HAL::ShaderProgram& p_selectedProgram, Rendering::HAL::Texture* p_emptyTexture2D, Rendering::HAL::Texture* p_emptyTextureCube)
+Rendering::Data::MaterialSignatureSet Rendering::Data::MaterialInstance::CalculateSignature(Rendering::HAL::ShaderProgram& p_selectedProgram, Rendering::HAL::Texture* p_emptyTexture2D, Rendering::HAL::Texture* p_emptyTextureCube)
 {
 	ZoneScoped;
 

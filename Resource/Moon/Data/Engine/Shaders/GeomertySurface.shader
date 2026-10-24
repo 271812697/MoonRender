@@ -32,6 +32,14 @@ material {
     features : [ WITH_EDGE, DISABLE_DOMAIN_COLOR ],
     passes   : [ Transparents ],
 
+    // Filament's per-material variant filter: the renderer adds these bits to the variant key for
+    // every draw, exactly as it does for Standard. The fragment used to declare
+    // VARIANT_HAS_DIRECTIONAL_LIGHTING / DYNAMIC_LIGHTING by hand because it had no filter and the
+    // keyed path was never taken for it; that pinned both light paths into every variant and could
+    // never produce a shadowed one. SHADOWING stays out of the list until the shadow pass is wired
+    // into the CAD draw (the filter only helps if there is a valid shadow map to sample).
+    variantFilter : [ DIRECTIONAL_LIGHTING, DYNAMIC_LIGHTING ],
+
     parameters : [
         // label / group / min / max / step / color are the designer schema, read by the
         // material designer and the actor inspector instead of guessing from the name.
@@ -206,13 +214,6 @@ void main()
 }
 
 fragment {
-    // This material keeps the feature power-set variants (it has no variantFilter), so the
-    // scene renderer does not add the engine VARIANT_HAS_* bits. Declare the lighting variants
-    // the CAD surface needs here; without them the light loop's point / directional / spot
-    // cases are compiled out and only ambient lights + IBL would light the faces.
-    #define VARIANT_HAS_DIRECTIONAL_LIGHTING
-    #define VARIANT_HAS_DYNAMIC_LIGHTING
-
 #include ":Shaders/Lighting/Filament/surface_lighting.glsl"
 
 in GS_OUT
