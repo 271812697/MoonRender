@@ -4,13 +4,16 @@
 #include <cstdlib>
 #include <cstring>
 #include <format>
+#include <iostream>
 #include <ranges>
+#include <set>
 #include <string_view>
 #include <vector>
 #include <tracy/Tracy.hpp>
 #include <Rendering/Data/Material.h>
 #include <Rendering/HAL/UniformBuffer.h>
 #include <Rendering/HAL/TextureHandle.h>
+#include <Rendering/Resources/ShaderPackage.h>
 #include <Rendering/Resources/Texture.h>
 
 #include <Tools/Utils/OptRef.h>
@@ -347,7 +350,7 @@ Tools::Utils::OptRef<Rendering::HAL::ShaderProgram> Rendering::Data::Material::G
 	return std::nullopt;
 }
 
-void Rendering::Data::Material::UploadProperties(bool uploadStableProperties, bool uploadSingleUseProperties, Rendering::HAL::Texture* p_emptyTexture2D, Rendering::HAL::Texture* p_emptyTextureCube, Rendering::HAL::Texture* p_brdfLut)
+void Rendering::Data::Material::UploadProperties(bool uploadStableProperties, bool uploadSingleUseProperties, Rendering::HAL::Texture* p_emptyTexture2D, Rendering::HAL::Texture* p_emptyTextureCube, Rendering::HAL::Texture* p_brdfLut, Rendering::HAL::Texture* p_flatNormalTexture)
 {
 	ZoneScoped;
 
@@ -357,8 +360,25 @@ void Rendering::Data::Material::UploadProperties(bool uploadStableProperties, bo
 	const bool hasParameterBlock = m_shader != nullptr && m_shader->HasParameterBlock();
 	if (hasParameterBlock)
 	{
-		UploadParameterBlock(uploadStableProperties, uploadSingleUseProperties, p_emptyTexture2D, p_emptyTextureCube, p_brdfLut);
+		UploadParameterBlock(uploadStableProperties, uploadSingleUseProperties, p_emptyTexture2D, p_emptyTextureCube, p_brdfLut, p_flatNormalTexture);
 	}
+
+	/** The 1x1 texture a sampler gets when the material instance has none: the material's own
+	 * `fallback :` kind when the package declared one, the engine's defaults otherwise. */
+	const auto fallbackTexture = [this, p_emptyTexture2D, p_emptyTextureCube, p_flatNormalTexture](
+		const std::string& p_name, bool p_isCube) -> Rendering::HAL::Texture*
+	{
+		for (const Rendering::Resources::Shader::Parameter& parameter : m_shader->GetParameters())
+		{
+			if (parameter.isSampler && parameter.name == p_name
+				&& parameter.fallback == static_cast<uint8_t>(Rendering::Resources::ShaderPackage::SamplerFallback::FlatNormal)
+				&& p_flatNormalTexture != nullptr)
+			{
+				return p_flatNormalTexture;
+			}
+		}
+		return p_isCube ? p_emptyTextureCube : p_emptyTexture2D;
+	};
 
 	// Properties the shader does not declare (an include's own uniforms, like PBR.glsl's
 	// u_ReceiveShadows) are not in the block: they still go through the per-name path below,
@@ -453,7 +473,9 @@ void Rendering::Data::Material::UploadProperties(bool uploadStableProperties, bo
 					handle = &(*texture)->GetTexture();
 				}
 			}
-			BindTexture(program, name, handle, uniformType == SAMPLER_2D ? p_emptyTexture2D : p_emptyTextureCube, textureSlot);
+			BindTexture(program, name, handle,
+				fallbackTexture(name, uniformType != SAMPLER_2D && uniformType != SAMPLER_BUFFER),
+				textureSlot);
 		}
 
 		if (prop.singleUse)
@@ -592,7 +614,8 @@ void Rendering::Data::Material::UploadParameterBlock(
 	bool p_uploadSingleUseProperties,
 	Rendering::HAL::Texture* p_emptyTexture2D,
 	Rendering::HAL::Texture* p_emptyTextureCube,
-	Rendering::HAL::Texture* p_brdfLut)
+	Rendering::HAL::Texture* p_brdfLut,
+	Rendering::HAL::Texture* p_flatNormalTexture)
 {
 	EnsureParameterSlice();
 	if (!m_parameterSlice.IsValid())
@@ -666,9 +689,31 @@ void Rendering::Data::Material::UploadParameterBlock(
 
 		Rendering::HAL::TextureHandle* fallback =
 			parameter.type == "samplerCube" ? p_emptyTextureCube : p_emptyTexture2D;
+		const char* fallbackName = parameter.type == "samplerCube" ? "empty cube (black)" : "empty 2D (white)";
+		if (parameter.fallback == static_cast<uint8_t>(Rendering::Resources::ShaderPackage::SamplerFallback::FlatNormal)
+			&& p_flatNormalTexture != nullptr)
+		{
+			fallback = p_flatNormalTexture;
+			fallbackName = "flat normal (0.5,0.5,1)";
+		}
 		if (auto* target = handle != nullptr ? handle : fallback)
 		{
 			target->Bind(parameter.binding);
+		}
+
+		// MOON_DEBUG_SAMPLERS: what each sampler slot actually got, once per shader and slot.
+		// The "why is my texture ignored" question has two very different answers (the material
+		// property is empty vs. it is set but the shader never reads it), and this says which.
+		if (std::getenv("MOON_DEBUG_SAMPLERS") != nullptr)
+		{
+			static std::set<std::string> reported;
+			const std::string key = (m_shader != nullptr ? m_shader->path : std::string("?")) + "|" + parameter.name;
+			if (reported.insert(key).second)
+			{
+				std::cout << "[Sampler] " << (m_shader != nullptr ? m_shader->path : "?") << " "
+					<< parameter.name << " unit " << parameter.binding << " <- "
+					<< (handle != nullptr ? "material texture" : fallbackName) << std::endl;
+			}
 		}
 	}
 
@@ -709,6 +754,19 @@ void Rendering::Data::Material::BindGlobalTexture(const std::string& p_name, Ren
 		if (parameter.isSampler && parameter.name == p_name)
 		{
 			p_texture->Bind(parameter.binding);
+			// MOON_DEBUG_SAMPLERS also reports the per-draw bindings: the ones in UploadParameterBlock
+			// happen once (and may have run before the sky pass baked the environment), while these
+			// happen on every draw and are what the shader really samples.
+			if (std::getenv("MOON_DEBUG_SAMPLERS") != nullptr)
+			{
+				static std::set<std::string> reported;
+				const std::string key = m_shader->path + "|draw|" + parameter.name;
+				if (reported.insert(key).second)
+				{
+					std::cout << "[Sampler] " << m_shader->path << " " << parameter.name << " unit "
+						<< parameter.binding << " <- view texture (per draw)" << std::endl;
+				}
+			}
 			return;
 		}
 	}

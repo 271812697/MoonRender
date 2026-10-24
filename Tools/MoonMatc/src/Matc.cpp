@@ -177,6 +177,12 @@ namespace
 		std::string defaultValue;
 		std::string label;
 		std::string group;
+		/** Which 1x1 texture the runtime binds for a sampler nobody assigned, `fallback : ...`
+		 * in the material file. Empty means the engine's default (white for sampler2D, black for
+		 * samplerCube). "flatNormal" is the neutral tangent-space normal (0, 0, 1), which a
+		 * normal map samples as "no perturbation" - without it the white fallback would decode
+		 * to (1, 1, 1) and bend every normal. */
+		std::string fallback;
 		float min = 0.0f;
 		float max = 0.0f;
 		float step = 0.0f;
@@ -242,6 +248,16 @@ namespace
 		bool hasDefaultFeatures = false;
 		std::vector<std::string> vertexAttributes; // declared vertex layout, in location order
 		std::vector<std::string> passes;          // extra passes, default pass implied
+		/** The MaterialInputs fields this material's own fragment code writes. Filled right
+		 * after parsing; decides the MATERIAL_HAS_* defines and whether the generated stages
+		 * need a tangent frame. */
+		std::set<std::string> writtenFields;
+		/** filament's material flag `specularAntiAliasing`: compile the geometric specular AA
+		 * into the material (GEOMETRIC_SPECULAR_AA) instead of branching on a uniform. */
+		bool specularAntiAliasing = false;
+		/** filament's `clearCoatIorChange`, on by default there too: the layer under a clear
+		 * coat sees a 1.5 -> 1.5 interface instead of air -> 1.5. */
+		bool clearCoatIorChange = true;
 		std::string vertexBody;                   // the vertex { ... } block, verbatim
 		std::string fragmentBody;                 // the fragment { ... } block, verbatim
 		/** The geometry { } block, verbatim. Our own extension: GLSL has a third stage, and
@@ -396,6 +412,9 @@ namespace
 						parameter.hasRange = ParseFloatText(valueOf(object, "min"), parameter.min)
 							&& ParseFloatText(valueOf(object, "max"), parameter.max);
 						parameter.hasStep = ParseFloatText(valueOf(object, "step"), parameter.step);
+						// `fallback : flatNormal` on a sampler says which 1x1 texture the runtime
+						// binds when the designer assigned no map - see FallbackKind.
+						parameter.fallback = valueOf(object, "fallback");
 
 						if (!parameter.name.empty())
 						{
@@ -430,6 +449,10 @@ namespace
 			if (key == "name") { p_out.name = value; }
 			else if (key == "shadingModel") { p_out.shadingModel = value; }
 			else if (key == "domain") { p_out.domain = value; }
+			// The two material-level switches filament puts in `material { }` as well. They
+			// are read here, not in the generic state map: they change the generated code.
+			else if (key == "specularAntiAliasing") { p_out.specularAntiAliasing = (value == "true"); }
+			else if (key == "clearCoatIorChange") { p_out.clearCoatIorChange = (value == "true"); }
 			else { p_out.state[key] = value; }
 		}
 	}
@@ -700,55 +723,227 @@ namespace
 	// Code generation: prelude + entry points + main
 	// ---------------------------------------------------------------------------------
 
+	/** When a MaterialInputs field exists, and when initMaterial() gives it a default. Two
+	 * separate guards because filament's own header does that: `clearCoat` and `anisotropy`
+	 * are always declared but only initialized when the material uses them. */
+	enum class InputGuard
+	{
+		Always,
+		Lit,                 // !defined(SHADING_MODEL_UNLIT)
+		Has,                 // defined(MATERIAL_HAS_<this field>)
+		HasNormal,           // defined(MATERIAL_HAS_NORMAL)
+		HasBentNormal,       // defined(MATERIAL_HAS_BENT_NORMAL)
+		HasClearCoatNormal,  // defined(MATERIAL_HAS_CLEAR_COAT) && defined(MATERIAL_HAS_CLEAR_COAT_NORMAL)
+		HasPostLightingColor,// defined(MATERIAL_HAS_POST_LIGHTING_COLOR)
+	};
+
+	struct InputField
+	{
+		const char* name;
+		const char* define;      // the suffix: MATERIAL_HAS_<define>
+		const char* type;
+		const char* initializer;
+		InputGuard declaration;
+		InputGuard initialization;
+	};
+
+	/** filament's shaders/src/surface_material_inputs.fs, field for field and guard for guard,
+	 * minus the shading models this engine does not have (cloth / subsurface / specular
+	 * glossiness). Keeping the order and the defaults identical is what makes the generated
+	 * struct comparable with the reference file - the surface prelude reads these fields. */
+	constexpr InputField kInputFields[] = {
+		{ "baseColor",            "BASE_COLOR",            "vec4",  "vec4(1.0)",                  InputGuard::Always, InputGuard::Always },
+		{ "roughness",            "ROUGHNESS",             "float", "1.0",                        InputGuard::Lit,    InputGuard::Lit },
+		{ "metallic",             "METALLIC",              "float", "0.0",                        InputGuard::Lit,    InputGuard::Lit },
+		{ "reflectance",          "REFLECTANCE",           "float", "0.5",                        InputGuard::Lit,    InputGuard::Lit },
+		{ "ambientOcclusion",     "AMBIENT_OCCLUSION",     "float", "1.0",                        InputGuard::Lit,    InputGuard::Lit },
+		{ "emissive",             "EMISSIVE",              "vec4",  "vec4(vec3(0.0), 1.0)",       InputGuard::Always, InputGuard::Always },
+		{ "sheenColor",           "SHEEN_COLOR",           "vec3",  "vec3(0.0)",                  InputGuard::Has,    InputGuard::Has },
+		{ "sheenRoughness",       "SHEEN_ROUGHNESS",       "float", "0.0",                        InputGuard::Has,    InputGuard::Has },
+		{ "clearCoat",            "CLEAR_COAT",            "float", "1.0",                        InputGuard::Always, InputGuard::Has },
+		{ "clearCoatRoughness",   "CLEAR_COAT_ROUGHNESS",  "float", "0.0",                        InputGuard::Always, InputGuard::Has },
+		{ "anisotropy",           "ANISOTROPY",            "float", "0.0",                        InputGuard::Always, InputGuard::Has },
+		{ "anisotropyDirection",  "ANISOTROPY_DIRECTION",  "vec3",  "vec3(1.0, 0.0, 0.0)",        InputGuard::Always, InputGuard::Has },
+		{ "thickness",            "THICKNESS",             "float", "0.5",                        InputGuard::Lit,    InputGuard::Lit },
+		{ "subsurfacePower",      "SUBSURFACE_POWER",      "float", "12.234",                     InputGuard::Has,    InputGuard::Has },
+		{ "subsurfaceColor",      "SUBSURFACE_COLOR",      "vec3",  "vec3(1.0)",                  InputGuard::Has,    InputGuard::Has },
+		{ "absorption",           "ABSORPTION",            "vec3",  "vec3(0.0)",                  InputGuard::Lit,    InputGuard::Has },
+		{ "transmission",         "TRANSMISSION",          "float", "1.0",                        InputGuard::Lit,    InputGuard::Has },
+		{ "ior",                  "IOR",                   "float", "1.5",                        InputGuard::Lit,    InputGuard::Has },
+		{ "specularFactor",       "SPECULAR_FACTOR",       "float", "1.0",                        InputGuard::Has,    InputGuard::Has },
+		{ "specularColorFactor",  "SPECULAR_COLOR_FACTOR", "vec3",  "vec3(1.0)",                  InputGuard::Has,    InputGuard::Has },
+		{ "shadowStrength",       "SHADOW_STRENGTH",       "float", "0.0",                        InputGuard::Has,    InputGuard::Has },
+		{ "normal",               "NORMAL",                "vec3",  "vec3(0.0, 0.0, 1.0)",        InputGuard::HasNormal, InputGuard::HasNormal },
+		{ "bentNormal",           "BENT_NORMAL",           "vec3",  "vec3(0.0, 0.0, 1.0)",        InputGuard::HasBentNormal, InputGuard::HasBentNormal },
+		{ "clearCoatNormal",      "CLEAR_COAT_NORMAL",     "vec3",  "vec3(0.0, 0.0, 1.0)",        InputGuard::HasClearCoatNormal, InputGuard::HasClearCoatNormal },
+		{ "postLightingColor",    "POST_LIGHTING_COLOR",   "vec4",  "vec4(0.0)",                  InputGuard::HasPostLightingColor, InputGuard::HasPostLightingColor },
+		{ "postLightingMixFactor","POST_LIGHTING_MIX_FACTOR","float","1.0",                        InputGuard::HasPostLightingColor, InputGuard::HasPostLightingColor },
+	};
+
+	/** The fields a material's own code writes. filament runs a real AST pass for this
+	 * (libs/filamat/src/sca/ASTHelpers.cpp, PropertyFinder); anchoring the scan on the
+	 * variables that are declared as `MaterialInputs` gets the same answer for code that
+	 * names them, and cannot mistake another struct's fields (`FilamentMaterialInputs
+	 * material;` in the Filament port) for these. The scan only sees the material's own
+	 * block, not what an #include writes - those are the engine's, and they write their own
+	 * struct in the current code. */
+	std::set<std::string> WrittenInputFields(const std::string& p_body)
+	{
+		std::set<std::string> written;
+
+		static const std::regex kDeclaration(R"(\bMaterialInputs\s+([A-Za-z_][A-Za-z0-9_]*))");
+		std::vector<std::string> variables;
+		for (auto it = std::sregex_iterator(p_body.begin(), p_body.end(), kDeclaration);
+			it != std::sregex_iterator(); ++it)
+		{
+			const std::string name = (*it)[1].str();
+			if (std::ranges::find(variables, name) == variables.end())
+			{
+				variables.push_back(name);
+			}
+		}
+
+		for (const std::string& variable : variables)
+		{
+			// `m.roughness = ...`, `m.baseColor.rgb = ...`, `m.emissive += ...`: any component
+			// and any compound assignment counts as "the material writes this field". A
+			// comparison (`==`) is a read.
+			const std::regex write("\\b" + variable
+				+ R"(\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)(\s*\.\s*[A-Za-z_][A-Za-z0-9_]*)*\s*(\+|-|\*|/)?=(?!=))");
+			for (auto it = std::sregex_iterator(p_body.begin(), p_body.end(), write);
+				it != std::sregex_iterator(); ++it)
+			{
+				written.insert((*it)[1].str());
+			}
+		}
+		return written;
+	}
+
+	/** filament's synthetic MATERIAL_NEEDS_TBN: the four fields that read the tangent frame. */
+	bool NeedsTangentFrame(const std::set<std::string>& p_writtenFields)
+	{
+		return p_writtenFields.contains("normal")
+			|| p_writtenFields.contains("bentNormal")
+			|| p_writtenFields.contains("clearCoatNormal")
+			|| p_writtenFields.contains("anisotropy");
+	}
+
+	/** Open the `#if` for one guard, or nothing for Always. */
+	std::string InputGuardOpen(InputGuard p_guard, const InputField& p_field)
+	{
+		switch (p_guard)
+		{
+		case InputGuard::Always: return {};
+		case InputGuard::Lit: return "#if !defined(SHADING_MODEL_UNLIT)\n";
+		case InputGuard::Has: return std::string("#if defined(MATERIAL_HAS_") + p_field.define + ")\n";
+		case InputGuard::HasNormal: return "#if defined(MATERIAL_HAS_NORMAL)\n";
+		case InputGuard::HasBentNormal: return "#if defined(MATERIAL_HAS_BENT_NORMAL)\n";
+		case InputGuard::HasClearCoatNormal:
+			return "#if defined(MATERIAL_HAS_CLEAR_COAT) && defined(MATERIAL_HAS_CLEAR_COAT_NORMAL)\n";
+		case InputGuard::HasPostLightingColor: return "#if defined(MATERIAL_HAS_POST_LIGHTING_COLOR)\n";
+		}
+		return {};
+	}
+
 	/** The MaterialInputs the material() entry point writes, the function that fills them
 	 * with defaults, and the function that turns them into a colour.
 	 *
 	 * Names and shape follow filament: `MaterialInputs inputs; initMaterial(inputs);
 	 * material(inputs); fragColor = evaluateMaterial(inputs);` is exactly what its generated
-	 * surface_main.fs does (shaders/src/surface_main.fs:50-56), and the fields are the ones
-	 * surface_material_inputs.fs declares, cut down to what this engine shades with. */
-	std::string MaterialInputsPrelude(const std::string& p_shadingModel)
+	 * surface_main.fs does (shaders/src/surface_main.fs:50-56); the fields, their order, their
+	 * defaults and their guards are surface_material_inputs.fs. The `MATERIAL_HAS_*` defines at
+	 * the top are the material-level half of filament's material system: they say which of
+	 * these fields this material actually writes, so the surface prelude can compile the
+	 * unused lobes out. */
+	std::string MaterialInputsPrelude(
+		const std::string& p_shadingModel,
+		const std::set<std::string>& p_writtenFields,
+		const MaterialFile& p_material)
 	{
 		const bool lit = (p_shadingModel != "unlit");
 		std::ostringstream out;
-		out << "struct MaterialInputs {\n"
-			<< "    vec4 baseColor;\n";
-		if (lit)
+
+		// --- the material's own defines -------------------------------------------------
+		out << "// material defines (filament's MATERIAL_HAS_*): derived from what the code below\n"
+			<< "// writes, so the surface prelude compiles the unused lobes out.\n"
+			<< (lit ? "#define SHADING_MODEL_LIT\n" : "#define SHADING_MODEL_UNLIT\n");
+		for (const InputField& field : kInputFields)
 		{
-			out << "    float roughness;\n"
-				<< "    float metallic;\n"
-				<< "    float reflectance;\n"
-				<< "    float ambientOcclusion;\n";
+			if (p_writtenFields.contains(field.name))
+			{
+				out << "#define MATERIAL_HAS_" << field.define << "\n";
+			}
 		}
-		out << "    vec4 emissive;\n"
-			<< "    vec3 normal;\n"
-			<< "};\n\n"
-			<< "void initMaterial(out MaterialInputs m) {\n"
-			<< "    m.baseColor = vec4(1.0);\n";
-		if (lit)
+
+		// filament's synthetic define: the four fields that need a tangent frame.
+		const bool needsTbn = NeedsTangentFrame(p_writtenFields);
+		out << "#define MATERIAL_NEEDS_TBN " << (needsTbn ? 1 : 0) << "\n"
+			<< "#define GEOMETRIC_SPECULAR_AA " << (p_material.specularAntiAliasing && lit ? 1 : 0) << "\n"
+			<< "#define CLEAR_COAT_IOR_CHANGE " << (p_material.clearCoatIorChange ? 1 : 0) << "\n\n";
+
+		// --- the struct ------------------------------------------------------------------
+		out << "struct MaterialInputs {\n";
+		for (const InputField& field : kInputFields)
 		{
-			out << "    m.roughness = 1.0;\n"
-				<< "    m.metallic = 0.0;\n"
-				<< "    m.reflectance = 0.5;\n"
-				<< "    m.ambientOcclusion = 1.0;\n";
+			const std::string guard = InputGuardOpen(field.declaration, field);
+			if (!guard.empty())
+			{
+				out << "  " << guard;
+			}
+			out << "    " << field.type << " " << field.name << ";\n";
+			if (!guard.empty())
+			{
+				out << "#endif\n";
+			}
 		}
-		out << "    m.emissive = vec4(0.0);\n"
-			<< "    m.normal = vec3(0.0, 0.0, 1.0);\n"
-			<< "}\n\n"
+		out << "};\n\n";
+
+		// --- the defaults ----------------------------------------------------------------
+		out << "void initMaterial(out MaterialInputs m) {\n";
+		for (const InputField& field : kInputFields)
+		{
+			const std::string guard = InputGuardOpen(field.initialization, field);
+			if (!guard.empty())
+			{
+				out << "  " << guard;
+			}
+			out << "    m." << field.name << " = " << field.initializer << ";\n";
+			if (!guard.empty())
+			{
+				out << "#endif\n";
+			}
+		}
+		out << "}\n\n"
 			// The .shader files call it prepareMaterial(); keeping the alias means a shader
 			// written either way compiles.
-			<< "void prepareMaterial(out MaterialInputs m) { initMaterial(m); }\n\n"
-			// The shading model's verdict on the inputs. Unlit is the whole slice.
-			<< (lit
-				? "vec4 evaluateMaterial(inout MaterialInputs m);\n"
-				: "vec4 evaluateMaterial(inout MaterialInputs m) { return m.baseColor + m.emissive; }\n");
+			<< "void prepareMaterial(out MaterialInputs m) { initMaterial(m); }\n\n";
+
+		// --- the shading model's verdict --------------------------------------------------
+		// Unlit is the whole of what this engine can evaluate so far; a lit material's
+		// evaluateMaterial() comes from the surface prelude that matc splices in for the
+		// `lit` shading model, so it is only forward-declared here.
+		out << (lit
+			? "vec4 evaluateMaterial(inout MaterialInputs m);\n"
+			// filament's surface_shading_unlit.fs: the base colour plus the emissive's rgb;
+			// the emissive does not touch alpha.
+			: "vec4 evaluateMaterial(inout MaterialInputs m) {\n"
+			  "    vec4 color = m.baseColor;\n"
+			  "#if defined(MATERIAL_HAS_EMISSIVE)\n"
+			  "    color.rgb += m.emissive.rgb;\n"
+			  "#endif\n"
+			  "    return color;\n"
+			  "}\n");
 		return out.str();
 	}
 
 	/** The varyings both stages agree on. Part of the prelude - the material's entry point
 	 * may read them, so they have to be declared before it, which is what filament does in
-	 * surface_varyings.glsl (and what post_process_main.vs/.fs pass instead of them). */
-	std::string VaryingsPrelude(bool p_vertex, const std::string& p_domain)
+	 * surface_varyings.glsl (and what post_process_main.vs/.fs pass instead of them).
+	 *
+	 * `p_needsTbn` adds the world tangent frame, filament's `shading_tangentToWorld`: a material
+	 * that writes `material.normal` / `material.anisotropyDirection` reads it, and a material
+	 * that writes neither never pays for it. */
+	std::string VaryingsPrelude(bool p_vertex, const std::string& p_domain, bool p_needsTbn)
 	{
 		std::ostringstream out;
 		if (p_domain == "postProcess")
@@ -760,8 +955,14 @@ namespace
 		out << (p_vertex ? "out VS_OUT {\n" : "in VS_OUT {\n")
 			<< "    vec3 FragPos;\n"
 			<< "    vec2 TexCoords;\n"
-			<< "    vec3 Normal;\n"
-			<< (p_vertex ? "} vs_out;\n\n" : "} fs_in;\n\n");
+			<< "    vec3 Normal;\n";
+		if (p_needsTbn)
+		{
+			out << "#if MATERIAL_NEEDS_TBN\n"
+				<< "    mat3 TBN; // world tangent frame: T, B, N (filament's shading_tangentToWorld)\n"
+				<< "#endif\n";
+		}
+		out << (p_vertex ? "} vs_out;\n\n" : "} fs_in;\n\n");
 		return out.str();
 	}
 
@@ -923,7 +1124,7 @@ namespace
 	 * the full-screen case.
 	 *
 	 * Only generated for a stage that does not own its main() - see BuildStage. */
-	std::string VertexSkeleton(bool p_hasUserVertex, const std::string& p_domain)
+	std::string VertexSkeleton(bool p_hasUserVertex, const std::string& p_domain, bool p_needsTbn)
 	{
 		std::ostringstream out;
 		if (p_domain == "postProcess")
@@ -939,7 +1140,15 @@ namespace
 		}
 		out << "layout (location = 0) in vec3 geo_Pos;\n"
 			<< "layout (location = 1) in vec2 geo_TexCoords;\n"
-			<< "layout (location = 2) in vec3 geo_Normal;\n\n";
+			<< "layout (location = 2) in vec3 geo_Normal;\n";
+		if (p_needsTbn)
+		{
+			// Geometry::Vertex: position, texCoords, normal, tangent, bitangent.
+			out << "#if MATERIAL_NEEDS_TBN\n"
+				<< "layout (location = 3) in vec3 geo_Tangent;\n"
+				<< "layout (location = 4) in vec3 geo_Bitangent;\n"
+				<< "#endif\n";
+		}
 		// The stub is only for a material that has no vertex block of its own; a material
 		// that has one would otherwise get two definitions of the same function.
 		if (!p_hasUserVertex)
@@ -953,8 +1162,17 @@ namespace
 			<< "    materialVertex(position, texCoords, normal);\n"
 			<< "    vs_out.FragPos = vec3(ubo_Model * vec4(position, 1.0));\n"
 			<< "    vs_out.TexCoords = texCoords;\n"
-			<< "    vs_out.Normal = mat3(ubo_Model) * normal;\n"
-			<< "    gl_Position = ubo_Projection * ubo_View * vec4(vs_out.FragPos, 1.0);\n"
+			// The normal matrix, not the model matrix: a non-uniform scale shears the normal off
+			// the surface otherwise. Every hand-written vertex stage in the engine already does
+			// this (filament keeps a per-object normal matrix in ObjectUniforms instead).
+			<< "    vs_out.Normal = normalize(mat3(transpose(inverse(ubo_Model))) * normal);\n";
+		if (p_needsTbn)
+		{
+			out << "#if MATERIAL_NEEDS_TBN\n"
+				<< "    vs_out.TBN = ConstructTBN(ubo_Model, normal, geo_Tangent, geo_Bitangent);\n"
+				<< "#endif\n";
+		}
+		out << "    gl_Position = ubo_Projection * ubo_View * vec4(vs_out.FragPos, 1.0);\n"
 			<< "}\n";
 		return out.str();
 	}
@@ -976,6 +1194,139 @@ namespace
 		return out.str();
 	}
 
+	/** The `lit` shading model's half of the generated fragment stage: the surface stack plus
+	 * the two entry points into it.
+	 *
+	 * filament's ShaderGenerator splices the same files in for Shading::LIT
+	 * (libs/filamat/src/shaders/ShaderGenerator.cpp:1151-1197): surface_lighting,
+	 * surface_shadowing, surface_brdf, surface_shading_model_standard, ambient occlusion,
+	 * surface_light_indirect, surface_light_directional/punctual and surface_shading_lit. Here
+	 * they are the ported Lighting/Filament/* files, #included rather than embedded so there is
+	 * exactly one copy of the reference code.
+	 *
+	 * Two entry points, because a material can be either kind of fragment stage:
+	 *  - `evaluateSurface(m, fragPos, geometricNormal, shadingNormal, clearCoatNormal, v)` is
+	 *    varying-agnostic and what a **raw** stage (one that writes its own `main()`, like the
+	 *    CAD one with its geometry-stage edge equations) calls after it filled the inputs;
+	 *  - `evaluateMaterial(m)` is the skeleton's version: it derives position, normals and the
+	 *    view vector from the generated varyings and forwards to `evaluateSurface`.
+	 *
+	 * `MaterialInputs` -> `FilamentMaterialInputs` is the debt this slice leaves: the surface
+	 * stack still takes its own struct, so the copy happens here. It goes away when the ported
+	 * files take `MaterialInputs` directly. */
+	std::string LitSurfacePrelude(bool p_skeletonStage)
+	{
+		std::ostringstream out;
+		out << "\n#line 1 \"<lit surface>\"\n"
+			<< "// The surface prelude is emitted after the material's parameters, so it can read\n"
+			<< "// them plus the injected engine globals.\n"
+			<< "#include \":Shaders/Lighting/Filament/surface_lighting.glsl\"\n\n"
+			// filament's getWorldNormalVector(): the material writes a tangent-space normal and
+			// the framework puts it in world space through the interpolated tangent frame. A
+			// mesh without usable tangents (nothing generates them for the imported models yet)
+			// would turn that into garbage, so a degenerate frame falls back to the geometric
+			// normal instead of shading with NaNs.
+			<< "vec3 tangentSpaceToWorld(mat3 tbn, vec3 tangentNormal, vec3 geometricNormal)\n"
+			<< "{\n"
+			<< "    const bool hasFrame = length(tbn[0]) > 1.0e-5 && length(tbn[1]) > 1.0e-5;\n"
+			<< "    return hasFrame ? normalize(tbn * tangentNormal) : geometricNormal;\n"
+			<< "}\n\n"
+			<< "vec4 evaluateSurface(MaterialInputs m, vec3 fragPos, vec3 geometricNormal,\n"
+			<< "    vec3 shadingNormal, vec3 clearCoatNormal, vec3 v)\n"
+			<< "{\n"
+			<< "    FilamentMaterialInputs inputs;\n"
+			<< "    inputs.baseColor = m.baseColor.rgb;\n"
+			<< "#if !defined(SHADING_MODEL_UNLIT)\n"
+			<< "    inputs.roughness = m.roughness;\n"
+			<< "    inputs.metallic = saturate(m.metallic);\n"
+			<< "    inputs.reflectance = m.reflectance;\n"
+			<< "    inputs.ambientOcclusion = saturate(m.ambientOcclusion);\n"
+			<< "#endif\n"
+			<< "#if defined(MATERIAL_HAS_CLEAR_COAT)\n"
+			<< "    inputs.clearCoat = m.clearCoat;\n"
+			<< "    inputs.clearCoatRoughness = m.clearCoatRoughness;\n"
+			<< "#else\n"
+			<< "    inputs.clearCoat = 0.0;\n"
+			<< "    inputs.clearCoatRoughness = 0.0;\n"
+			<< "#endif\n"
+			<< "#if defined(MATERIAL_HAS_THICKNESS)\n"
+			<< "    inputs.thickness = m.thickness;\n"
+			<< "#else\n"
+			<< "    inputs.thickness = 0.0;\n"
+			<< "#endif\n"
+			<< "#if defined(MATERIAL_HAS_TRANSMISSION)\n"
+			<< "    inputs.transmission = m.transmission;\n"
+			<< "#else\n"
+			<< "    inputs.transmission = 0.0;\n"
+			<< "#endif\n"
+			<< "#if defined(MATERIAL_HAS_ABSORPTION)\n"
+			<< "    inputs.absorption = m.absorption;\n"
+			<< "#else\n"
+			<< "    inputs.absorption = vec3(0.0);\n"
+			<< "#endif\n"
+			<< "#if defined(MATERIAL_HAS_IOR)\n"
+			<< "    inputs.refractionIndex = m.ior;\n"
+			<< "#else\n"
+			<< "    inputs.refractionIndex = 1.5;\n"
+			<< "#endif\n"
+			<< "#if defined(MATERIAL_HAS_SPECULAR_FACTOR)\n"
+			<< "    inputs.specularFactor = m.specularFactor;\n"
+			<< "#else\n"
+			<< "    inputs.specularFactor = 1.0;\n"
+			<< "#endif\n"
+			<< "#if defined(MATERIAL_HAS_SPECULAR_COLOR_FACTOR)\n"
+			<< "    inputs.specularColorFactor = m.specularColorFactor;\n"
+			<< "#else\n"
+			<< "    inputs.specularColorFactor = vec3(1.0);\n"
+			<< "#endif\n"
+			<< "#if defined(MATERIAL_HAS_EMISSIVE)\n"
+			<< "    inputs.emissive = m.emissive.rgb;\n"
+			<< "#else\n"
+			<< "    inputs.emissive = vec3(0.0);\n"
+			<< "#endif\n\n"
+			<< "    FilamentMaterialInputs filtered = inputs;\n"
+			<< "#if GEOMETRIC_SPECULAR_AA\n"
+			<< "    filtered.roughness = normalFiltering(inputs.roughness, geometricNormal);\n"
+			<< "    filtered.clearCoatRoughness = normalFiltering(inputs.clearCoatRoughness, geometricNormal);\n"
+			<< "#endif\n\n"
+			<< "    const PixelParams pixel = preparePixelParams(filtered, shadingNormal, v, _BRDFLut, clearCoatNormal);\n"
+			<< "    vec3 color = evaluateFilamentSurface(inputs, pixel, fragPos, shadingNormal, v,\n"
+			<< "        _IrradianceCube, _PrefilterCube, _ShadowMap, _LightSpaceMatrix, _BRDFLut);\n"
+			<< "    color += inputs.emissive;\n"
+			<< "    return vec4(color, m.baseColor.a);\n"
+			<< "}\n";
+
+		if (p_skeletonStage)
+		{
+			out << "\n"
+				<< "vec4 evaluateMaterial(inout MaterialInputs m)\n"
+				<< "{\n"
+				<< "    const vec3 v = normalize(ubo_ViewPos - fs_in.FragPos);\n"
+				<< "    const vec3 geometricNormal = normalize(fs_in.Normal);\n"
+				<< "#if defined(MATERIAL_HAS_NORMAL)\n"
+				<< "#if MATERIAL_NEEDS_TBN\n"
+				<< "    const vec3 n = tangentSpaceToWorld(fs_in.TBN, m.normal, geometricNormal);\n"
+				<< "#else\n"
+				<< "    const vec3 n = geometricNormal;\n"
+				<< "#endif\n"
+				<< "#else\n"
+				<< "    const vec3 n = geometricNormal;\n"
+				<< "#endif\n"
+				<< "#if defined(MATERIAL_HAS_CLEAR_COAT_NORMAL)\n"
+				<< "#if MATERIAL_NEEDS_TBN\n"
+				<< "    const vec3 clearCoatNormal = tangentSpaceToWorld(fs_in.TBN, m.clearCoatNormal, geometricNormal);\n"
+				<< "#else\n"
+				<< "    const vec3 clearCoatNormal = geometricNormal;\n"
+				<< "#endif\n"
+				<< "#else\n"
+				<< "    const vec3 clearCoatNormal = geometricNormal;\n"
+				<< "#endif\n"
+				<< "    return evaluateSurface(m, fs_in.FragPos, geometricNormal, n, clearCoatNormal, v);\n"
+				<< "}\n";
+		}
+		return out.str();
+	}
+
 	/** Whether a parameter type is one of the sampler types: the slot a texture goes into,
 	 * as opposed to a plain uniform. */
 	bool IsSamplerType(const std::string& p_dslType)
@@ -983,6 +1334,25 @@ namespace
 		return p_dslType.starts_with("sampler")
 			|| p_dslType.starts_with("isampler")
 			|| p_dslType.starts_with("usampler");
+	}
+
+	/** The 1x1 fallback a sampler gets when the designer assigned no map. Filament binds a
+	 * default texture for an unassigned sampler as well; the kinds below are the ones the
+	 * engine ships, and the material picks one per slot with `fallback : <name>`. */
+	enum class SamplerFallback : uint8_t
+	{
+		/** sampler2D: (1,1,1,1) - the neutral multiplier for albedo / metal / roughness / AO.
+		 * samplerCube: black, which is what the engine always used. */
+		Default = 0,
+		/** (0.5, 0.5, 1.0): a normal map decodes it to the neutral tangent-space normal
+		 * (0, 0, 1), i.e. "no perturbation". The white default would decode to (1, 1, 1). */
+		FlatNormal = 1,
+	};
+
+	uint8_t SamplerFallbackKind(const std::string& p_name)
+	{
+		if (p_name == "flatNormal") { return static_cast<uint8_t>(SamplerFallback::FlatNormal); }
+		return static_cast<uint8_t>(SamplerFallback::Default);
 	}
 
 	/** One vertex attribute a generated stage declares: `layout (location = N) in T name;`.
@@ -1106,6 +1476,54 @@ namespace
 		}
 
 		p_material.parameterBlockSize = RoundUp(offset, 16);
+	}
+
+	/** The resources the lit surface prelude reads, added to the material's parameter table.
+	 *
+	 * filament keeps these outside the material: they are frame/per-view data, declared in the
+	 * surface prelude from the engine's own interface blocks. Here the uniform machinery is the
+	 * material parameter block plus one texture unit per sampler, so the cheapest way to give a
+	 * lit material working declarations (and a runtime that uploads them by name) is to put them
+	 * in the same table, marked `ui : false` so the designer never shows them.
+	 *
+	 * Names are the ones the renderer already sets: the sky pass's IBL cubes, the DFG LUT, the
+	 * shadow pass's map and matrix. A material that declares one of them itself keeps its own
+	 * declaration - the injection only fills the gap. */
+	void InjectEngineGlobals(MaterialFile& p_material)
+	{
+		if (p_material.shadingModel == "unlit" || p_material.domain != "surface")
+		{
+			return;
+		}
+
+		struct Entry
+		{
+			const char* name;
+			const char* type;
+		};
+		static constexpr Entry kEntries[] = {
+			{ "_IrradianceCube",   "samplerCube" },
+			{ "_PrefilterCube",    "samplerCube" },
+			{ "_BRDFLut",          "sampler2D" },
+			{ "_ShadowMap",        "sampler2D" },
+			{ "_LightSpaceMatrix", "mat4" },
+		};
+
+		for (const Entry& entry : kEntries)
+		{
+			const bool declared = std::ranges::any_of(p_material.parameters,
+				[&entry](const Parameter& p_parameter) { return p_parameter.name == entry.name; });
+			if (declared)
+			{
+				continue;
+			}
+
+			Parameter parameter;
+			parameter.name = entry.name;
+			parameter.type = entry.type;
+			parameter.ui = false;
+			p_material.parameters.push_back(std::move(parameter));
+		}
 	}
 
 	/** The material's parameters, as the descriptors the entry point reads.
@@ -1268,6 +1686,7 @@ namespace
 			: p_stage == Stage::Fragment ? p_material.fragmentEntryLine
 			: p_material.geometryEntryLine;
 		const bool rawStage = p_stage == Stage::Geometry || DefinesMain(body);
+		const bool needsTbn = NeedsTangentFrame(p_material.writtenFields);
 
 		std::ostringstream out;
 		out << "#version 450 core\n"
@@ -1290,18 +1709,55 @@ namespace
 		out << p_prelude;
 		if (!rawStage)
 		{
-			out << VaryingsPrelude(p_stage == Stage::Vertex, p_material.domain);
+			out << VaryingsPrelude(p_stage == Stage::Vertex, p_material.domain, needsTbn);
 		}
 		out << AttributeDeclarations(p_material, p_stage);
-		out << ParametersPrelude(p_material.parameters, p_material.parameterBlockSize)
-			<< "\n#line " << entryLine << " \"" << p_fileName << "\"\n"
+		out << ParametersPrelude(p_material.parameters, p_material.parameterBlockSize);
+
+		// A lit surface's fragment stage carries the shading model's code. Where it goes matters:
+		//
+		//  - a skeleton stage gets the whole prelude (surface stack + `evaluateMaterial`) here,
+		//    before its `material()` block. Nothing in a material block may change what the
+		//    prelude compiles to - `#define`s there are the material's own business;
+		//  - a raw stage *is* `main()`, so it needs `evaluateSurface` declared before it. But the
+		//    material block may start with `#define VARIANT_HAS_DIRECTIONAL_LIGHTING` (the CAD
+		//    material did exactly that), and the surface stack tests those with `#if` at include
+		//    time. Emitting the stack before the body therefore compiled both light cases out and
+		//    the surface came out black. So for a raw stage: a prototype before the body, the
+		//    prelude itself after it.
+		const bool litSurface = p_stage == Stage::Fragment
+			&& p_material.shadingModel != "unlit" && p_material.domain == "surface";
+		if (litSurface)
+		{
+			if (rawStage)
+			{
+				out << "\n#line 1 \"<lit surface>\"\n"
+					<< "vec4 evaluateSurface(MaterialInputs m, vec3 fragPos, vec3 geometricNormal,\n"
+					<< "    vec3 shadingNormal, vec3 clearCoatNormal, vec3 v);\n";
+			}
+			else
+			{
+				out << LitSurfacePrelude(true);
+			}
+		}
+
+		out << "\n#line " << entryLine << " \"" << p_fileName << "\"\n"
 			<< body
 			<< "\n#line 1 \"<generated>\"\n";
+		if (litSurface && rawStage)
+		{
+			out << LitSurfacePrelude(false);
+		}
 		if (!rawStage)
 		{
-			out << (p_stage == Stage::Vertex
-				? VertexSkeleton(!p_material.vertexBody.empty(), p_material.domain)
-				: FragmentSkeleton());
+			if (p_stage == Stage::Vertex)
+			{
+				out << VertexSkeleton(!p_material.vertexBody.empty(), p_material.domain, needsTbn);
+			}
+			else
+			{
+				out << FragmentSkeleton();
+			}
 		}
 
 		// The material's own #includes are expanded here, into the stage that is about to be
@@ -1451,7 +1907,9 @@ namespace
 
 	// The material's descriptors: std140 offsets for the parameter block and the sampler units.
 	// Done before code generation and before the package is written, so both sides use the same
-	// numbers.
+	// numbers. A lit material first gets the engine globals the surface prelude reads, so they
+	// are laid out with the material's own parameters.
+	InjectEngineGlobals(material);
 	LayoutParameters(material);
 
 	if (!p_options.dumpVariantsPath.empty())
@@ -1567,7 +2025,15 @@ namespace
 			commonPrelude += "\n#line 1 \"" + relative + "\"\n" + content + "\n";
 		}
 	}
-	commonPrelude += "\n#line 1 \"<material inputs>\"\n" + MaterialInputsPrelude(material.shadingModel);
+	// Which MaterialInputs fields the material's own fragment code writes. This is the input of
+	// the MATERIAL_HAS_* defines, and it has to be known before the prelude is built because the
+	// struct and its defaults are guarded by them (surface_material_inputs.fs does the same).
+	// Kept on the material as well: the generated stages ask whether they need a tangent frame.
+	material.writtenFields = WrittenInputFields(material.fragmentBody);
+	const std::set<std::string>& writtenInputFields = material.writtenFields;
+
+	commonPrelude += "\n#line 1 \"<material inputs>\"\n"
+		+ MaterialInputsPrelude(material.shadingModel, writtenInputFields, material);
 
 	// The shared stage texts, one per stage the material has, with the variant defines left as
 	// a placeholder. Everything else in a stage is the same for every variant, so this is the
@@ -1642,7 +2108,30 @@ namespace
 		<< "  \"shadingModel\": \"" << material.shadingModel << "\",\n"
 		<< "  \"domain\": \"" << material.domain << "\",\n"
 		<< "  \"source\": \"" << nameForLines << "\",\n"
-		<< "  \"variants\": [\n";
+		// The material-level defines, i.e. the MATERIAL_HAS_* set the code below produced.
+		// Same information the generated GLSL carries, for the editor and for A/B work.
+		<< "  \"defines\": [";
+	{
+		size_t d = 0;
+		const auto emitDefine = [&json, &d](const std::string& p_name, int p_value) {
+			json << (d++ == 0 ? "\n" : ",\n")
+				<< "    { \"name\": \"" << p_name << "\", \"value\": " << p_value << " }";
+		};
+		for (const InputField& field : kInputFields)
+		{
+			if (writtenInputFields.contains(field.name))
+			{
+				emitDefine(std::string("MATERIAL_HAS_") + field.define, 1);
+			}
+		}
+		const bool lit = (material.shadingModel != "unlit");
+		const bool needsTbn = NeedsTangentFrame(writtenInputFields);
+		emitDefine("MATERIAL_NEEDS_TBN", needsTbn ? 1 : 0);
+		emitDefine("GEOMETRIC_SPECULAR_AA", (material.specularAntiAliasing && lit) ? 1 : 0);
+		emitDefine("CLEAR_COAT_IOR_CHANGE", material.clearCoatIorChange ? 1 : 0);
+		json << "\n  ],\n";
+	}
+	json << "  \"variants\": [\n";
 	for (size_t i = 0; i < variants.size(); ++i)
 	{
 		json << "    { \"pass\": \"" << variants[i].pass << "\", \"features\": [";
@@ -1696,6 +2185,10 @@ namespace
 		if (IsSamplerType(parameter.type))
 		{
 			json << ", \"binding\": " << parameter.binding;
+			if (!parameter.fallback.empty())
+			{
+				json << ", \"fallback\": \"" << JsonEscape(parameter.fallback) << "\"";
+			}
 		}
 		else
 		{
@@ -1914,6 +2407,38 @@ namespace
 		}
 		payload.append(reinterpret_cast<const char*>(&material.parameterBlockSize), sizeof(material.parameterBlockSize));
 		AppendChunk(package, "SHDRPROP", payload);
+	}
+
+	// SHDRFALL: the sampler fallbacks (`fallback : flatNormal`). One entry per sampler that
+	// declares a non-default one. A separate chunk rather than another field inside SHDRPROP,
+	// so a package written before this existed still parses: the reader skips unknown chunks.
+	// Nothing is written when no sampler asked for one, which keeps every other package
+	// byte-identical to before.
+	{
+		std::vector<const Parameter*> fallbacks;
+		for (const Parameter& parameter : material.parameters)
+		{
+			if (IsSamplerType(parameter.type) && SamplerFallbackKind(parameter.fallback) != 0)
+			{
+				fallbacks.push_back(&parameter);
+			}
+		}
+
+		if (!fallbacks.empty())
+		{
+			std::string payload;
+			const uint32_t count = static_cast<uint32_t>(fallbacks.size());
+			payload.append(reinterpret_cast<const char*>(&count), sizeof(count));
+			for (const Parameter* parameter : fallbacks)
+			{
+				const uint32_t nameSize = static_cast<uint32_t>(parameter->name.size());
+				const uint8_t kind = SamplerFallbackKind(parameter->fallback);
+				payload.append(reinterpret_cast<const char*>(&nameSize), sizeof(nameSize));
+				payload.append(parameter->name);
+				payload.append(reinterpret_cast<const char*>(&kind), sizeof(kind));
+			}
+			AppendChunk(package, "SHDRFALL", payload);
+		}
 	}
 
 	// SHDRATTR: the vertex attributes the material reads - location, GLSL type, name. Same idea

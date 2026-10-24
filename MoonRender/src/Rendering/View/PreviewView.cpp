@@ -646,7 +646,19 @@ void Editor::Panels::PreviewView::ResetCameraTransform()
 	// Clear stale destinations / mouse state first: a preview that lost a mouse-release
 	// event would otherwise drop every new destination on the next frame.
 	m_cameraController.ClearMovement();
-	const Maths::FVector3 eye{ 1.50f, 0.82f, 3.65f };
+	Maths::FVector3 eye{ 1.50f, 0.82f, 3.65f };
+	// MOON_PREVIEW_CAM_ELEV=<degrees>: swing the preview camera around X, so a render can be
+	// captured from below the equator without the UI (a probe for "it goes wrong from below").
+	if (const char* p_elevation = std::getenv("MOON_PREVIEW_CAM_ELEV"); p_elevation != nullptr)
+	{
+		const float radians = std::strtof(p_elevation, nullptr) * 3.14159265358979f / 180.0f;
+		const float distance = Maths::FVector3::Length(eye);
+		eye = Maths::FVector3{
+			eye.x,
+			eye.y * std::cos(radians) - eye.z * std::sin(radians),
+			eye.y * std::sin(radians) + eye.z * std::cos(radians) };
+		eye = Maths::FVector3::Normalize(eye) * distance;
+	}
 	m_cameraController.MoveToPose(eye, Maths::FQuaternion::LookAt(
 		Maths::FVector3::Normalize(Maths::FVector3{ -eye.x, -eye.y, -eye.z }),
 		Maths::FVector3{ 0.0f, 1.0f, 0.0f }));

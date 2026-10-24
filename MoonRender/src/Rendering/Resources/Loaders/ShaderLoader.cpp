@@ -1,4 +1,4 @@
-﻿#include <algorithm>
+#include <algorithm>
 #include <array>
 #include <filesystem>
 #include <format>
@@ -1042,6 +1042,18 @@ void main()
 		std::vector<Rendering::Resources::Shader::Parameter> parameters;
 		parameters.reserve(p_package.Parameters().size());
 
+		const auto fallbackOf = [&p_package](const std::string& p_name) -> uint8_t {
+			for (const Rendering::Resources::ShaderPackage::SamplerFallbackEntry& entry
+				: p_package.SamplerFallbacks())
+			{
+				if (entry.name == p_name)
+				{
+					return static_cast<uint8_t>(entry.kind);
+				}
+			}
+			return static_cast<uint8_t>(Rendering::Resources::ShaderPackage::SamplerFallback::Default);
+		};
+
 		for (const Rendering::Resources::ShaderPackage::Parameter& parameter : p_package.Parameters())
 		{
 			parameters.push_back(Rendering::Resources::Shader::Parameter{
@@ -1057,6 +1069,7 @@ void main()
 				.offset = parameter.offset,
 				.stride = parameter.stride,
 				.binding = parameter.binding,
+				.fallback = parameter.isSampler ? fallbackOf(parameter.name) : uint8_t{ 0 },
 				.isSampler = parameter.isSampler,
 				.hasRange = parameter.hasRange,
 				.hasStep = parameter.hasStep,

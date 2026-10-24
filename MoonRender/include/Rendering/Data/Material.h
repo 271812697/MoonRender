@@ -68,7 +68,10 @@ namespace Rendering::Data
 			bool uploadSingleUseProperties,
 			Rendering::HAL::Texture* p_emptyTexture2D = nullptr,
 			Rendering::HAL::Texture* p_emptyTextureCube = nullptr,
-			Rendering::HAL::Texture* p_brdfLut = nullptr
+			Rendering::HAL::Texture* p_brdfLut = nullptr,
+			/** Bound for a sampler declared `fallback : flatNormal` when the instance has no
+			 * texture in that slot. Null falls back to the white 1x1 (the old behaviour). */
+			Rendering::HAL::Texture* p_flatNormalTexture = nullptr
 		);
 		void UpdateProperties();
 		/** Puts one parameter back to the initialiser its .shader declared. Engine-owned
@@ -174,7 +177,8 @@ namespace Rendering::Data
 			bool p_uploadSingleUseProperties,
 			Rendering::HAL::Texture* p_emptyTexture2D,
 			Rendering::HAL::Texture* p_emptyTextureCube,
-			Rendering::HAL::Texture* p_brdfLut
+			Rendering::HAL::Texture* p_brdfLut,
+			Rendering::HAL::Texture* p_flatNormalTexture
 		);
 
 		/** Acquires a slice sized to the shader's block, or releases it when the block is gone
