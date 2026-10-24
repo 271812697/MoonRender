@@ -6,13 +6,13 @@
 
 #include ":Shaders/Common/Buffers/ReflectionUBO.glsl"
 
-// Filament samples the roughness-one level of the prefiltered specular cubemap here when no
-// SH is supplied. That path is kept for the viewport but is not used for diffuse: the
-// material preview's prefilter cubemap has been measured black at its roughness-one level
-// (the preview's one-shot capture does not bake the high mips), so sampling it made a
-// dielectric's whole diffuse term zero and the ball looked like a mirror. The engine's
-// cosine-convolved irradiance cube is always valid and is what the pre-Filament-IBL
-// GeomertySurface/FilamentPBR shading used.
+// Filament has no separate irradiance map: it samples the roughness-one level of the prefiltered
+// specular cube and averages four taps around `n` (diffuseIrradianceRoughnessOne below). That is
+// what Fd uses again. The engine's 32x32 irradiance cube was used instead for a while because the
+// preview's prefiltered cube had been measured black at that level; with the bake fixed it is not,
+// and the small cube turned out to be the visible defect: 32x32 with no filtering across cube
+// faces, so around a sphere's pole its face borders read as a soft square patch. The 4-tap
+// roughness-one sample is Filament's path and has no such seam.
 vec3 diffuseIrradianceRoughnessOne(samplerCube prefilterCube, vec3 n)
 {
     const float maxLod = float(textureQueryLevels(prefilterCube) - 1);
@@ -34,9 +34,26 @@ vec3 diffuseIrradianceRoughnessOne(samplerCube prefilterCube, vec3 n)
     return irradiance;
 }
 
+// The irradiance cube is 32x32 and holds a cosine convolution, so it is a very low frequency
+// signal: sampling a blurred level loses nothing. It is sampled at level 2 (8x8 per face) with
+// four taps a face-texel apart. Level 0 is too coarse in the other direction - one of its texels
+// magnified over a sphere's pole reads as a soft square patch, and a single tap leaves the cube
+// face borders visible as a seam that shows up the same way. The taps are sized for the level
+// they are taken from, not for level 0.
 vec3 diffuseIrradiance(samplerCube irradianceCube, vec3 n)
 {
-    vec3 irradiance = texture(irradianceCube, n).rgb;
+    const float lod = 2.0;
+    const ivec2 size = textureSize(irradianceCube, int(lod));
+    const float du = 1.0 / float(size.x);
+    const float dv = 1.0 / float(size.y);
+    const vec3 up = abs(n.y) > 0.99 ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 1.0, 0.0);
+    const vec3 m0 = normalize(cross(n, up));
+    const vec3 m1 = cross(n, m0);
+    vec3 irradiance = textureLod(irradianceCube, n - m0 * du - m1 * dv, lod).rgb;
+    irradiance += textureLod(irradianceCube, n + m0 * du - m1 * dv, lod).rgb;
+    irradiance += textureLod(irradianceCube, n + m0 * du + m1 * dv, lod).rgb;
+    irradiance += textureLod(irradianceCube, n - m0 * du + m1 * dv, lod).rgb;
+    irradiance *= 0.25;
     if (any(isnan(irradiance)) || any(isinf(irradiance)))
     {
         irradiance = vec3(0.0);

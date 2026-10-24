@@ -3,6 +3,8 @@
 #include <QFileInfo>
 
 #include <cstdint>
+#include <cstdlib>
+#include <filesystem>
 #include <vector>
 
 #include "Core/Global/ServiceLocator.h"
@@ -130,6 +132,42 @@ namespace MOON
 		}
 
 		const QImage frame(pixels.data(), width, height, width * 4, QImage::Format_RGBA8888);
-		return frame.copy().scaled(p_size, p_size, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+		const QImage scaled = frame.copy().scaled(p_size, p_size, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+
+		// MOON_DUMP_THUMBNAILS=<dir>: writes the preview scene the material editor shows, so it can
+		// be inspected without the UI. MOON_DUMP_SIZE renders the dump larger.
+		if (const char* p_dir = std::getenv("MOON_DUMP_THUMBNAILS"); p_dir != nullptr && *p_dir != '\0')
+		{
+			std::error_code error;
+			std::filesystem::create_directories(p_dir, error);
+			int dumpSize = 0;
+			if (const char* p_sizeText = std::getenv("MOON_DUMP_SIZE"); p_sizeText != nullptr)
+			{
+				dumpSize = std::atoi(p_sizeText);
+			}
+			QImage dump = scaled;
+			if (dumpSize > p_size)
+			{
+				m_view->Resize(dumpSize, dumpSize);
+				// The camera pose is a destination the view eases towards; settle it so the dump
+				// honours MOON_PREVIEW_CAM_ELEV.
+				for (int settle = 0; settle < 120; ++settle)
+				{
+					m_view->Update(0.05f);
+				}
+				m_view->Render({});
+				m_view->Render({});
+				std::vector<uint8_t> dumpPixels;
+				int dumpWidth = 0;
+				int dumpHeight = 0;
+				if (m_view->ReadFrame(dumpPixels, dumpWidth, dumpHeight) && dumpWidth > 0 && dumpHeight > 0)
+				{
+					dump = QImage(dumpPixels.data(), dumpWidth, dumpHeight, dumpWidth * 4, QImage::Format_RGBA8888).copy();
+				}
+			}
+			const QString name = QFileInfo(p_materialPath).fileName() + QStringLiteral(".png");
+			dump.save(QString::fromLocal8Bit(p_dir) + QStringLiteral("/") + name);
+		}
+		return scaled;
 	}
 }
