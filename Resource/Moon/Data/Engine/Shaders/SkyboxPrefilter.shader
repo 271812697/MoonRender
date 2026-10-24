@@ -189,15 +189,20 @@ fragment {
             float NoL = clamp(2.0 * NoH * NoH - 1.0, 0.0, 1.0);
             vec3 L = vec3(2.0 * NoH * H.x, 2.0 * NoH * H.y, NoL);
 
-            // V == N, so pdf = D * 0.25; the kernel stores l = -log4(sampleCount * pdf).
+            // V == N, so pdf = D * 0.25. This is `-log4(sampleCount * pdf)` = `-log4(omegaS)`,
+            // the LOD whose texel matches one importance sample's solid angle.
             float pdf = DistributionGGX(vec3(0.0, 0.0, 1.0), H, roughness) * 0.25;
             float l = (pdf > 0.0) ? -0.5 * log2(float(SAMPLE_COUNT) * pdf) : 0.0;
 
-            // A roughness-zero level has no measurable kernel: it is a single sample along N.
-            // Sample the source at baseLod, the LOD whose texel is the size of one *output*
-            // texel, so the mirror level is a filtered copy of the 1024 source (as Filament's
-            // level 0 is of its 256 source) instead of one aliased source texel.
-            float sampleLod = (roughness <= 0.0001) ? baseLod : (l + lodOffset);
+            // `lodOffset` widens a texel of the *source* cube to the solid angle the kernel
+            // expects. It has to be measured against the cube the samples are actually read
+            // from: the band above `l` alone left the studio's bright panels intact, so a
+            // mid-roughness reflection sampled a handful of them and the sphere showed hard
+            // blobs that change shape as the camera moves (measured on the 640px preview dump:
+            // 1024 samples over a 1024-wide source). The extra `-log4` of the source/sample ratio
+            // is what keeps the prefiltered level actually prefiltered.
+            const float kSourceLodBias = 3.0; // 8x the source texel footprint
+            float sampleLod = (roughness <= 0.0001) ? baseLod : (l + lodOffset + kSourceLodBias);
             prefilteredColor += compressHDR(textureLod(SkyboxCube, T * L, sampleLod).rgb, 1024.0, 16384.0) * NoL;
             totalWeight += NoL;
         }

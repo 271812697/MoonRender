@@ -63,6 +63,10 @@ namespace Rendering::Resources
 			int32_t offset = -1;      // std140 offset in the material parameter block, -1 = no layout
 			uint32_t stride = 0;      // std140 element stride (arrays)
 			uint32_t binding = 0;     // texture unit of a sampler
+			/** What to bind when the material instance has no texture in this slot: 0 = the
+			 * engine's default (white 2D / black cube), 1 = the flat normal map
+			 * (SamplerFallback in ShaderPackage). Always 0 for a non-sampler. */
+			uint8_t fallback = 0;
 			bool isSampler = false;   // a texture slot rather than a plain uniform
 			bool hasRange = false;
 			bool hasStep = false;

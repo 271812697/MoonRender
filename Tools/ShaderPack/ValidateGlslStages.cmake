@@ -70,3 +70,80 @@ if(failed GREATER 0)
     "${SHADER}: ${failed} stage(s) do not compile (glslangValidator). "
     "The dump is under ${STAGE_DIR} - the numbers in the messages are .shader / .glsl lines.")
 endif()
+
+# --- link -------------------------------------------------------------------------------
+# Validating a stage on its own says nothing about the program it becomes. Three classes of
+# error pass `-S vert` / `-S frag` and only fail when the driver links the stages:
+#
+#   - a function that is declared but never defined (evaluateMaterial() before the `lit` surface
+#     prelude existed - the material compiled, then failed at first draw),
+#   - a vertex stage that writes a varying the fragment stage declares with another type,
+#   - a fragment stage that reads a varying the vertex stage never writes.
+#
+# filament cannot hit the first one: it links glslang into matc and its packages are SPIR-V
+# modules. This is the external equivalent, one link per *distinct* program: a keyed material's
+# 128 variants usually share a handful of stage texts, so the list is hashed first.
+set(link_failed 0)
+# A plain string, not a list: this script runs via `cmake -P`, where CMP0057 (IN_LIST) is not
+# set to NEW, so `if(x IN_LIST y)` fails with "Unknown arguments".
+set(link_hashes ";")
+foreach(vertex_file IN LISTS stage_files)
+  if(NOT vertex_file MATCHES "_vertex\\.glsl$")
+    continue()
+  endif()
+
+  string(REGEX REPLACE "_vertex\\.glsl$" "" prefix "${vertex_file}")
+  if(NOT EXISTS "${prefix}_fragment.glsl")
+    continue()
+  endif()
+
+  file(READ "${prefix}_vertex.glsl" vertex_text)
+  file(READ "${prefix}_fragment.glsl" fragment_text)
+  set(geometry_text "")
+  if(EXISTS "${prefix}_geometry.glsl")
+    file(READ "${prefix}_geometry.glsl" geometry_text)
+  endif()
+
+  string(SHA1 program_hash "${vertex_text}${geometry_text}${fragment_text}")
+  if(link_hashes MATCHES ";${program_hash};")
+    continue()
+  endif()
+  string(APPEND link_hashes "${program_hash};")
+
+  # glslang names the stage from the file extension in link mode, so the dumps are copied to
+  # the extensions it expects (.glsl carries no stage).
+  set(link_dir "${STAGE_DIR}/.link")
+  file(MAKE_DIRECTORY "${link_dir}")
+  file(WRITE "${link_dir}/program.vert" "${vertex_text}")
+  file(WRITE "${link_dir}/program.frag" "${fragment_text}")
+  set(link_files "${link_dir}/program.vert")
+  if(NOT geometry_text STREQUAL "")
+    file(WRITE "${link_dir}/program.geom" "${geometry_text}")
+    list(APPEND link_files "${link_dir}/program.geom")
+  endif()
+  list(APPEND link_files "${link_dir}/program.frag")
+
+  set(log_out "${link_dir}/link.out")
+  set(log_err "${link_dir}/link.err")
+  execute_process(
+    COMMAND "${GLSLANG}" -l ${link_files}
+    RESULT_VARIABLE result
+    OUTPUT_FILE "${log_out}"
+    ERROR_FILE "${log_err}"
+    TIMEOUT 300)
+
+  if(NOT result EQUAL 0)
+    message("--- link: ${prefix} (exit ${result}) ---")
+    file(READ "${log_out}" text_out)
+    file(READ "${log_err}" text_err)
+    message("${text_out}${text_err}")
+    math(EXPR link_failed "${link_failed} + 1")
+  endif()
+endforeach()
+
+if(link_failed GREATER 0)
+  message(FATAL_ERROR
+    "${SHADER}: ${link_failed} program(s) do not link (glslangValidator -l). The dump is under "
+    "${STAGE_DIR} - a missing function definition or a mismatched varying shows up here and "
+    "nowhere else in the build.")
+endif()

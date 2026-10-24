@@ -76,6 +76,10 @@ namespace
 	};
 	constexpr auto kWhitePixel = std::to_array<uint8_t>({ 255, 255, 255, 255 });
 	constexpr auto kBlackPixel = std::to_array<uint8_t, 6 * 4>({ 0 });
+	/** The neutral tangent-space normal: a normal map decodes (0.5, 0.5, 1.0) to (0, 0, 1),
+	 * i.e. "no perturbation". 128/255 is 0.502, close enough that the decoded vector is
+	 * (0.004, 0.004, 1.0) and normalizes to (0, 0, 1). */
+	constexpr auto kFlatNormalPixel = std::to_array<uint8_t>({ 128, 128, 255, 255 });
 }
 
 Rendering::Core::ABaseRenderer::ABaseRenderer(Context::Driver& p_driver) :
@@ -83,6 +87,7 @@ Rendering::Core::ABaseRenderer::ABaseRenderer(Context::Driver& p_driver) :
 	m_isDrawing(false),
 	m_emptyTexture2D{ Settings::ETextureType::TEXTURE_2D },
 	m_emptyTextureCube{ Settings::ETextureType::TEXTURE_CUBE },
+	m_flatNormalTexture{ Settings::ETextureType::TEXTURE_2D },
 	m_unitQuad(kUnitQuadVertices, kUnitQuadIndices),
 	m_unitCube(kUnitCubeVertices, kUnitCubeIndices)
 {
@@ -102,6 +107,9 @@ Rendering::Core::ABaseRenderer::ABaseRenderer(Context::Driver& p_driver) :
 
 	m_emptyTextureCube.Allocate(kEmptyTextureDesc);
 	m_emptyTextureCube.Upload(kBlackPixel.data(), Settings::EFormat::RGBA, Settings::EPixelDataType::UNSIGNED_BYTE);
+
+	m_flatNormalTexture.Allocate(kEmptyTextureDesc);
+	m_flatNormalTexture.Upload(kFlatNormalPixel.data(), Settings::EFormat::RGBA, Settings::EPixelDataType::UNSIGNED_BYTE);
 	std::string v = R"(
 #version 450 core
 
@@ -432,7 +440,8 @@ void Rendering::Core::ABaseRenderer::DrawEntity(
 			uploadSingleUseProperties,
 			&m_emptyTexture2D,
 			&m_emptyTextureCube,
-			m_brdfLut
+			m_brdfLut,
+			&m_flatNormalTexture
 		);
 	}
 
@@ -444,6 +453,12 @@ void Rendering::Core::ABaseRenderer::DrawEntity(
 	// was bound on the first frame (DFG=(1,1), E~=1, diffuse multiplied by zero and the
 	// dielectric looking like a full mirror).
 	p_drawable.material->BindGlobalTexture("_BRDFLut", m_brdfLut);
+	// Same reasoning for the environment: the sky pass bakes these on the first frame, and a
+	// material instance that was created (and uploaded) before that kept the empty black cube -
+	// a metal then reads as black except where the sun happens to reflect, which is what "turning
+	// the view shows black" looked like.
+	p_drawable.material->BindGlobalTexture("_IrradianceCube", m_irradianceCube);
+	p_drawable.material->BindGlobalTexture("_PrefilterCube", m_prefilterCube);
 
 	m_driver.Draw(
 		p_pso,

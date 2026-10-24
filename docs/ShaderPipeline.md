@@ -118,6 +118,7 @@ fragment {
 | `geometry { ... }` | GLSL 第三阶段，**我们的扩展**（Filament 没有）。总是整段自管，块里定义 `layout(triangles) in` 等 | `GizmoLine` `GeomertySurface` `SectionFace` `GizmoCell` `SectionContour` |
 | `{ type : float3, name : samples, count : 64 }` | 数组 uniform（SSAO 的 64 采样核） | `ssao` |
 | `{ type : float, name : u_GridSize, default : 0.01 }` | uniform 的 GLSL 初始化值：老文件 `uniform float x = 0.01;` 的下发默认值必须保留，否则没人设的参数会静默变 0 | `Grid` `SectionCap` `Billboard` `Standard` |
+| `{ type : sampler2D, name : u_NormalMap, fallback : flatNormal }` | **采样器的 1×1 回退纹理**：实例没设贴图时绑哪张。`flatNormal`=(0.5,0.5,1)→解码成法线空间的 (0,0,1)，于是法线贴图可以**无条件采样**，不需要 `u_UseNormalMap` 这类运行期开关（Filament 也是无条件采样） | `FilamentPBR` `GeomertySurface` |
 
 另外两件配套的事：
 
@@ -132,25 +133,88 @@ fragment {
   glslang 不容忍。现在用 `#if !defined(MOON_STAGE_VERTEX) && !defined(MOON_STAGE_GEOMETRY)`
   把它挡在非片元阶段外（老路径不定义这些宏，行为不变），顶点/几何阶段才终于能离线校验。
 
+### 2.5 材质级开关（2026-10-24）
+
+`material { }` 里多了两个 Filament 也有的开关。它们**改变生成的代码**，所以不进 `state`、不按实例设：
+
+| 字段 | 生成的 define | 默认 | 形状 |
+|---|---|---|---|
+| `specularAntiAliasing : true/false` | `#define GEOMETRIC_SPECULAR_AA 0/1`（`shadingModel : lit` 时才可能为 1，同 Filament） | `false` | `#if GEOMETRIC_SPECULAR_AA` |
+| `clearCoatIorChange : true/false` | `#define CLEAR_COAT_IOR_CHANGE 0/1` | `true`（同 Filament `MaterialBuilder`） | `#if CLEAR_COAT_IOR_CHANGE` |
+
+配合 §3 的 `MATERIAL_HAS_*`：材质"有没有 clear coat / 法线图 / 透射"不再靠运行期 bool，
+而是由它写了哪些 `MaterialInputs` 字段决定。
+
 ---
 
 ## 3. prelude：我们的"生成骨架"
 
 Filament 的骨架在 `filament/src/materials/`（`surface_shading_model_standard.fs`、
-`surface_lighting.fs`、`surface_shadowing.fs` …），由 matc 拼进去。我们的骨架就是现有的
-`Shaders/Common/*.glsl` + `Standard.shader` 里那段光照，整理成 matc 内置文件：
+`surface_lighting.fs`、`surface_shadowing.fs` …），由 matc 拼进去。我们的骨架是两种东西：
+**拼接的引擎头**（`Common/*.glsl`）和**生成出来的代码**（`MaterialInputs`、材质 define、lit surface
+预置、变体位上的 `#define`）。
 
-| prelude | 来源 | 内容 |
+拼接顺序（`BuildStage`，照 Filament）：
+
+```
+#version 450 core + 扩展
+  kDefinesPlaceholder            ← 每个变体只换这几行（pass / feature / VARIANT_*）
+  engine prelude                 EngineUBO.glsl + Utils.glsl（构建期从 -I 读进来）
+  <material inputs>              MATERIAL_HAS_* + SHADING_MODEL_* + MaterialInputs + initMaterial
+  varyings（非 raw stage）        VS_OUT / fs_in（+ postProcess 的 TexCoords）
+  顶点属性声明                    material { vertexAttributes } → layout(location) + HAS_ATTRIBUTE_*
+  参数                           std140 块（binding 2）+ 每个采样器一个 layout(binding = N)
+  用户块                          vertex { } / geometry { } / fragment { }
+  （骨骼/预置）                   骨架 main()；lit 时再加 LitSurfacePrelude()（见下）
+```
+
+各段的现状：
+
+| 段 | 来源 | 内容 |
 |---|---|---|
-| `prelude/buffers.glsl` | `Common/Buffers/EngineUBO.glsl`、`LightsSSBO.glsl`、`ReflectionUBO.glsl` | 帧/灯/反射 UBO |
-| `prelude/common.glsl` | `Common/Constants.glsl`、`Utils.glsl`、`Physics.glsl` | 常量与工具函数 |
-| `prelude/material.glsl` | 新写（照 `surface_material_inputs.fs`） | `MaterialInputs` / `prepareMaterial()` / `materialParams` |
-| `prelude/surface.glsl` | `Standard.shader` 的光照段 + `Lighting/PBR.glsl`、`IBL.glsl`、`Shadow.glsl` | 由 `shadingModel` 选中的着色模型 |
-| `prelude/variants.glsl` | 新写（照 `Variant.h`） | 变体位对应的 `#define` |
-| `prelude/output.glsl` | `Standard.shader` 末尾 | 色调映射/alpha 等收尾 |
+| engine prelude | `Common/Buffers/EngineUBO.glsl`、`Common/Utils.glsl` | 帧 UBO 与工具函数（`#include` 这两份的材质会被静默忽略） |
+| `<material inputs>` | 生成（照 `surface_material_inputs.fs`） | `#define SHADING_MODEL_LIT/UNLIT`、每个被写的字段一个 `MATERIAL_HAS_*`、`MATERIAL_NEEDS_TBN`、`GEOMETRIC_SPECULAR_AA`、`CLEAR_COAT_IOR_CHANGE`；`MaterialInputs`（order/guard/默认值照抄）；`initMaterial`；unlit 的 `evaluateMaterial` |
+| varyings | 生成 | `VS_OUT { FragPos, TexCoords, Normal }` / `fs_in`；postProcess 只有 `TexCoords` |
+| 参数 | 生成（`LayoutParameters`） | 见 `docs/FilamentMaterialShaderGap.md` §6 |
+| lit surface | `#include ":Shaders/Lighting/Filament/surface_lighting.glsl"` + 生成的 `evaluateSurface` / `evaluateMaterial` | only for `shadingModel : lit`，**放在参数之后、用户块之前**：`evaluateSurface(m, fragPos, geometricNormal, shadingNormal, clearCoatNormal, v)` 是 varying 无关的入口（raw fragment 用它），`evaluateMaterial(m)` 是骨架版的薄包装（从 `fs_in` 取位置/法线/视线，并按 `m.normal` 走切线帧） |
+| 切线帧 | 生成（`MATERIAL_NEEDS_TBN` 为 1 时） | 顶点阶段多声明 `TANGENT`/`BITANGENT`（location 3/4）并写 `vs_out.TBN = ConstructTBN(...)`，fragment 侧 `fs_in.TBN`；退化帧由 `tangentSpaceToWorld()` 回落几何法线 |
 
-matc 拼接顺序（照 Filament）：`#version` → 顶点/片元属性 → 变体位 `#define` →
-`buffers` → `common` → `material` → `surface` → 用户入口函数（`main` 之前）→ 生成的 `main()`。
+**材质级 define 怎么来**（Filament 用 AST，我们用名字锚定的扫描）：先找 `MaterialInputs <name>`
+的声明（入口参数或局部变量），再找 `<name>.<field>` 的**写入**（含 `.rgb` 这类分量的 `=` / `+=`），
+字段表在 `kInputFields`（order/type/默认值/guard 与 `surface_material_inputs.fs` 一一对应）。
+读不算写：`float a = m.reflectance;` 不会产生 `MATERIAL_HAS_REFLECTANCE`。
+
+**lit 材质的引擎资源**（这些在 Filament 里是 frame uniform，不是材质参数）：
+`_IrradianceCube` / `_PrefilterCube` / `_BRDFLut` / `_ShadowMap` / `_LightSpaceMatrix` 由
+`InjectEngineGlobals` 自动加进参数表（`ui : false`，名字与渲染器现在用的相同），材质文件里**不再声明**。
+`u_ReceiveShadows` 仍是 `surface_lighting.glsl` 里的松散 uniform（运行期按名字写入），
+将来应该一起收进参数表。
+
+一个材质现在可以只写：
+
+```glsl
+material {
+    name : FilamentPBR,
+    shadingModel : lit,
+    specularAntiAliasing : false,
+    clearCoatIorChange : true,
+    parameters : [ { type : sampler2D, name : u_AlbedoMap }, ... ]
+}
+fragment {
+    void material(inout MaterialInputs m) {
+        m.baseColor = pow(texture(u_AlbedoMap, fs_in.TexCoords).rgb, vec3(2.2));
+        m.roughness = 0.4;
+        m.metallic  = 0.0;
+    }
+}
+```
+
+顶点阶段、变换、光照、IBL、shadow、输出全由骨架与 lit 预置负责。
+
+**还没进骨架的**（`surface_main.fs` 的其余部分）：`computeShadingParams()`（`shading_NoV`、
+`shading_view` 这类全局）、`applyAlphaMask`、`postLightingColor` 混合、fog、depth variant 的片元分支、
+`outputs`（MRT）。切线帧已经有了，但引擎**不给导入模型生成切线**，所以法线贴图只在程序化网格上有效
+（退化帧会回落几何法线，不会出 NaN）。
 
 ---
 
@@ -203,6 +267,7 @@ Filament：8 位掩码 + 白名单 + **固定枚举**（`determineSurfaceVariant
 | `SHDRGLSL` | 每 (pass, variant, stage) 只存**自己那几行 `#define`** |
 | `SHDRVARI` | 变体清单（pass + feature 集合） |
 | `SHDRPROP` | **反射**：每个参数的 name、DSL 类型、GLSL 类型、数组长度、是否 sampler、声明处初值 |
+| `SHDRFALL` | **采样器回退**：声明了 `fallback :` 的采样器 → 回退种类。单独一个 chunk 而不是塞进 `SHDRPROP`，这样老包（没有它）照样解析；没人声明时不写，其它包字节不变 |
 | `SHDRATTR` | **反射**：顶点属性（location、GLSL 类型、名字），从生成的顶点阶段文本里读回 |
 | `SHDRPARM` | 老的 name/type 表，保留兼容（`SHDRPROP` 在它之后写出并覆盖同名记录） |
 | `SHDRSTAT` | `material { }` 里的状态字段（blending/culling/depthWrite …），目前只记录、运行时不读 |
@@ -260,7 +325,7 @@ ShaderManager[key]
 4. `Standard.shader` 最后做（PBR/IBL/阴影/变体最多）。
 5. 全部迁完后再删旧解析路径，并把 `.shader` 改名为 `.mat`。
 
-完成情况：1-4 已做完（`Engine/Shaders` 下 44 / 48 个 `material{}` 形式，剩 4 个 PathTrace 定为
+完成情况：1-4 已做完（`Engine/Shaders` 下 46 / 50 个 `material{}` 形式，剩 4 个 PathTrace 定为
 永久例外，见 §8）；第 5 步**不做**——旧的文件版解析路径还要留给 PathTrace，`.shader` 也因此不改名
 `.mat`。
 
@@ -279,9 +344,9 @@ ShaderManager[key]
 | 构建期 `Tools/MoonMatc`（= matc） | ✅ `material{}`/`vertex{}`/`geometry{}`/`fragment{}` 解析、`domain: surface\|postProcess`、变体展开、`uniform` 生成（DSL 名 → GLSL、`count` 数组、`default` 初值）、`#include` 构建期展开、整段自管阶段、阶段宏、`#line` 回指、`.ovshader` chunk、反射 JSON、未迁移文件透传 |
 | 打包 `Tools/ShaderPack`（= resgen） | ✅ `name=path` 合并成 `shader.h` / `shader.cpp`，`MoonShader` 由 `MoonRender` 链接 |
 | 运行时 `ShaderArchive` / `ShaderPackage` / `ShaderLoader` | ✅ 归档优先、`MOONSDR1` 分流、按变体清单编译（顶点/片元/几何三段，几何可选） |
-| **已迁移（44 / 48）** | ✅ `Unlit` `Standard` `GeomertySurface` `GeomertySurfacePick` `GeomertyLine` `GeomertyPoint` `GizmoCell` `Gizmo` `GizmoLine` `GizmoPoint` `GizmoTriangle` `Grid` `Line` `Point` `Billboard` `Atmosphere` `Skysphere` `SkyboxConvert` `SkyboxIrrandiance` `SkyboxPrefilter` `BrdfLut` `ClearBackground` `PickingFallback` `OutlineFallback` `ShadowFallback` `MirrorPlaneShadow` `SectionCap` `SectionContour` `SectionFace` `SectionParity` `gbuffer` `ssao` `ssaoblur`；`PostProcess/` 全部 12 个 |
+| **已迁移（46 / 50）** | ✅ `Unlit` `Standard` `FilamentPBR`（`lit`）`GeomertySurface` `GeomertySurfacePick` `GeomertyLine` `GeomertyPoint` `GizmoCell` `Gizmo` `GizmoLine` `GizmoPoint` `GizmoTriangle` `Grid` `Line` `Point` `Billboard` `Atmosphere` `Skysphere` `SkyboxConvert` `SkyboxIrrandiance` `SkyboxPrefilter` `BrdfLut` `ClearBackground` `PickingFallback` `OutlineFallback` `ShadowFallback` `MirrorPlaneShadow` `SectionCap` `SectionContour` `SectionFace` `SectionParity` `gbuffer` `ssao` `ssaoblur`；`PostProcess/` 全部 11 个 |
 
-`Resource/Moon/Data/Engine/Shaders` 下共 48 个 `.shader`（+ 10 个 `.glsl`，共 58 个源打进归档）。
+`Resource/Moon/Data/Engine/Shaders` 下共 50 个 `.shader`（+ 17 个 `.glsl`）。
 
 ### 剩余（都已定案，不是待办）
 
@@ -370,12 +435,27 @@ cmake --build Build --target Moon --config Release -- /nologo /m:1
 
 **构建期就会校验 GLSL**（照 filament 的 matc：编译不过就构建失败，不让它活到运行时）。
 `Tools/ShaderPack/CMakeLists.txt` 里 `find_program(GLSLANG_VALIDATOR ...)` 找到
-`glslangValidator` 后，每个 `MoonMatc` 规则变成三步：
+`glslangValidator` 后，每个 `MoonMatc` 规则变成四步：
 
 1. 清掉旧 shader 的 dump 目录（避免拿上一轮的残留阶段去校验）；
 2. `MoonMatc --dump-glsl <dir>` —— 每个 (pass, 变体, 阶段) 一个 `.glsl`；
 3. `ValidateGlslStages.cmake` 对每个文件跑 `glslangValidator -S vert|frag|geom`，有失败就
-   `FATAL_ERROR`，并把 glslang 的输出原样打出来。
+   `FATAL_ERROR`，并把 glslang 的输出原样打出来；
+4. 再对每个 **(vertex, geometry?, fragment) 组合**跑 `glslangValidator -l` **链接**（2026-10-24 加）。
+   单阶段校验抓不到三类错误，它们只在链接时暴露：函数声明了但没有定义（`lit` 预置出现之前，
+   `evaluateMaterial()` 就是这种）、顶点阶段写的 varying 与片元阶段声明的类型不一致、
+   片元阶段读了顶点阶段从不写的 varying。filament 把 glslang 链进 matc、包里直接是 SPIR-V
+   模块，天然没有这类问题；外部校验只能靠链接补。为了不把变体数乘进构建时间，链接前先按
+   (顶点+几何+片元) 文本做 SHA1 去重——关键变体材质的 128 个变体通常只有几种不同文本。
+
+实测（故意删掉 `evaluateMaterial` 的定义）：
+
+```
+--- link: __ (exit 1) ---
+ERROR: Linking fragment stage: No function definition (body) found:
+    evaluateMaterial(vf4;
+FilamentPBR.shader: 1 program(s) do not link (glslangValidator -l). ...
+```
 
 找不到 `glslangValidator` 时只打一条 `STATUS`（“will NOT be validated at build time”），
 其它行为不变——所以这是一条可选依赖，不引入 glslang 库（filament 是自己链 glslang + SPIRV-Tools）。
@@ -392,8 +472,8 @@ ssaoblur.shader: 1 stage(s) do not compile (glslangValidator). The dump is under
 ```
 
 行号指回 `.shader` 自己，构建 exit 1。**代价**：只有改动的 shader 会重新校验，但单个大
-shader 不便宜——`Standard`（192 变体、380 个阶段）重新校验 + 重新打包 + 链接要 **50 s**；
-全量清理后重建会校验全部 1002 个阶段。嫌慢的话把 `GLSLANG_VALIDATOR` 缓存变量置空即可关掉。
+shader 不便宜；全量重建（清掉 dump）会校验约 1700 个阶段并对约 640 个去重后的程序做链接，
+本机要几分钟。嫌慢的话把 `GLSLANG_VALIDATOR` 缓存变量置空即可整体关掉（阶段校验与链接都不做）。
 
 再**带一个工程启动**，让视口真的画帧（不开工程停在首页时，一半 shader 根本不会被加载）：
 
@@ -477,9 +557,16 @@ materials: 44 ; stages validated: 1002 ; failures: 0
 
 ## 10. 与 Filament 的已知差异（明确记录，避免误以为抄漏）
 
-- **变体枚举**：Filament 是固定枚举（`determineSurfaceVariants`），我们第一版仍是 feature 的幂集；
-  `Standard` 现在是 3 pass × 2^6 feature = **192 个变体**（体积问题已用 §5 的 `SHDRSTAG` 解决，
-  但变体数本身没有收敛）。固定枚举 + `variantFilter` 是下一件该做的事。
+- **变体枚举**：Filament 是固定枚举（`determineSurfaceVariants`），我们第一版仍是幂集；
+  例如 `FilamentPBR` 的 `variantFilter` 7 位 → **128 个变体**（体积问题已用 §5 的 `SHDRSTAG` 解决，
+  加载期还有 stage/program 文本去重，但变体数本身没有收敛）。固定枚举 + per-stage 过滤 +
+  按需编译是下一件该做的事（`docs/FilamentMaterialShaderGap.md` 批次 B）。
+- **引擎资源的位置**：Filament 把 `iblLuminance`、shadow map、DFG 这些放在 frame/per-view 的
+  descriptor set 里，材质碰不到；我们为了不改运行时，让 `MoonMatc` 把它们**注入材质的参数表**
+  （`InjectEngineGlobals`，`ui : false`）。功能等价，但"引擎资源"和"材质参数"还没有真正分家。
+- **`MaterialInputs` 的两份结构**：DSL 生成的那份已经和 `surface_material_inputs.fs` 对齐，但
+  `Lighting/Filament/*` 仍吃自己的 `FilamentMaterialInputs`，`evaluateMaterial` 里做一次拷贝。
+  等 CAD 材质也迁到 `lit` 后合并。
 - **路径追踪 4 个 shader 不迁**（§8 "剩余"）：Filament 没有"运行时往源码插 define 再编译"的机制，
   它靠固定变体枚举 + 材质实例；我们的 PathTrace 恰好靠前者，所以永久留在旧路径上，等路径追踪器
   重构时连加载方式一起改。这也是整个迁移唯一未收口的地方。

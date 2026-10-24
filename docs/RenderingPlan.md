@@ -37,8 +37,8 @@
 | `.filamat`（chunk 容器） | 引擎 shader 包，chunk：`SHDRSTAG` / `SHDRGLSL` / `SHDRVARI` / `SHDRPROP` / `SHDRATTR` / `SHDRPARM` / `SHDRSTAT` / `SHDRNAME` | 已实现 |
 | `tools/resgen` | `Tools/ShaderPack`：源码打包进 `shader.cpp`，随可执行文件发布 | 已实现 |
 | `MaterialParser` + `filaflat/DictionaryReader` | `ShaderManager` / `ShaderArchive` 的 chunk 读取；`Shader::GetVariant(pass, featureSet)` | 已实现 |
-| `surface_main.vs/.fs` 的骨架 + `MaterialInputs` | MoonMatc 生成 vertex/fragment 骨架：MVP/世界坐标/varying、`initMaterial` → `material()` → `evaluateMaterial`；材质可自己写整段 stage 覆盖骨架 | 已实现 |
-| 变体键（Variant bits）+ 材质特性（features） | `EVariant`：`DIRECTIONAL_LIGHTING` / `DYNAMIC_LIGHTING` / `SHADOWING` / `FOG` / `PICKING` / `SSR` / `DEPTH`；材质特性编译期固定为 `MATERIAL_HAS_*` | 已实现（`SHADOWING` / `SSR` / `FOG` 暂无使用方） |
+| `surface_main.vs/.fs` 的骨架 + `MaterialInputs` | MoonMatc 生成 vertex/fragment 骨架：MVP/世界坐标/normal matrix、`initMaterial` → `material()` → `evaluateMaterial`；`shadingModel : lit` 时再拼 lit surface 预置（`Lighting/Filament/*`）作为 `evaluateMaterial`；材质可自己写整段 stage 覆盖骨架 | 已实现（`FilamentPBR.shader` 走骨架 form，`GeomertySurface` 走 raw form + `evaluateSurface`） |
+| 变体键（Variant bits）+ 材质特性（features） | `EVariant`：`DIRECTIONAL_LIGHTING` / `DYNAMIC_LIGHTING` / `SHADOWING` / `FOG` / `PICKING` / `SSR` / `DEPTH`；材质特性编译期固定 → 扫描材质写入的 `MaterialInputs` 字段生成 `MATERIAL_HAS_*` / `MATERIAL_NEEDS_TBN` | 已实现（`SHADOWING` 已有逐 draw 使用方；`SSR` / `FOG` 仍无） |
 | 参数元数据（label/group/min/max/step/color） | `.shader` 参数声明即面板 schema，材质面板/Actor 属性面板直接生成表单 | 已实现 |
 | 参数的 uniform 块 / 每 renderable 块 | 描述符式绑定：`EngineUBO`(binding 0) / `ReflectionUBO`(1) / 材质参数块(2) / `ObjectUBO`(3)，动态 offset 来自共享 UBO 池 | 已实现 |
 | 材质 DSL 的 `constants` / `variables` / `outputs`（MRT） | — | 未落地 |
@@ -93,7 +93,9 @@
 - **剖切与截面**：模板奇偶填充的实时截面 + 几何着色器截线；剖面线为屏幕空间固定周期
   （`docs/SectionRendering.md`）。
 - **拾取**：独立 pick pass（颜色附件存 id + 世界坐标），不走 CPU 射线查询。
-- **调试通道**：`MOON_CLIP_DEMO` / `MOON_SHOT` / `MOON_SECTION_DEBUG` 等环境开关，支持无鼠标复现与 A/B 截图。
+- **调试通道**：`MOON_CLIP_DEMO` / `MOON_SHOT` / `MOON_SECTION_DEBUG` / `MOON_DEBUG_SAMPLERS` 等环境开关，支持无鼠标复现与 A/B 截图。
+  `MOON_DEBUG_SAMPLERS=1` 打印每个采样器槽实际拿到的东西（材质贴图 / 白色回退 / 扁平法线回退 / 黑色 cube），
+  一个 shader 一个槽只打一行——"贴图设了却没生效"和"贴图根本没设"是两种完全不同的原因，这行日志直接分开它们。
 
 ---
 
@@ -175,9 +177,13 @@
 已落地的部分见 2.1 的表（离线变体、材质 DSL、描述符式绑定、参数元数据）。剩余：
 
 - **`constants` / `variables` / `outputs`(MRT)**：MoonMatc 尚不支持，Filament 的 matc 有；
+- **编译期特化的消费面**：`MATERIAL_HAS_*` 的生成机制已经有了（2026-10-24），`GeomertySurface`（CAD）与
+  `FilamentPBR` / `GeomertySurface` 已经迁到 `shadingModel : lit`；剩下的运行期 bool 只有
+  `u_UseNormalMap`（缺"扁平法线"回退纹理）和冻结的对照材质 `FilamentPBR` 里那一组
+  `u_HasXxxMap`/`u_SpecularAA`。详见 `docs/FilamentMaterialShaderGap.md` 批次 A3；
 - **后处理链与 PBR/IBL 的残余差异**：见 `docs/FilamentAlignmentTODO.md`；
-- **shadowing**：`SHADOWING` 变体目前无使用方，`ShadowRenderPass` / `ShadowRenderFeature` 代码在但未接入。
-  该项**暂不排期**（按用户决定先不做阴影）。
+- **shadowing**：`SHADOWING` 变体位已有逐 draw 选择，但 `ShadowRenderPass` / `ShadowRenderFeature`
+  还没接进 pass 链。该项**暂不排期**（按用户决定先不做阴影）。
 
 **验收标准**
 

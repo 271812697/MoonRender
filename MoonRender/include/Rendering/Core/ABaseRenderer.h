@@ -121,12 +121,26 @@ namespace Rendering::Core
 		/** The view's split-sum DFG LUT: global, bound for every material that declares
 		 * _BRDFLut (see Material::UploadParameterBlock). Set by CompositeRenderer each frame. */
 		void SetBrdfLut(Rendering::HAL::Texture* p_lut) { m_brdfLut = p_lut; }
+		/** The view's environment (filament's IndirectLight): the irradiance cube (diffuse) and
+		 * the prefiltered cube (specular). Bound per draw like the DFG LUT, so a material
+		 * instance created before the sky pass baked them still samples the view's environment
+		 * instead of the empty black cube. */
+		void SetEnvironmentTextures(Rendering::HAL::Texture* p_irradianceCube, Rendering::HAL::Texture* p_prefilterCube)
+		{
+			m_irradianceCube = p_irradianceCube;
+			m_prefilterCube = p_prefilterCube;
+		}
 	protected:
 		Data::FrameDescriptor m_frameDescriptor;
 		Context::Driver& m_driver;
 		Rendering::HAL::Texture m_emptyTexture2D;
 		Rendering::HAL::Texture m_emptyTextureCube;
+		/** The neutral tangent-space normal (0.5, 0.5, 1.0), bound for a sampler declared
+		 * `fallback : flatNormal` when the material instance has no map in that slot. */
+		Rendering::HAL::Texture m_flatNormalTexture;
 		Rendering::HAL::Texture* m_brdfLut = nullptr;
+		Rendering::HAL::Texture* m_irradianceCube = nullptr;
+		Rendering::HAL::Texture* m_prefilterCube = nullptr;
 		
 		Rendering::Data::PipelineState m_basePipelineState;
 		bool m_isDrawing;
