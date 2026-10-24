@@ -49,7 +49,7 @@ namespace Core::Rendering
 		* @param p_reflectionProbe (if set to nullopt, empty probe data will be sent)
 		*/
 		void SendProbeData(
-			::Rendering::Data::Material& p_material,
+			::Rendering::Data::MaterialInstance& p_material,
 			Tools::Utils::OptRef<const Core::ECS::Components::CReflectionProbe> p_reflectionProbe
 		);
 

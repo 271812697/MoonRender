@@ -1,10 +1,14 @@
-﻿#pragma once
+#pragma once
 #include <optional>
+#include <type_traits>
 namespace Tools::Utils
 {
 	/**
 	* Wrapper for std::optional<std::reference_wrapper<T>> with some utility functions
 	*/
+    template <typename T>
+    class OptRef;
+
     template <typename T>
     class OptRef
     {
@@ -15,6 +19,24 @@ namespace Tools::Utils
         OptRef(T* ptr) { if (ptr) { m_storage(std::ref(*ptr)); }}
         OptRef(std::nullopt_t) : m_storage() {}
         OptRef(const OptRef& other) : m_storage(other.m_storage) {}
+
+        template <typename U>
+        friend class OptRef;
+
+        /** An OptRef to a derived type converts to one on its base: a Drawable holds a
+         * MaterialInstance, and a Material (the definition, which is its own default instance)
+         * has to be assignable to it without a cast at every call site. */
+        template <typename U>
+            requires std::is_base_of_v<T, U> && std::is_convertible_v<U*, T*>
+        OptRef(const OptRef<U>& other) : m_storage(other.m_storage) {}
+
+        template <typename U>
+            requires std::is_base_of_v<T, U> && std::is_convertible_v<U*, T*>
+        OptRef& operator=(const OptRef<U>& other)
+        {
+            m_storage = other.m_storage;
+            return *this;
+        }
 
         OptRef& operator=(const OptRef& other)
         {

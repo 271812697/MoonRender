@@ -1037,6 +1037,11 @@ bool Rendering::Data::Material::HasShader() const
 	return m_shader != nullptr;
 }
 
+bool Rendering::Data::MaterialInstance::HasPass(const std::string& p_pass) const
+{
+	const auto* shader = ShaderOf();
+	return shader != nullptr && shader->GetPasses().contains(p_pass);
+}
 bool Rendering::Data::MaterialInstance::IsValid() const
 {
 	return ShaderOf() != nullptr;

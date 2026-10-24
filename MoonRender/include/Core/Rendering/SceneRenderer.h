@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <map>
 #include <cstdint>
 #include <Rendering/Core/CompositeRenderer.h>
@@ -69,8 +69,8 @@ namespace Core::Rendering
 		{
 			Core::SceneSystem::Scene& scene;
 			Tools::Utils::OptRef<const ::Rendering::Data::Frustum> frustumOverride;
-			Tools::Utils::OptRef<::Rendering::Data::Material> overrideMaterial;
-			Tools::Utils::OptRef<::Rendering::Data::Material> fallbackMaterial;
+			Tools::Utils::OptRef<::Rendering::Data::MaterialInstance> overrideMaterial;
+			Tools::Utils::OptRef<::Rendering::Data::MaterialInstance> fallbackMaterial;
 		};
 
 		struct SceneParsingInput
@@ -120,8 +120,8 @@ namespace Core::Rendering
 		{
 			const ::Rendering::Entities::Camera& camera;
 			Tools::Utils::OptRef<const ::Rendering::Data::Frustum> frustumOverride;
-			Tools::Utils::OptRef<::Rendering::Data::Material> overrideMaterial;
-			Tools::Utils::OptRef<::Rendering::Data::Material> fallbackMaterial;
+			Tools::Utils::OptRef<::Rendering::Data::MaterialInstance> overrideMaterial;
+			Tools::Utils::OptRef<::Rendering::Data::MaterialInstance> fallbackMaterial;
 			EVisibilityFlags requiredVisibilityFlags = EVisibilityFlags::NONE;
 			bool includeUI = true; // Whether to include UI drawables in the filtering
 			bool includeTransparent = true; // Whether to include transparent drawables in the filtering

@@ -75,6 +75,12 @@ namespace Rendering::Data
 		/** The definition this instance overrides. Null for a Material (it is its own definition). */
 		Material* Definition() const { return m_definition; }
 
+		/** The definition's shader and feature set: what a variant is selected from. A drawable
+		 * holds an instance now, so the renderer asks these two questions through this pair
+		 * instead of through Material. */
+		Rendering::Resources::Shader* Shader() const { return ShaderOf(); }
+		const Data::FeatureSet& Features() const { return FeaturesOf(); }
+
 		/** The program for a pass and a feature set, resolved through the definition's shader. */
 		Tools::Utils::OptRef<Rendering::HAL::ShaderProgram> GetVariant(
 			std::optional<const std::string_view> p_pass = std::nullopt,
@@ -157,6 +163,10 @@ namespace Rendering::Data
 		bool SupportsOrthographic() const { return m_supportOrthographic; }
 		bool SupportsPerspective() const { return m_supportPerspective; }
 		bool SupportsProjectionMode(Rendering::Settings::EProjectionMode p_mode) const;
+
+		/** Whether the definition's shader was compiled with this pass (the picking / shadow
+		 * passes ask this through the instance the drawable holds). */
+		bool HasPass(const std::string& p_pass) const;
 
 		const Rendering::Data::StateMask GenerateStateMask() const;
 

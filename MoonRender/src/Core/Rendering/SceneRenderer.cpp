@@ -1070,10 +1070,10 @@ void Core::Rendering::SceneRenderer::UpdateParsedDrawables(Core::SceneSystem::Sc
 	for (auto& drawable : m_parsedDrawables.drawables)
 	{
 		if (!drawable.material) { continue; }
-		const bool keyed = drawable.material->GetShader() != nullptr
-			&& drawable.material->GetShader()->UsesVariantKeys();
+		const bool keyed = drawable.material->Shader() != nullptr
+			&& drawable.material->Shader()->UsesVariantKeys();
 		if (!keyed && m_excludedFeatures.empty()) { continue; }
-		::Rendering::Data::FeatureSet features = drawable.material->GetFeatures();
+		::Rendering::Data::FeatureSet features = drawable.material->Features();
 		for (const std::string& excluded : m_excludedFeatures) { features.erase(excluded); }
 		if (keyed) { features.insert(variantFeatures.begin(), variantFeatures.end()); }
 		drawable.featureSetOverride = std::move(features);
