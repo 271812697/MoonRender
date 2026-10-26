@@ -148,6 +148,11 @@ namespace Core::Rendering
 		 * sits inside the fade range, and the shader dithers the surface into a dot pattern. */
 		void SetExcludedFeatures(::Rendering::Data::FeatureSet p_features);
 
+		/** Drops the cached drawables so the next frame re-reads the scene. What a material swap
+		 * needs: the parse result (and the hash that guards it) was built against the old one, and
+		 * nothing in the scene graph changes when a component's material list is rewritten. */
+		void InvalidateParsedDrawables();
+
 		SceneDrawablesDescriptor ParseScene(
 			const SceneParsingInput& p_input
 		);

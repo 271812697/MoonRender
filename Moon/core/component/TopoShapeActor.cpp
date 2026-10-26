@@ -1,4 +1,5 @@
-#include "core/component/TopoShapeActor.h"
+﻿#include "core/component/TopoShapeActor.h"
+#include <iostream>
 #include "renderer/SceneView.h"
 #include <Core/ResourceManagement/MaterialManager.h>
 #include <Core/ECS/Components/CMaterialRenderer.h>
@@ -14,6 +15,24 @@
 #include <Core/Global/ServiceLocator.h>
 #include <Core/SceneSystem/Scene.h>
 #include "TopoShape.h"
+#include <Rendering/Data/Material.h>
+#include "core/log.h"
+
+	namespace
+	{
+		/** The CAD materials are assets under :Materials/; the manager owns them and loads one copy
+		 * per file, so a shape looks them up instead of building its own. */
+		::Core::Resources::Material* LoadCadMaterial(const std::string& p_key)
+		{
+			auto* material = Core::Global::ServiceLocator::Get<Core::ResourceManagement::MaterialManager>()
+				.GetResource(p_key, true);
+			if (material == nullptr)
+			{
+				CORE_WARN("[Material] the CAD material asset {} is missing", p_key);
+			}
+			return material;
+		}
+	}
 
 namespace MOON {
 
@@ -61,85 +80,33 @@ namespace MOON {
 		vertexChild.GetComponent<Core::ECS::Components::CModelRenderer>()->SetModel(vertexModel);
 		GetService(Core::ResourceManagement::ModelManager).RegisterResource(p_name + std::string("_vertexModel") + std::to_string(this->GetID()), vertexModel);
 
-		Core::Resources::Material* lineMat = new Core::Resources::Material();
-		Core::Global::ServiceLocator::Get<Core::ResourceManagement::MaterialManager>().RegisterResource(p_name + std::to_string(this->GetID()) + "_linemat",lineMat);
-		Core::Resources::Material* vertexMat = new Core::Resources::Material();
-		Core::Global::ServiceLocator::Get<Core::ResourceManagement::MaterialManager>().RegisterResource(p_name + std::to_string(this->GetID()) + "_vertexmat", vertexMat);
-		Core::Resources::Material* faceMat = new Core::Resources::Material();
-		Core::Global::ServiceLocator::Get<Core::ResourceManagement::MaterialManager>().RegisterResource(p_name + std::to_string(this->GetID()) + "_facemat", faceMat);
-		Core::Resources::Material* faceTransparentMat = new Core::Resources::Material();
-		Core::Global::ServiceLocator::Get<Core::ResourceManagement::MaterialManager>().RegisterResource(p_name + std::to_string(this->GetID()) + "_faceTransparentMat", faceTransparentMat);
-		faceChild.GetComponent<Core::ECS::Components::CMaterialRenderer>()->SetMaterialAtIndex(0, *faceMat);
-		faceChild.GetComponent<Core::ECS::Components::CMaterialRenderer>()->SetMaterialAtIndex(1, *faceTransparentMat);		
-		edgeChild.GetComponent<Core::ECS::Components::CMaterialRenderer>()->SetMaterialAtIndex(0, *lineMat);
-		vertexChild.GetComponent<Core::ECS::Components::CMaterialRenderer>()->SetMaterialAtIndex(0, *vertexMat);
-		faceChild.GetComponent<Core::ECS::Components::CMaterialRenderer>()->UpdateMaterialList();
-		edgeChild.GetComponent<Core::ECS::Components::CMaterialRenderer>()->UpdateMaterialList();
-		vertexChild.GetComponent<Core::ECS::Components::CMaterialRenderer>()->UpdateMaterialList();
-		{
-			auto& renderer=GetSceneView.GetRenderer();;
-			{
-				faceMat->SetBackfaceCulling(false);
-				faceMat->SetCastShadows(false);
-				faceMat->SetReceiveShadows(false);
-				// Push the faces back in depth (glPolygonOffset, slope scaled) so
-				// edge lines that are coplanar with / close to their faces (concave
-				// folds, small dihedral angles) stay visible on top. Note: with
-				// the reversed-Z depth range the driver applies a NEGATIVE offset
-				// (see Driver::SetPipelineState), keep the signs consistent.
-				faceMat->SetPolygonOffsetFill(true);
-				//tempMat->SetBlendable(true);
-				//tempMat->SetDepthWriting(false);
-				faceMat->SetShader(GetShaderService[":Shaders\\GeomertySurface.shader"]);
-				// The CAD face starts from the same base colour as FilamentPBR / Qt-Filament's
-				// MaterialPreview (#b8b8b8); a per-shape colour can still override it later.
-				faceMat->SetProperty("u_Albedo", Maths::FVector4(0.7215686f, 0.7215686f, 0.7215686f, 1.0f));
-				// Everything else stays at the shader's declared defaults.
-				faceMat->TrySetProperty("_IrradianceCube", renderer.GetIrradianceCube());
-				faceMat->TrySetProperty("_PrefilterCube", renderer.GetPrefilterCube());
-				faceMat->TrySetProperty("_BRDFLut", renderer.GetBrdfTexture());
-				faceTransparentMat->SetBackfaceCulling(false);
-				faceTransparentMat->SetCastShadows(false);
-				faceTransparentMat->SetReceiveShadows(false);
-				//tempMat->SetBlendable(true);
-				//tempMat->SetDepthWriting(false);
-				faceTransparentMat->SetShader(GetShaderService[":Shaders\\GeomertySurface.shader"]);
-				faceTransparentMat->SetProperty("u_Albedo", Maths::FVector4(1, 0, 0, 0.5));
-				// Everything else stays at the shader's declared defaults.
+		// The four CAD materials are assets (CADFace / CADFaceTransparent / CADLine / CADPoint
+		// under :Materials/), so the resource manager already holds the one instance of each that
+		// the document shares: every shape just draws with its own instance of them.
+		auto& faceRenderer = *faceChild.GetComponent<Core::ECS::Components::CMaterialRenderer>();
+		auto& edgeRenderer = *edgeChild.GetComponent<Core::ECS::Components::CMaterialRenderer>();
+		auto& vertexRenderer = *vertexChild.GetComponent<Core::ECS::Components::CMaterialRenderer>();
 
-				faceTransparentMat->TrySetProperty("_IrradianceCube", renderer.GetIrradianceCube());
-				faceTransparentMat->TrySetProperty("_PrefilterCube", renderer.GetPrefilterCube());
-				faceTransparentMat->TrySetProperty("_BRDFLut", renderer.GetBrdfTexture());
-				faceTransparentMat->SetTransparent(true);
-				faceTransparentMat->SetDepthWriting(true);
-			}
-			{
-				lineMat->SetShader(Core::Global::ServiceLocator::Get<Editor::Core::Context>().shaderManager[":Shaders\\GeomertyLine.shader"]);
-				lineMat->SetBackfaceCulling(false);
-				lineMat->SetCastShadows(false);
-				lineMat->SetReceiveShadows(false);
-				// Edge lines are coplanar with their faces: never write depth so
-				// they don't z-fight with the faces (the line pass uses LEQUAL).
-				lineMat->SetDepthWriting(false);
-				lineMat->SetLineWidth(1.5);
-				lineMat->AddFeature("CLIP_PLANE");	
-			}
-			{
-				// The vertices are point sprites: one dot per corner of the shape,
-				// drawn with the edges (same pass, same depth handling) so a dot sits
-				// on the corner it belongs to instead of z-fighting with the faces
-				// that meet there. Both the colour and the size are material
-				// properties: they are what the material panel of this actor edits.
-				vertexMat->SetShader(Core::Global::ServiceLocator::Get<Editor::Core::Context>().shaderManager[":Shaders\\GeomertyPoint.shader"]);
-				vertexMat->SetBackfaceCulling(false);
-				vertexMat->SetCastShadows(false);
-				vertexMat->SetReceiveShadows(false);
-				vertexMat->SetDepthWriting(false);
-				vertexMat->AddFeature("CLIP_PLANE");
-				vertexMat->SetProperty("color", Maths::FVector4(1, 0, 0, 1));
-				vertexMat->SetProperty("u_PointSize", 8.0f);
-			}
+		if (auto* faceMaterial = LoadCadMaterial(":Materials/CADFace.mat"))
+		{
+			faceRenderer.SetMaterialInstanceAtIndex(0, faceMaterial->CreateInstance());
 		}
+		if (auto* transparentMaterial = LoadCadMaterial(":Materials/CADFaceTransparent.mat"))
+		{
+			faceRenderer.SetMaterialInstanceAtIndex(1, transparentMaterial->CreateInstance());
+		}
+		if (auto* lineMaterial = LoadCadMaterial(":Materials/CADLine.mat"))
+		{
+			edgeRenderer.SetMaterialInstanceAtIndex(0, lineMaterial->CreateInstance());
+		}
+		if (auto* pointMaterial = LoadCadMaterial(":Materials/CADPoint.mat"))
+		{
+			vertexRenderer.SetMaterialInstanceAtIndex(0, pointMaterial->CreateInstance());
+		}
+
+		faceRenderer.UpdateMaterialList();
+		edgeRenderer.UpdateMaterialList();
+		vertexRenderer.UpdateMaterialList();
 		// The colour the shape carries goes on the material now that there is one: the
 		// component is made before these render anchors are, so a colour that arrived
 		// earlier (a feature read out of a document) had nowhere to go until here.

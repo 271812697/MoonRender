@@ -38,29 +38,16 @@ namespace Rendering::Data
 		 * everything it does not override itself. */
 		std::unique_ptr<MaterialInstance> CreateInstance();
 
-		void SetFeatures(const Data::FeatureSet& p_features);
-		void AddFeature(const std::string& p_feature);
-		void RemoveFeature(const std::string& p_feature);
-		void EnableFeature(const std::string& feature, bool flag);
-		bool HasFeature(const std::string& p_feature) const;
-		bool SupportsFeature(const std::string& p_feature) const;
-		bool HasPass(const std::string& p_pass) const;
-		const Data::FeatureSet& GetFeatures() const { return m_features; }
-
-		void LateUpdateTexture(const std::string& p_name, const std::string& p_path);
-
 		/** Applies the shader's material block (blending / culling / depth writing / the support
 		 * flags) to this definition. The Set* calls that follow are the definition's own choice. */
 		void ResetStateToShader();
 
 	protected:
 		Rendering::Resources::Shader* ShaderOf() const override { return m_shader; }
-		const Data::FeatureSet& FeaturesOf() const override { return m_features; }
 
 		// The engine-side material asset (Core::Resources::Material) derives from this class and
 		// still writes the shader / feature set directly, so they stay protected rather than
 		// private - that is the split's boundary: the definition's own data.
 		Rendering::Resources::Shader* m_shader = nullptr;
-		Data::FeatureSet m_features;
 	};
 }

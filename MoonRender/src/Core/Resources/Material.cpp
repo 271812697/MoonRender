@@ -1,4 +1,4 @@
-﻿#include <sstream>
+#include <sstream>
 #include <tinyxml2.h>
 
 #include <Core/Resources/Material.h>
@@ -42,25 +42,29 @@ void Core::Resources::Material::OnSerialize(tinyxml2::XMLDocument& p_doc, tinyxm
 	tinyxml2::XMLNode* settingsNode = p_doc.NewElement("settings");
 	p_node->InsertEndChild(settingsNode);
 
-	Serializer::SerializeBoolean(p_doc, settingsNode, "support_orthographic", m_supportOrthographic);
-	Serializer::SerializeBoolean(p_doc, settingsNode, "support_perspective", m_supportPerspective);
-	Serializer::SerializeBoolean(p_doc, settingsNode, "blendable", m_blendable);
-	Serializer::SerializeString(p_doc, settingsNode, "blending", BlendModeName(m_blendMode));
+	Serializer::SerializeBoolean(p_doc, settingsNode, "support_orthographic", SupportsOrthographic());
+	Serializer::SerializeBoolean(p_doc, settingsNode, "support_perspective", SupportsPerspective());
+	Serializer::SerializeBoolean(p_doc, settingsNode, "blendable", IsBlendable());
+	Serializer::SerializeString(p_doc, settingsNode, "blending", BlendModeName(GetBlendMode()));
 	// Queue membership, not just a blend factor: the depth-peel pass draws these drawables, so
 	// the instance has to remember whether it belongs there.
-	Serializer::SerializeBoolean(p_doc, settingsNode, "transparent", m_transparent);
-	Serializer::SerializeBoolean(p_doc, settingsNode, "backface_culling", m_backfaceCulling);
-	Serializer::SerializeBoolean(p_doc, settingsNode, "frontface_culling", m_frontfaceCulling);
-	Serializer::SerializeBoolean(p_doc, settingsNode, "depth_test", m_depthTest);
-	Serializer::SerializeBoolean(p_doc, settingsNode, "depth_writing", m_depthWriting);
-	Serializer::SerializeBoolean(p_doc, settingsNode, "color_writing", m_colorWriting);
-	Serializer::SerializeBoolean(p_doc, settingsNode, "cast_shadows", m_castShadows);
-	Serializer::SerializeBoolean(p_doc, settingsNode, "receive_shadows", m_receiveShadows);
-	Serializer::SerializeBoolean(p_doc, settingsNode, "captured_by_reflection_probes", m_capturedByReflectionProbes);
-	Serializer::SerializeBoolean(p_doc, settingsNode, "receive_reflections", m_receiveReflections);
-	Serializer::SerializeBoolean(p_doc, settingsNode, "user_interface", m_userInterface);
-	Serializer::SerializeInt(p_doc, settingsNode, "gpu_instances", m_gpuInstances);
-	Serializer::SerializeInt(p_doc, settingsNode, "draw_order", m_drawOrder);
+	Serializer::SerializeBoolean(p_doc, settingsNode, "transparent", IsTransparent());
+	Serializer::SerializeBoolean(p_doc, settingsNode, "backface_culling", HasBackfaceCulling());
+	Serializer::SerializeBoolean(p_doc, settingsNode, "frontface_culling", HasFrontfaceCulling());
+	Serializer::SerializeBoolean(p_doc, settingsNode, "depth_test", HasDepthTest());
+	Serializer::SerializeBoolean(p_doc, settingsNode, "depth_writing", HasDepthWriting());
+	Serializer::SerializeBoolean(p_doc, settingsNode, "color_writing", HasColorWriting());
+	Serializer::SerializeBoolean(p_doc, settingsNode, "cast_shadows", IsShadowCaster());
+	Serializer::SerializeBoolean(p_doc, settingsNode, "receive_shadows", IsShadowReceiver());
+	Serializer::SerializeBoolean(p_doc, settingsNode, "captured_by_reflection_probes", IsCapturedByReflectionProbes());
+	Serializer::SerializeBoolean(p_doc, settingsNode, "receive_reflections", IsReflectionReceiver());
+	Serializer::SerializeBoolean(p_doc, settingsNode, "user_interface", IsUserInterface());
+	Serializer::SerializeInt(p_doc, settingsNode, "gpu_instances", GetGPUInstances());
+	Serializer::SerializeInt(p_doc, settingsNode, "draw_order", GetDrawOrder());
+	// The two a shape's material needs but a .mat could not express: the CAD faces push
+	// themselves back in depth (polygon offset, slope scaled) and the CAD edges are wide lines.
+	Serializer::SerializeBoolean(p_doc, settingsNode, "polygon_offset", HasPolygonOffsetFill());
+	Serializer::SerializeFloat(p_doc, settingsNode, "line_width", GetLineWidth());
 
 	// Create "Uniforms" (Every uniform will be attached to "Uniforms")
 	tinyxml2::XMLNode* uniformsNode = p_doc.NewElement("uniforms");
@@ -187,9 +191,25 @@ void Core::Resources::Material::OnDeserialize(tinyxml2::XMLDocument& p_doc, tiny
 	
 	if (settingsNode)
 	{
-		Serializer::DeserializeBoolean(p_doc, settingsNode, "support_orthographic", m_supportOrthographic);
-		Serializer::DeserializeBoolean(p_doc, settingsNode, "support_perspective", m_supportPerspective);
-		Serializer::DeserializeBoolean(p_doc, settingsNode, "blendable", m_blendable);
+		const auto readBool = [&](const char* p_name, bool p_current, auto&& p_apply)
+		{
+			bool value = p_current;
+			Serializer::DeserializeBoolean(p_doc, settingsNode, p_name, value);
+			p_apply(value);
+		};
+		const auto readInt = [&](const char* p_name, int p_current, auto&& p_apply)
+		{
+			int value = p_current;
+			Serializer::DeserializeInt(p_doc, settingsNode, p_name, value);
+			p_apply(value);
+		};
+
+		// The values are read through the getters (which fall back to the shader's material block)
+		// and written back through the setters, so a field the file omits keeps the definition's
+		// value instead of being reset to zero.
+		readBool("support_orthographic", SupportsOrthographic(), [this](bool v) { SetOrthographicSupport(v); });
+		readBool("support_perspective", SupportsPerspective(), [this](bool v) { SetPerspectiveSupport(v); });
+		readBool("blendable", IsBlendable(), [this](bool v) { SetBlendable(v); });
 		{
 			// Newer files carry the blend mode; older ones only had the blendable flag, which
 			// already means the standard alpha blend.
@@ -201,19 +221,25 @@ void Core::Resources::Material::OnDeserialize(tinyxml2::XMLDocument& p_doc, tiny
 			}
 		}
 		// Explicit queue membership (absent in older files, which is the non-peeled default).
-		Serializer::DeserializeBoolean(p_doc, settingsNode, "transparent", m_transparent);
-		Serializer::DeserializeBoolean(p_doc, settingsNode, "backface_culling", m_backfaceCulling);
-		Serializer::DeserializeBoolean(p_doc, settingsNode, "frontface_culling", m_frontfaceCulling);
-		Serializer::DeserializeBoolean(p_doc, settingsNode, "depth_test", m_depthTest);
-		Serializer::DeserializeBoolean(p_doc, settingsNode, "depth_writing", m_depthWriting);
-		Serializer::DeserializeBoolean(p_doc, settingsNode, "color_writing", m_colorWriting);
-		Serializer::DeserializeBoolean(p_doc, settingsNode, "cast_shadows", m_castShadows);
-		Serializer::DeserializeBoolean(p_doc, settingsNode, "receive_shadows", m_receiveShadows);
-		Serializer::DeserializeBoolean(p_doc, settingsNode, "captured_by_reflection_probes", m_capturedByReflectionProbes);
-		Serializer::DeserializeBoolean(p_doc, settingsNode, "receive_reflections", m_receiveReflections);
-		Serializer::DeserializeBoolean(p_doc, settingsNode, "user_interface", m_userInterface);
-		Serializer::DeserializeInt(p_doc, settingsNode, "gpu_instances", m_gpuInstances);
-		Serializer::DeserializeInt(p_doc, settingsNode, "draw_order", m_drawOrder);
+		readBool("transparent", IsTransparent(), [this](bool v) { SetTransparent(v); });
+		readBool("backface_culling", HasBackfaceCulling(), [this](bool v) { SetBackfaceCulling(v); });
+		readBool("frontface_culling", HasFrontfaceCulling(), [this](bool v) { SetFrontfaceCulling(v); });
+		readBool("depth_test", HasDepthTest(), [this](bool v) { SetDepthTest(v); });
+		readBool("depth_writing", HasDepthWriting(), [this](bool v) { SetDepthWriting(v); });
+		readBool("color_writing", HasColorWriting(), [this](bool v) { SetColorWriting(v); });
+		readBool("cast_shadows", IsShadowCaster(), [this](bool v) { SetCastShadows(v); });
+		readBool("receive_shadows", IsShadowReceiver(), [this](bool v) { SetReceiveShadows(v); });
+		readBool("captured_by_reflection_probes", IsCapturedByReflectionProbes(), [this](bool v) { SetCapturedByReflectionProbes(v); });
+		readBool("receive_reflections", IsReflectionReceiver(), [this](bool v) { SetReceiveReflections(v); });
+		readBool("user_interface", IsUserInterface(), [this](bool v) { SetUserInterface(v); });
+		readInt("gpu_instances", GetGPUInstances(), [this](int v) { SetGPUInstances(v); });
+		readInt("draw_order", GetDrawOrder(), [this](int v) { SetDrawOrder(v); });
+		readBool("polygon_offset", HasPolygonOffsetFill(), [this](bool v) { SetPolygonOffsetFill(v); });
+		{
+			float value = GetLineWidth();
+			Serializer::DeserializeFloat(p_doc, settingsNode, "line_width", value);
+			SetLineWidth(value);
+		}
 	}
 
 	if (shader)

@@ -1,8 +1,8 @@
-﻿#pragma once
+#pragma once
 #include <array>
 #include <Core/ECS/Components/AComponent.h>
 #include <Core/Rendering/EVisibilityFlags.h>
-#include <Core/Resources/Material.h>
+#include <Rendering/Data/MaterialInstance.h>
 #include <Rendering/Resources/Mesh.h>
 constexpr uint8_t kMaxMaterialCount = 0xFF;
 namespace Core::ECS { class Actor; }
@@ -14,7 +14,9 @@ namespace Core::ECS::Components
 	class CMaterialRenderer : public AComponent
 	{
 	public:
-		using MaterialList = std::array<Core::Resources::Material*, kMaxMaterialCount>;
+		/** What a drawable draws with: an instance, not the material definition. A definition is
+		 * shared (one per shader), an instance carries the per-actor parameter overrides. */
+		using MaterialList = std::array<::Rendering::Data::MaterialInstance*, kMaxMaterialCount>;
 
 		/**
 		* Constructor
@@ -31,20 +33,29 @@ namespace Core::ECS::Components
 		* Fill the material renderer with the given material
 		* @param p_material
 		*/
-		void FillWithMaterial(Core::Resources::Material& p_material);
+		void FillWithMaterial(::Rendering::Data::MaterialInstance& p_material);
 
 		/**
 		* Defines the material to use for the given index
 		* @param p_index
 		* @param p_material
 		*/
-		void SetMaterialAtIndex(uint8_t p_index, Core::Resources::Material& p_material);
+		void SetMaterialAtIndex(uint8_t p_index, ::Rendering::Data::MaterialInstance& p_material);
+
+		/** Takes an instance the component owns and draws with at p_index. What a material drop onto
+		 * an actor does: the shape must not write its per-shape values (the domain colour table, the
+		 * pick colour) into the shared material asset, so it draws through an instance of it. */
+		void SetMaterialInstanceAtIndex(uint8_t p_index, std::unique_ptr<::Rendering::Data::MaterialInstance> p_instance);
+
+		/** Gives the same instance to every slot the renderer has: a drop names one material for the
+		 * whole actor, and a mesh may split its sub-ranges over several material indices. */
+		void FillWithMaterialInstance(std::unique_ptr<::Rendering::Data::MaterialInstance> p_instance);
 
 		/**
 		* Returns the material to use at index
 		* @param p_index
 		*/
-		Core::Resources::Material* GetMaterialAtIndex(uint8_t p_index);
+		::Rendering::Data::MaterialInstance* GetMaterialAtIndex(uint8_t p_index);
 
 		/**
 		* Remove the material at index
@@ -56,7 +67,7 @@ namespace Core::ECS::Components
 		* Remove the material by instance
 		* @param p_instance
 		*/
-		void RemoveMaterialByInstance(Core::Resources::Material& p_instance);
+		void RemoveMaterialByInstance(::Rendering::Data::MaterialInstance& p_instance);
 
 		/**
 		* Remove every materials
@@ -132,6 +143,8 @@ namespace Core::ECS::Components
 
 	private:
 		MaterialList m_materials;
+		/** The instances created for this renderer (see SetMaterialInstanceAtIndex). */
+		std::vector<std::unique_ptr<::Rendering::Data::MaterialInstance>> m_ownedInstances;
 
 		std::array<std::string, kMaxMaterialCount> m_materialNames;
 		Maths::FMatrix4 m_userMatrix;

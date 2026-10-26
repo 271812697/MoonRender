@@ -1,5 +1,7 @@
 #include "MaterialThumbnailRenderer.h"
 
+#include <QDateTime>
+#include <QDir>
 #include <QFileInfo>
 
 #include <cstdint>
@@ -89,6 +91,9 @@ namespace MOON
 			m_view->SetPreviewMesh(Editor::Panels::EPreviewMesh::SPHERE);
 		}
 
+		// The CAD materials read a per-face domain id and sample a domain colour table with it: on
+		// the sphere that path reads garbage and the thumbnail comes out black, so they are shown
+		// on the CAD part instead.
 		// The material designer keys its list with the serializer's resource path.
 		const std::string key = (":Materials/" + QFileInfo(p_materialPath).fileName()).toStdString();
 		auto* material = Core::Global::ServiceLocator::Get<Core::ResourceManagement::MaterialManager>()
@@ -99,6 +104,16 @@ namespace MOON
 		}
 
 		m_view->Resize(p_size, p_size);
+		const bool isCadMaterial = [material] {
+			auto* shader = material->GetShader();
+			if (shader == nullptr) { return false; }
+			for (const auto& parameter : shader->GetParameters())
+			{
+				if (parameter.name == "domainColorTex") { return true; }
+			}
+			return false;
+		}();
+		m_view->SetPreviewMesh(isCadMaterial ? Editor::Panels::EPreviewMesh::CAD : Editor::Panels::EPreviewMesh::SPHERE);
 		m_view->SetMaterial(material);
 		m_view->ResetCameraTransform();
 		m_view->Update(0.016f);
@@ -170,4 +185,35 @@ namespace MOON
 		}
 		return scaled;
 	}
+	namespace
+	{
+		/** One table for the whole editor: the content browser fills it, the property panel reads it.
+		 * Deliberately never freed - it holds nothing but images, and a QPixmap table destroyed
+		 * after the GUI is gone is a shutdown hazard. */
+		QHash<QString, QPixmap>& ThumbnailTable()
+		{
+			static QHash<QString, QPixmap>* table = new QHash<QString, QPixmap>();
+			return *table;
+		}
+	}
+
+	QString MaterialThumbnailKey(const QString& p_materialPath)
+	{
+		// Cleaned, so the two callers agree whatever separators they built the path with: the
+		// browser appends "/Moon/Data/Engine", std::filesystem on Windows writes backslashes.
+		const QFileInfo info(p_materialPath);
+		return QDir::cleanPath(info.absoluteFilePath()) + QLatin1Char('|')
+			+ QString::number(info.lastModified().toMSecsSinceEpoch());
+	}
+
+	QPixmap CachedMaterialThumbnail(const QString& p_materialPath)
+	{
+		return ThumbnailTable().value(MaterialThumbnailKey(p_materialPath));
+	}
+
+	void StoreMaterialThumbnail(const QString& p_materialPath, const QPixmap& p_image)
+	{
+		ThumbnailTable().insert(MaterialThumbnailKey(p_materialPath), p_image);
+	}
+
 }

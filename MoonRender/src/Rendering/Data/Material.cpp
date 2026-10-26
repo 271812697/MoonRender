@@ -275,13 +275,37 @@ namespace
 Rendering::Data::MaterialInstance::MaterialInstance(Material& p_definition)
 	: m_definition(&p_definition)
 {
-	// An instance answers every question the definition does, with its own values on top. The
-	// property map is seeded from the definition so the upload loops (which iterate this map) keep
-	// working unchanged; a later change on the definition does not reach an existing instance.
-	m_properties = p_definition.Properties();
-	CopyStateFrom(p_definition);
+	// Nothing is copied: parameters and render state are both answered by the definition until
+	// this instance sets them. That is what makes a material a live template - editing it (or
+	// reloading its shader) reaches every instance that did not override the field.
+	m_seenDefinitionRevision = 0;
 }
 
+Rendering::Data::MaterialInstance::MaterialInstance()
+{
+	// The definition's own values: engine defaults, which the shader's material block then
+	// overrides in Material::ResetStateToShader. A plain instance leaves every one of these empty
+	// and inherits from its definition instead.
+	m_supportOrthographic = true;
+	m_supportPerspective = true;
+	m_userInterface = false;
+	m_blendable = false;
+	m_blendMode = Rendering::Settings::EBlendMode::BLEND_OPAQUE;
+	m_transparent = false;
+	m_backfaceCulling = true;
+	m_frontfaceCulling = false;
+	m_polygonOffsetFill = false;
+	m_depthTest = true;
+	m_depthWriting = true;
+	m_colorWriting = true;
+	m_castShadows = true;
+	m_receiveShadows = true;
+	m_capturedByReflectionProbes = true;
+	m_receiveReflections = true;
+	m_gpuInstances = 1;
+	m_drawOrder = 1000;
+	m_lineWidth = 1.0f;
+}
 Rendering::Data::MaterialInstance::~MaterialInstance()
 {
 	ReleaseParameterSlice();
@@ -290,41 +314,19 @@ Rendering::Data::MaterialInstance::~MaterialInstance()
 const Rendering::Data::MaterialProperty* Rendering::Data::MaterialInstance::FindProperty(const std::string& p_name) const
 {
 	const auto it = m_properties.find(p_name);
-	return it == m_properties.end() ? nullptr : &it->second;
+	if (it != m_properties.end())
+	{
+		return &it->second;
+	}
+
+	// Not overridden here: the definition's value is what this instance draws with. A Material
+	// overrides this member and answers from its own map, so the chain stops at the definition.
+	return m_definition != nullptr ? m_definition->FindProperty(p_name) : nullptr;
 }
 
 Rendering::Resources::Shader* Rendering::Data::MaterialInstance::ShaderOf() const
 {
 	return m_definition != nullptr ? m_definition->GetShader() : nullptr;
-}
-
-const Rendering::Data::FeatureSet& Rendering::Data::MaterialInstance::FeaturesOf() const
-{
-	static const Data::FeatureSet empty;
-	return m_definition != nullptr ? m_definition->GetFeatures() : empty;
-}
-
-void Rendering::Data::MaterialInstance::CopyStateFrom(const MaterialInstance& p_source)
-{
-	m_supportOrthographic = p_source.m_supportOrthographic;
-	m_supportPerspective = p_source.m_supportPerspective;
-	m_userInterface = p_source.m_userInterface;
-	m_blendable = p_source.m_blendable;
-	m_blendMode = p_source.m_blendMode;
-	m_transparent = p_source.m_transparent;
-	m_backfaceCulling = p_source.m_backfaceCulling;
-	m_frontfaceCulling = p_source.m_frontfaceCulling;
-	m_polygonOffsetFill = p_source.m_polygonOffsetFill;
-	m_depthTest = p_source.m_depthTest;
-	m_depthWriting = p_source.m_depthWriting;
-	m_colorWriting = p_source.m_colorWriting;
-	m_castShadows = p_source.m_castShadows;
-	m_receiveShadows = p_source.m_receiveShadows;
-	m_capturedByReflectionProbes = p_source.m_capturedByReflectionProbes;
-	m_receiveReflections = p_source.m_receiveReflections;
-	m_gpuInstances = p_source.m_gpuInstances;
-	m_drawOrder = p_source.m_drawOrder;
-	m_lineWidth = p_source.m_lineWidth;
 }
 
 std::unique_ptr<Rendering::Data::MaterialInstance> Rendering::Data::Material::CreateInstance()
@@ -414,6 +416,14 @@ Tools::Utils::OptRef<Rendering::HAL::ShaderProgram> Rendering::Data::MaterialIns
 void Rendering::Data::MaterialInstance::UploadProperties(bool uploadStableProperties, bool uploadSingleUseProperties, Rendering::HAL::Texture* p_emptyTexture2D, Rendering::HAL::Texture* p_emptyTextureCube, Rendering::HAL::Texture* p_brdfLut, Rendering::HAL::Texture* p_flatNormalTexture)
 {
 	ZoneScoped;
+
+	// Inherited values: when the definition changed since the last upload, this instance's cached
+	// signature describes stale data (the block would keep the old numbers), so invalidate it.
+	if (m_definition != nullptr && m_definition->Revision() != m_seenDefinitionRevision)
+	{
+		m_seenDefinitionRevision = m_definition->Revision();
+		InvalidatePropertySignature();
+	}
 
 	// Packaged shaders carry their parameters as one std140 block (the per-material descriptor):
 	// write the values by offset into it and bind it once, instead of resolving each name
@@ -857,6 +867,19 @@ bool Rendering::Data::MaterialInstance::ResetPropertyToDefault(const std::string
 			return false;
 		}
 
+		// On an instance, "reset" means "stop overriding": erasing the entry lets the value fall
+		// back to the definition, which is where the shader's default lives. A definition has no
+		// one to fall back to, so it writes the default into its own map.
+		if (m_definition != nullptr)
+		{
+			if (m_properties.erase(p_name) > 0)
+			{
+				++m_revision;
+				InvalidatePropertySignature();
+			}
+			return true;
+		}
+
 		if (HasProperty(p_name))
 		{
 			SetProperty(p_name, value);
@@ -874,6 +897,14 @@ bool Rendering::Data::MaterialInstance::ResetPropertyToDefault(const std::string
 void Rendering::Data::MaterialInstance::UpdateProperties()
 {
 	InvalidatePropertySignature();
+
+	// Only a definition owns the parameter values: it is the one seeded from the shader's declared
+	// initialisers. A plain instance starts empty and inherits, so seeding it here would turn the
+	// defaults into overrides and cut it off from later edits of the material.
+	if (m_definition != nullptr)
+	{
+		return;
+	}
 
 	// A shader that came out of a package knows its parameters: name, GLSL type, texture slot or
 	// not, array size, and the initialiser the material declared. Building the property set from
@@ -984,13 +1015,14 @@ void Rendering::Data::MaterialInstance::Unbind(bool p_resetBoundProgram)
 
 bool Rendering::Data::MaterialInstance::HasProperty(const std::string& p_name) const
 {
-	return m_properties.contains(p_name);
+	return FindProperty(p_name) != nullptr;
 }
 
 void Rendering::Data::MaterialInstance::SetProperty(const std::string p_name, const MaterialPropertyType& p_value, bool p_singleUse)
 {
 	m_properties[p_name].value = p_value;
 	m_properties[p_name].singleUse = p_singleUse;
+	++m_revision;
 
 	if (p_singleUse)
 	{
@@ -1002,13 +1034,14 @@ void Rendering::Data::MaterialInstance::SetProperty(const std::string p_name, co
 	}
 }
 
-void Rendering::Data::Material::LateUpdateTexture(const std::string& p_name, const std::string& p_path)
+void Rendering::Data::MaterialInstance::LateUpdateTexture(const std::string& p_name, const std::string& p_path)
 {
 	if (HasProperty(p_name)) {
 		auto& prop = m_properties[p_name];
 		if (auto texture = std::holds_alternative<Rendering::Resources::Texture*>(prop.value))
 		{
 			m_lateLoadTextures[p_name] = p_path;
+			++m_revision;
 		}
 	}
 }
@@ -1025,9 +1058,10 @@ bool Rendering::Data::MaterialInstance::TrySetProperty(const std::string& p_name
 
 Tools::Utils::OptRef<const Rendering::Data::MaterialProperty> Rendering::Data::MaterialInstance::GetProperty(const std::string p_key) const
 {
-	if (m_properties.find(p_key) != m_properties.end())
+	// Resolved through the chain: an instance sees its own override, then its definition's value.
+	if (const MaterialProperty* property = FindProperty(p_key))
 	{
-		return m_properties.at(p_key);
+		return *property;
 	}
 	return std::nullopt;
 }
@@ -1037,11 +1071,6 @@ bool Rendering::Data::Material::HasShader() const
 	return m_shader != nullptr;
 }
 
-bool Rendering::Data::MaterialInstance::HasPass(const std::string& p_pass) const
-{
-	const auto* shader = ShaderOf();
-	return shader != nullptr && shader->GetPasses().contains(p_pass);
-}
 bool Rendering::Data::MaterialInstance::IsValid() const
 {
 	return ShaderOf() != nullptr;
@@ -1068,7 +1097,7 @@ void Rendering::Data::MaterialInstance::SetBlendable(bool p_transparent)
 
 	// Keep the mode in step: the renderer derives its blend factors from it, and an alpha
 	// material that only flips "blendable" still means the standard alpha blend.
-	if (p_transparent && m_blendMode == Rendering::Settings::EBlendMode::BLEND_OPAQUE)
+	if (p_transparent && GetBlendMode() == Rendering::Settings::EBlendMode::BLEND_OPAQUE)
 	{
 		m_blendMode = Rendering::Settings::EBlendMode::BLEND_TRANSPARENT;
 	}
@@ -1149,94 +1178,129 @@ void Rendering::Data::MaterialInstance::SetGPUInstances(int p_instances)
 
 bool Rendering::Data::MaterialInstance::IsBlendable() const
 {
-	return m_blendable;
+	return m_blendable ? *m_blendable : (m_definition ? m_definition->IsBlendable() : false);
 }
 
 bool Rendering::Data::MaterialInstance::IsTransparent() const
 {
-	return m_transparent;
+	return m_transparent ? *m_transparent : (m_definition ? m_definition->IsTransparent() : false);
 }
 
 bool Rendering::Data::MaterialInstance::IsUserInterface() const
 {
-	return m_userInterface;
+	return m_userInterface ? *m_userInterface : (m_definition ? m_definition->IsUserInterface() : false);
 }
 
 bool Rendering::Data::MaterialInstance::HasBackfaceCulling() const
 {
-	return m_backfaceCulling;
+	return m_backfaceCulling ? *m_backfaceCulling : (m_definition ? m_definition->HasBackfaceCulling() : true);
 }
 
 bool Rendering::Data::MaterialInstance::HasFrontfaceCulling() const
 {
-	return m_frontfaceCulling;
+	return m_frontfaceCulling ? *m_frontfaceCulling : (m_definition ? m_definition->HasFrontfaceCulling() : false);
 }
 
 bool Rendering::Data::MaterialInstance::HasDepthTest() const
 {
-	return m_depthTest;
+	return m_depthTest ? *m_depthTest : (m_definition ? m_definition->HasDepthTest() : true);
 }
 
 bool Rendering::Data::MaterialInstance::HasDepthWriting() const
 {
-	return m_depthWriting;
+	return m_depthWriting ? *m_depthWriting : (m_definition ? m_definition->HasDepthWriting() : true);
 }
 
 bool Rendering::Data::MaterialInstance::HasColorWriting() const
 {
-	return m_colorWriting;
+	return m_colorWriting ? *m_colorWriting : (m_definition ? m_definition->HasColorWriting() : true);
 }
 
 bool Rendering::Data::MaterialInstance::IsShadowCaster() const
 {
-	return m_castShadows;
+	return m_castShadows ? *m_castShadows : (m_definition ? m_definition->IsShadowCaster() : true);
 }
 
 bool Rendering::Data::MaterialInstance::IsShadowReceiver() const
 {
-	return m_receiveShadows;
+	return m_receiveShadows ? *m_receiveShadows : (m_definition ? m_definition->IsShadowReceiver() : true);
 }
 
 bool Rendering::Data::MaterialInstance::IsCapturedByReflectionProbes() const
 {
-	return m_capturedByReflectionProbes;
+	return m_capturedByReflectionProbes ? *m_capturedByReflectionProbes : (m_definition ? m_definition->IsCapturedByReflectionProbes() : true);
 }
 
 bool Rendering::Data::MaterialInstance::IsReflectionReceiver() const
 {
-	return m_receiveReflections;
+	return m_receiveReflections ? *m_receiveReflections : (m_definition ? m_definition->IsReflectionReceiver() : true);
+}
+
+int Rendering::Data::MaterialInstance::GetDrawOrder() const
+{
+	return m_drawOrder ? *m_drawOrder : (m_definition ? m_definition->GetDrawOrder() : 1000);
+}
+
+int Rendering::Data::MaterialInstance::GetGPUInstances() const
+{
+	return m_gpuInstances ? *m_gpuInstances : (m_definition ? m_definition->GetGPUInstances() : 1);
+}
+
+float Rendering::Data::MaterialInstance::GetLineWidth() const
+{
+	return m_lineWidth ? *m_lineWidth : (m_definition ? m_definition->GetLineWidth() : 1.0f);
+}
+
+Rendering::Settings::EBlendMode Rendering::Data::MaterialInstance::GetBlendMode() const
+{
+	if (m_blendMode) { return *m_blendMode; }
+	return m_definition ? m_definition->GetBlendMode() : Rendering::Settings::EBlendMode::BLEND_OPAQUE;
+}
+
+bool Rendering::Data::MaterialInstance::SupportsOrthographic() const
+{
+	return m_supportOrthographic ? *m_supportOrthographic : (m_definition ? m_definition->SupportsOrthographic() : true);
+}
+
+bool Rendering::Data::MaterialInstance::SupportsPerspective() const
+{
+	return m_supportPerspective ? *m_supportPerspective : (m_definition ? m_definition->SupportsPerspective() : true);
+}
+bool Rendering::Data::MaterialInstance::HasPolygonOffsetFill() const
+{
+	return m_polygonOffsetFill ? *m_polygonOffsetFill : (m_definition ? m_definition->HasPolygonOffsetFill() : false);
 }
 
 const Rendering::Data::StateMask Rendering::Data::MaterialInstance::GenerateStateMask() const
 {
 	StateMask stateMask;
-	stateMask.depthWriting = m_depthWriting;
-	stateMask.colorWriting = m_colorWriting;
-	stateMask.blendable = m_blendable;
-	stateMask.depthTest = m_depthTest;
-	stateMask.frontfaceCulling = m_frontfaceCulling;
-	stateMask.backfaceCulling = m_backfaceCulling;
-	stateMask.polygonOffsetFill = m_polygonOffsetFill;
-	stateMask.blendMode = m_blendMode;
-	stateMask.lineWidth = m_lineWidth;
+	stateMask.depthWriting = HasDepthWriting();
+	stateMask.colorWriting = HasColorWriting();
+	stateMask.blendable = IsBlendable();
+	stateMask.depthTest = HasDepthTest();
+	stateMask.frontfaceCulling = HasFrontfaceCulling();
+	stateMask.backfaceCulling = HasBackfaceCulling();
+	stateMask.polygonOffsetFill = HasPolygonOffsetFill();
+	stateMask.blendMode = GetBlendMode();
+	stateMask.lineWidth = GetLineWidth();
 	return stateMask;
 }
 
-void Rendering::Data::Material::SetFeatures(const Data::FeatureSet& p_features)
+void Rendering::Data::MaterialInstance::SetFeatures(const Data::FeatureSet& p_features)
 {
 	m_features = p_features;
 }
 
-void Rendering::Data::Material::AddFeature(const std::string& p_feature)
+void Rendering::Data::MaterialInstance::AddFeature(const std::string& p_feature)
 {
 	m_features.insert(p_feature);
 }
 
-void Rendering::Data::Material::RemoveFeature(const std::string& p_feature)
+void Rendering::Data::MaterialInstance::RemoveFeature(const std::string& p_feature)
 {
 	m_features.erase(p_feature);
 }
-void Rendering::Data::Material::EnableFeature(const std::string& p_feature,bool flag)
+void Rendering::Data::MaterialInstance::EnableFeature(const std::string& p_feature,bool flag)
 {
 	if (flag) {
 		m_features.insert(p_feature);
@@ -1247,17 +1311,17 @@ void Rendering::Data::Material::EnableFeature(const std::string& p_feature,bool 
 	}
 }
 
-bool Rendering::Data::Material::HasFeature(const std::string& p_feature) const
+bool Rendering::Data::MaterialInstance::HasFeature(const std::string& p_feature) const
 {
 	return m_features.contains(p_feature);
 }
 
-bool Rendering::Data::Material::SupportsFeature(const std::string& p_feature) const
+bool Rendering::Data::MaterialInstance::SupportsFeature(const std::string& p_feature) const
 {
 	return ShaderOf()->GetFeatures().contains(p_feature);
 }
 
-bool Rendering::Data::Material::HasPass(const std::string& p_pass) const
+bool Rendering::Data::MaterialInstance::HasPass(const std::string& p_pass) const
 {
 	return ShaderOf()->GetPasses().contains(p_pass);
 }

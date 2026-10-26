@@ -773,8 +773,8 @@ QTreeView::branch:open:has-children:has-siblings {
 
 	QString ContentBrowserPanel::ThumbnailKey(const QString& p_path) const
 	{
-		const QFileInfo info(p_path);
-		return p_path + QLatin1Char('|') + QString::number(info.lastModified().toMSecsSinceEpoch());
+		// The same key the shared table uses, so the property panel can find these pictures.
+		return MaterialThumbnailKey(p_path);
 	}
 
 	void ContentBrowserPanel::EnqueueMaterialThumbnails()
@@ -830,6 +830,8 @@ QTreeView::branch:open:has-children:has-siblings {
 		{
 			const QPixmap thumbnail = QPixmap::fromImage(image);
 			m_materialThumbnails.insert(ThumbnailKey(path), thumbnail);
+			// The property panel's material slots show the same picture.
+			StoreMaterialThumbnail(path, thumbnail);
 			m_thumbnailAttempts.remove(path);
 			ApplyThumbnail(path, thumbnail);
 		}

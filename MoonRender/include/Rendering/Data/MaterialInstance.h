@@ -75,10 +75,19 @@ namespace Rendering::Data
 		/** The definition this instance overrides. Null for a Material (it is its own definition). */
 		Material* Definition() const { return m_definition; }
 
+		/** Bumped whenever this object's parameter values change. An instance compares it against
+		 * the value it last uploaded, which is how an edit on the definition reaches the instances
+		 * that inherit from it (they re-upload instead of using stale data). */
+		uint64_t Revision() const { return m_revision; }
+
 		/** The definition's shader and feature set: what a variant is selected from. A drawable
 		 * holds an instance now, so the renderer asks these two questions through this pair
 		 * instead of through Material. */
 		Rendering::Resources::Shader* Shader() const { return ShaderOf(); }
+		Rendering::Resources::Shader* GetShader() const { return ShaderOf(); }
+
+		/** Re-reads a texture assigned by path (the designer saves a path, not a handle). */
+		void LateUpdateTexture(const std::string& p_name, const std::string& p_path);
 		const Data::FeatureSet& Features() const { return FeaturesOf(); }
 
 		/** The program for a pass and a feature set, resolved through the definition's shader. */
@@ -156,17 +165,31 @@ namespace Rendering::Data
 		bool IsShadowReceiver() const;
 		bool IsCapturedByReflectionProbes() const;
 		bool IsReflectionReceiver() const;
-		int GetDrawOrder() const { return m_drawOrder; }
-		int GetGPUInstances() const { return m_gpuInstances; }
-		float GetLineWidth() const { return m_lineWidth; }
-		Rendering::Settings::EBlendMode GetBlendMode() const { return m_blendMode; }
-		bool SupportsOrthographic() const { return m_supportOrthographic; }
-		bool SupportsPerspective() const { return m_supportPerspective; }
+		bool HasPolygonOffsetFill() const;
+		// Defined out of line: the fallback needs Material to be complete, and Material derives from
+		// this class (it is only forward declared here).
+		int GetDrawOrder() const;
+		int GetGPUInstances() const;
+		float GetLineWidth() const;
+		Rendering::Settings::EBlendMode GetBlendMode() const;
+		bool SupportsOrthographic() const;
+		bool SupportsPerspective() const;
 		bool SupportsProjectionMode(Rendering::Settings::EProjectionMode p_mode) const;
 
 		/** Whether the definition's shader was compiled with this pass (the picking / shadow
 		 * passes ask this through the instance the drawable holds). */
 		bool HasPass(const std::string& p_pass) const;
+
+		// Filament keeps features on the material; here an instance may need a different combination
+		// (that used to be Drawable::featureSetOverride), so the set lives on the instance and a plain
+		// instance starts from the definition's.
+		void SetFeatures(const Data::FeatureSet& p_features);
+		void AddFeature(const std::string& p_feature);
+		void RemoveFeature(const std::string& p_feature);
+		void EnableFeature(const std::string& feature, bool flag);
+		bool HasFeature(const std::string& p_feature) const;
+		bool SupportsFeature(const std::string& p_feature) const;
+		const Data::FeatureSet& GetFeatures() const { return m_features; }
 
 		const Rendering::Data::StateMask GenerateStateMask() const;
 
@@ -175,20 +198,18 @@ namespace Rendering::Data
 		Rendering::HAL::Texture* TextureOf(const std::string& p_name) const;
 
 	protected:
-		/** A Material is its own default instance: it has no separate definition to forward to. */
-		MaterialInstance() = default;
+		/** A Material is its own default instance: it has no separate definition to forward to, and
+		 * the values it holds are what a plain instance falls back to. */
+		MaterialInstance();
 
 		/** The definition-side lookup. A Material overrides this with its own defaults; a plain
 		 * instance forwards to its definition. */
 		virtual const MaterialProperty* FindProperty(const std::string& p_name) const;
 		/** The definition's shader (the one the variant comes from). */
 		virtual Rendering::Resources::Shader* ShaderOf() const;
-		/** The definition's feature set (the instance can still be drawn with an override). */
-		virtual const Data::FeatureSet& FeaturesOf() const;
+		/** The feature set this instance draws with: its own, seeded from the definition. */
+		const Data::FeatureSet& FeaturesOf() const { return m_features; }
 
-		/** Called by a Material after (re)binding to a shader: copies the definition's render
-		 * state into this instance so the instance starts from it. */
-		void CopyStateFrom(const MaterialInstance& p_source);
 		void InvalidatePropertySignature();
 
 		void BindParameterBlock();
@@ -213,6 +234,9 @@ namespace Rendering::Data
 		Material* m_definition = nullptr;
 		std::map<std::string, std::string> m_lateLoadTextures;
 		PropertyMap m_properties;
+		Data::FeatureSet m_features;
+		uint64_t m_revision = 0;
+		uint64_t m_seenDefinitionRevision = 0;
 		size_t m_stablePropertySignatureVersion = 0ULL;
 		size_t m_singleUsePropertySignatureVersion = 0ULL;
 		Tools::Utils::OptRef<Rendering::HAL::ShaderProgram> m_programInUse = std::nullopt;
@@ -220,24 +244,29 @@ namespace Rendering::Data
 		UniformBufferPool::Slice m_parameterSlice;
 		std::vector<uint8_t> m_parameterData;
 
-		bool m_supportOrthographic = true;
-		bool m_supportPerspective = true;
-		bool m_userInterface = false;
-		bool m_blendable = false;
-		Rendering::Settings::EBlendMode m_blendMode = Rendering::Settings::EBlendMode::BLEND_OPAQUE;
-		bool m_transparent = false;
-		bool m_backfaceCulling = true;
-		bool m_frontfaceCulling = false;
-		bool m_polygonOffsetFill = false;
-		bool m_depthTest = true;
-		bool m_depthWriting = true;
-		bool m_colorWriting = true;
-		bool m_castShadows = true;
-		bool m_receiveShadows = true;
-		bool m_capturedByReflectionProbes = true;
-		bool m_receiveReflections = true;
-		int m_gpuInstances = 1;
-		int m_drawOrder = 1000;
-		float m_lineWidth = 1.0f;
+		// Render state, Filament's way: the definition holds the values its material block declared
+		// (and the engine defaults for the rest); a plain instance stores only the fields it
+		// overrides and answers everything else from its definition. An empty optional means "not
+		// overridden here", so a definition that changes later is seen by the instances that did
+		// not pin that field - a shader reload no longer leaves stale state behind.
+		std::optional<bool> m_supportOrthographic;
+		std::optional<bool> m_supportPerspective;
+		std::optional<bool> m_userInterface;
+		std::optional<bool> m_blendable;
+		std::optional<Rendering::Settings::EBlendMode> m_blendMode;
+		std::optional<bool> m_transparent;
+		std::optional<bool> m_backfaceCulling;
+		std::optional<bool> m_frontfaceCulling;
+		std::optional<bool> m_polygonOffsetFill;
+		std::optional<bool> m_depthTest;
+		std::optional<bool> m_depthWriting;
+		std::optional<bool> m_colorWriting;
+		std::optional<bool> m_castShadows;
+		std::optional<bool> m_receiveShadows;
+		std::optional<bool> m_capturedByReflectionProbes;
+		std::optional<bool> m_receiveReflections;
+		std::optional<int> m_gpuInstances;
+		std::optional<int> m_drawOrder;
+		std::optional<float> m_lineWidth;
 	};
 }

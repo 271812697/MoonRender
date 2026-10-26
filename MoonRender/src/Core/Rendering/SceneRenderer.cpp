@@ -790,6 +790,10 @@ void Core::Rendering::SceneRenderer::SetExcludedFeatures(::Rendering::Data::Feat
 	// The cached drawables were parsed with the previous exclusions.
 	m_parsedDrawablesValid = false;
 }
+void Core::Rendering::SceneRenderer::InvalidateParsedDrawables()
+{
+	m_parsedDrawablesValid = false;
+}
 void Core::Rendering::SceneRenderer::DrawModelWithSingleMaterial(::Rendering::Data::PipelineState p_pso, ::Rendering::Resources::Model& p_model, ::Rendering::Data::Material& p_material, const Maths::FMatrix4& p_modelMatrix)
 {
 	auto stateMask = p_material.GenerateStateMask();
@@ -851,7 +855,7 @@ SceneRenderer::SceneDrawablesDescriptor Core::Rendering::SceneRenderer::ParseSce
 				if (mesh->GetIndexCount(bufferIndex) <= 0) {
 					continue;
 				}
-				Tools::Utils::OptRef<::Rendering::Data::Material> material;
+				Tools::Utils::OptRef<::Rendering::Data::MaterialInstance> material;
 
 				if (materialIndex < kMaxMaterialCount)
 				{
@@ -980,7 +984,7 @@ void Core::Rendering::SceneRenderer::UpdateParsedDrawables(Core::SceneSystem::Sc
 			// the variant key of a keyed shader is part of the drawable's feature override.
 			// Both have to re-run ParseScene, otherwise the cached drawables keep the old
 			// (feature-only) override and the draw falls back to a variant without the key.
-			HashCombine(signature, HashPointer(material->GetShader()));
+			HashCombine(signature, HashPointer(material->Shader()));
 			for (const std::string& feature : material->GetFeatures())
 			{
 				for (const char c : feature)

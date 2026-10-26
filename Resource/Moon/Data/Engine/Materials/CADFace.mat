@@ -1,0 +1,33 @@
+<root>
+    <shader>:Shaders\GeomertySurface.shader</shader>
+    <settings>
+        <support_orthographic>true</support_orthographic>
+        <support_perspective>true</support_perspective>
+        <blendable>false</blendable>
+        <backface_culling>false</backface_culling>
+        <frontface_culling>false</frontface_culling>
+        <depth_test>true</depth_test>
+        <depth_writing>true</depth_writing>
+        <color_writing>true</color_writing>
+        <cast_shadows>false</cast_shadows>
+        <receive_shadows>false</receive_shadows>
+        <captured_by_reflection_probes>true</captured_by_reflection_probes>
+        <receive_reflections>true</receive_reflections>
+        <user_interface>false</user_interface>
+        <gpu_instances>1</gpu_instances>
+        <draw_order>1000</draw_order>
+        <polygon_offset>true</polygon_offset>
+        <line_width>1</line_width>
+    </settings>
+    <uniforms>
+        <uniform>
+            <name>u_Albedo</name>
+            <value>
+                <x>0.7215686</x>
+                <y>0.7215686</y>
+                <z>0.7215686</z>
+                <w>1</w>
+            </value>
+        </uniform>
+    </uniforms>
+</root>

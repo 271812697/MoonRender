@@ -317,6 +317,8 @@ public:
 			static_cast<int>(::Editor::Panels::EPreviewMesh::CUBE));
 		meshPicker->addItem(QStringLiteral("Plane"),
 			static_cast<int>(::Editor::Panels::EPreviewMesh::PLANE));
+		meshPicker->addItem(QStringLiteral("CAD part"),
+			static_cast<int>(::Editor::Panels::EPreviewMesh::CAD));
 		previewHeaderLayout->addWidget(meshPicker, 0);
 
 		auto* resetView = new QToolButton(previewHeader);

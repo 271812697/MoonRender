@@ -129,44 +129,49 @@ namespace Core::SceneSystem
 	BvhService::BvhService(Scene* sc):scene(sc)
 	{
 	}
-	void BvhService::AddMaterial(::Core::Resources::Material* material)
+	void BvhService::AddMaterial(::Rendering::Data::MaterialInstance* material)
 	{
 		Material tempMat;
 		if (material) {
-			auto& propsMap=material->GetProperties();
-			auto it = propsMap.find("u_Albedo");
-			if (it != propsMap.end()) {
-				tempMat.baseColor=std::get<Maths::FVector4>(it->second.value).ToFVector3();
-				tempMat.opacity = std::get<Maths::FVector4>(it->second.value).w;
+			// Resolved through the chain: an instance may only override a few of these, the rest
+			// come from its material. Reading the instance's own map would miss them.
+			const auto propertyOf = [material](const std::string& p_name) {
+				const auto property = material->GetProperty(p_name);
+				return property ? &property.value() : nullptr;
+			};
+			const ::Rendering::Data::MaterialProperty* it = propertyOf("u_Albedo");
+			if (it != nullptr) {
+				tempMat.baseColor=std::get<Maths::FVector4>(it->value).ToFVector3();
+				tempMat.opacity = std::get<Maths::FVector4>(it->value).w;
 			
 			}
-			it = propsMap.find("u_EmissiveColor");
-			if (it != propsMap.end()) {
-				tempMat.emission = std::get<Maths::FVector3>(it->second.value);
+			it = propertyOf("u_EmissiveColor");
+			if (it != nullptr) {
+				tempMat.emission = std::get<Maths::FVector3>(it->value);
 			}
-			it = propsMap.find("u_Metallic");
-			if (it != propsMap.end()) {
-				tempMat.metallic= std::get<float>(it->second.value);
+			it = propertyOf("u_Metallic");
+			if (it != nullptr) {
+				tempMat.metallic= std::get<float>(it->value);
 			}
-			it = propsMap.find("u_Roughness");
-			if (it != propsMap.end()) {
-				tempMat.roughness = std::get<float>(it->second.value);
+			it = propertyOf("u_Roughness");
+			if (it != nullptr) {
+				tempMat.roughness = std::get<float>(it->value);
 			}
 			//u_RefractionIndex
-			it = propsMap.find("u_RefractionIndex");
-			if (it != propsMap.end()) {
-				tempMat.ior = std::get<float>(it->second.value);
+			it = propertyOf("u_RefractionIndex");
+			if (it != nullptr) {
+				tempMat.ior = std::get<float>(it->value);
 			}
 
 			//Albedo Texture
-			it = propsMap.find("u_AlbedoMap");
-			if (it!=propsMap.end()) {
+			it = propertyOf("u_AlbedoMap");
+			if (it != nullptr) {
 				::Rendering::HAL::Texture* handle = nullptr;
-				if (auto textureHandle = std::get_if<::Rendering::HAL::TextureHandle*>(&it->second.value))
+				if (auto textureHandle = std::get_if<::Rendering::HAL::TextureHandle*>(&it->value))
 				{
 					handle = static_cast<::Rendering::HAL::Texture*>(*textureHandle);
 				}
-				else if (auto texture = std::get_if<::Rendering::Resources::Texture*>(&it->second.value))
+				else if (auto texture = std::get_if<::Rendering::Resources::Texture*>(&it->value))
 				{
 					if (*texture != nullptr)
 					{
@@ -177,14 +182,14 @@ namespace Core::SceneSystem
 					tempMat.baseColorTexId=AddTexture(handle);
 				}
 			}
-			it = propsMap.find("u_RoughnessMap");
-			if (it != propsMap.end()) {
+			it = propertyOf("u_RoughnessMap");
+			if (it != nullptr) {
 				::Rendering::HAL::Texture* handle = nullptr;
-				if (auto textureHandle = std::get_if<::Rendering::HAL::TextureHandle*>(&it->second.value))
+				if (auto textureHandle = std::get_if<::Rendering::HAL::TextureHandle*>(&it->value))
 				{
 					handle = static_cast<::Rendering::HAL::Texture*>(*textureHandle);
 				}
-				else if (auto texture = std::get_if<::Rendering::Resources::Texture*>(&it->second.value))
+				else if (auto texture = std::get_if<::Rendering::Resources::Texture*>(&it->value))
 				{
 					if (*texture != nullptr)
 					{
@@ -195,14 +200,14 @@ namespace Core::SceneSystem
 					tempMat.metallicRoughnessTexID = AddTexture(handle);
 				}
 			}
-			it = propsMap.find("u_EmissiveMap");
-			if (it != propsMap.end()) {
+			it = propertyOf("u_EmissiveMap");
+			if (it != nullptr) {
 				::Rendering::HAL::Texture* handle = nullptr;
-				if (auto textureHandle = std::get_if<::Rendering::HAL::TextureHandle*>(&it->second.value))
+				if (auto textureHandle = std::get_if<::Rendering::HAL::TextureHandle*>(&it->value))
 				{
 					handle = static_cast<::Rendering::HAL::Texture*>(*textureHandle);
 				}
-				else if (auto texture = std::get_if<::Rendering::Resources::Texture*>(&it->second.value))
+				else if (auto texture = std::get_if<::Rendering::Resources::Texture*>(&it->value))
 				{
 					if (*texture != nullptr)
 					{
@@ -213,14 +218,14 @@ namespace Core::SceneSystem
 					tempMat.emissionmapTexID = AddTexture(handle);
 				}
 			}
-			it = propsMap.find("u_NormalMap");
-			if (it != propsMap.end()) {
+			it = propertyOf("u_NormalMap");
+			if (it != nullptr) {
 				::Rendering::HAL::Texture* handle = nullptr;
-				if (auto textureHandle = std::get_if<::Rendering::HAL::TextureHandle*>(&it->second.value))
+				if (auto textureHandle = std::get_if<::Rendering::HAL::TextureHandle*>(&it->value))
 				{
 					handle = static_cast<::Rendering::HAL::Texture*>(*textureHandle);
 				}
-				else if (auto texture = std::get_if<::Rendering::Resources::Texture*>(&it->second.value))
+				else if (auto texture = std::get_if<::Rendering::Resources::Texture*>(&it->value))
 				{
 					if (*texture != nullptr)
 					{
@@ -728,7 +733,11 @@ namespace Core::SceneSystem
 								};
 								int ss = tfo.size();
 								mat->SetProperty("trifoLen",ss);
-								const ::Rendering::Data::MaterialProperty prop=mat->GetProperty("triangleInfoTex").value();
+								// Not every material carries the BVH triangle table; a missing
+								// property used to throw out of .value().
+								const auto property = mat->GetProperty("triangleInfoTex");
+								if (!property) { return; }
+								const ::Rendering::Data::MaterialProperty& prop = property.value();
 								if (std::holds_alternative<::Rendering::Resources::Texture*>(prop.value)) {
 									
 									auto v = std::get<::Rendering::Resources::Texture*>(prop.value);

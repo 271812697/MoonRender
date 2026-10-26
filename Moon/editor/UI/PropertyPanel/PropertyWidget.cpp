@@ -1,12 +1,17 @@
-#pragma once
+﻿#pragma once
 #include "PropertyWidget.h"
 #include "core/ECS/Actor.h"
 #include "core/ECS/Components/CMaterialRenderer.h"
+#include "Core/ECS/Components/CModelRenderer.h"
 #include "Core/ECS/Components/CPostProcessStack.h"
 #include "Core/ECS/Components/CPointLight.h"
 #include "core/ECS/Components/CDirectionalLight.h"
 #include "core/component/CTopoShape.h"
 #include "core/Resources/Material.h"
+#include <Core/ResourceManagement/MaterialManager.h>
+#include "editor/UI/ContentBrowser/MaterialThumbnailRenderer.h"
+#include "renderer/SceneView.h"
+
 #include <Rendering/Resources/Shader.h>
 #include <Rendering/Resources/Texture.h>
 #include "Core/Global/ServiceLocator.h"
@@ -43,12 +48,25 @@
 #include <QMessageBox>
 #include <QScrollArea>
 #include <QStyleFactory>
+#include <QFrame>
+#include <QMenu>
 #include <QLabel>
+#include <filesystem>
+#include <Tools/Utils/PathParser.h>
+#include <QPainter>
+#include <QRadialGradient>
+#include <QPixmap>
+#include <QTimer>
+#include <QToolButton>
 #include <QGroupBox>
 #include <QFormLayout>
 #include <QComboBox>
 #include <QLineEdit>
-#include <fstream>
+#include <QMimeData>
+#include <QUrl>
+#include <QFileInfo>
+#include <QDragEnterEvent>
+#include <QDropEvent>
 
 namespace MOON {
 	namespace {
@@ -428,19 +446,319 @@ namespace MOON {
 	 * form (the same labels, groups, ranges, colour pickers and texture slots), instead of
 	 * listing whatever names the instance happens to carry. The widgets edit the actor's own
 	 * material instance, so the viewport updates live. */
+	/** The material file a drag carries, or an empty string. The content browser drags assets as
+	 * file URLs; only .mat files can be dropped on a material slot. */
+	QString MaterialPathFromMime(const QMimeData* p_mime)
+	{
+		if (p_mime == nullptr || !p_mime->hasUrls())
+		{
+			return {};
+		}
+		for (const QUrl& url : p_mime->urls())
+		{
+			if (!url.isLocalFile())
+			{
+				continue;
+			}
+			const QString local = url.toLocalFile();
+			if (QFileInfo(local).suffix().compare(QStringLiteral("mat"), Qt::CaseInsensitive) == 0)
+			{
+				return local;
+			}
+		}
+		return {};
+	}
+
+	/** The material assets the resource manager holds, as the ":Materials/<file>" keys its paths
+	 * use. What the slot's drop-down lists. */
+	std::vector<std::string> MaterialAssetKeys()
+	{
+		std::vector<std::string> keys;
+
+		// Listed from the folder the browser shows, not from the manager: building the panel must
+		// not pull on a service (the panel is built while the viewport is drawing).
+		const std::filesystem::path folder =
+			std::filesystem::path(Tools::Utils::PathParser::GetExeDirectory()) / "Moon" / "Data" / "Engine" / "Materials";
+
+		std::error_code error;
+		for (const auto& entry : std::filesystem::directory_iterator(folder, error))
+		{
+			if (!entry.is_regular_file() || entry.path().extension() != ".mat")
+			{
+				continue;
+			}
+			keys.push_back(":Materials/" + entry.path().filename().string());
+		}
+		std::ranges::sort(keys);
+		return keys;
+	}
+
+	/** A painted stand-in for the material's thumbnail: a sphere lit top-left, tinted with the
+	 * material's own base colour. The real preview needs the render module's context and a whole
+	 * frame per material, which a property panel must not do while it is being built - the
+	 * content browser renders those on a timer of its own. */
+	/** ":Materials/Foo.mat" as the file on disk: what the thumbnail cache is keyed by. */
+	QString MaterialFilePath(const QString& p_key)
+	{
+		const QString file = QFileInfo(p_key).fileName();
+		const std::filesystem::path folder =
+			std::filesystem::path(Tools::Utils::PathParser::GetExeDirectory()) / "Moon" / "Data" / "Engine" / "Materials";
+		return QString::fromStdString((folder / file.toStdString()).string());
+	}
+	QPixmap MaterialSphereIcon(const QColor& p_color, int p_size)
+	{
+		QPixmap pixmap(p_size, p_size);
+		pixmap.fill(Qt::transparent);
+
+		QPainter painter(&pixmap);
+		painter.setRenderHint(QPainter::Antialiasing);
+
+		const QColor base = p_color.isValid() ? p_color : QColor(150, 150, 150);
+		QRadialGradient gradient(QPointF(p_size * 0.36, p_size * 0.30), p_size * 0.78);
+		gradient.setColorAt(0.0, base.lighter(160));
+		gradient.setColorAt(0.55, base);
+		gradient.setColorAt(1.0, base.darker(240));
+		painter.setBrush(gradient);
+		painter.setPen(QPen(QColor(0, 0, 0, 140), 1.0));
+		painter.drawEllipse(QRectF(1.5, 1.5, p_size - 3.0, p_size - 3.0));
+
+		return pixmap;
+	}
+
+	/** One material slot, laid out like Unreal's element row: the slot's index, the material's
+	 * thumbnail, a drop-down of the material assets and a button that empties the slot. A material
+	 * dragged from the content browser is taken by the whole row.
+	 *
+	 * Dragging still works, the drop-down is for what the asset list makes easy to reach: both end
+	 * up in the same assignment call. */
+	class MaterialSlotRow : public QWidget
+	{
+	public:
+		using AssignHandler = std::function<void(const QString&)>;
+		using ClearHandler = std::function<void()>;
+
+		MaterialSlotRow(int p_index, const QString& p_currentKey, const QColor& p_albedo,
+			const std::vector<std::string>& p_keys, AssignHandler p_assign, ClearHandler p_clear,
+			QWidget* p_parent = nullptr)
+			: QWidget(p_parent), m_assign(std::move(p_assign)), m_clear(std::move(p_clear))
+		{
+			setAcceptDrops(true);
+
+			auto* layout = new QHBoxLayout(this);
+			layout->setContentsMargins(8, 5, 8, 5);
+			layout->setSpacing(8);
+
+			auto* label = new QLabel(QStringLiteral("Element %1").arg(p_index), this);
+			label->setMinimumWidth(56);
+			layout->addWidget(label, 0, Qt::AlignVCenter);
+
+			// One menu, shared by the thumbnail, the name field and the arrow: any of them opens
+			// the list of material assets.
+			auto* menu = new QMenu(this);
+			menu->addAction(QStringLiteral("Clear"), this, [this] {
+				if (m_clear) { m_clear(); }
+			});
+			menu->addSeparator();
+			for (const std::string& key : p_keys)
+			{
+				const QString materialKey = QString::fromStdString(key);
+				menu->addAction(QFileInfo(materialKey).fileName(), this, [this, materialKey] {
+					if (m_assign) { m_assign(materialKey); }
+				});
+			}
+
+			// The green bar under the thumbnail is Unreal's "this slot is filled" cue.
+			m_thumbnail = new QToolButton(this);
+			m_thumbnail->setFixedSize(42, 42);
+			m_thumbnail->setIconSize(QSize(36, 36));
+			m_thumbnail->setPopupMode(QToolButton::InstantPopup);
+			m_thumbnail->setMenu(menu);
+			m_thumbnail->setToolTip(QStringLiteral("Pick the material of this slot"));
+			m_thumbnail->setStyleSheet(QStringLiteral(
+				"QToolButton { background: #161616; border: 1px solid #3c3c3c;"
+				" border-bottom: 3px solid %1; } QToolButton::menu-indicator { image: none; }")
+				.arg(p_currentKey.isEmpty() ? QStringLiteral("#3c3c3c") : QStringLiteral("#5fbf3f")));
+			if (!p_currentKey.isEmpty())
+			{
+				SetThumbnail(m_thumbnail, p_albedo, p_currentKey);
+			}
+			layout->addWidget(m_thumbnail, 0, Qt::AlignVCenter);
+
+			m_name = new QToolButton(this);
+			m_name->setText(p_currentKey.isEmpty()
+				? QStringLiteral("<none>")
+				: QFileInfo(p_currentKey).fileName());
+			m_name->setToolButtonStyle(Qt::ToolButtonTextOnly);
+			m_name->setPopupMode(QToolButton::InstantPopup);
+			m_name->setMenu(menu);
+			m_name->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
+			m_name->setMinimumWidth(60);
+			m_name->setCursor(Qt::PointingHandCursor);
+			m_name->setStyleSheet(QStringLiteral(
+				"QToolButton { text-align: left; padding: 4px 8px; border: 1px solid #3c3c3c;"
+				" background: #232323; } QToolButton::menu-indicator { image: none; }"));
+			m_name->setToolTip(QStringLiteral("Pick the material of this slot"));
+			layout->addWidget(m_name, 1);
+
+			// The drops land on whichever child is under the cursor, so the whole row takes them.
+			for (QWidget* child : findChildren<QWidget*>())
+			{
+				child->setAcceptDrops(true);
+				child->installEventFilter(this);
+			}
+		}
+
+		/** Assigned after construction: the handler needs the row to refresh itself. */
+		void SetHandlers(AssignHandler p_assign, ClearHandler p_clear)
+		{
+			m_assign = std::move(p_assign);
+			m_clear = std::move(p_clear);
+		}
+
+		/** Shows what the slot holds now: the name, the filled/empty bar and the thumbnail. */
+		void Refresh(const QString& p_key, const QColor& p_albedo)
+		{
+			m_name->setText(p_key.isEmpty() ? QStringLiteral("<none>") : QFileInfo(p_key).fileName());
+			m_thumbnail->setStyleSheet(QStringLiteral(
+				"QToolButton { background: #161616; border: 1px solid #3c3c3c;"
+				" border-bottom: 3px solid %1; } QToolButton::menu-indicator { image: none; }")
+				.arg(p_key.isEmpty() ? QStringLiteral("#3c3c3c") : QStringLiteral("#5fbf3f")));
+			m_thumbnail->setIcon(QIcon());
+			if (!p_key.isEmpty())
+			{
+				SetThumbnail(m_thumbnail, p_albedo, p_key);
+			}
+		}
+
+	protected:
+		void dragEnterEvent(QDragEnterEvent* p_event) override
+		{
+			if (!MaterialPathFromMime(p_event->mimeData()).isEmpty()) { p_event->acceptProposedAction(); }
+		}
+
+		void dragMoveEvent(QDragMoveEvent* p_event) override
+		{
+			if (!MaterialPathFromMime(p_event->mimeData()).isEmpty()) { p_event->acceptProposedAction(); }
+		}
+
+		void dropEvent(QDropEvent* p_event) override
+		{
+			const QString path = MaterialPathFromMime(p_event->mimeData());
+			if (path.isEmpty()) { return; }
+			if (m_assign) { m_assign(path); }
+			p_event->acceptProposedAction();
+		}
+
+		/** The children are drop targets too: a drop on the thumbnail or the name field has to
+		 * behave like a drop on the row. */
+		bool eventFilter(QObject* p_watched, QEvent* p_event) override
+		{
+			if (p_event->type() == QEvent::DragEnter || p_event->type() == QEvent::DragMove)
+			{
+				auto* drag = static_cast<QDragMoveEvent*>(p_event);
+				if (!MaterialPathFromMime(drag->mimeData()).isEmpty())
+				{
+					drag->acceptProposedAction();
+					return true;
+				}
+			}
+			else if (p_event->type() == QEvent::Drop)
+			{
+				auto* drop = static_cast<QDropEvent*>(p_event);
+				const QString path = MaterialPathFromMime(drop->mimeData());
+				if (!path.isEmpty())
+				{
+					if (m_assign) { m_assign(path); }
+					drop->acceptProposedAction();
+					return true;
+				}
+			}
+			return QWidget::eventFilter(p_watched, p_event);
+		}
+
+	private:
+		/** The browser's rendered picture when it exists, the painted sphere until then. */
+		void SetThumbnail(QToolButton* p_button, const QColor& p_albedo, const QString& p_key)
+		{
+			const QPixmap cached = CachedMaterialThumbnail(MaterialFilePath(p_key));
+			if (!cached.isNull())
+			{
+				p_button->setIcon(QIcon(cached.scaled(36, 36, Qt::KeepAspectRatio, Qt::SmoothTransformation)));
+				return;
+			}
+
+			p_button->setIcon(QIcon(MaterialSphereIcon(p_albedo, 36)));
+
+			auto* poll = new QTimer(this);
+			poll->setInterval(400);
+			QObject::connect(poll, &QTimer::timeout, poll, [p_button, key = p_key, poll] {
+				const QPixmap ready = CachedMaterialThumbnail(MaterialFilePath(key));
+				if (ready.isNull()) { return; }
+				p_button->setIcon(QIcon(ready.scaled(36, 36, Qt::KeepAspectRatio, Qt::SmoothTransformation)));
+				poll->stop();
+			});
+			poll->start();
+		}
+
+		QToolButton* m_thumbnail = nullptr;
+		QToolButton* m_name = nullptr;
+		AssignHandler m_assign;
+		ClearHandler m_clear;
+	};
+
 	class MaterialPropertyComponent :public ActorPropertyComponent
 	{
 	public:
-		MaterialPropertyComponent(Core::ECS::Components::CMaterialRenderer* comp) :ActorPropertyComponent(comp) {
+		MaterialPropertyComponent(Core::ECS::Components::CMaterialRenderer* comp) :ActorPropertyComponent(comp),
+			m_renderer(comp) {
 			mat = comp->GetMaterialAtIndex(0);
 			BuildForm();
 		}
 		virtual ~MaterialPropertyComponent() = default;
 
 		QWidget* createCustomWidget(QWidget* p_parent) override {
-			(void)p_parent;
-			return m_form;
+			// The slots the component draws with, one Unreal-style row each: index, thumbnail,
+			// material drop-down, and a material dragged onto the row is taken as well. The
+			// parameter form of the first slot follows, since that is what the panel is for.
+			auto* container = new QWidget(p_parent);
+			auto* layout = new QVBoxLayout(container);
+			layout->setContentsMargins(0, 0, 0, 0);
+			layout->setSpacing(0);
+
+			const std::vector<std::string> keys = MaterialAssetKeys();
+			const int slotCount = MaterialSlotCount();
+			for (int index = 0; index < slotCount; ++index)
+			{
+				auto* row = new MaterialSlotRow(index, MaterialKeyAt(index), AlbedoAt(index), keys,
+					nullptr, nullptr, container);
+
+				// The row has to update itself after the swap: the name and the thumbnail are what
+				// shows which material the slot holds now.
+				row->SetHandlers(
+					[this, index, row](const QString& p_key) {
+						if (p_key.isEmpty()) { ClearMaterialAt(index); }
+						else { AssignMaterialAt(index, p_key); }
+						row->Refresh(MaterialKeyAt(index), AlbedoAt(index));
+					},
+					[this, index, row] {
+						ClearMaterialAt(index);
+						row->Refresh(MaterialKeyAt(index), AlbedoAt(index));
+					});
+				layout->addWidget(row);
+
+				auto* separator = new QFrame(container);
+				separator->setFrameShape(QFrame::HLine);
+				separator->setStyleSheet(QStringLiteral("color: #2e2e2e;"));
+				layout->addWidget(separator);
+			}
+
+			if (m_form != nullptr)
+			{
+				layout->addWidget(m_form);
+			}
+			return container;
 		}
+
 
 		virtual QVariant getPropertyValue(const QString& propertyName)override {
 			if (mat == nullptr) { return QVariant(); }
@@ -580,6 +898,136 @@ namespace MOON {
 		}
 
 	private:
+		/** How many material slots to show: the number the actor's model splits its sub-ranges
+		 * over, and at least two - a CAD face mesh keeps its transparent variant on slot 1 even
+		 * when the model reports a single material name. */
+		int MaterialSlotCount() const
+		{
+			int count = 2;
+			if (m_renderer != nullptr)
+			{
+				if (auto* modelRenderer = m_renderer->owner.GetComponent<Core::ECS::Components::CModelRenderer>())
+				{
+					if (auto* model = modelRenderer->GetModel())
+					{
+						count = std::max(count, static_cast<int>(model->GetMaterialNames().size()));
+					}
+				}
+			}
+			return std::min(count, 8);
+		}
+
+		/** The name of the material in a slot, as the user should see it: the asset's file name
+		 * when the slot holds an asset, "instance of <asset>" when it holds an instance of one. */
+		QString MaterialNameAt(int p_index) const
+		{
+			if (m_renderer == nullptr)
+			{
+				return {};
+			}
+			auto* instance = m_renderer->GetMaterialAtIndex(static_cast<uint8_t>(p_index));
+			if (instance == nullptr)
+			{
+				return QStringLiteral("<none>");
+			}
+			if (auto* asset = dynamic_cast<::Core::Resources::Material*>(instance))
+			{
+				return QFileInfo(QString::fromStdString(asset->path)).fileName();
+			}
+			if (auto* definition = dynamic_cast<::Core::Resources::Material*>(instance->Definition()))
+			{
+				return QStringLiteral("instance of ") + QFileInfo(QString::fromStdString(definition->path)).fileName();
+			}
+			return QStringLiteral("<instance>");
+		}
+
+		/** Gives the material file to the slot. The component owns an instance of it, so the asset
+		 * stays shared: a shape's own values (the CAD domain colour table, the pick colour) land on
+		 * the instance and never on the material the browser shows. */
+		/** The asset key behind a slot, for the drop-down's selection: the asset's own path when the
+		 * slot holds one, the definition's when it holds an instance of it. */
+		QString MaterialKeyAt(int p_index) const
+		{
+			if (m_renderer == nullptr)
+			{
+				return {};
+			}
+			auto* instance = m_renderer->GetMaterialAtIndex(static_cast<uint8_t>(p_index));
+			if (instance == nullptr)
+			{
+				return {};
+			}
+			if (auto* asset = dynamic_cast<::Core::Resources::Material*>(instance))
+			{
+				return QString::fromStdString(asset->path);
+			}
+			if (auto* definition = dynamic_cast<::Core::Resources::Material*>(instance->Definition()))
+			{
+				return QString::fromStdString(definition->path);
+			}
+			return {};
+		}
+
+		/** The slot's base colour, for the painted thumbnail. Falls back to grey when the material
+		 * has no u_Albedo (an unlit line material, for instance). */
+		QColor AlbedoAt(int p_index) const
+		{
+			if (m_renderer == nullptr)
+			{
+				return {};
+			}
+			auto* instance = m_renderer->GetMaterialAtIndex(static_cast<uint8_t>(p_index));
+			if (instance == nullptr)
+			{
+				return {};
+			}
+			const auto property = instance->GetProperty("u_Albedo");
+			if (!property.has_value() || !std::holds_alternative<Maths::FVector4>(property.value().value))
+			{
+				return QColor(150, 150, 150);
+			}
+			const auto& colour = std::get<Maths::FVector4>(property.value().value);
+			return QColor::fromRgbF(std::clamp(colour.x, 0.0f, 1.0f), std::clamp(colour.y, 0.0f, 1.0f),
+				std::clamp(colour.z, 0.0f, 1.0f));
+		}
+		/** Empties the slot: nothing is drawn for the sub-ranges that read it. */
+		void ClearMaterialAt(int p_index)
+		{
+			if (m_renderer == nullptr)
+			{
+				return;
+			}
+			m_renderer->RemoveMaterialAtIndex(static_cast<uint8_t>(p_index));
+			GetService(::Editor::Panels::SceneView).GetRenderer().InvalidateParsedDrawables();
+		}
+		void AssignMaterialAt(int p_index, const QString& p_path)
+		{
+			if (m_renderer == nullptr)
+			{
+				return;
+			}
+
+			const std::string key = (":Materials/" + QFileInfo(p_path).fileName()).toStdString();
+			auto* material = Core::Global::ServiceLocator::Get<Core::ResourceManagement::MaterialManager>()
+				.GetResource(key, true);
+			if (material == nullptr)
+			{
+				CORE_WARN("[Material] could not load {} for slot {}", key, p_index);
+				return;
+			}
+
+			m_renderer->SetMaterialInstanceAtIndex(static_cast<uint8_t>(p_index), material->CreateInstance());
+			if (p_index == 0)
+			{
+				// The parameter form below the list edits slot 0.
+				mat = m_renderer->GetMaterialAtIndex(0);
+			}
+
+			// The drawables were parsed against the old material list.
+			GetService(::Editor::Panels::SceneView).GetRenderer().InvalidateParsedDrawables();
+			CORE_INFO("[Material] {} assigned to slot {} of {}", key, p_index, m_renderer->owner.GetName());
+		}
+
 		void BuildForm() {
 			m_form = new QWidget();
 			auto* layout = new QVBoxLayout(m_form);
@@ -761,16 +1209,82 @@ namespace MOON {
 			}
 		}
 
-		Core::Resources::Material* mat = nullptr;
+		::Rendering::Data::MaterialInstance* mat = nullptr;
+		Core::ECS::Components::CMaterialRenderer* m_renderer = nullptr;
 		QWidget* m_form = nullptr;
 		std::map<QString, std::string> m_uniformNames;
 		std::map<QString, std::string> m_featureNames;
 		std::set<std::string> m_colorNames;
 	};
+	/** A model renderer's meshes: what the actor draws, how heavy each mesh is, and which material
+	 * slot every sub-range reads. Read-only: the geometry comes from the document / the import. */
+	class ModelRendererPropertyComponent : public ActorPropertyComponent
+	{
+	public:
+		ModelRendererPropertyComponent(Core::ECS::Components::CModelRenderer* p_component)
+			: ActorPropertyComponent(p_component), m_renderer(p_component)
+		{
+		}
+
+		QWidget* createCustomWidget(QWidget* p_parent) override
+		{
+			auto* container = new QWidget(p_parent);
+			auto* layout = new QVBoxLayout(container);
+			layout->setContentsMargins(0, 0, 0, 0);
+			layout->setSpacing(2);
+
+			auto* title = new QLabel(QStringLiteral("Meshes"), container);
+			title->setMargin(6);
+			layout->addWidget(title);
+
+			auto* model = m_renderer != nullptr ? m_renderer->GetModel() : nullptr;
+			if (model == nullptr)
+			{
+				auto* hint = new QLabel(QStringLiteral("This actor has no model."), container);
+				hint->setMargin(6);
+				layout->addWidget(hint);
+				return container;
+			}
+
+			const auto& meshes = model->GetMeshes();
+			for (size_t i = 0; i < meshes.size(); ++i)
+			{
+				auto* mesh = meshes[i];
+				if (mesh == nullptr) { continue; }
+
+				const auto& materialIndices = mesh->GetMaterialIndex();
+				QString materials;
+				for (size_t m = 0; m < materialIndices.size(); ++m)
+				{
+					materials += (m == 0 ? QString() : QStringLiteral(", "))
+						+ QString::number(materialIndices[m]);
+				}
+
+				auto* row = new QLabel(
+					QStringLiteral("%1.  %2 verts   %3 indices   material %4")
+						.arg(static_cast<int>(i))
+						.arg(mesh->GetVertexCount())
+						.arg(mesh->GetIndexCount())
+						.arg(materials.isEmpty() ? QStringLiteral("-") : materials),
+					container);
+				row->setMargin(6);
+				row->setTextInteractionFlags(Qt::TextSelectableByMouse);
+				layout->addWidget(row);
+			}
+			return container;
+		}
+
+	private:
+		Core::ECS::Components::CModelRenderer* m_renderer = nullptr;
+	};
+
 	ActorPropertyComponent* transferActorPropertyComponent(Core::ECS::Components::AComponent* comp) {
 
 		if (auto trans = dynamic_cast<Core::ECS::Components::CTransform*>(comp)) {
 			return new  TransFormPropertyComponent(trans);
+		}
+		else if (auto renderer = dynamic_cast<Core::ECS::Components::CModelRenderer*>(comp)) {
+			return new ModelRendererPropertyComponent(renderer);
 		}
 		else if (auto trans = dynamic_cast<Core::ECS::Components::CMaterialRenderer*>(comp)) {
 			return new  MaterialPropertyComponent(trans);
