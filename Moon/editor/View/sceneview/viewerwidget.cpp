@@ -209,80 +209,6 @@ namespace MOON {
 			// The read waits for the viewport to be up: the start page is the page that
 			// is shown first, and the viewport behind it is only initialized the moment
 			// it comes to the front.
-			// MOON_TEST_SELECT=<actor name>: selects an actor (and fills the property panel) without
-			// a mouse, so a window screenshot can show what the panel builds.
-			if (std::getenv("MOON_TEST_DUMP_ACTORS") != nullptr && !mTestDumpDone && ++mTestDumpFrame > 30)
-			{
-				const auto dump = [](Core::ECS::Actor& p_actor, int p_depth, auto&& p_self) -> void {
-					int meshes = 0;
-					const void* model = nullptr;
-					if (auto* mr = p_actor.GetComponent<Core::ECS::Components::CModelRenderer>())
-					{
-						model = static_cast<const void*>(mr->GetModel());
-						if (mr->GetModel() != nullptr) { meshes = static_cast<int>(mr->GetModel()->GetMeshes().size()); }
-					}
-					std::cout << "[Actors] " << std::string(p_depth * 2, ' ') << p_actor.GetName()
-						<< " meshes=" << meshes << " model=" << model << " actor=" << static_cast<const void*>(&p_actor) << std::endl;
-					for (Core::ECS::Actor* child : p_actor.GetChildren())
-					{
-						if (child != nullptr) { p_self(*child, p_depth + 1, p_self); }
-					}
-				};
-				for (Core::ECS::Actor* actor : mSceneView->GetScene()->GetActors())
-				{
-					if (actor != nullptr) { dump(*actor, 0, dump); }
-				}
-				mTestDumpDone = true;
-			}
-			if (const char* testSelect = std::getenv("MOON_TEST_SELECT"); testSelect != nullptr && !mTestSelectDone && mTestSelectFrame++ > 0)
-			{
-				const std::string wanted = testSelect;
-				const auto findByName = [](Core::ECS::Actor& p_actor, const std::string& p_name,
-					auto&& p_self) -> Core::ECS::Actor* {
-					if (p_actor.GetName() == p_name)
-					{
-						if (auto* mr = p_actor.GetComponent<Core::ECS::Components::CModelRenderer>())
-						{
-							if (mr->GetModel() != nullptr && !mr->GetModel()->GetMeshes().empty()) { return &p_actor; }
-						}
-					}
-					for (Core::ECS::Actor* child : p_actor.GetChildren())
-					{
-						if (child == nullptr) { continue; }
-						if (Core::ECS::Actor* found = p_self(*child, p_name, p_self)) { return found; }
-					}
-					return nullptr;
-				};
-
-				Core::ECS::Actor* target = nullptr;
-				for (Core::ECS::Actor* actor : mSceneView->GetScene()->GetActors())
-				{
-					if (actor == nullptr) { continue; }
-					if ((target = findByName(*actor, wanted, findByName)) != nullptr) { break; }
-				}
-
-				// Only once the shape has geometry: the mesh list can only show what the model holds.
-				bool hasGeometry = false;
-				if (target != nullptr)
-				{
-					if (auto* mr = target->GetComponent<Core::ECS::Components::CModelRenderer>())
-					{
-						hasGeometry = mr->GetModel() != nullptr && !mr->GetModel()->GetMeshes().empty();
-					}
-				}
-				if (target != nullptr && hasGeometry)
-				{
-					std::cout << "[UI] test select: " << wanted << " meshes="
-						<< target->GetComponent<Core::ECS::Components::CModelRenderer>()->GetModel()->GetMeshes().size() << std::endl;
-
-					GetSelection.select({ target->GetID() });
-					mSceneView->SelectActor(*target);
-					GetService(PropertyWidget).setSelectedActor(target);
-
-					mTestSelectDone = true;
-				}
-			}
-
 			if (mDoReadFile && mSceneView != nullptr) {
 				mDoReadFile = false;
 				const std::string path = mReadFilePath.toUtf8().toStdString();
@@ -644,10 +570,6 @@ namespace MOON {
 		double m_fps = 0.0;
 		double m_frameMs = 0.0;
 
-		bool mTestSelectDone = false;
-		bool mTestDumpDone = false;
-		int mTestDumpFrame = 0;
-		int mTestSelectFrame = 0;
 
 	};
 	ViewerWidget::ViewerWidget(QWidget* parent) :

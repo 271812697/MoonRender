@@ -245,25 +245,17 @@ out vec4 FRAGMENT_COLOR;
 void main()
 {
 #if defined(Transparents)
-  // Compare linear view-space depth instead of window depth. In an ortho
-  // projection the whole [near, far] range is linearly compressed into [0, 1],
-  // so close transparent layers can quantize to the same window depth and the
-  // <= / >= comparisons swallow layers. Unprojecting both sides keeps the
-  // peeling consistent in perspective and ortho.
-  const mat4 invProj = inverse(ubo_Projection);
+  // Window depth, straight from the depth buffer: no inverse projection, so the camera's
+  // projection cannot distort the comparison. The perspective camera here has an infinite far
+  // plane, and unprojecting its stored depth makes w approach zero - the reconstruction error
+  // explodes, and the same surface passes the test on some pixels and fails on others. That is
+  // the flicker the transparent objects showed while the camera orbited, and never in ortho.
+  // Reversed-Z: a larger window depth is closer.
   ivec2 coords = ivec2(gl_FragCoord.xy);
-  // Note: the unprojected vector is homogeneous (w != 1 in perspective), so
-  // the view-space depth must be z / w. Taking .z alone yields a constant
-  // (-1) in perspective and silently discards every peeled layer.
-  // Reversed-Z: window depth is 1 at near and 0 at far, so the NDC conversion
-  // flips (1 - 2 * raw) instead of (2 * raw - 1).
-  vec4 unprojPrev = invProj * vec4(0.0, 0.0, 1.0 - texelFetch(DepthPeelTex, coords, 0).r * 2.0, 1.0);
-  vec4 unprojOpaque = invProj * vec4(0.0, 0.0, 1.0 - texelFetch(OpaqueDepthTex, coords, 0).r * 2.0, 1.0);
-  vec4 unprojFrag = invProj * vec4(0.0, 0.0, 1.0 - gl_FragCoord.z * 2.0, 1.0);
-  float prevDepth = -unprojPrev.z / unprojPrev.w;
-  float opaqueDepth = -unprojOpaque.z / unprojOpaque.w;
-  float fragDepth = -unprojFrag.z / unprojFrag.w;
-  if (fragDepth <= prevDepth || fragDepth >= opaqueDepth) discard;
+  const float prevRaw = texelFetch(DepthPeelTex, coords, 0).r;
+  const float opaqueRaw = texelFetch(OpaqueDepthTex, coords, 0).r;
+  const float rawEps = 4.0 / 16777216.0;   // a few quanta of a 24-bit depth buffer
+  if (gl_FragCoord.z >= prevRaw - rawEps || gl_FragCoord.z <= opaqueRaw + rawEps) discard;
 #endif
 
     if(ubo_enableClip==1){
