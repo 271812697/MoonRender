@@ -1,4 +1,5 @@
-﻿#include "LogPanel.h"
+#include "LogPanel.h"
+#include "editor/Language.h"
 #include "core/log.h"
 #include "Core/Global/ServiceLocator.h"
 #include "editor/UI/DockWidgetTitleBar.h"
@@ -63,21 +64,26 @@ namespace MOON {
 	LogPanel::LogPanel(QWidget* parent)
 		: QDockWidget(parent), LogOutput("LogPanel") {
 		RegService(LogPanel, *this);
-		setWindowTitle(tr("Log"));
+		MOON::Language::SetWindowTitle(this, QStringLiteral("日志"), QStringLiteral("Log"));
 		auto* titleBar = new DockWidgetTitleBar(this);
 		setTitleBarWidget(titleBar);
 
 		// Level filters live in the title bar, keeping the content area for
 		// the log text itself.
-		m_debugCheck = new QCheckBox(tr("Debug"), titleBar);
-		m_infoCheck = new QCheckBox(tr("Info"), titleBar);
-		m_warnCheck = new QCheckBox(tr("Warning"), titleBar);
-		m_errorCheck = new QCheckBox(tr("Error"), titleBar);
+		m_debugCheck = new QCheckBox(titleBar);
+		MOON::Language::SetText(m_debugCheck, QStringLiteral("调试"), QStringLiteral("Debug"));
+		m_infoCheck = new QCheckBox(titleBar);
+		MOON::Language::SetText(m_infoCheck, QStringLiteral("信息"), QStringLiteral("Info"));
+		m_warnCheck = new QCheckBox(titleBar);
+		MOON::Language::SetText(m_warnCheck, QStringLiteral("警告"), QStringLiteral("Warning"));
+		m_errorCheck = new QCheckBox(titleBar);
+		MOON::Language::SetText(m_errorCheck, QStringLiteral("错误"), QStringLiteral("Error"));
 		m_debugCheck->setChecked(true);
 		m_infoCheck->setChecked(true);
 		m_warnCheck->setChecked(true);
 		m_errorCheck->setChecked(true);
-		m_clear = new QPushButton(tr("Clean"), titleBar);
+		m_clear = new QPushButton(titleBar);
+		MOON::Language::SetText(m_clear, QStringLiteral("清空"), QStringLiteral("Clean"));
 		for (QWidget* w : {static_cast<QWidget*>(m_debugCheck), static_cast<QWidget*>(m_infoCheck),
 		                   static_cast<QWidget*>(m_warnCheck), static_cast<QWidget*>(m_errorCheck),
 		                   static_cast<QWidget*>(m_clear)}) {

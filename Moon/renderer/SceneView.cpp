@@ -8,6 +8,7 @@
 #include <Core/SceneSystem/SceneManager.h>
 #include <Rendering/Geometry/bvh.h>
 #include "SceneView.h"
+#include "editor/parsescene.h"   // EnsureViewportLights
 #include "Settings/DebugSetting.h"
 #include "renderer/GizmoRenderPass.h"
 #include "Interactive/Widgets/ClipPlane.h"
@@ -102,6 +103,11 @@ void Editor::Panels::SceneView::Update(float p_deltaTime)
 {
 	AViewControllable::Update(p_deltaTime);
 	GetScene()->Update(p_deltaTime);
+	// The rig is part of what a viewport needs, not of how the scene was loaded: a .moon document
+	// is built by MoonDocument::open, which never went through the scene parser that used to be
+	// the only place creating it, so those documents were drawn with the directional light alone.
+	// Idempotent, so a scene that already has it is left untouched.
+	::MOON::EnsureViewportLights(GetScene());
 	auto headLight = GetScene()->FindActorByName("HeadLight");
 	if (!headLight) {
 		return;

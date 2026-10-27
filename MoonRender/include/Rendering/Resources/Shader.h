@@ -63,6 +63,10 @@ namespace Rendering::Resources
 			int32_t offset = -1;      // std140 offset in the material parameter block, -1 = no layout
 			uint32_t stride = 0;      // std140 element stride (arrays)
 			uint32_t binding = 0;     // texture unit of a sampler
+			/** What to bind when the material instance has no texture in this slot: 0 = the
+			 * engine's default (white 2D / black cube), 1 = the flat normal map
+			 * (SamplerFallback in ShaderPackage). Always 0 for a non-sampler. */
+			uint8_t fallback = 0;
 			bool isSampler = false;   // a texture slot rather than a plain uniform
 			bool hasRange = false;
 			bool hasStep = false;
@@ -153,6 +157,12 @@ namespace Rendering::Resources
 		 * instead of the material's feature set. */
 		bool UsesVariantKeys() const;
 
+		/** Every variant key name this shader was compiled with (the VARIANT_* defines that
+		 * appear in at least one variant). The scene's per-frame variant bits are filtered against
+		 * it, so a bit the shader never compiles cannot make the lookup miss and land on a variant
+		 * without the lighting code. */
+		const std::unordered_set<std::string>& GetVariantKeys() const;
+
 		/** Replaces the state, for a hot reload whose material block changed. */
 		void SetState(State p_state);
 	private:
@@ -178,5 +188,6 @@ namespace Rendering::Resources
 		State m_state;
 		bool m_hasState = false;
 		bool m_usesVariantKeys = false;
+		std::unordered_set<std::string> m_variantKeys;
 	};
 }

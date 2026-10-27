@@ -1,4 +1,4 @@
-﻿
+
 
 
 #include <array>
@@ -152,6 +152,45 @@ Rendering::Resources::Texture* Rendering::Resources::Loaders::TextureLoader::Cre
 		p_generateMipmap,
 		false
 	);
+
+	return new Texture("", std::move(texture));
+}
+
+Rendering::Resources::Texture* Rendering::Resources::Loaders::TextureLoader::CreateMutable(
+	uint32_t p_width,
+	uint32_t p_height,
+	const void* p_rgba8,
+	Rendering::Settings::ETextureFilteringMode p_minFilter,
+	Rendering::Settings::ETextureFilteringMode p_magFilter,
+	Rendering::Settings::ETextureWrapMode p_horizontalWrapMode,
+	Rendering::Settings::ETextureWrapMode p_verticalWrapMode,
+	bool p_generateMipmap
+)
+{
+	using namespace Rendering::Settings;
+
+	auto texture = std::make_unique<HAL::Texture>(ETextureType::TEXTURE_2D, "RuntimeGenerated");
+	texture->Allocate({
+		.width = p_width,
+		.height = p_height,
+		.minFilter = p_minFilter,
+		.magFilter = p_magFilter,
+		.horizontalWrap = p_horizontalWrapMode,
+		.verticalWrap = p_verticalWrapMode,
+		.internalFormat = EInternalFormat::RGBA8,
+		.useMipMaps = p_generateMipmap,
+		// The mutable descriptor is what lets Upload() reach the GPU copy later.
+		.mutableDesc = MutableTextureDesc{
+			.format = EFormat::RGBA,
+			.type = EPixelDataType::UNSIGNED_BYTE,
+			.data = p_rgba8
+		}
+		});
+
+	if (p_generateMipmap)
+	{
+		texture->GenerateMipmaps();
+	}
 
 	return new Texture("", std::move(texture));
 }

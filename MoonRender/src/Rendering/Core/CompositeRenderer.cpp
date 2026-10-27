@@ -53,6 +53,12 @@ void Rendering::Core::CompositeRenderer::DrawFrame()
 	// a per-instance property (a material without it sampled the white empty texture and lost
 	// its whole diffuse term).
 	SetBrdfLut(GetBrdfTexture());
+	// Filament's IndirectLight: the sky pass bakes the irradiance and prefiltered cubes, and every
+	// lit material reads them. They are view state, not material parameters, so they are bound
+	// per draw here (DrawEntity) instead of relying on whoever created the material instance to
+	// hand them over - a face material built before the first sky bake used to keep the empty
+	// black cube forever, which reads as "black except where the sun reflects" as the view turns.
+	SetEnvironmentTextures(GetIrradianceCube(), GetPrefilterCube());
 	auto pso = CreatePipelineState();
 	for (const auto& pass : m_passes | std::views::values)
 	{

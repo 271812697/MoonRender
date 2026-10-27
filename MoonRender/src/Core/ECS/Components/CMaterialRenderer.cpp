@@ -1,6 +1,7 @@
 ﻿#include <tinyxml2.h>
 #include <Core/ECS/Actor.h>
 #include <Core/ECS/Components/CMaterialRenderer.h>
+#include <Core/Resources/Material.h>
 #include <Core/ECS/Components/CModelRenderer.h>
 #include <Core/Global/ServiceLocator.h>
 #include <Core/ResourceManagement/MaterialManager.h>
@@ -21,18 +22,45 @@ std::string Core::ECS::Components::CMaterialRenderer::GetName()
 	return "Material Renderer";
 }
 
-void Core::ECS::Components::CMaterialRenderer::FillWithMaterial(Core::Resources::Material& p_material)
+void Core::ECS::Components::CMaterialRenderer::FillWithMaterial(::Rendering::Data::MaterialInstance& p_material)
 {
 	for (uint8_t i = 0; i < m_materials.size(); ++i)
 		m_materials[i] = &p_material;
 }
 
-void Core::ECS::Components::CMaterialRenderer::SetMaterialAtIndex(uint8_t p_index, Core::Resources::Material& p_material)
+void Core::ECS::Components::CMaterialRenderer::SetMaterialAtIndex(uint8_t p_index, ::Rendering::Data::MaterialInstance& p_material)
 {
 	m_materials[p_index] = &p_material;
 }
 
-Core::Resources::Material* Core::ECS::Components::CMaterialRenderer::GetMaterialAtIndex(uint8_t p_index)
+void Core::ECS::Components::CMaterialRenderer::SetMaterialInstanceAtIndex(uint8_t p_index,
+	std::unique_ptr<::Rendering::Data::MaterialInstance> p_instance)
+{
+	if (p_index >= m_materials.size() || p_instance == nullptr)
+	{
+		return;
+	}
+
+	m_materials[p_index] = p_instance.get();
+	m_ownedInstances.push_back(std::move(p_instance));
+}
+void Core::ECS::Components::CMaterialRenderer::FillWithMaterialInstance(
+	std::unique_ptr<::Rendering::Data::MaterialInstance> p_instance)
+{
+	if (p_instance == nullptr)
+	{
+		return;
+	}
+
+	::Rendering::Data::MaterialInstance* instance = p_instance.get();
+	m_ownedInstances.push_back(std::move(p_instance));
+
+	for (uint8_t i = 0; i < m_materials.size(); ++i)
+	{
+		m_materials[i] = instance;
+	}
+}
+::Rendering::Data::MaterialInstance* Core::ECS::Components::CMaterialRenderer::GetMaterialAtIndex(uint8_t p_index)
 {
 	return m_materials.at(p_index);
 }
@@ -45,7 +73,7 @@ void Core::ECS::Components::CMaterialRenderer::RemoveMaterialAtIndex(uint8_t p_i
 	}
 }
 
-void Core::ECS::Components::CMaterialRenderer::RemoveMaterialByInstance(Core::Resources::Material& p_instance)
+void Core::ECS::Components::CMaterialRenderer::RemoveMaterialByInstance(::Rendering::Data::MaterialInstance& p_instance)
 {
 	for (uint8_t i = 0; i < m_materials.size(); ++i)
 		if (m_materials[i] == &p_instance)
@@ -95,7 +123,12 @@ void Core::ECS::Components::CMaterialRenderer::OnSerialize(tinyxml2::XMLDocument
 
 	for (uint8_t i = 0; i < elementsToSerialize; ++i)
 	{
-		Core::Helpers::Serializer::SerializeMaterial(p_doc, materialsNode, "material", m_materials[i]);
+		// Only a material asset (a definition) has a path to serialize. A per-actor instance is
+		// rebuilt by whoever created it, so it is skipped rather than written as a dangling name.
+		if (auto* asset = dynamic_cast<Core::Resources::Material*>(m_materials[i]))
+		{
+			Core::Helpers::Serializer::SerializeMaterial(p_doc, materialsNode, "material", asset);
+		}
 	}
 
 	Core::Helpers::Serializer::SerializeUint32(p_doc, p_node, "visibility_flags", reinterpret_cast<uint32_t&>(m_visibilityFlags));

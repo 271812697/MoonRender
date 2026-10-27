@@ -174,7 +174,7 @@ void Editor::Rendering::OutlineRenderFeature::DrawModelToStencil(
 
 	for (auto mesh : p_model.GetMeshes())
 	{
-		auto getStencilMaterial = [&]() -> ::Core::Resources::Material& {
+		auto getStencilMaterial = [&]() -> ::Rendering::Data::MaterialInstance& {
 			auto material = p_materials.has_value() ? p_materials->at(mesh->GetMaterialIndex()[0]) : nullptr;
 			if (material && material->IsValid() && material->HasPass(outlinePassName))
 			{
@@ -218,7 +218,7 @@ void Editor::Rendering::OutlineRenderFeature::DrawModelOutline(
 
 	for (auto mesh : p_model.GetMeshes())
 	{
-		auto getStencilMaterial = [&]() -> ::Core::Resources::Material& {
+		auto getStencilMaterial = [&]() -> ::Rendering::Data::MaterialInstance& {
 			auto material = p_materials.has_value() ? p_materials->at(mesh->GetMaterialIndex()[0]) : nullptr;
 			if (material && material->IsValid() && material->HasPass(outlinePassName))
 			{

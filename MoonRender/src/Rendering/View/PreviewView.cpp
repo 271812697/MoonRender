@@ -20,6 +20,8 @@
 #include <Maths/FVector3.h>
 #include <Rendering/Context/Driver.h>
 #include <Rendering/Geometry/Vertex.h>
+#include <Rendering/HAL/OpenGL/GLTexture.h>
+#include <Rendering/Settings/TextureDesc.h>
 #include <Rendering/Resources/Loaders/ModelLoader.h>
 #include <Rendering/Resources/Mesh.h>
 #include <Tools/Utils/PathParser.h>
@@ -200,6 +202,109 @@ namespace
 		}
 
 		p_indices.insert(p_indices.end(), { 0, 1, 2, 0, 2, 3 });
+	}
+
+	/** The CAD preview part: a plate with a cylindrical boss on it, every face carrying a domain
+	 * id the way a B-rep body does.
+	 *
+	 * It is built with the CAD vertex layout (position, UV, normal, domain id) rather than the
+	 * preview sphere's, because GeomertySurface reads a fourth attribute for the domain index and
+	 * samples its domain colour table with it - on a mesh without that attribute the domain path
+	 * reads garbage and the material previews black. The ids here are 0..7, and DomainColorTable()
+	 * has a colour for each of them. */
+	void BuildCadPart(
+		std::vector<::Rendering::Geometry::VertexBVH>& p_vertices,
+		std::vector<uint32_t>& p_indices)
+	{
+		using namespace Maths;
+
+		const auto addVertex = [&p_vertices](const FVector3& p_position, const FVector3& p_normal,
+			float p_u, float p_v, float p_domain)
+		{
+			::Rendering::Geometry::VertexBVH vertex{};
+			vertex.position = p_position;
+			vertex.texCoords = FVector2{ p_u, p_v };
+			vertex.normals = p_normal;
+			vertex.domainId = FVector2{ p_domain, 0.0f };
+			p_vertices.push_back(vertex);
+		};
+
+		// A quad from four corners, counter-clockwise seen from the side the normal points at.
+		const auto addQuad = [&](const FVector3& p_a, const FVector3& p_b, const FVector3& p_c,
+			const FVector3& p_d, const FVector3& p_normal, float p_domain)
+		{
+			const uint32_t base = static_cast<uint32_t>(p_vertices.size());
+			addVertex(p_a, p_normal, 0.0f, 0.0f, p_domain);
+			addVertex(p_b, p_normal, 1.0f, 0.0f, p_domain);
+			addVertex(p_c, p_normal, 1.0f, 1.0f, p_domain);
+			addVertex(p_d, p_normal, 0.0f, 1.0f, p_domain);
+			p_indices.insert(p_indices.end(), { base, base + 1, base + 2, base, base + 2, base + 3 });
+		};
+
+		constexpr float plateHalfX = 1.0f;
+		constexpr float plateHalfZ = 0.6f;
+		constexpr float plateTop = 0.3f;
+		constexpr float plateBottom = 0.0f;
+
+		// The plate: bottom (domain 0), top (1), then the four sides (2..5).
+		addQuad({ -plateHalfX, plateBottom, plateHalfZ }, { plateHalfX, plateBottom, plateHalfZ },
+			{ plateHalfX, plateBottom, -plateHalfZ }, { -plateHalfX, plateBottom, -plateHalfZ },
+			{ 0.0f, -1.0f, 0.0f }, 0.0f);
+		addQuad({ -plateHalfX, plateTop, -plateHalfZ }, { plateHalfX, plateTop, -plateHalfZ },
+			{ plateHalfX, plateTop, plateHalfZ }, { -plateHalfX, plateTop, plateHalfZ },
+			{ 0.0f, 1.0f, 0.0f }, 1.0f);
+		addQuad({ -plateHalfX, plateBottom, -plateHalfZ }, { plateHalfX, plateBottom, -plateHalfZ },
+			{ plateHalfX, plateTop, -plateHalfZ }, { -plateHalfX, plateTop, -plateHalfZ },
+			{ 0.0f, 0.0f, -1.0f }, 2.0f);
+		addQuad({ plateHalfX, plateBottom, plateHalfZ }, { -plateHalfX, plateBottom, plateHalfZ },
+			{ -plateHalfX, plateTop, plateHalfZ }, { plateHalfX, plateTop, plateHalfZ },
+			{ 0.0f, 0.0f, 1.0f }, 3.0f);
+		addQuad({ -plateHalfX, plateBottom, plateHalfZ }, { -plateHalfX, plateBottom, -plateHalfZ },
+			{ -plateHalfX, plateTop, -plateHalfZ }, { -plateHalfX, plateTop, plateHalfZ },
+			{ -1.0f, 0.0f, 0.0f }, 4.0f);
+		addQuad({ plateHalfX, plateBottom, -plateHalfZ }, { plateHalfX, plateBottom, plateHalfZ },
+			{ plateHalfX, plateTop, plateHalfZ }, { plateHalfX, plateTop, -plateHalfZ },
+			{ 1.0f, 0.0f, 0.0f }, 5.0f);
+
+		// The boss: a cylinder standing on the plate, side (6) and cap (7).
+		constexpr int segments = 32;
+		constexpr float bossRadius = 0.34f;
+		constexpr float bossTop = 0.85f;
+		constexpr float twoPi = 2.0f * 3.14159265358979323846f;
+
+		const uint32_t sideBase = static_cast<uint32_t>(p_vertices.size());
+		for (int i = 0; i <= segments; ++i)
+		{
+			const float angle = twoPi * static_cast<float>(i) / static_cast<float>(segments);
+			const float c = std::cos(angle);
+			const float s = std::sin(angle);
+			const float u = static_cast<float>(i) / static_cast<float>(segments);
+
+			addVertex({ bossRadius * c, plateTop, bossRadius * s }, { c, 0.0f, s }, u, 0.0f, 6.0f);
+			addVertex({ bossRadius * c, bossTop, bossRadius * s }, { c, 0.0f, s }, u, 1.0f, 6.0f);
+		}
+		for (int i = 0; i < segments; ++i)
+		{
+			const uint32_t v = sideBase + static_cast<uint32_t>(i) * 2;
+			p_indices.insert(p_indices.end(), { v, v + 1, v + 3, v, v + 3, v + 2 });
+		}
+
+		// The cap, as a triangle fan around its centre.
+		const uint32_t capCenter = static_cast<uint32_t>(p_vertices.size());
+		addVertex({ 0.0f, bossTop, 0.0f }, { 0.0f, 1.0f, 0.0f }, 0.5f, 0.5f, 7.0f);
+		for (int i = 0; i <= segments; ++i)
+		{
+			const float angle = twoPi * static_cast<float>(i) / static_cast<float>(segments);
+			const float c = std::cos(angle);
+			const float s = std::sin(angle);
+			addVertex({ bossRadius * c, bossTop, bossRadius * s }, { 0.0f, 1.0f, 0.0f },
+				0.5f + 0.5f * c, 0.5f + 0.5f * s, 7.0f);
+		}
+		for (int i = 0; i < segments; ++i)
+		{
+			p_indices.insert(p_indices.end(),
+				{ capCenter, capCenter + 1 + static_cast<uint32_t>(i), capCenter + 2 + static_cast<uint32_t>(i) });
+		}
 	}
 
 	/** The "material ball" most engines show a material on: a UV sphere with a circular dimple
@@ -497,6 +602,22 @@ void Editor::Panels::PreviewView::BuildPreviewMesh()
 		}
 		break;
 	}
+	case EPreviewMesh::CAD:
+	{
+		// The CAD materials read a domain id attribute and sample a colour table with it, so this
+		// one is built with the CAD vertex layout and gets its own mesh instead of the generic
+		// vertex/index pair below.
+		std::vector<::Rendering::Geometry::VertexBVH> cadVertices;
+		BuildCadPart(cadVertices, indices);
+
+		auto* mesh = new ::Rendering::Resources::Mesh(cadVertices, indices);
+		mesh->AddSubRangeBuffer();
+		mesh->ComputeBoundingSphereAndBox();
+
+		model = std::make_unique<::Rendering::Resources::Model>(":Preview/CadPart");
+		model->AddMesh(mesh);
+		break;
+	}
 	case EPreviewMesh::CUBE:
 		BuildCube(vertices, indices);
 		break;
@@ -646,7 +767,19 @@ void Editor::Panels::PreviewView::ResetCameraTransform()
 	// Clear stale destinations / mouse state first: a preview that lost a mouse-release
 	// event would otherwise drop every new destination on the next frame.
 	m_cameraController.ClearMovement();
-	const Maths::FVector3 eye{ 1.50f, 0.82f, 3.65f };
+	Maths::FVector3 eye{ 1.50f, 0.82f, 3.65f };
+	// MOON_PREVIEW_CAM_ELEV=<degrees>: swing the preview camera around X, so a render can be
+	// captured from below the equator without the UI (a probe for "it goes wrong from below").
+	if (const char* p_elevation = std::getenv("MOON_PREVIEW_CAM_ELEV"); p_elevation != nullptr)
+	{
+		const float radians = std::strtof(p_elevation, nullptr) * 3.14159265358979f / 180.0f;
+		const float distance = Maths::FVector3::Length(eye);
+		eye = Maths::FVector3{
+			eye.x,
+			eye.y * std::cos(radians) - eye.z * std::sin(radians),
+			eye.y * std::sin(radians) + eye.z * std::cos(radians) };
+		eye = Maths::FVector3::Normalize(eye) * distance;
+	}
 	m_cameraController.MoveToPose(eye, Maths::FQuaternion::LookAt(
 		Maths::FVector3::Normalize(Maths::FVector3{ -eye.x, -eye.y, -eye.z }),
 		Maths::FVector3{ 0.0f, 1.0f, 0.0f }));
@@ -723,11 +856,22 @@ void Editor::Panels::PreviewView::SetMaterial(::Core::Resources::Material* p_mat
 		return;
 	}
 
+	m_previewInstance.reset();
+
 	if (p_material != nullptr)
 	{
+		// Drawn through an instance, not the asset: the CAD mesh needs a domain colour table on
+		// the material, and writing that into the asset would hand the same table to every shape
+		// that draws with it.
+		m_previewInstance = p_material->CreateInstance();
+		if (m_previewMesh == EPreviewMesh::CAD)
+		{
+			m_previewInstance->SetProperty("domainColorTex", DomainColorTable());
+		}
+
 		// Fill every slot: a loaded model (the material sphere) may split its geometry by
 		// material, and the preview shows the same material on all of it.
-		materials->FillWithMaterial(*p_material);
+		materials->FillWithMaterial(*m_previewInstance);
 	}
 	else
 	{
@@ -744,8 +888,46 @@ void Editor::Panels::PreviewView::SetPreviewMesh(EPreviewMesh p_mesh)
 
 	m_previewMesh = p_mesh;
 	BuildPreviewMesh();
+
+	// The instance is what carries the mesh-specific properties (the CAD domain colour table), and
+	// it was made for the old mesh: rebuild it for the new one.
+	SetMaterial(m_material);
 }
 
+::Rendering::HAL::TextureHandle* Editor::Panels::PreviewView::DomainColorTable()
+{
+	if (m_domainColorTable != nullptr)
+	{
+		return m_domainColorTable;
+	}
+
+	// One entry per domain id BuildCadPart stamps on the mesh (0..7). The values mirror the
+	// solids palette the B-rep bodies use, so a CAD material previews in the colours a shape
+	// would show it in.
+	const std::vector<Maths::FVector4> colors{
+		{ 0.85f, 0.85f, 0.88f, 1.0f },  // free faces / plate bottom
+		{ 1.00f, 0.92f, 0.78f, 1.0f },  // plate top
+		{ 0.78f, 0.86f, 0.95f, 1.0f },
+		{ 0.86f, 0.78f, 0.95f, 1.0f },
+		{ 0.80f, 0.93f, 0.83f, 1.0f },
+		{ 0.95f, 0.82f, 0.80f, 1.0f },
+		{ 0.93f, 0.90f, 0.78f, 1.0f },  // boss side
+		{ 0.88f, 0.88f, 0.90f, 1.0f },  // boss cap
+	};
+
+	::Rendering::Settings::TextureDesc desc;
+	desc.isTextureBuffer = true;
+	desc.internalFormat = ::Rendering::Settings::EInternalFormat::RGBA32F;
+	desc.buffetLen = static_cast<int>(colors.size() * sizeof(Maths::FVector4));
+	desc.mutableDesc = ::Rendering::Settings::MutableTextureDesc{
+		.data = const_cast<Maths::FVector4*>(colors.data())
+	};
+
+	auto* texture = new ::Rendering::HAL::GLTexture(::Rendering::Settings::ETextureType::TEXTURE_BUFFER);
+	texture->Allocate(desc);
+	m_domainColorTable = texture;
+	return m_domainColorTable;
+}
 Editor::Panels::EPreviewMesh Editor::Panels::PreviewView::GetPreviewMesh() const
 {
 	return m_previewMesh;

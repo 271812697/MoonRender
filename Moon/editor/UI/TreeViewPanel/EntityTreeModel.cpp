@@ -1,4 +1,5 @@
 #include "EntityTreeModel.h"
+#include "editor/Language.h"
 #include "Core/Global/ServiceLocator.h"
 #include "core/component/CTopoShape.h"
 #include "Core/SceneSystem/Scene.h"
@@ -24,9 +25,9 @@ namespace MOON {
 		void init() {
 			QList<QStandardItem*> arrays;
 			sceneRoot = new QStandardItem;
-			sceneRoot->setText(QString("SceneActor"));
+			sceneRoot->setText(MOON::Language::Pick(QStringLiteral("场景对象"), QStringLiteral("SceneActor")));
 			sketcherRoot = new QStandardItem;
-			sketcherRoot->setText(QString("Sketcher"));
+			sketcherRoot->setText(MOON::Language::Pick(QStringLiteral("草图"), QStringLiteral("Sketcher")));
 			arrays.push_back(sceneRoot);
 			arrays.push_back(sketcherRoot);
 			self->invisibleRootItem()->appendColumn(arrays);

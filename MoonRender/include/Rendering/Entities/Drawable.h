@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <Rendering/Data/Describable.h>
 #include <Rendering/Data/Material.h>
 #include <Rendering/Resources/IMesh.h>
@@ -12,7 +12,7 @@ namespace Rendering::Entities
 	struct Drawable : public Data::Describable
 	{
 		Tools::Utils::OptRef<Rendering::Resources::IMesh> mesh;
-		Tools::Utils::OptRef<Rendering::Data::Material> material;
+		Tools::Utils::OptRef<Rendering::Data::MaterialInstance> material;
 		Data::StateMask stateMask;
 		int subIndexBufferIndex = 0;
 		Settings::EPrimitiveMode primitiveMode = Rendering::Settings::EPrimitiveMode::TRIANGLES;

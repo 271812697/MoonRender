@@ -1,4 +1,5 @@
-﻿#include "MulViewPanel.h"
+#include "MulViewPanel.h"
+#include "editor/Language.h"
 #include "editor/View/sceneview/viewerpanel.h"
 #include <QTabWidget>
 #include <QGridLayout>
@@ -20,7 +21,8 @@ namespace MOON {
 		glayout->setSpacing(0);
 		glayout->addWidget(impl->tabWidget, 0, 0);
 		
-		impl->tabWidget->addTab(new ViewerPanel(this), "viewerpanel");
+		impl->tabWidget->addTab(new ViewerPanel(this),
+			MOON::Language::Pick(QStringLiteral("3D 视图"), QStringLiteral("3D View")));
 
 	}
 

@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <cstdint>
 #include <map>
 #include <set>
@@ -58,6 +58,26 @@ namespace Rendering::Resources
 			std::string name;
 		};
 
+		/** What a sampler samples when the material instance has no texture in that slot.
+		 * Filament binds a default texture for an unassigned sampler as well; the kinds here are
+		 * the 1x1 textures the engine ships, and the material picks one with
+		 * `fallback : <name>` (see MoonMatc's SamplerFallback). */
+		enum class SamplerFallback : uint8_t
+		{
+			/** sampler2D: white (the neutral multiplier for albedo/metal/roughness/AO);
+			 * samplerCube: black, which is what the engine always bound. */
+			Default = 0,
+			/** (0.5, 0.5, 1.0) - a normal map decodes it to the neutral tangent-space
+			 * normal (0, 0, 1): "no perturbation". */
+			FlatNormal = 1,
+		};
+
+		struct SamplerFallbackEntry
+		{
+			std::string name;
+			SamplerFallback kind = SamplerFallback::Default;
+		};
+
 		/** The stage a blob belongs to. Geometry is the engine's own extension: GLSL has a
 		 * third stage and the shaders that expand lines and triangle edges use it. */
 		enum class Stage
@@ -88,6 +108,10 @@ namespace Rendering::Resources
 		 * what a material panel reads instead of asking the driver for active uniforms. */
 		const std::vector<Parameter>& Parameters() const { return m_parameters; }
 		const std::vector<Attribute>& Attributes() const { return m_attributes; }
+
+		/** The samplers that asked for a non-default 1x1 fallback texture, empty for a package
+		 * whose samplers all take the engine default. */
+		const std::vector<SamplerFallbackEntry>& SamplerFallbacks() const { return m_samplerFallbacks; }
 
 		/** The state the `material { }` block declared besides the name, domain and shading model:
 		 * `blending`, `culling`, `depthWrite`, ... as the text the material wrote. Filament bakes
@@ -130,6 +154,7 @@ namespace Rendering::Resources
 		std::vector<Attribute> m_attributes;
 		std::map<std::string, std::string> m_states;
 		uint32_t m_parameterBlockSize = 0;
+		std::vector<SamplerFallbackEntry> m_samplerFallbacks;
 		std::vector<Blob> m_blobs;
 		/** Stage name ("vertex" / "fragment" / "geometry") -> the stage's whole text, with the
 		 * placeholder where the variant's #define lines go. Empty for a package written before

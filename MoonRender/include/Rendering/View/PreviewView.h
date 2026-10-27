@@ -2,6 +2,7 @@
 #include <memory>
 
 #include <Core/SceneSystem/Scene.h>
+#include <Rendering/Data/MaterialInstance.h>
 #include <Rendering/Resources/Model.h>
 #include <Rendering/View/AViewControllable.h>
 #include <Rendering/View/EPreviewMesh.h>
@@ -69,6 +70,9 @@ namespace Editor::Panels
 		 * UV set and a tangent frame, so a normal map has something to work with. Replaces the
 		 * model the actor points at, keeping the actor and the material. */
 		void BuildPreviewMesh();
+		/** The 1xN colour table the CAD shader samples by domain id. Created once, for the CAD
+		 * preview mesh only: without it the domain colour path multiplies the albedo by black. */
+		::Rendering::HAL::TextureHandle* DomainColorTable();
 		/** Fills the scene: the preview actor, the light rig and the post-process stack. */
 		void BuildScene();
 		/** Places the rig around the mesh the way the scene view places its own around the
@@ -87,6 +91,11 @@ namespace Editor::Panels
 		::Core::ECS::Actor* m_rimLightLeft = nullptr;
 		::Core::ECS::Actor* m_headLight = nullptr;
 		::Core::Resources::Material* m_material = nullptr;
+		/** The instance the preview draws with. An instance, not the asset: the CAD mesh needs a
+		 * domain colour table on the material, and that must not be written into the asset the
+		 * resource browser and the shapes share. */
+		std::unique_ptr<::Rendering::Data::MaterialInstance> m_previewInstance;
+		::Rendering::HAL::TextureHandle* m_domainColorTable = nullptr;
 		/** Declared last so it is destroyed first: the actors that point at the sphere's meshes
 		 * go before the model does. */
 		::Core::SceneSystem::Scene m_scene;

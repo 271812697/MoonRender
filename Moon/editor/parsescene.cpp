@@ -31,7 +31,15 @@ namespace MOON {
 		float azimuth = b / 180.0 * 3.14159265;
 		return Maths::FVector3(cos(elevation) * sin(azimuth), sin(elevation), cos(elevation) * cos(azimuth)) * radius;
 	}
-	void addSphereLight(Core::SceneSystem::Scene* scene) {
+	void EnsureViewportLights(Core::SceneSystem::Scene* scene) {
+		if (scene == nullptr) {
+			return;
+		}
+		// Already there: every caller (the scene parser, the viewport's own update) asks for the
+		// same rig, and a second set would double the lighting.
+		if (scene->FindActorByName("HeadLight") != nullptr) {
+			return;
+		}
 		DebugSettings::instance().addCallBack("showLight", "default", [scene](NodeBase* self) {
 			bool value = self->getData<bool>();
 			scene->FindActorByName("PointLight1")->SetActive(value);
@@ -129,7 +137,7 @@ namespace MOON {
 			scene = GetService(Editor::Core::Context).sceneManager.GetCurrentScene();
 			scene->FindActorByName("Directional Light")->GetComponent<Core::ECS::Components::CDirectionalLight>()->SetIntensity(1.0f);
 		    scene->FindActorByName("Directional Light")->GetComponent<Core::ECS::Components::CDirectionalLight>()->GetData().castShadows = true;
-			addSphereLight(scene);
+			EnsureViewportLights(scene);
 			GetViewerWidget.addActorToTreeView(scene->FindActorByName("Post Process Stack"));
 		}
 

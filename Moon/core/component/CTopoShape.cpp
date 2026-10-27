@@ -1,4 +1,4 @@
-﻿#include <tinyxml2.h>
+#include <tinyxml2.h>
 #include <tracy/Tracy.hpp>
 #include <Core/ECS/Actor.h>
 #include <map>
@@ -74,10 +74,11 @@ namespace Core::ECS::Components
 		friend class CTopoShape;
         HighLightOption highOption;
 		/** What GetColor() answers while there is no material to read the colour
-		 * back from; SetColor() keeps it up to date (see ApplyColor). The default is
-		 * FilamentPBR's base colour (#b8b8b8, Qt-Filament's MaterialPreview default), so a
-		 * new CAD shape starts from the same material state as the alignment material. */
-		Maths::FVector4 color{ 0.7215686f, 0.7215686f, 0.7215686f, 1.0f };
+		 * back from; SetColor() keeps it up to date (see ApplyColor). The default used to be
+		 * FilamentPBR's #b8b8b8 (Qt-Filament's MaterialPreview default); under the viewport's
+		 * light rig that read as a mid grey, so a new shape starts from white instead, the same
+		 * base the CAD previews and the reference cups use. */
+		Maths::FVector4 color{ 1.0f, 1.0f, 1.0f, 1.0f };
 		CTopoShape* mSelf = nullptr;
 		Part::TopoShape mTopoShape;
         std::vector<std::pair<int, int>>childMeshInfos;
@@ -167,7 +168,7 @@ namespace Core::ECS::Components
 	{
 		/** The material the faces of an actor's shape are drawn with: the one TopoActor()
 		 * makes for its "AllFaces" render anchor, or null while the actor has none. */
-		Core::Resources::Material* FaceMaterialOf(Core::ECS::Actor& p_owner)
+		::Rendering::Data::MaterialInstance* FaceMaterialOf(Core::ECS::Actor& p_owner)
 		{
 			Core::ECS::Actor* faces = p_owner.GetChild("AllFaces");
 			if (faces == nullptr) {
@@ -183,7 +184,7 @@ namespace Core::ECS::Components
 		// What is drawn is the material, and the material panel edits that material
 		// directly, so the colour is read back from it when there is one: what a panel
 		// shows and what the shape carries stay one and the same value.
-		if (Core::Resources::Material* material = FaceMaterialOf(owner)) {
+		if (::Rendering::Data::MaterialInstance* material = FaceMaterialOf(owner)) {
 			if (auto property = material->GetProperty("u_Albedo"); property.has_value()) {
 				if (std::holds_alternative<Maths::FVector4>(property.value().value)) {
 					return std::get<Maths::FVector4>(property.value().value);
@@ -201,7 +202,7 @@ namespace Core::ECS::Components
 
 	void CTopoShape::ApplyColor()
 	{
-		Core::Resources::Material* material = FaceMaterialOf(owner);
+		::Rendering::Data::MaterialInstance* material = FaceMaterialOf(owner);
 		if (material == nullptr) {
 			// The render anchors are not up yet; TopoActor() calls this again once
 			// they are, and the colour is kept until then.
@@ -466,7 +467,7 @@ namespace Core::ECS::Components
                 auto model = faceChild->GetComponent<Core::ECS::Components::CModelRenderer>()->GetModel();
                 model->GetMaterialNames().emplace_back("Face");
                 model->ClearMeshes();
-                model->AddMesh(faceMesh);    
+                model->AddMesh(faceMesh);
                 faceMesh->ComputeBoundingSphereAndBox();
                 model->computeBoxAndShpere();
                 //auto computeBox =[=](JobDispatchArgs arg) {
@@ -489,7 +490,7 @@ namespace Core::ECS::Components
                 domainColorTex->Allocate(desc);
                 // 创建并注册默认材质
                 auto& materialRenderer = *faceChild->GetComponent <Core::ECS::Components::CMaterialRenderer>();
-                Core::Resources::Material* tempMat = materialRenderer.GetMaterialAtIndex(0);
+                ::Rendering::Data::MaterialInstance* tempMat = materialRenderer.GetMaterialAtIndex(0);
                 tempMat->SetProperty("domainColorTex", domainColorTex);
                 auto& batchMesh = *faceChild->GetComponent<Core::ECS::Components::CBatchMeshTriangle>();
                 batchMesh.SetColors(domainColor);

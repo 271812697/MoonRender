@@ -11,16 +11,34 @@
 
 material {
     name         : GeomertySurface,
-    shadingModel : unlit,
+    // Filament's standard model, generated rather than called by hand: MoonMatc splices the
+    // surface stack in (Lighting/Filament/*) and this file only fills MaterialInputs. The
+    // fragment stays a raw stage because of the geometry stage's edge equations, domain colour,
+    // clip plane and depth peel - it calls evaluateSurface(), the varying-agnostic entry point.
+    shadingModel : lit,
     blending     : opaque,        // the face material itself is opaque; the same shader also
                                   // backs a SetTransparent(true) instance (the Transparents pass)
     culling      : none,          // SetBackfaceCulling(false) at the TopoActor draw site
     depthWrite   : true,          // both face materials keep depth writing on
 
+    // Filament's per-material specularAntiAliasing (GEOMETRIC_SPECULAR_AA): compile-time, like
+    // every other material property in filament. Off, matching the Qt-Filament reference.
+    specularAntiAliasing : false,
+    // Filament's clearCoatIorChange, on there too.
+    clearCoatIorChange : true,
+
     vertexAttributes : [POSITION, UV0, NORMAL, DOMAIN_ID],
 
     features : [ WITH_EDGE, DISABLE_DOMAIN_COLOR ],
     passes   : [ Transparents ],
+
+    // Filament's per-material variant filter: the renderer adds these bits to the variant key for
+    // every draw, exactly as it does for Standard. The fragment used to declare
+    // VARIANT_HAS_DIRECTIONAL_LIGHTING / DYNAMIC_LIGHTING by hand because it had no filter and the
+    // keyed path was never taken for it; that pinned both light paths into every variant and could
+    // never produce a shadowed one. SHADOWING stays out of the list until the shadow pass is wired
+    // into the CAD draw (the filter only helps if there is a valid shadow map to sample).
+    variantFilter : [ DIRECTIONAL_LIGHTING, DYNAMIC_LIGHTING ],
 
     parameters : [
         // label / group / min / max / step / color are the designer schema, read by the
@@ -32,12 +50,7 @@ material {
         { type : float,     name : edgeOpacity, default : 1.0, label : "Edge Opacity", group : "Edge", min : 0.0, max : 1.0, step : 0.005 },
 
         { type : sampler2D, name : u_AlbedoMap, label : "Albedo Map", group : "Textures" },
-        { type : float4,    name : u_Albedo, default : vec4(0.7215686, 0.7215686, 0.7215686, 1.0), label : "Base Color", group : "Base", color : true },
-        { type : sampler2D, name : u_NormalMap, label : "Normal Map", group : "Textures" },
-        { type : bool,      name : u_UseNormalMap, default : false, label : "Use Normal Map", group : "Base" },
-        // Filament's per-material specularAntiAliasing (GEOMETRIC_SPECULAR_AA). Kept equal to
-        // FilamentPBR.mat so the CAD face and the alignment material start from the same state.
-        { type : bool,      name : u_SpecularAA, default : false, label : "Specular AA", group : "Base" },
+        { type : float4,    name : u_Albedo, default : vec4(1.0, 1.0, 1.0, 1.0), label : "Base Color", group : "Base", color : true },
         { type : sampler2D, name : u_AmbientOcclusionMap, label : "Ambient Occlusion Map", group : "Textures" },
 
         { type : sampler2D, name : u_EmissiveMap, label : "Emissive Map", group : "Textures" },
@@ -68,12 +81,9 @@ material {
         { type : sampler2D, name : DepthPeelTex, ui : false },
         { type : sampler2D, name : OpaqueDepthTex, ui : false },
 
-        { type : sampler2D,   name : _ShadowMap, ui : false },
-        { type : mat4,        name : _LightSpaceMatrix, ui : false },
-
-        { type : samplerCube, name : _IrradianceCube, ui : false },
-        { type : samplerCube, name : _PrefilterCube, ui : false },
-        { type : sampler2D,   name : _BRDFLut, ui : false },
+        // The IBL cubes, the DFG LUT, the shadow map and its matrix are NOT declared here any
+        // more: for `shadingModel : lit` MoonMatc injects them (InjectEngineGlobals), the way
+        // filament keeps them in the frame/per-view blocks instead of in the material.
 
         // One colour per B-rep domain, indexed by the domain id attribute.
         { type : samplerBuffer, name : domainColorTex, ui : false }
@@ -204,13 +214,6 @@ void main()
 }
 
 fragment {
-    // This material keeps the feature power-set variants (it has no variantFilter), so the
-    // scene renderer does not add the engine VARIANT_HAS_* bits. Declare the lighting variants
-    // the CAD surface needs here; without them the light loop's point / directional / spot
-    // cases are compiled out and only ambient lights + IBL would light the faces.
-    #define VARIANT_HAS_DIRECTIONAL_LIGHTING
-    #define VARIANT_HAS_DYNAMIC_LIGHTING
-
 #include ":Shaders/Lighting/Filament/surface_lighting.glsl"
 
 in GS_OUT
@@ -231,58 +234,28 @@ in GS_OUT
 // declared here - see the parameters list above).
 
 // The shared Filament prelude (surface_common.glsl) provides saturate/pow5 and the standard
-// model helpers; only the CAD-specific normal mapping below is kept here.
-
-
-vec3 getNormalFromMap(vec3 Normal, bool backFace)
-{
-    vec3 tangentNormal = texture(u_NormalMap, fs_in.TexCoords).xyz * 2.0 - 1.0;
-
-    vec3 Q1  = dFdx(fs_in.FragPos);
-    vec3 Q2  = dFdy(fs_in.FragPos);
-    vec2 st1 = dFdx(fs_in.TexCoords);
-    vec2 st2 = dFdy(fs_in.TexCoords);
-
-    vec3 N   = normalize(Normal);
-    vec3 T  = normalize(Q1*st2.t - Q2*st1.t);
-    // Filament flips the whole tangent frame on a back face (n, t and b). N is already
-    // flipped by the caller; flipping T too and using the opposite bitangent sign gives
-    // exactly (-T, -B, -N), so a normal map on a double-sided face keeps its handedness.
-    if (backFace)
-    {
-        T = -T;
-    }
-    vec3 B  = (backFace ? 1.0 : -1.0) * normalize(cross(N, T));
-    mat3 TBN = mat3(T, B, N);
-
-    return normalize(TBN * tangentNormal);
-}
-
+// model helpers. There is deliberately no normal mapping here: the CAD face mesh (VertexBVH:
+// position, UV, normal, domain id) has no tangent frame, and building one from the screen-space
+// derivatives of the UVs is not acceptable - it is undefined on a mesh without UVs (the STEP
+// import writes UV = 0 for every vertex) and it is not what Filament does either. The
+// interpolated vertex normal is what the shape actually has.
 
 out vec4 FRAGMENT_COLOR;
 
 void main()
 {
 #if defined(Transparents)
-  // Compare linear view-space depth instead of window depth. In an ortho
-  // projection the whole [near, far] range is linearly compressed into [0, 1],
-  // so close transparent layers can quantize to the same window depth and the
-  // <= / >= comparisons swallow layers. Unprojecting both sides keeps the
-  // peeling consistent in perspective and ortho.
-  const mat4 invProj = inverse(ubo_Projection);
+  // Window depth, straight from the depth buffer: no inverse projection, so the camera's
+  // projection cannot distort the comparison. The perspective camera here has an infinite far
+  // plane, and unprojecting its stored depth makes w approach zero - the reconstruction error
+  // explodes, and the same surface passes the test on some pixels and fails on others. That is
+  // the flicker the transparent objects showed while the camera orbited, and never in ortho.
+  // Reversed-Z: a larger window depth is closer.
   ivec2 coords = ivec2(gl_FragCoord.xy);
-  // Note: the unprojected vector is homogeneous (w != 1 in perspective), so
-  // the view-space depth must be z / w. Taking .z alone yields a constant
-  // (-1) in perspective and silently discards every peeled layer.
-  // Reversed-Z: window depth is 1 at near and 0 at far, so the NDC conversion
-  // flips (1 - 2 * raw) instead of (2 * raw - 1).
-  vec4 unprojPrev = invProj * vec4(0.0, 0.0, 1.0 - texelFetch(DepthPeelTex, coords, 0).r * 2.0, 1.0);
-  vec4 unprojOpaque = invProj * vec4(0.0, 0.0, 1.0 - texelFetch(OpaqueDepthTex, coords, 0).r * 2.0, 1.0);
-  vec4 unprojFrag = invProj * vec4(0.0, 0.0, 1.0 - gl_FragCoord.z * 2.0, 1.0);
-  float prevDepth = -unprojPrev.z / unprojPrev.w;
-  float opaqueDepth = -unprojOpaque.z / unprojOpaque.w;
-  float fragDepth = -unprojFrag.z / unprojFrag.w;
-  if (fragDepth <= prevDepth || fragDepth >= opaqueDepth) discard;
+  const float prevRaw = texelFetch(DepthPeelTex, coords, 0).r;
+  const float opaqueRaw = texelFetch(OpaqueDepthTex, coords, 0).r;
+  const float rawEps = 4.0 / 16777216.0;   // a few quanta of a 24-bit depth buffer
+  if (gl_FragCoord.z >= prevRaw - rawEps || gl_FragCoord.z <= opaqueRaw + rawEps) discard;
 #endif
 
     if(ubo_enableClip==1){
@@ -317,10 +290,6 @@ void main()
     }
     vec3 gnormal = normal;
 
-    if (u_UseNormalMap) {
-        normal = getNormalFromMap(normal, backFace);
-    }
-
     const float metallic = texture(u_MetallicMap, texCoords).r * u_Metallic;
     const float roughness = texture(u_RoughnessMap, texCoords).r * u_Roughness;
 
@@ -347,54 +316,43 @@ void main()
     float opacityFactor = clamp(fs_in.screenLengthOutput / 50., 0.15, 1.0);
     linearAlbedo = mix(linearAlbedo, pow(edgeColor, vec3(2.2)), emix*opacityFactor*edgeOpacity);
 #endif
-    // Filament standard model, the same include chain FilamentPBR.mat uses. Everything the
-    // CAD surface has already computed (albedo including domain/edge colour, metallic/
-    // roughness, AO map, geometric/mapped normal, ortho view vector) is handed over as material
-    // inputs; shading, clear coat, transmission and the IBL stay in Lighting/Filament/.
+    // Filament standard model, generated by MoonMatc: this file fills MaterialInputs and the
+    // `lit` surface prelude (Lighting/Filament/*) turns them into a colour. Everything the CAD
+    // surface adds on top - domain colour, the edge feather, clip plane, depth peel, the ortho
+    // view vector, the derivative tangent frame - is already folded into the inputs below.
     //
     // NOTE: unlike the old Lighting/IBL.glsl path this one does not apply ParallaxCorrect or
     // the local reflection-probe OBB mask yet; that is a known difference (see
     // docs/FilamentAlignmentTODO.md, "GeomertySurface 迁移").
-    FilamentMaterialInputs material;
-    material.baseColor = linearAlbedo;
-    material.metallic = clamp(metallic, 0.0, 1.0);
-    material.roughness = roughness;
-    material.reflectance = u_Reflectance;
-    material.specularFactor = u_SpecularFactor;
-    material.specularColorFactor = u_SpecularColorFactor;
-    material.refractionIndex = u_RefractionIndex;
-    material.thickness = u_Thickness;
-    material.clearCoat = u_ClearCoat;
-    material.clearCoatRoughness = u_ClearCoatRoughness;
-    material.ambientOcclusion = clamp(ao, 0.0, 1.0);
-    material.transmission = u_Transmission;
-    material.absorption = u_Absorption;
-    // GeomertySurface adds emissive itself after the shading (it decodes the map and the picker
-    // colour separately); the shared function does not read this field.
-    material.emissive = vec3(0.0);
-
-    // Filament's specular AA (GEOMETRIC_SPECULAR_AA): widen the roughness where the geometric
-    // normal changes quickly across the pixel. It is per material; the CAD face keeps it on.
-    FilamentMaterialInputs filteredMaterial = material;
-    if (u_SpecularAA)
-    {
-        filteredMaterial.roughness = normalFiltering(material.roughness, gnormal);
-        filteredMaterial.clearCoatRoughness = normalFiltering(material.clearCoatRoughness, gnormal);
-    }
-    const PixelParams pixel = preparePixelParams(filteredMaterial, normal, VD, _BRDFLut, gnormal);
-    vec3 pbr = evaluateFilamentSurface(
-        material, pixel, fs_in.FragPos, normal, VD,
-        _IrradianceCube, _PrefilterCube, _ShadowMap, _LightSpaceMatrix, _BRDFLut);
+    MaterialInputs m;
+    initMaterial(m);
+    m.baseColor = vec4(linearAlbedo, albedo.a);
+    m.metallic = metallic;
+    m.roughness = roughness;
+    m.reflectance = u_Reflectance;
+    m.specularFactor = u_SpecularFactor;
+    m.specularColorFactor = u_SpecularColorFactor;
+    m.ior = u_RefractionIndex;
+    m.thickness = u_Thickness;
+    m.clearCoat = u_ClearCoat;
+    m.clearCoatRoughness = u_ClearCoatRoughness;
+    m.ambientOcclusion = ao;
+    m.transmission = u_Transmission;
+    m.absorption = u_Absorption;
 
     // The emissive map is sRGB and the colour comes from the panel's colour picker, which is
     // sRGB too: decode each separately, then scale by the (linear) intensity. Decoding the
     // product instead would darken any tint that is not white or black.
-    const vec3 emissive =
+    m.emissive = vec4(
         pow(texture(u_EmissiveMap, texCoords).rgb, vec3(2.2))
         * pow(u_EmissiveColor, vec3(2.2))
-        * u_EmissiveIntensity;
-    pbr += emissive;
-    FRAGMENT_COLOR = vec4(pbr,albedo.a);
+        * u_EmissiveIntensity, 1.0);
+
+    // `normal` is the world shading normal (already through the derivative tangent frame when
+    // the designer assigned a normal map) and `gnormal` the geometric one, so they are handed
+    // over directly instead of writing a tangent-space m.normal.
+    const vec4 shaded = evaluateSurface(m, fs_in.FragPos, gnormal, normal, gnormal, VD);
+    FRAGMENT_COLOR = vec4(shaded.rgb, albedo.a);
 
 }
 }

@@ -175,7 +175,7 @@ void Core::Rendering::ReflectionRenderFeature::PrepareProbe(Core::ECS::Component
 }
 
 void Core::Rendering::ReflectionRenderFeature::SendProbeData(
-	::Rendering::Data::Material& p_material,
+	::Rendering::Data::MaterialInstance& p_material,
 	Tools::Utils::OptRef<const Core::ECS::Components::CReflectionProbe> p_reflectionProbe
 )
 {

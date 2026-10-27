@@ -440,7 +440,7 @@ void Core::SceneSystem::Scene::BuildSceneBvh()
 	int i = 0;
 	std::vector<::Rendering::Geometry::bbox> bounds;
 	std::vector<MeshInstance>meshInstances;
-	std::vector<Core::Resources::Material*>matrialLists;
+	std::vector<::Rendering::Data::MaterialInstance*> matrialLists;
 	std::vector<::Rendering::Resources::Mesh*>sceneMeshes;
 	for (auto modelRenderer : m_fastAccessComponents.modelRenderers)
 	{

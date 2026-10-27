@@ -21,7 +21,7 @@ namespace
 {
 	void PreparePickingMaterial(
 		const Core::ECS::Actor& p_actor,
-		Rendering::Data::Material& p_material,
+		Rendering::Data::MaterialInstance& p_material,
 		const std::string& p_uniformName = "_PickingColor"
 	)
 	{

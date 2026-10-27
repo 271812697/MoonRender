@@ -1,4 +1,4 @@
-#include "MaterialEditorPanel.h"
+﻿#include "MaterialEditorPanel.h"
 #include "MaterialCodeEditor.h"
 #include "MaterialDesigner.h"
 #include "MaterialPreviewWidget.h"
@@ -273,6 +273,22 @@ public:
 		m_glslTabs->addTab(m_vertexEditor, QStringLiteral("Vertex"));
 		m_glslTabs->addTab(m_fragmentEditor, QStringLiteral("Fragment"));
 		m_glslTabs->addTab(m_geometryEditor, QStringLiteral("Geometry"));
+		// The variant the two/three stage tabs show: a material compiles one program per pass and
+		// feature set, and the viewer has to be able to look at any of them, not only the default.
+		auto* variantRow = new QWidget(glslPane);
+		auto* variantLayout = new QHBoxLayout(variantRow);
+		variantLayout->setContentsMargins(6, 2, 6, 2);
+		variantLayout->setSpacing(6);
+		auto* variantLabel = new QLabel(QStringLiteral("Variant"), variantRow);
+		m_variantPicker = new QComboBox(variantRow);
+		m_variantPicker->setObjectName("MaterialVariantPicker");
+		m_variantPicker->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+		m_variantPicker->setMinimumContentsLength(24);
+		variantLayout->addWidget(variantLabel, 0);
+		variantLayout->addWidget(m_variantPicker, 1);
+		glslLayout->addWidget(variantRow);
+		QObject::connect(m_variantPicker, QOverload<int>::of(&QComboBox::currentIndexChanged), m_owner,
+			[this](int p_index) { ShowGlslVariant(p_index); });
 		glslLayout->addWidget(m_glslTabs);
 
 		codeSplitter->addWidget(materialPane);
@@ -317,6 +333,8 @@ public:
 			static_cast<int>(::Editor::Panels::EPreviewMesh::CUBE));
 		meshPicker->addItem(QStringLiteral("Plane"),
 			static_cast<int>(::Editor::Panels::EPreviewMesh::PLANE));
+		meshPicker->addItem(QStringLiteral("CAD part"),
+			static_cast<int>(::Editor::Panels::EPreviewMesh::CAD));
 		previewHeaderLayout->addWidget(meshPicker, 0);
 
 		auto* resetView = new QToolButton(previewHeader);
@@ -593,17 +611,18 @@ public:
 	 * ShaderPanel does with the package it extracts from the .filamat. */
 	void UpdateGlslTabs(const std::string& p_package)
 	{
-		const auto clearTabs = [this] {
-			if (m_vertexEditor != nullptr) { m_vertexEditor->clear(); }
-			if (m_fragmentEditor != nullptr) { m_fragmentEditor->clear(); }
-			if (m_geometryEditor != nullptr) { m_geometryEditor->clear(); }
-			if (m_glslTabs != nullptr) { m_glslTabs->setTabVisible(2, false); }
-			UpdateGlslStats();
-		};
+		m_glslPackage = p_package;
+		m_glslVariants.clear();
+
+		if (m_variantPicker != nullptr)
+		{
+			const QSignalBlocker blocker(m_variantPicker);
+			m_variantPicker->clear();
+		}
 
 		if (p_package.empty())
 		{
-			clearTabs();
+			ShowGlslVariant(-1);
 			return;
 		}
 
@@ -611,22 +630,81 @@ public:
 			p_package.data(), static_cast<uint32_t>(p_package.size()));
 		if (!package.IsValid() || package.Variants().empty())
 		{
+			ShowGlslVariant(-1);
+			return;
+		}
+
+		m_glslVariants = package.Variants();
+
+		int defaultIndex = 0;
+		for (size_t i = 0; i < m_glslVariants.size(); ++i)
+		{
+			const auto& variant = m_glslVariants[i];
+			QString label = QString::fromStdString(
+				variant.pass.empty() || variant.pass == "Default" ? "Default pass" : variant.pass);
+			label += QStringLiteral(" \u00b7 ");
+			if (variant.features.empty())
+			{
+				label += QStringLiteral("no features");
+			}
+			else
+			{
+				QStringList features;
+				for (const std::string& feature : variant.features)
+				{
+					features << QString::fromStdString(feature);
+				}
+				label += features.join(QStringLiteral(", "));
+			}
+
+			if (m_variantPicker != nullptr)
+			{
+				m_variantPicker->addItem(label);
+			}
+
+			// The same one the viewer used to show unconditionally: the default pass with no
+			// features. Older packages spell the default pass "Default".
+			if ((variant.pass.empty() || variant.pass == "Default") && variant.features.empty())
+			{
+				defaultIndex = static_cast<int>(i);
+			}
+		}
+
+		if (m_variantPicker != nullptr)
+		{
+			const QSignalBlocker blocker(m_variantPicker);
+			m_variantPicker->setCurrentIndex(defaultIndex);
+		}
+		ShowGlslVariant(defaultIndex);
+	}
+
+	/** Fills the read-only stage tabs with the stages of one variant. A material has one variant
+	 * per pass / feature set; the picker above the tabs chooses which one is shown. */
+	void ShowGlslVariant(int p_index)
+	{
+		const auto clearTabs = [this] {
+			if (m_vertexEditor != nullptr) { m_vertexEditor->clear(); }
+			if (m_fragmentEditor != nullptr) { m_fragmentEditor->clear(); }
+			if (m_geometryEditor != nullptr) { m_geometryEditor->clear(); }
+			if (m_glslTabs != nullptr) { m_glslTabs->setTabVisible(2, false); }
+			if (m_glslStats != nullptr) { m_glslStats->clear(); }
+		};
+
+		if (p_index < 0 || p_index >= static_cast<int>(m_glslVariants.size()) || m_glslPackage.empty())
+		{
 			clearTabs();
 			return;
 		}
 
-		Rendering::Resources::ShaderPackage::Variant chosen = package.Variants().front();
-		for (const auto& variant : package.Variants())
+		const Rendering::Resources::ShaderPackage package(
+			m_glslPackage.data(), static_cast<uint32_t>(m_glslPackage.size()));
+		if (!package.IsValid())
 		{
-			// The default pass has no name in MoonMatc's model (the material's passes list is
-			// empty for it); older packages spell it "Default".
-			if ((variant.pass.empty() || variant.pass == "Default") && variant.features.empty())
-			{
-				chosen = variant;
-				break;
-			}
+			clearTabs();
+			return;
 		}
 
+		const auto& chosen = m_glslVariants[static_cast<size_t>(p_index)];
 		const std::string vertex = package.Source(
 			chosen, Rendering::Resources::ShaderPackage::Stage::Vertex);
 		const std::string fragment = package.Source(
@@ -637,7 +715,7 @@ public:
 		m_vertexEditor->setPlainText(QString::fromStdString(vertex));
 		m_fragmentEditor->setPlainText(QString::fromStdString(fragment));
 		m_geometryEditor->setPlainText(QString::fromStdString(geometry));
-		if (m_glslTabs->count() > 2)
+		if (m_glslTabs != nullptr && m_glslTabs->count() > 2)
 		{
 			m_glslTabs->setTabVisible(2, !geometry.empty());
 			if (geometry.empty() && m_glslTabs->currentIndex() == 2)
@@ -1132,6 +1210,9 @@ public:
 	QToolButton* m_copyGlsl = nullptr;
 	QToolButton* m_copyMaterial = nullptr;
 	QTabWidget* m_glslTabs = nullptr;
+	QComboBox* m_variantPicker = nullptr;
+	std::string m_glslPackage;
+	std::vector<Rendering::Resources::ShaderPackage::Variant> m_glslVariants;
 	::MOON::MaterialCodeEditor* m_vertexEditor = nullptr;
 	::MOON::MaterialCodeEditor* m_fragmentEditor = nullptr;
 	::MOON::MaterialCodeEditor* m_geometryEditor = nullptr;

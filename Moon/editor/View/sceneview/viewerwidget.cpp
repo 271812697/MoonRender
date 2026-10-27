@@ -20,6 +20,8 @@
 #include "editor/UI/HomePanel/HomePanel.h"
 #include "feature/MoonDocument.h"
 #include "editor/UI/TreeViewPanel/treeViewpanel.h"
+#include "editor/UI/PropertyPanel/PropertyWidget.h"
+#include <Core/ResourceManagement/MaterialManager.h>
 #include "editor/UI/SettingPanel/PassSettingWidget.h"
 
 #include "Interactive/Im3DRenderer.h"
@@ -43,6 +45,7 @@ namespace MOON {
 			return (void*)ctx->getProcAddress(name);
 		}
 	};
+
 	class ViewerWidget::ViewerWindowInternal {
 	public:
 		ViewerWindowInternal(ViewerWidget* view) :mSelf(view) {
@@ -566,6 +569,7 @@ namespace MOON {
 		QElapsedTimer m_fpsTimer;
 		double m_fps = 0.0;
 		double m_frameMs = 0.0;
+
 
 	};
 	ViewerWidget::ViewerWidget(QWidget* parent) :

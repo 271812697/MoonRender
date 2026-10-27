@@ -1,4 +1,4 @@
-﻿#include <algorithm>
+#include <algorithm>
 #include <array>
 #include <filesystem>
 #include <format>
@@ -907,6 +907,7 @@ void main()
 	{
 		using namespace Rendering::Settings;
 
+		const auto p_assemblyStart = std::chrono::high_resolution_clock::now();
 		Rendering::Resources::Shader::Variants variants;
 		bool blockValidated = false;
 
@@ -1028,6 +1029,20 @@ void main()
 			*p_error = "the package produced no usable variant";
 		}
 
+		// MOON_DEBUG_SHADER_LOAD=1: what the eager assembly actually costs. The variants are
+		// deduplicated (one compile per distinct stage text, one link per distinct combination),
+		// so the number of GL compiles is stageCache.size(), not the variant count - this prints
+		// both plus the wall time, per shader, so the loader can be reasoned about with numbers.
+		if (std::getenv("MOON_DEBUG_SHADER_LOAD") != nullptr)
+		{
+			const auto elapsedMs = std::chrono::duration<double, std::milli>(
+				std::chrono::high_resolution_clock::now() - p_assemblyStart).count();
+			std::cout << std::format(
+				"[Shader Load] {:<28} variants={:<4} stages(compiled)={:<4} programs={:<4} {:8.1f} ms",
+				p_package.Name(), p_package.Variants().size(), stageCache.size(), programCache.size(), elapsedMs)
+				<< std::endl;
+		}
+
 		return variants;
 	}
 
@@ -1041,6 +1056,18 @@ void main()
 	{
 		std::vector<Rendering::Resources::Shader::Parameter> parameters;
 		parameters.reserve(p_package.Parameters().size());
+
+		const auto fallbackOf = [&p_package](const std::string& p_name) -> uint8_t {
+			for (const Rendering::Resources::ShaderPackage::SamplerFallbackEntry& entry
+				: p_package.SamplerFallbacks())
+			{
+				if (entry.name == p_name)
+				{
+					return static_cast<uint8_t>(entry.kind);
+				}
+			}
+			return static_cast<uint8_t>(Rendering::Resources::ShaderPackage::SamplerFallback::Default);
+		};
 
 		for (const Rendering::Resources::ShaderPackage::Parameter& parameter : p_package.Parameters())
 		{
@@ -1057,6 +1084,7 @@ void main()
 				.offset = parameter.offset,
 				.stride = parameter.stride,
 				.binding = parameter.binding,
+				.fallback = parameter.isSampler ? fallbackOf(parameter.name) : uint8_t{ 0 },
 				.isSampler = parameter.isSampler,
 				.hasRange = parameter.hasRange,
 				.hasStep = parameter.hasStep,

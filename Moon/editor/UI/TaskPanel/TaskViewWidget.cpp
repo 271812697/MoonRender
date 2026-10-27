@@ -1,4 +1,5 @@
-﻿#include "editor/UI/TaskPanel/TaskViewWidget.h"
+#include "editor/UI/TaskPanel/TaskViewWidget.h"
+#include "editor/Language.h"
 #include "Core/Global/ServiceLocator.h"
 #include "editor/UI/TaskPanel/ExtrudeTaskDialog.h"
 #include "editor/UI/TaskPanel/SketchTaskDialog.h"
@@ -139,6 +140,11 @@ namespace MOON {
         QPushButton* btnOk = new QPushButton("OK");
         QPushButton* btnApply = new QPushButton("Apply");
         QPushButton* btnCancel = new QPushButton("Cancel");
+        // The three buttons are the same in every task panel, so they follow the UI language
+        // here rather than in each dialog.
+        MOON::Language::SetText(btnOk, QStringLiteral("确定"), QStringLiteral("OK"));
+        MOON::Language::SetText(btnApply, QStringLiteral("应用"), QStringLiteral("Apply"));
+        MOON::Language::SetText(btnCancel, QStringLiteral("取消"), QStringLiteral("Cancel"));
 
         btnLay->addStretch();
         btnLay->addWidget(btnOk);

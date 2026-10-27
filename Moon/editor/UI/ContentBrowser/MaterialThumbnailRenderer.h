@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QImage>
+#include <QPixmap>
 #include <QString>
 
 #include <memory>
@@ -12,6 +13,18 @@ namespace Editor::Panels
 
 namespace MOON
 {
+	/** The key a material thumbnail is cached under: the file's path plus its modification time, so
+	 * editing the .mat invalidates the picture. */
+	QString MaterialThumbnailKey(const QString& p_materialPath);
+
+	/** The thumbnail the content browser rendered for that material, or a null pixmap while it has
+	 * not been rendered yet. Other panels (the property panel's material slots) show the same
+	 * picture instead of painting one of their own. */
+	QPixmap CachedMaterialThumbnail(const QString& p_materialPath);
+
+	/** Called by whoever rendered a thumbnail; the content browser does, on its own timer. */
+	void StoreMaterialThumbnail(const QString& p_materialPath, const QPixmap& p_image);
+
 	/** Renders an .mat asset into the sphere thumbnail the content browser shows.
 	 *
 	 * The material editor's preview widget can only capture what it is showing, so it was not

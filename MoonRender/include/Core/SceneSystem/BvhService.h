@@ -2,6 +2,7 @@
 #include <string>
 #include <Rendering/Geometry/bvh.h>
 #include <Rendering/HAL/Texture.h>
+#include <Rendering/Data/MaterialInstance.h>
 #include <Core/ECS/Actor.h>
 #include <Core/SceneSystem/Intersection.h>
 #include <Rendering/Geometry/ray.h>
@@ -242,7 +243,7 @@ namespace Core::SceneSystem
 			Maths::FVector3 bboxmax;
 			Maths::FVector3 LRLeaf;
 		};
-		void AddMaterial(::Core::Resources::Material* material);
+		void AddMaterial(::Rendering::Data::MaterialInstance* material);
 		int AddTexture(::Rendering::HAL::Texture*);
 		void ProcessBLAS();
 		void ProcessTLAS();

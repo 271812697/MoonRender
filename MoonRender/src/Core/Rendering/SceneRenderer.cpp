@@ -790,6 +790,10 @@ void Core::Rendering::SceneRenderer::SetExcludedFeatures(::Rendering::Data::Feat
 	// The cached drawables were parsed with the previous exclusions.
 	m_parsedDrawablesValid = false;
 }
+void Core::Rendering::SceneRenderer::InvalidateParsedDrawables()
+{
+	m_parsedDrawablesValid = false;
+}
 void Core::Rendering::SceneRenderer::DrawModelWithSingleMaterial(::Rendering::Data::PipelineState p_pso, ::Rendering::Resources::Model& p_model, ::Rendering::Data::Material& p_material, const Maths::FMatrix4& p_modelMatrix)
 {
 	auto stateMask = p_material.GenerateStateMask();
@@ -851,7 +855,7 @@ SceneRenderer::SceneDrawablesDescriptor Core::Rendering::SceneRenderer::ParseSce
 				if (mesh->GetIndexCount(bufferIndex) <= 0) {
 					continue;
 				}
-				Tools::Utils::OptRef<::Rendering::Data::Material> material;
+				Tools::Utils::OptRef<::Rendering::Data::MaterialInstance> material;
 
 				if (materialIndex < kMaxMaterialCount)
 				{
@@ -980,7 +984,7 @@ void Core::Rendering::SceneRenderer::UpdateParsedDrawables(Core::SceneSystem::Sc
 			// the variant key of a keyed shader is part of the drawable's feature override.
 			// Both have to re-run ParseScene, otherwise the cached drawables keep the old
 			// (feature-only) override and the draw falls back to a variant without the key.
-			HashCombine(signature, HashPointer(material->GetShader()));
+			HashCombine(signature, HashPointer(material->Shader()));
 			for (const std::string& feature : material->GetFeatures())
 			{
 				for (const char c : feature)
@@ -1047,14 +1051,12 @@ void Core::Rendering::SceneRenderer::UpdateParsedDrawables(Core::SceneSystem::Sc
 	{
 		bool directional = false;
 		bool dynamic = false;
-		bool shadows = false;
 		for (::Core::ECS::Actor* actor : p_scene.GetActors())
 		{
 			if (actor == nullptr || !actor->IsActive()) { continue; }
-			if (auto* light = actor->GetComponent<::Core::ECS::Components::CDirectionalLight>())
+			if (actor->GetComponent<::Core::ECS::Components::CDirectionalLight>() != nullptr)
 			{
 				directional = true;
-				shadows = shadows || light->GetCastShadows();
 			}
 			if (actor->GetComponent<::Core::ECS::Components::CPointLight>() != nullptr
 				|| actor->GetComponent<::Core::ECS::Components::CSpotLight>() != nullptr)
@@ -1064,18 +1066,28 @@ void Core::Rendering::SceneRenderer::UpdateParsedDrawables(Core::SceneSystem::Sc
 		}
 		if (directional) { variantFeatures.insert("VARIANT_HAS_DIRECTIONAL_LIGHTING"); }
 		if (dynamic) { variantFeatures.insert("VARIANT_HAS_DYNAMIC_LIGHTING"); }
-		if (shadows) { variantFeatures.insert("VARIANT_HAS_SHADOWING"); }
+		// No SHADOWING bit: the shadow pass is not wired into the scene draw, so a material whose
+		// shader filters it would only be asked for a variant that was never compiled. The bit
+		// belongs here next to the pass that fills the shadow map.
 	}
 
 	for (auto& drawable : m_parsedDrawables.drawables)
 	{
 		if (!drawable.material) { continue; }
-		const bool keyed = drawable.material->GetShader() != nullptr
-			&& drawable.material->GetShader()->UsesVariantKeys();
+		const bool keyed = drawable.material->Shader() != nullptr
+			&& drawable.material->Shader()->UsesVariantKeys();
 		if (!keyed && m_excludedFeatures.empty()) { continue; }
-		::Rendering::Data::FeatureSet features = drawable.material->GetFeatures();
+		::Rendering::Data::FeatureSet features = drawable.material->Features();
 		for (const std::string& excluded : m_excludedFeatures) { features.erase(excluded); }
-		if (keyed) { features.insert(variantFeatures.begin(), variantFeatures.end()); }
+		if (keyed)
+		{
+			// Only the bits this shader actually compiled a variant for.
+			const auto& variantKeys = drawable.material->Shader()->GetVariantKeys();
+			for (const std::string& feature : variantFeatures)
+			{
+				if (variantKeys.contains(feature)) { features.insert(feature); }
+			}
+		}
 		drawable.featureSetOverride = std::move(features);
 	}
 

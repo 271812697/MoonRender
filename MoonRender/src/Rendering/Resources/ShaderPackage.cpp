@@ -1,4 +1,4 @@
-﻿#include <Rendering/Resources/ShaderPackage.h>
+#include <Rendering/Resources/ShaderPackage.h>
 
 #include <cstring>
 #include <iostream>
@@ -186,6 +186,25 @@ namespace Rendering::Resources
 				if (payload.size() >= sizeof(uint32_t))
 				{
 					Take(payload, m_parameterBlockSize);
+				}
+			}
+			else if (tag == "SHDRFALL")
+			{
+				uint32_t count = 0;
+				if (!Take(payload, count))
+				{
+					continue;
+				}
+				for (uint32_t i = 0; i < count; ++i)
+				{
+					SamplerFallbackEntry entry;
+					uint8_t kind = 0;
+					if (!TakeString(payload, entry.name) || !Take(payload, kind))
+					{
+						break;
+					}
+					entry.kind = static_cast<SamplerFallback>(kind);
+					m_samplerFallbacks.push_back(std::move(entry));
 				}
 			}
 			else if (tag == "SHDRSTAT")

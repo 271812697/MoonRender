@@ -8,6 +8,7 @@
 #include "core/log.h"
 #include <Rendering/Overlay/Im2DRender.h>
 #include "Sketcher/SketcheTool2D.h"
+#include "editor/UI/IconCache.h"
 #include <QInputDialog>
 #include <limits>
 #include <cmath>
@@ -19,7 +20,7 @@ namespace MOON {
     namespace {
         /** Annotation text size. The font atlas is baked at 24px, so this is crisp and the
          * exponent labels (1.4x) are only slightly magnified. */
-        constexpr float kAnnotationFontSize = 20.0f;
+        constexpr float kAnnotationFontSize = 26.0f;
 
         Im2D::DrawList& AnnotationDrawList()
         {
@@ -56,6 +57,48 @@ namespace MOON {
     // Draws a sketch-plane polyline with a screen-space dashed pattern (dash
     // and gap lengths are fixed in pixels, so the pattern keeps its size when
     // the view is zoomed). Construction geometry uses this style.
+
+    // The constraint markers used to be drawn from primitives (circles, arcs, ticks). The SVG set
+    // already exists for the toolbar, so the markers reuse it: one glyph per constraint type, the
+    // same shape the user picks the constraint from.
+    // Where a marker sits relative to its anchor, in screen-ish pixels along the sketch axes:
+    // x to the right, y down. Chosen per constraint type so the glyph does not cover the
+    // geometry it describes.
+    static void constraintMarkerOffset(Sketcher::ConstraintType p_type, float& p_x, float& p_y)
+    {
+        switch (p_type) {
+        case Sketcher::ConstraintType::Coincident:    p_x = 20.0f; p_y = 20.0f; break;
+        case Sketcher::ConstraintType::PointOnObject: p_x = -22.0f; p_y = 18.0f; break;
+        case Sketcher::ConstraintType::Horizontal:    p_x = 0.0f;  p_y = 24.0f; break;
+        case Sketcher::ConstraintType::Vertical:      p_x = 24.0f; p_y = 0.0f;  break;
+        case Sketcher::ConstraintType::Parallel:      p_x = 22.0f; p_y = -18.0f; break;
+        case Sketcher::ConstraintType::Perpendicular: p_x = 22.0f; p_y = -18.0f; break;
+        case Sketcher::ConstraintType::Tangent:       p_x = 0.0f;  p_y = -26.0f; break;
+        // Tangent is not here: drawTangentIcons() owns it (it needs the tangent point and
+        // the normal, which the generic anchor cannot give).
+        case Sketcher::ConstraintType::Equal:         p_x = 22.0f; p_y = 0.0f;  break;
+        case Sketcher::ConstraintType::Symmetric:     p_x = 0.0f;  p_y = 26.0f; break;
+        case Sketcher::ConstraintType::Block:         p_x = 0.0f;  p_y = 0.0f;  break;
+        default:                                      p_x = 16.0f; p_y = -16.0f; break;
+        }
+    }
+
+    static const char* constraintIconPath(Sketcher::ConstraintType p_type)
+    {
+        switch (p_type) {
+        case Sketcher::ConstraintType::Coincident:    return ":/widgets/icons/constraint32/Constraint_Coincident.svg";
+        case Sketcher::ConstraintType::PointOnObject: return ":/widgets/icons/constraint32/Constraint_PointOnObject.svg";
+        case Sketcher::ConstraintType::Horizontal:    return ":/widgets/icons/constraint32/Constraint_Horizontal.svg";
+        case Sketcher::ConstraintType::Vertical:      return ":/widgets/icons/constraint32/Constraint_Vertical.svg";
+        case Sketcher::ConstraintType::Parallel:      return ":/widgets/icons/constraint32/Constraint_Parallel.svg";
+        case Sketcher::ConstraintType::Perpendicular: return ":/widgets/icons/constraint32/Constraint_Perpendicular.svg";
+        case Sketcher::ConstraintType::Equal:         return ":/widgets/icons/constraint32/Constraint_EqualLength.svg";
+        case Sketcher::ConstraintType::Symmetric:     return ":/widgets/icons/constraint32/Constraint_Symmetric.svg";
+        case Sketcher::ConstraintType::Block:         return ":/widgets/icons/constraint32/Constraint_Block.svg";
+        default:                                      return nullptr;
+        }
+    }
+
     static void drawDashedSketchPolyline(
         ImRenderer* renderer,
         const SketcherPlane2D& plane,
@@ -67,35 +110,17 @@ namespace MOON {
         if (!renderer || points.size() < 2) {
             return;
         }
-        const float cycle = dashPx + gapPx;
-        float phase = 0.0f;
-        for (int i = 0; i + 1 < static_cast<int>(points.size()); i++) {
-            const Eigen::Vector3f wa = plane.valueEigen(points[i].x, points[i].y);
-            const Eigen::Vector3f wb = plane.valueEigen(points[i + 1].x, points[i + 1].y);
-            const Eigen::Vector2f aS = renderer->worldToScreen(wa);
-            const Eigen::Vector2f bS = renderer->worldToScreen(wb);
-            const float len = (bS - aS).norm();
-            if (len < 0.05f) {
-                continue;
-            }
-            float t = 0.0f;
-            while (t < len - 0.1f) {
-                const bool ink = phase < dashPx;
-                const float stateRemain = ink ? (dashPx - phase) : (cycle - phase);
-                const float step = std::min(stateRemain, len - t);
-                if (ink && step > 0.1f) {
-                    const float u0 = t / len;
-                    const float u1 = (t + step) / len;
-                    renderer->drawLine(wa + (wb - wa) * u0, wa + (wb - wa) * u1);
-                }
-                t += step;
-                phase += step;
-                if (phase >= cycle) {
-                    phase -= cycle;
-                }
-            }
+        // The dash pattern is a renderer feature now (ImRenderer::drawDashedPolyline): it keeps
+        // the points in world space, so a construction line goes through the same pipeline as a
+        // solid one, and only the dash rhythm is measured in screen pixels.
+        std::vector<Eigen::Vector3f> world;
+        world.reserve(points.size());
+        for (const Base::Vector3d& point : points) {
+            world.push_back(plane.valueEigen(point.x, point.y));
         }
+        renderer->drawDashedPolyline(world, dashPx, gapPx);
     }
+
     // Default screen-space offset (in pixels) applied to the auto anchor when
     // the user has not moved the label manually.
     void defaultLabelOffsetPx(const Sketcher::Constraint* c, float& dx, float& dy)
@@ -2368,7 +2393,34 @@ namespace MOON {
                 : hovered ? Im2D::ColorU32(255, 255, 140, 255) : Im2D::ColorU32(255, 255, 255, 42);
             //drawList->AddRectFilled(boxMin, boxMax, Im2D::ColorU32(24, 24, 30, 178), 4.0f);
             //drawList->AddRect(boxMin, boxMax, borderCol, 4.0f);
-            drawList->AddText(AnnotationFont(), kAnnotationFontSize, Im2D::Vec2(sx - ts.x * 0.5f, sy - ts.y * 0.5f), textCol, text.c_str());
+            // The label is anchored to a point on the sketch plane and nudged by the same
+            // screen offset the 2D box used, so it follows the model instead of the window.
+            // Drawing it through the 3D text pass keeps annotations and geometry in one space.
+            const Im2D::ImU32 rawCol = textCol;
+            const Eigen::Vector4<uint8_t> labelRgba(
+                static_cast<uint8_t>((rawCol >> 16) & 0xFF),
+                static_cast<uint8_t>((rawCol >> 8) & 0xFF),
+                static_cast<uint8_t>(rawCol & 0xFF),
+                static_cast<uint8_t>((rawCol >> 24) & 0xFF));
+            const float ascent = AnnotationFont().GetAscent(kAnnotationFontSize);
+            const Eigen::Vector3f labelAnchor = m_sketch->plane().valueEigen(anchor);
+            const auto& sketchPlane = m_sketch->plane();
+            const Eigen::Vector3f planeRight(
+                static_cast<float>(sketchPlane.xAxis.x),
+                static_cast<float>(sketchPlane.xAxis.y),
+                static_cast<float>(sketchPlane.xAxis.z));
+            const Eigen::Vector3f planeUp(
+                static_cast<float>(sketchPlane.yAxis.x),
+                static_cast<float>(sketchPlane.yAxis.y),
+                static_cast<float>(sketchPlane.yAxis.z));
+            // The label centre (sx, sy) carries the anchor offset and the user's drag; move it
+            // into pixels relative to the anchor so the 3D text lands exactly where the 2D one
+            // used to be.
+            const Eigen::Vector2f anchorScreen = renderer->worldToScreen(labelAnchor);
+            const float labelOffX = sx - anchorScreen.x();
+            const float labelOffY = sy - anchorScreen.y();
+            renderer->drawLabel3D(labelAnchor, text.c_str(), kAnnotationFontSize, labelRgba,
+                labelOffX - ts.x * 0.5f, labelOffY - ts.y * 0.5f + ascent, planeRight, planeUp, true);
         }
     }
     void SketcherObjWidget::editConstraintValue(int constrId)
@@ -2572,6 +2624,25 @@ namespace MOON {
             if (!computeTangentIconAnchor(c, anchorSketch, dirSketch, normalSketch)) {
                 continue;
             }
+            // The tangent marker is an SVG like every other constraint now; this function used to
+            // draw it from an arc and a tick, which is why it stayed magenta while the rest turned
+            // into icons. The anchor computation above still decides where it goes.
+            if (auto* texture = MOON::IconCache::Instance().GetTexture(
+                    QStringLiteral(":/widgets/icons/constraint32/Constraint_Tangent.svg"), 40)) {
+                const auto& tangentPlane = m_sketch->plane();
+                const Eigen::Vector4<uint8_t> tangentRgba = constraintInError(i)
+                    ? Eigen::Vector4<uint8_t>(255, 96, 96, 255)
+                    : Eigen::Vector4<uint8_t>(255, 255, 255, 255);
+                renderer->drawIcon3D(tangentPlane.valueEigen(anchorSketch), texture, 40.0f, tangentRgba,
+                    Eigen::Vector3f(static_cast<float>(tangentPlane.xAxis.x),
+                        static_cast<float>(tangentPlane.xAxis.y),
+                        static_cast<float>(tangentPlane.xAxis.z)),
+                    Eigen::Vector3f(static_cast<float>(tangentPlane.yAxis.x),
+                        static_cast<float>(tangentPlane.yAxis.y),
+                        static_cast<float>(tangentPlane.yAxis.z)),
+                    0.0f, -26.0f, true);
+                continue;
+            }
             const bool isError = constraintInError(i);
             const Im2D::ImU32 col = isError ? Im2D::ColorU32(255, 110, 110, 255)
                                       : abgrToImU32(m_drawOption.constraintColor);
@@ -2656,6 +2727,41 @@ namespace MOON {
             const Im2D::ImU32 col = isError ? Im2D::ColorU32(255, 110, 110, 255)
                                       : abgrToImU32(m_drawOption.constraintColor);
 
+            // An SVG marker when the type has one, drawn through the 3D overlay: the anchor is a
+            // point on the sketch plane, so the glyph is part of the scene instead of being pinned
+            // to the window.
+            if (const char* iconPath = constraintIconPath(c->Type)) {
+                Base::Vector2d iconAnchor;
+                if (anchorOf(c, 0, iconAnchor)) {
+                    if (auto* texture = MOON::IconCache::Instance().GetTexture(
+                            QString::fromLatin1(iconPath), 40)) {
+                        // The icon carries the palette the toolbar uses (blue / amber / green);
+                        // tinting it with the constraint colour would flatten all of that into
+                        // one orange. White keeps the sprite's own colours, and only an error
+                        // recolours the marker.
+                        const Eigen::Vector4<uint8_t> rgba = isError
+                            ? Eigen::Vector4<uint8_t>(255, 96, 96, 255)
+                            : Eigen::Vector4<uint8_t>(255, 255, 255, 255);
+                        // Larger, lying on the sketch plane and offset per type, so the marker
+                        // sits beside its geometry instead of on top of it.
+                        const auto& markerPlane = m_sketch->plane();
+                        const Eigen::Vector3f planeRight(
+                            static_cast<float>(markerPlane.xAxis.x),
+                            static_cast<float>(markerPlane.xAxis.y),
+                            static_cast<float>(markerPlane.xAxis.z));
+                        const Eigen::Vector3f planeUp(
+                            static_cast<float>(markerPlane.yAxis.x),
+                            static_cast<float>(markerPlane.yAxis.y),
+                            static_cast<float>(markerPlane.yAxis.z));
+                        float offsetX = 0.0f;
+                        float offsetY = 0.0f;
+                        constraintMarkerOffset(c->Type, offsetX, offsetY);
+                        renderer->drawIcon3D(markerPlane.valueEigen(iconAnchor), texture, 40.0f, rgba,
+                            planeRight, planeUp, offsetX, offsetY, true);
+                        continue;
+                    }
+                }
+            }
             switch (c->Type) {
             case Sketcher::ConstraintType::Tangent:
                 continue;  // handled by drawTangentIcons()

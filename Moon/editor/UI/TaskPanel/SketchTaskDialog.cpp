@@ -293,6 +293,7 @@ namespace MOON {
         addGroupParam("Constraints");
         addGroupParam("Curves");
         addGroupParam("External Geometry");
+        addGroupParam("Sketch Axes");
         buildUi();
 
         mConstraintList = new QListWidget(this);
@@ -325,6 +326,63 @@ namespace MOON {
         attachList("Constraints", mConstraintList);
         attachList("Curves", mCurveList);
         attachList("External Geometry", mExternalList);
+
+        // The sketch frame: a face carries an arbitrary pair of axes in its surface, so lining a
+        // sketch up with another CAD's frame means turning it. The turn is applied to the plane
+        // itself, which is what every tool and every constraint reads.
+        {
+            const auto it = groupToIndex.find("Sketch Axes");
+            if (it != groupToIndex.end()) {
+                auto* group = m_comps[it->second].first;
+                group->setCollapsed(false);
+                auto* host = new QWidget(this);
+                auto* row = new QHBoxLayout(host);
+                row->setContentsMargins(0, 0, 0, 0);
+                auto* rotate = new QPushButton(QStringLiteral("\u7ed5 Z \u65cb\u8f6c 90\u00b0"), host);
+                auto* info = new QLabel(host);
+                info->setWordWrap(true);
+                row->addWidget(rotate);
+                row->addStretch();
+                group->addSubWidget(host);
+                group->addSubWidget(info);
+
+                auto refresh = [this, info]() {
+                    auto* object = mInternal->feature != nullptr ? mInternal->feature->getSketcherObj() : nullptr;
+                    if (object == nullptr) {
+                        return;
+                    }
+                    const SketcherPlane2D& plane = object->plane();
+                    info->setText(QStringLiteral("X (%1, %2, %3)\nY (%4, %5, %6)")
+                        .arg(plane.xAxis.x, 0, 'f', 2).arg(plane.xAxis.y, 0, 'f', 2).arg(plane.xAxis.z, 0, 'f', 2)
+                        .arg(plane.yAxis.x, 0, 'f', 2).arg(plane.yAxis.y, 0, 'f', 2).arg(plane.yAxis.z, 0, 'f', 2));
+                };
+
+                connect(rotate, &QPushButton::clicked, this, [this, refresh]() {
+                    auto* object = mInternal->feature != nullptr ? mInternal->feature->getSketcherObj() : nullptr;
+                    if (object == nullptr) {
+                        return;
+                    }
+                    // 90 degrees about the normal is Rodrigues with cos = 0, sin = 1: the new X is
+                    // n x x (the normal is unit and x is perpendicular to it), the new Y is n x X.
+                    SketcherPlane2D plane = object->plane();
+                    const Base::Vector3d n = plane.normal;
+                    const Base::Vector3d x = plane.xAxis;
+                    const Base::Vector3d xRot(
+                        n.y * x.z - n.z * x.y,
+                        n.z * x.x - n.x * x.z,
+                        n.x * x.y - n.y * x.x);
+                    plane.xAxis = xRot;
+                    plane.yAxis = Base::Vector3d(
+                        n.y * xRot.z - n.z * xRot.y,
+                        n.z * xRot.x - n.x * xRot.z,
+                        n.x * xRot.y - n.y * xRot.x);
+                    object->setPlane(plane);
+                    refresh();
+                });
+                refresh();
+            }
+        }
+
 
         mRefreshTimer = new QTimer(this);
         mRefreshTimer->setInterval(300);

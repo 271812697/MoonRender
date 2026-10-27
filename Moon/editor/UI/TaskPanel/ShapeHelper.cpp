@@ -1,4 +1,4 @@
-#include "editor/UI/TaskPanel/ShapeHelper.h"
+﻿#include "editor/UI/TaskPanel/ShapeHelper.h"
 #include "editor/View/sceneview/viewerwidget.h"
 #include "TopoShape.h"
 #include "core/component/TopoShapeActor.h"
@@ -149,7 +149,7 @@ namespace MOON {
 				topo.setShape(mInternal->m_previewShape);
 				topoComp->discretizationShape();
 				auto MatRender = mInternal->m_previewActor->GetChild("AllFaces")->GetComponent<Core::ECS::Components::CMaterialRenderer>();
-				Core::Resources::Material* tempMat = MatRender->GetMaterialAtIndex(0);
+				::Rendering::Data::MaterialInstance* tempMat = MatRender->GetMaterialAtIndex(0);
 				tempMat->SetProperty("u_Albedo", Maths::FVector4(mPreviewOption.r, mPreviewOption.g, mPreviewOption.b, mPreviewOption.a));
 				if (mPreviewOption.isTransparent) {
 					// Both styles are spelled out completely: a panel can switch

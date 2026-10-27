@@ -56,9 +56,14 @@ namespace Core::ECS::Components
 		if (mInternal->colorChange) {
 			mInternal->colorChange = false;
 			auto mat = owner.GetComponent<CMaterialRenderer>()->GetMaterialAtIndex(0);
-			if (mat) {
-				const ::Rendering::Data::MaterialProperty prop = mat->GetProperty("domainColorTex").value();
-				auto tex = std::get<::Rendering::HAL::TextureHandle*>(prop.value);
+			// The slot may hold a material that has no domain colour table at all (the user can
+			// assign any .mat to the faces); .value() on the empty optional used to throw here,
+			// which took the editor down the moment a face was picked.
+			const auto property = mat != nullptr ? mat->GetProperty("domainColorTex")
+				: Tools::Utils::OptRef<const ::Rendering::Data::MaterialProperty>{};
+			const auto* texture = property ? std::get_if<::Rendering::HAL::TextureHandle*>(&property.value().value) : nullptr;
+			if (texture != nullptr) {
+				auto tex = *texture;
 
 				if (tex) {
 					std::vector<Maths::FVector4> colors = mInternal->m_defaultColors;
