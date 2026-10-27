@@ -50,7 +50,7 @@ material {
         { type : float,     name : edgeOpacity, default : 1.0, label : "Edge Opacity", group : "Edge", min : 0.0, max : 1.0, step : 0.005 },
 
         { type : sampler2D, name : u_AlbedoMap, label : "Albedo Map", group : "Textures" },
-        { type : float4,    name : u_Albedo, default : vec4(0.7215686, 0.7215686, 0.7215686, 1.0), label : "Base Color", group : "Base", color : true },
+        { type : float4,    name : u_Albedo, default : vec4(1.0, 1.0, 1.0, 1.0), label : "Base Color", group : "Base", color : true },
         { type : sampler2D, name : u_AmbientOcclusionMap, label : "Ambient Occlusion Map", group : "Textures" },
 
         { type : sampler2D, name : u_EmissiveMap, label : "Emissive Map", group : "Textures" },

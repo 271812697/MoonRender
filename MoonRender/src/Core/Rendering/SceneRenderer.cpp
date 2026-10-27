@@ -1051,14 +1051,12 @@ void Core::Rendering::SceneRenderer::UpdateParsedDrawables(Core::SceneSystem::Sc
 	{
 		bool directional = false;
 		bool dynamic = false;
-		bool shadows = false;
 		for (::Core::ECS::Actor* actor : p_scene.GetActors())
 		{
 			if (actor == nullptr || !actor->IsActive()) { continue; }
-			if (auto* light = actor->GetComponent<::Core::ECS::Components::CDirectionalLight>())
+			if (actor->GetComponent<::Core::ECS::Components::CDirectionalLight>() != nullptr)
 			{
 				directional = true;
-				shadows = shadows || light->GetCastShadows();
 			}
 			if (actor->GetComponent<::Core::ECS::Components::CPointLight>() != nullptr
 				|| actor->GetComponent<::Core::ECS::Components::CSpotLight>() != nullptr)
@@ -1068,7 +1066,9 @@ void Core::Rendering::SceneRenderer::UpdateParsedDrawables(Core::SceneSystem::Sc
 		}
 		if (directional) { variantFeatures.insert("VARIANT_HAS_DIRECTIONAL_LIGHTING"); }
 		if (dynamic) { variantFeatures.insert("VARIANT_HAS_DYNAMIC_LIGHTING"); }
-		if (shadows) { variantFeatures.insert("VARIANT_HAS_SHADOWING"); }
+		// No SHADOWING bit: the shadow pass is not wired into the scene draw, so a material whose
+		// shader filters it would only be asked for a variant that was never compiled. The bit
+		// belongs here next to the pass that fills the shadow map.
 	}
 
 	for (auto& drawable : m_parsedDrawables.drawables)
@@ -1079,7 +1079,15 @@ void Core::Rendering::SceneRenderer::UpdateParsedDrawables(Core::SceneSystem::Sc
 		if (!keyed && m_excludedFeatures.empty()) { continue; }
 		::Rendering::Data::FeatureSet features = drawable.material->Features();
 		for (const std::string& excluded : m_excludedFeatures) { features.erase(excluded); }
-		if (keyed) { features.insert(variantFeatures.begin(), variantFeatures.end()); }
+		if (keyed)
+		{
+			// Only the bits this shader actually compiled a variant for.
+			const auto& variantKeys = drawable.material->Shader()->GetVariantKeys();
+			for (const std::string& feature : variantFeatures)
+			{
+				if (variantKeys.contains(feature)) { features.insert(feature); }
+			}
+		}
 		drawable.featureSetOverride = std::move(features);
 	}
 

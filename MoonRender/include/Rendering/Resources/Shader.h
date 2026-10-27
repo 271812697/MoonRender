@@ -157,6 +157,12 @@ namespace Rendering::Resources
 		 * instead of the material's feature set. */
 		bool UsesVariantKeys() const;
 
+		/** Every variant key name this shader was compiled with (the VARIANT_* defines that
+		 * appear in at least one variant). The scene's per-frame variant bits are filtered against
+		 * it, so a bit the shader never compiles cannot make the lookup miss and land on a variant
+		 * without the lighting code. */
+		const std::unordered_set<std::string>& GetVariantKeys() const;
+
 		/** Replaces the state, for a hot reload whose material block changed. */
 		void SetState(State p_state);
 	private:
@@ -182,5 +188,6 @@ namespace Rendering::Resources
 		State m_state;
 		bool m_hasState = false;
 		bool m_usesVariantKeys = false;
+		std::unordered_set<std::string> m_variantKeys;
 	};
 }

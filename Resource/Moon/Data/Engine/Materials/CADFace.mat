@@ -23,9 +23,9 @@
         <uniform>
             <name>u_Albedo</name>
             <value>
-                <x>0.7215686</x>
-                <y>0.7215686</y>
-                <z>0.7215686</z>
+                <x>1</x>
+                <y>1</y>
+                <z>1</z>
                 <w>1</w>
             </value>
         </uniform>

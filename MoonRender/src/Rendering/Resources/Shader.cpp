@@ -1,4 +1,4 @@
-﻿#include <algorithm>
+#include <algorithm>
 #include <format>
 #include <iostream>
 #include <ranges>
@@ -34,17 +34,44 @@ Rendering::HAL::ShaderProgram& Rendering::Resources::Shader::GetVariant(std::opt
 	auto it = variants.find(p_featureSet);
 	if (it == variants.end())
 	{
-		it = variants.find(Data::FeatureSet{});
-		if (it == variants.end())
+		// No exact variant. Falling back to "any" (the first one, historically) is how a material
+		// that asked for lighting could end up on a variant compiled without it: the CAD faces
+		// rendered dark because the pick landed on the empty set. Take the variant that shares the
+		// most features with the request instead, preferring the one with the fewest extras.
+		size_t bestCommon = 0;
+		size_t bestExtra = static_cast<size_t>(-1);
+		for (auto candidate = variants.begin(); candidate != variants.end(); ++candidate)
 		{
-			it = variants.begin();
+			size_t common = 0;
+			for (const std::string& feature : candidate->first)
+			{
+				if (p_featureSet.contains(feature)) { ++common; }
+			}
+			const size_t extra = candidate->first.size() - common;
+			if (common > bestCommon || (common == bestCommon && extra < bestExtra))
+			{
+				bestCommon = common;
+				bestExtra = extra;
+				it = candidate;
+			}
 		}
 
+		// Keyed by the request, not just the shader: the material preview renders first and a
+		// per-shader key would silence the scene's own miss behind it.
 		static std::set<std::string> reported;
-		if (reported.insert(path + "|" + pass).second)
+		std::string requestKey = path + "|" + pass;
+		for (const std::string& feature : p_featureSet) { requestKey += "|" + feature; }
+		if (reported.insert(std::move(requestKey)).second)
 		{
 			std::cout << "[Shader] " << path << " has no variant for pass " << pass
-				<< " with " << p_featureSet.size() << " feature(s); using a fallback." << std::endl;
+				<< " with " << p_featureSet.size() << " feature(s); using the closest one ("
+				<< bestCommon << " match(es), " << bestExtra << " extra)." << std::endl;
+			std::cout << "[Shader]   wanted:";
+			for (const std::string& feature : p_featureSet) { std::cout << " " << feature; }
+			std::cout << std::endl;
+			std::cout << "[Shader]   chose:";
+			for (const std::string& feature : it->first) { std::cout << " " << feature; }
+			std::cout << std::endl;
 		}
 	}
 
@@ -93,6 +120,7 @@ void Rendering::Resources::Shader::SetVariants(Variants&& p_variants)
 	m_passes.clear();
 	m_features.clear();
 	m_usesVariantKeys = false;
+	m_variantKeys.clear();
 
 	// Find all passes & features based on the compiled variants
 	for (const auto& [pass, featureVariants] : m_variants)
@@ -106,12 +134,21 @@ void Rendering::Resources::Shader::SetVariants(Variants&& p_variants)
 				if (feature.starts_with("VARIANT_"))
 				{
 					m_usesVariantKeys = true;
+					// Every key that exists in at least one variant: the scene's per-frame variant
+					// bits are filtered against it, so asking for a bit this shader never compiles
+					// cannot make the exact lookup miss and land on a variant without lighting.
+					m_variantKeys.insert(feature);
 					continue;
 				}
 				m_features.insert(feature);
 			}
 		}
 	}
+}
+
+const std::unordered_set<std::string>& Rendering::Resources::Shader::GetVariantKeys() const
+{
+	return m_variantKeys;
 }
 
 const Rendering::Resources::Shader::Variants& Rendering::Resources::Shader::GetVariants() const
