@@ -13,43 +13,31 @@
 
 namespace Moon::Matc
 {
-	/** The GLSL name of a parameter type. The material files spell them the way filament's
-	 * DSL does (float4, int3, ...); GLSL calls the same things vec4, ivec3, and sampling one
-	 * a name wrong is a compile error rather than a silent default. */
-	std::string GlslType(const std::string& p_type)
+	TypeLayout ParameterTypeLayout(ParameterType p_type)
 	{
-		static const std::map<std::string, std::string> kTypes = {
-			{ "bool", "bool" }, { "bool2", "bvec2" }, { "bool3", "bvec3" }, { "bool4", "bvec4" },
-			{ "int", "int" }, { "int2", "ivec2" }, { "int3", "ivec3" }, { "int4", "ivec4" },
-			{ "uint", "uint" }, { "uint2", "uvec2" }, { "uint3", "uvec3" }, { "uint4", "uvec4" },
-			{ "float", "float" }, { "float2", "vec2" }, { "float3", "vec3" }, { "float4", "vec4" },
-			{ "mat2", "mat2" }, { "mat3", "mat3" }, { "mat4", "mat4" },
-			{ "sampler2D", "sampler2D" }, { "sampler2DArray", "sampler2DArray" },
-			{ "samplerCube", "samplerCube" }, { "sampler3D", "sampler3D" },
-		};
-		const auto it = kTypes.find(p_type);
-		return it != kTypes.end() ? it->second : p_type;
-	}
-
-	/** The std140 size and base alignment of a parameter type. Samplers never reach this:
-	 * they are not allowed inside a uniform block and stay separate uniforms. */
-	struct TypeLayout
-	{
-		uint32_t size;
-		uint32_t alignment;
-	};
-
-	TypeLayout ParameterTypeLayout(const std::string& p_type)
-	{
-		static const std::map<std::string, TypeLayout> kTypes = {
-			{ "bool", { 4, 4 } }, { "bool2", { 8, 8 } }, { "bool3", { 12, 16 } }, { "bool4", { 16, 16 } },
-			{ "int", { 4, 4 } }, { "int2", { 8, 8 } }, { "int3", { 12, 16 } }, { "int4", { 16, 16 } },
-			{ "uint", { 4, 4 } }, { "uint2", { 8, 8 } }, { "uint3", { 12, 16 } }, { "uint4", { 16, 16 } },
-			{ "float", { 4, 4 } }, { "float2", { 8, 8 } }, { "float3", { 12, 16 } }, { "float4", { 16, 16 } },
-			{ "mat2", { 32, 8 } }, { "mat3", { 48, 16 } }, { "mat4", { 64, 16 } },
-		};
-		const auto it = kTypes.find(p_type);
-		return it != kTypes.end() ? it->second : TypeLayout{ 4, 4 };
+		switch (p_type)
+		{
+		case ParameterType::Bool: return { 4, 4 };
+		case ParameterType::Bool2: return { 8, 8 };
+		case ParameterType::Bool3: return { 12, 16 };
+		case ParameterType::Bool4: return { 16, 16 };
+		case ParameterType::Int: return { 4, 4 };
+		case ParameterType::Int2: return { 8, 8 };
+		case ParameterType::Int3: return { 12, 16 };
+		case ParameterType::Int4: return { 16, 16 };
+		case ParameterType::UInt: return { 4, 4 };
+		case ParameterType::UInt2: return { 8, 8 };
+		case ParameterType::UInt3: return { 12, 16 };
+		case ParameterType::UInt4: return { 16, 16 };
+		case ParameterType::Float: return { 4, 4 };
+		case ParameterType::Float2: return { 8, 8 };
+		case ParameterType::Float3: return { 12, 16 };
+		case ParameterType::Float4: return { 16, 16 };
+		case ParameterType::Mat2: return { 32, 8 };
+		case ParameterType::Mat3: return { 48, 16 };
+		case ParameterType::Mat4: return { 64, 16 };
+		default: return { 4, 4 };
+		}
 	}
 
 	uint32_t RoundUp(uint32_t p_value, uint32_t p_alignment)
@@ -77,8 +65,7 @@ namespace Moon::Matc
 			}
 
 			const TypeLayout layout = ParameterTypeLayout(parameter.type);
-			const uint32_t count = parameter.count.empty()
-				? 1u : static_cast<uint32_t>(std::stoul(parameter.count));
+			const uint32_t count = parameter.count > 0 ? parameter.count : 1u;
 
 			if (count > 1)
 			{
@@ -142,7 +129,7 @@ namespace Moon::Matc
 
 			Parameter parameter;
 			parameter.name = entry.name;
-			parameter.type = entry.type;
+			parameter.type = ParseParameterType(entry.type);
 			parameter.ui = false;
 			p_material.parameters.push_back(std::move(parameter));
 		}
@@ -157,7 +144,7 @@ namespace Moon::Matc
 	 * for both stages - a parameter only one of them reads is dropped by the compiler.
 	 *
 	 * The declared initialisers move to the runtime: a block member cannot have one, and the
-	 * material's property defaults (parsed from the same declarations, see SHDRPROP) are what
+	 * material's property defaults (parsed from the same declarations, see MAT_PROP) are what
 	 * fills the buffer. */
 	std::string ParametersPrelude(const std::vector<Parameter>& p_parameters, uint32_t p_blockSize)
 	{
@@ -172,8 +159,8 @@ namespace Moon::Matc
 				{
 					continue;
 				}
-				out << "    " << GlslType(parameter.type) << " " << parameter.name;
-				if (!parameter.count.empty())
+				out << "    " << ParameterTypeGlsl(parameter.type) << " " << parameter.name;
+				if (parameter.count > 0)
 				{
 					out << "[" << parameter.count << "]";
 				}
@@ -189,7 +176,7 @@ namespace Moon::Matc
 				continue;
 			}
 			out << "layout(binding = " << parameter.binding << ") uniform "
-				<< GlslType(parameter.type) << " " << parameter.name << ";\n";
+				<< ParameterTypeGlsl(parameter.type) << " " << parameter.name << ";\n";
 		}
 
 		out << "\n";
@@ -206,11 +193,10 @@ namespace Moon::Matc
 
 			UniformInfo uniform;
 			uniform.name = parameter.name;
-			uniform.type = GlslType(parameter.type);
+			uniform.type = parameter.type;
 			uniform.offset = parameter.offset;
 			uniform.stride = parameter.stride;
-			uniform.count = parameter.count.empty()
-				? 1u : static_cast<uint32_t>(std::stoul(parameter.count));
+			uniform.count = parameter.count > 0 ? parameter.count : 1u;
 			block.uniforms.push_back(std::move(uniform));
 		}
 		return block;

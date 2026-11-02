@@ -16,7 +16,7 @@ namespace Moon::Matc
 	struct UniformInfo
 	{
 		std::string name;
-		std::string type;      // the GLSL type
+		ParameterType type = ParameterType::Unknown;
 		uint32_t offset = 0;   // std140 offset inside the block
 		uint32_t stride = 0;   // element size (arrays: the padded stride)
 		uint32_t count = 1;    // array length, 1 for a plain field
@@ -29,8 +29,15 @@ namespace Moon::Matc
 		std::vector<UniformInfo> uniforms;
 	};
 
-	/** The GLSL spelling of a material DSL type. */
-	std::string GlslType(const std::string& p_type);
+	/** The std140 size and base alignment of a parameter type. Samplers never reach this:
+	 * they are not allowed inside a uniform block and stay separate uniforms. */
+	struct TypeLayout
+	{
+		uint32_t size;
+		uint32_t alignment;
+	};
+
+	TypeLayout ParameterTypeLayout(ParameterType p_type);
 
 	/** Assigns the std140 offsets/strides and the sampler units, and writes them back into the
 	 * builder's parameters (the package reflects those); BuildUniformBlock reads them back. */

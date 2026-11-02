@@ -77,6 +77,55 @@ namespace Moon::Matc
 		{ "postLightingMixFactor","POST_LIGHTING_MIX_FACTOR","float","1.0",                        InputGuard::HasPostLightingColor, InputGuard::HasPostLightingColor },
 	};
 
+	ShaderGenerator::ShaderGenerator(
+		const MaterialBuilder& p_material,
+		std::set<std::string> p_writtenFields,
+		std::string p_fileName,
+		std::vector<std::string> p_includeDirs,
+		IncludeResolver p_includeResolver)
+		: m_material(p_material)
+		, m_writtenFields(std::move(p_writtenFields))
+		, m_fileName(std::move(p_fileName))
+		, m_includeDirs(std::move(p_includeDirs))
+		, m_includeResolver(std::move(p_includeResolver))
+	{
+		m_prelude = BuildPrelude();
+	}
+
+	std::string ShaderGenerator::BuildPrelude() const
+	{
+		// The two headers every stage gets, then the MaterialInputs struct and its defines.
+		std::string prelude;
+		for (const std::string& relative : { "Common/Buffers/EngineUBO.glsl", "Common/Utils.glsl" })
+		{
+			std::string content;
+			bool found = false;
+			if (m_includeResolver)
+			{
+				std::string origin;
+				found = m_includeResolver(relative, content, origin);
+			}
+			if (!found)
+			{
+				for (const std::string& dir : m_includeDirs)
+				{
+					content = ReadFile((std::filesystem::path(dir) / relative).string(), found);
+					if (found)
+					{
+						break;
+					}
+				}
+			}
+			if (found)
+			{
+				prelude += "\n#line 1 \"" + relative + "\"\n" + content + "\n";
+			}
+		}
+
+		prelude += "\n#line 1 \"<material inputs>\"\n" + MaterialInputsPrelude();
+		return prelude;
+	}
+
 	/** The fields a material's own code writes. filament runs a real AST pass for this
 	 * (libs/filamat/src/sca/ASTHelpers.cpp, PropertyFinder); anchoring the scan on the
 	 * variables that are declared as `MaterialInputs` gets the same answer for code that
@@ -84,7 +133,7 @@ namespace Moon::Matc
 	 * material;` in the Filament port) for these. The scan only sees the material's own
 	 * block, not what an #include writes - those are the engine's, and they write their own
 	 * struct in the current code. */
-	std::set<std::string> WrittenInputFields(const std::string& p_body)
+	std::set<std::string> ShaderGenerator::WrittenInputFields(const std::string& p_body)
 	{
 		std::set<std::string> written;
 
@@ -117,29 +166,12 @@ namespace Moon::Matc
 	}
 
 	/** filament's synthetic MATERIAL_NEEDS_TBN: the four fields that read the tangent frame. */
-	bool NeedsTangentFrame(const std::set<std::string>& p_writtenFields)
+	bool ShaderGenerator::NeedsTangentFrame(const std::set<std::string>& p_writtenFields)
 	{
 		return p_writtenFields.contains("normal")
 			|| p_writtenFields.contains("bentNormal")
 			|| p_writtenFields.contains("clearCoatNormal")
 			|| p_writtenFields.contains("anisotropy");
-	}
-
-	/** Open the `#if` for one guard, or nothing for Always. */
-	std::string InputGuardOpen(InputGuard p_guard, const InputField& p_field)
-	{
-		switch (p_guard)
-		{
-		case InputGuard::Always: return {};
-		case InputGuard::Lit: return "#if !defined(SHADING_MODEL_UNLIT)\n";
-		case InputGuard::Has: return std::string("#if defined(MATERIAL_HAS_") + p_field.define + ")\n";
-		case InputGuard::HasNormal: return "#if defined(MATERIAL_HAS_NORMAL)\n";
-		case InputGuard::HasBentNormal: return "#if defined(MATERIAL_HAS_BENT_NORMAL)\n";
-		case InputGuard::HasClearCoatNormal:
-			return "#if defined(MATERIAL_HAS_CLEAR_COAT) && defined(MATERIAL_HAS_CLEAR_COAT_NORMAL)\n";
-		case InputGuard::HasPostLightingColor: return "#if defined(MATERIAL_HAS_POST_LIGHTING_COLOR)\n";
-		}
-		return {};
 	}
 
 	/** The MaterialInputs the material() entry point writes, the function that fills them
@@ -152,13 +184,26 @@ namespace Moon::Matc
 	 * the top are the material-level half of filament's material system: they say which of
 	 * these fields this material actually writes, so the surface prelude can compile the
 	 * unused lobes out. */
-	std::string MaterialInputsPrelude(
-		const std::string& p_shadingModel,
-		const std::set<std::string>& p_writtenFields,
-		const MaterialFile& p_material)
+	std::string ShaderGenerator::MaterialInputsPrelude() const
 	{
-		const bool lit = (p_shadingModel != "unlit");
+		const bool lit = (m_material.shadingModel != "unlit");
 		std::ostringstream out;
+
+		const auto inputGuardOpen = [](InputGuard p_guard, const InputField& p_field) -> std::string
+		{
+			switch (p_guard)
+			{
+			case InputGuard::Always: return {};
+			case InputGuard::Lit: return "#if !defined(SHADING_MODEL_UNLIT)\n";
+			case InputGuard::Has: return std::string("#if defined(MATERIAL_HAS_") + p_field.define + ")\n";
+			case InputGuard::HasNormal: return "#if defined(MATERIAL_HAS_NORMAL)\n";
+			case InputGuard::HasBentNormal: return "#if defined(MATERIAL_HAS_BENT_NORMAL)\n";
+			case InputGuard::HasClearCoatNormal:
+				return "#if defined(MATERIAL_HAS_CLEAR_COAT) && defined(MATERIAL_HAS_CLEAR_COAT_NORMAL)\n";
+			case InputGuard::HasPostLightingColor: return "#if defined(MATERIAL_HAS_POST_LIGHTING_COLOR)\n";
+			}
+			return {};
+		};
 
 		// --- the material's own defines -------------------------------------------------
 		out << "// material defines (filament's MATERIAL_HAS_*): derived from what the code below\n"
@@ -166,23 +211,23 @@ namespace Moon::Matc
 			<< (lit ? "#define SHADING_MODEL_LIT\n" : "#define SHADING_MODEL_UNLIT\n");
 		for (const InputField& field : kInputFields)
 		{
-			if (p_writtenFields.contains(field.name))
+			if (m_writtenFields.contains(field.name))
 			{
 				out << "#define MATERIAL_HAS_" << field.define << "\n";
 			}
 		}
 
 		// filament's synthetic define: the four fields that need a tangent frame.
-		const bool needsTbn = NeedsTangentFrame(p_writtenFields);
+		const bool needsTbn = NeedsTangentFrame(m_writtenFields);
 		out << "#define MATERIAL_NEEDS_TBN " << (needsTbn ? 1 : 0) << "\n"
-			<< "#define GEOMETRIC_SPECULAR_AA " << (p_material.specularAntiAliasing && lit ? 1 : 0) << "\n"
-			<< "#define CLEAR_COAT_IOR_CHANGE " << (p_material.clearCoatIorChange ? 1 : 0) << "\n\n";
+			<< "#define GEOMETRIC_SPECULAR_AA " << (m_material.specularAntiAliasing && lit ? 1 : 0) << "\n"
+			<< "#define CLEAR_COAT_IOR_CHANGE " << (m_material.clearCoatIorChange ? 1 : 0) << "\n\n";
 
 		// --- the struct ------------------------------------------------------------------
 		out << "struct MaterialInputs {\n";
 		for (const InputField& field : kInputFields)
 		{
-			const std::string guard = InputGuardOpen(field.declaration, field);
+			const std::string guard = inputGuardOpen(field.declaration, field);
 			if (!guard.empty())
 			{
 				out << "  " << guard;
@@ -199,7 +244,7 @@ namespace Moon::Matc
 		out << "void initMaterial(out MaterialInputs m) {\n";
 		for (const InputField& field : kInputFields)
 		{
-			const std::string guard = InputGuardOpen(field.initialization, field);
+			const std::string guard = inputGuardOpen(field.initialization, field);
 			if (!guard.empty())
 			{
 				out << "  " << guard;
@@ -240,10 +285,10 @@ namespace Moon::Matc
 	 * `p_needsTbn` adds the world tangent frame, filament's `shading_tangentToWorld`: a material
 	 * that writes `material.normal` / `material.anisotropyDirection` reads it, and a material
 	 * that writes neither never pays for it. */
-	std::string VaryingsPrelude(bool p_vertex, const std::string& p_domain, bool p_needsTbn)
+	std::string ShaderGenerator::VaryingsPrelude(bool p_vertex, bool p_needsTbn) const
 	{
 		std::ostringstream out;
-		if (p_domain == "postProcess")
+		if (m_material.domain == "postProcess")
 		{
 			// A full-screen pass only carries texture coordinates between the stages.
 			out << (p_vertex ? "out vec2 TexCoords;\n\n" : "in vec2 TexCoords;\n\n");
@@ -266,7 +311,7 @@ namespace Moon::Matc
 	/** The feature a geometry body's leading guard is about, if it is a plain single-feature
 	 * test: `#ifdef F` / `#if defined(F)` / `#if F` are +1, the negations are -1, and anything
 	 * fancier (`||`, `&&`, comparisons) is 0 "do not try to be clever". */
-	int GeometryGuardFeature(const std::string& p_body, std::string& p_feature)
+	int ShaderGenerator::GeometryGuardFeature(const std::string& p_body, std::string& p_feature)
 	{
 		std::istringstream stream(p_body);
 		std::string line;
@@ -336,7 +381,7 @@ namespace Moon::Matc
 
 	/** True when the block's first `#if` is closed by an `#endif` with nothing but whitespace
 	 * after it - i.e. the guard covers the whole stage body rather than one helper in it. */
-	bool GuardWrapsBlock(const std::string& p_body)
+	bool ShaderGenerator::GuardWrapsBlock(const std::string& p_body)
 	{
 		std::istringstream stream(p_body);
 		std::string line;
@@ -378,11 +423,11 @@ namespace Moon::Matc
 	 * Only a guard that wraps the WHOLE block counts (first line `#if`, matching `#endif` at the
 	 * end of the block): a guard around part of it says nothing about whether the stage is
 	 * needed, and those keep their geometry stage. */
-	bool WantsGeometryStage(const std::string& p_body, const PassVariant& p_variant)
+	bool ShaderGenerator::WantsGeometryStage(const PassVariant& p_variant) const
 	{
 		std::string feature;
-		const int sense = GeometryGuardFeature(p_body, feature);
-		if (sense == 0 || !GuardWrapsBlock(p_body))
+		const int sense = GeometryGuardFeature(m_material.geometryBody, feature);
+		if (sense == 0 || !GuardWrapsBlock(m_material.geometryBody))
 		{
 			return true;
 		}
@@ -395,7 +440,7 @@ namespace Moon::Matc
 	 * billboard that rebuilds the model-view matrix, a skybox that writes w = z. Filament
 	 * keeps the transform out of the material too, so a material that owns its stage is our
 	 * deviation, documented in docs/ShaderPipeline.md (section 10, differences from Filament). */
-	bool DefinesMain(const std::string& p_body)
+	bool ShaderGenerator::DefinesMain(const std::string& p_body)
 	{
 		size_t at = 0;
 		while ((at = p_body.find("void", at)) != std::string::npos)
@@ -421,10 +466,10 @@ namespace Moon::Matc
 	 * the full-screen case.
 	 *
 	 * Only generated for a stage that does not own its main() - see BuildStage. */
-	std::string VertexSkeleton(bool p_hasUserVertex, const std::string& p_domain, bool p_needsTbn)
+	std::string ShaderGenerator::VertexSkeleton(bool p_hasUserVertex, bool p_needsTbn) const
 	{
 		std::ostringstream out;
-		if (p_domain == "postProcess")
+		if (m_material.domain == "postProcess")
 		{
 			// The quad comes in in clip space; there is no model matrix and no normal.
 			out << "layout (location = 0) in vec2 geo_Pos;\n"
@@ -477,7 +522,7 @@ namespace Moon::Matc
 	/** The fragment main, copied in shape from filament's surface_main.fs:50-56: fill the
 	 * inputs with defaults, run the material's entry point, then let the shading model turn
 	 * them into a colour. Only generated for a stage that does not own its main(). */
-	std::string FragmentSkeleton()
+	std::string ShaderGenerator::FragmentSkeleton() const
 	{
 		std::ostringstream out;
 		out << "out vec4 FRAGMENT_COLOR;\n\n"
@@ -511,7 +556,7 @@ namespace Moon::Matc
 	 * `MaterialInputs` -> `FilamentMaterialInputs` is the debt this slice leaves: the surface
 	 * stack still takes its own struct, so the copy happens here. It goes away when the ported
 	 * files take `MaterialInputs` directly. */
-	std::string LitSurfacePrelude(bool p_skeletonStage)
+	std::string ShaderGenerator::LitSurfacePrelude(bool p_skeletonStage) const
 	{
 		std::ostringstream out;
 		out << "\n#line 1 \"<lit surface>\"\n"
@@ -629,7 +674,7 @@ namespace Moon::Matc
 	 * declares its own inputs (GizmoLine's aPositionSize/aColor, the instanced ones) shows up
 	 * exactly like the generated skeleton does. filament records the same pairs in its
 	 * MaterialAttributeInfo chunk. */
-	std::vector<VertexAttribute> CollectVertexAttributes(const std::string& p_stageText)
+	std::vector<VertexAttribute> ShaderGenerator::CollectVertexAttributes(const std::string& p_stageText)
 	{
 		static const std::regex kAttribute(
 			R"(layout\s*\(\s*location\s*=\s*([0-9]+)\s*\)\s*in\s+([A-Za-z0-9_]+)\s+([A-Za-z0-9_]+))");
@@ -661,7 +706,7 @@ namespace Moon::Matc
 	 * its required attributes into shader defines. The declaration order is the attribute
 	 * order of the mesh, so the same material cannot serve two different vertex layouts; that
 	 * is exactly filament's model (a material owns its vertex layout). */
-	std::string AttributeDeclarations(const MaterialFile& p_material, Stage p_stage)
+	std::string ShaderGenerator::AttributeDeclarations(Stage p_stage) const
 	{
 		struct Entry
 		{
@@ -680,7 +725,7 @@ namespace Moon::Matc
 
 		std::ostringstream out;
 		uint32_t location = 0;
-		for (const std::string& name : p_material.vertexAttributes)
+		for (const std::string& name : m_material.vertexAttributes)
 		{
 			for (const Entry& entry : kEntries)
 			{
@@ -700,7 +745,7 @@ namespace Moon::Matc
 		return out.str();
 	}
 
-	std::string VariantDefines(const PassVariant& p_variant, Stage p_stage, const std::string& p_stageText)
+	std::string ShaderGenerator::VariantDefines(const PassVariant& p_variant, Stage p_stage, const std::string& p_stageText) const
 	{
 		std::ostringstream out;
 		out << (p_stage == Stage::Vertex ? "#define MOON_STAGE_VERTEX\n"
@@ -734,7 +779,7 @@ namespace Moon::Matc
 
 	/** The (field, define) pairs the material-defines dump lists, in the order the surface
 	 * model declares them; Matc.cpp asks for them instead of reaching into kInputFields. */
-	std::vector<std::string> WrittenInputDefines(const std::set<std::string>& p_writtenFields)
+	std::vector<std::string> ShaderGenerator::WrittenInputDefines(const std::set<std::string>& p_writtenFields)
 	{
 		std::vector<std::string> defines;
 		for (const InputField& field : kInputFields)
@@ -762,25 +807,18 @@ namespace Moon::Matc
 	 *
 	 * With p_shared the defines are replaced by kDefinesPlaceholder: that is the one copy of
 	 * this stage the package keeps, and every variant contributes just its define lines. */
-	std::string ShaderGenerator::Build(
-		Stage p_stage,
-		const MaterialFile& p_material,
-		const PassVariant& p_variant,
-		const std::string& p_prelude,
-		const std::string& p_fileName,
-		const std::vector<std::string>& p_includeDirs,
-		const IncludeResolver& p_includeResolver,
-		std::string& p_error,
-		bool p_shared)
+	std::string ShaderGenerator::Build(Stage p_stage, const PassVariant& p_variant, bool p_shared)
 	{
-		const std::string& body = p_stage == Stage::Vertex ? p_material.vertexBody
-			: p_stage == Stage::Fragment ? p_material.fragmentBody
-			: p_material.geometryBody;
-		const uint32_t entryLine = p_stage == Stage::Vertex ? p_material.vertexEntryLine
-			: p_stage == Stage::Fragment ? p_material.fragmentEntryLine
-			: p_material.geometryEntryLine;
+		m_error.clear();
+
+		const std::string& body = p_stage == Stage::Vertex ? m_material.vertexBody
+			: p_stage == Stage::Fragment ? m_material.fragmentBody
+			: m_material.geometryBody;
+		const uint32_t entryLine = p_stage == Stage::Vertex ? m_material.vertexEntryLine
+			: p_stage == Stage::Fragment ? m_material.fragmentEntryLine
+			: m_material.geometryEntryLine;
 		const bool rawStage = p_stage == Stage::Geometry || DefinesMain(body);
-		const bool needsTbn = NeedsTangentFrame(p_material.writtenFields);
+		const bool needsTbn = NeedsTangentFrame(m_writtenFields);
 
 		std::ostringstream out;
 		out << "#version 450 core\n"
@@ -789,7 +827,7 @@ namespace Moon::Matc
 			// the directive outright, so the build-time validation could not read what we
 			// generate; drivers accept the form either way.
 			<< "#extension GL_GOOGLE_cpp_style_line_directive : enable\n"
-			<< "// generated by MoonMatc from " << p_fileName << ", stage " << StageName(p_stage) << '\n';
+			<< "// generated by MoonMatc from " << m_fileName << ", stage " << StageName(p_stage) << '\n';
 		if (p_shared)
 		{
 			out << kDefinesPlaceholder << '\n';
@@ -800,13 +838,13 @@ namespace Moon::Matc
 				<< " feature(s)\n"
 				<< VariantDefines(p_variant, p_stage);
 		}
-		out << p_prelude;
+		out << m_prelude;
 		if (!rawStage)
 		{
-			out << VaryingsPrelude(p_stage == Stage::Vertex, p_material.domain, needsTbn);
+			out << VaryingsPrelude(p_stage == Stage::Vertex, needsTbn);
 		}
-		out << AttributeDeclarations(p_material, p_stage);
-		out << ParametersPrelude(p_material.parameters, p_material.parameterBlockSize);
+		out << AttributeDeclarations(p_stage);
+		out << ParametersPrelude(m_material.parameters, m_material.parameterBlockSize);
 
 		// A lit surface's fragment stage carries the shading model's code. Where it goes matters:
 		//
@@ -820,7 +858,7 @@ namespace Moon::Matc
 		//    the surface came out black. So for a raw stage: a prototype before the body, the
 		//    prelude itself after it.
 		const bool litSurface = p_stage == Stage::Fragment
-			&& p_material.shadingModel != "unlit" && p_material.domain == "surface";
+			&& m_material.shadingModel != "unlit" && m_material.domain == "surface";
 		if (litSurface)
 		{
 			if (rawStage)
@@ -835,7 +873,7 @@ namespace Moon::Matc
 			}
 		}
 
-		out << "\n#line " << entryLine << " \"" << p_fileName << "\"\n"
+		out << "\n#line " << entryLine << " \"" << m_fileName << "\"\n"
 			<< body
 			<< "\n#line 1 \"<generated>\"\n";
 		if (litSurface && rawStage)
@@ -846,7 +884,7 @@ namespace Moon::Matc
 		{
 			if (p_stage == Stage::Vertex)
 			{
-				out << VertexSkeleton(!p_material.vertexBody.empty(), p_material.domain, needsTbn);
+				out << VertexSkeleton(!m_material.vertexBody.empty(), needsTbn);
 			}
 			else
 			{
@@ -858,7 +896,7 @@ namespace Moon::Matc
 		// compiled - there is no runtime pass left to do it once it is a package.
 		std::set<std::string> visited;
 		std::string expanded;
-		if (!ExpandIncludes(out.str(), p_includeDirs, p_includeResolver, p_fileName, visited, expanded, p_error))
+		if (!ExpandIncludes(out.str(), m_includeDirs, m_includeResolver, m_fileName, visited, expanded, m_error))
 		{
 			return {};
 		}

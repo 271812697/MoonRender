@@ -7,13 +7,14 @@
 #include "Matc.h"
 #include "MaterialBuilder.h"
 
-/** The stage code generation flow (filament's ShaderGenerator): one variant of one stage is
- * assembled from the material's prelude (parameter block, material inputs, varyings), the
- * variant's #define set, the skeleton main() the material does not write, the material's own
- * body, and - for the stages this engine writes itself - the geometry-stage guards.
+/** The stage code generator (filament's filamat/src/shaders/ShaderGenerator).
  *
- * Split out of Matc.cpp; the prelude / layout helpers still live next to the flow in
- * ShaderGenerator.cpp and move to their own modules (UibGenerator / SibGenerator) next. */
+ * One instance is the generator for one material: it holds the material, the MaterialInputs
+ * fields the material's fragment code writes, the common prelude and the include resolver.
+ * Everything that decides what a stage looks like - defines, varyings, attributes, skeleton
+ * main, MaterialInputs struct, lit-surface stack, #line placement - is a member method here;
+ * CompileSource only asks for stages and packages the result.
+ */
 namespace Moon::Matc
 {
 	/** One vertex attribute a generated stage declares: `layout (location = N) in T name;`. */
@@ -24,62 +25,68 @@ namespace Moon::Matc
 		std::string name;
 	};
 
-	/** The MaterialInputs fields the material's own fragment code writes. */
-	std::set<std::string> WrittenInputFields(const std::string& p_body);
-
-	/** The MATERIAL_HAS_<define> suffixes those fields turn into, in surface-model order. */
-	std::vector<std::string> WrittenInputDefines(const std::set<std::string>& p_writtenFields);
-
 	/** Where a shared stage carries its variant defines: the package stores one copy per stage
 	 * and the runtime splices the variant's defines in (filament's dictionary chunk idea). */
 	inline constexpr char kDefinesPlaceholder[] = "//@MOON_VARIANT_DEFINES@";
 
-	/** Whether those fields need a tangent frame (normal / anisotropy read it). */
-	bool NeedsTangentFrame(const std::set<std::string>& p_writtenFields);
-
-	/** The generated MaterialInputs struct and its accessor declarations. */
-	std::string MaterialInputsPrelude(
-		const std::string& p_shadingModel,
-		const std::set<std::string>& p_writtenFields,
-		const MaterialBuilder& p_material);
-
-	/** Whether this variant needs the geometry stage for a material that expands lines. */
-	bool WantsGeometryStage(const std::string& p_body, const PassVariant& p_variant);
-
-	/** The attributes a stage text declares, read back out of the generated `layout (...)` lines. */
-	std::vector<VertexAttribute> CollectVertexAttributes(const std::string& p_stageText);
-
-	/** True for the sampler types of the material DSL (sampler2D / samplerCube / ...). */
-	bool IsSamplerType(const std::string& p_dslType);
-
-	/** Which 1x1 texture the runtime binds for an unassigned sampler (0 = default, 1 = flat normal). */
-	uint8_t SamplerFallbackKind(const std::string& p_name);
-
-	/** The GLSL spelling of a material DSL type. */
-	std::string GlslType(const std::string& p_type);
-
-	/** Fills each parameter's std140 offset / stride and the block size (LayoutParameters). */
-	void LayoutParameters(MaterialBuilder& p_material);
-
-	/** Adds the engine-owned globals (camera, lights, shadow matrix) to the block. */
-	void InjectEngineGlobals(MaterialBuilder& p_material);
-
-	/** The variant's #define set: the engine bits it carries plus the stage's feature defines. */
-	std::string VariantDefines(const PassVariant& p_variant, Stage p_stage, const std::string& p_stageText = {});
-
-	/** The whole stage: prelude + defines + body + main. Empty with p_error set on failure. */
 	class ShaderGenerator
 	{
 	public:
-		static std::string Build(
-			Stage p_stage,
+		ShaderGenerator(
 			const MaterialBuilder& p_material,
+			std::set<std::string> p_writtenFields,
+			std::string p_fileName,
+			std::vector<std::string> p_includeDirs,
+			IncludeResolver p_includeResolver);
+
+		/** The MaterialInputs fields the material's own fragment code writes. Static because it
+		 * is a property of the source text, before a generator exists. */
+		static std::set<std::string> WrittenInputFields(const std::string& p_body);
+
+		/** The MATERIAL_HAS_<define> suffixes those fields turn into, in surface-model order. */
+		static std::vector<std::string> WrittenInputDefines(const std::set<std::string>& p_writtenFields);
+
+		/** Whether those fields need a tangent frame (normal / anisotropy read it). */
+		static bool NeedsTangentFrame(const std::set<std::string>& p_writtenFields);
+
+		/** The attributes a generated stage declares, read back out of its `layout (...)` lines. */
+		static std::vector<VertexAttribute> CollectVertexAttributes(const std::string& p_stageText);
+
+		/** The whole stage: version, defines, prelude, entry point, generated main. Empty with
+		 * Error() set on failure. With p_shared the variant defines become the placeholder. */
+		std::string Build(Stage p_stage, const PassVariant& p_variant, bool p_shared = false);
+
+		/** The #define lines for one variant of a stage (the package stores them per entry). */
+		std::string VariantDefines(
 			const PassVariant& p_variant,
-			const std::string& p_prelude,
-			const std::string& p_fileName,
-			const std::vector<std::string>& p_includeDirs,
-			const IncludeResolver& p_includeResolver,
-			std::string& p_error,
-			bool p_shared = false);
+			Stage p_stage,
+			const std::string& p_stageText = {}) const;
+
+		/** Whether this variant needs the material's geometry block (the guard-feature rule). */
+		bool WantsGeometryStage(const PassVariant& p_variant) const;
+
+		const std::string& Error() const { return m_error; }
+
+	private:
+		/** EngineUBO + Utils + MaterialInputs: the part every stage shares. */
+		std::string BuildPrelude() const;
+		std::string MaterialInputsPrelude() const;
+		std::string VaryingsPrelude(bool p_vertex, bool p_needsTbn) const;
+		std::string AttributeDeclarations(Stage p_stage) const;
+		std::string VertexSkeleton(bool p_hasUserVertex, bool p_needsTbn) const;
+		std::string FragmentSkeleton() const;
+		std::string LitSurfacePrelude(bool p_skeletonStage) const;
+
+		static bool DefinesMain(const std::string& p_body);
+		static int GeometryGuardFeature(const std::string& p_body, std::string& p_feature);
+		static bool GuardWrapsBlock(const std::string& p_body);
+
+		const MaterialBuilder& m_material;
+		std::set<std::string> m_writtenFields;
+		std::string m_fileName;
+		std::vector<std::string> m_includeDirs;
+		IncludeResolver m_includeResolver;
+		std::string m_prelude;
+		std::string m_error;
 	};
 }

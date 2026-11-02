@@ -960,7 +960,7 @@ namespace MOON {
 			{
 				return QFileInfo(QString::fromStdString(asset->path)).fileName();
 			}
-			if (auto* definition = dynamic_cast<::Core::Resources::Material*>(instance->Definition()))
+			if (auto* definition = dynamic_cast<::Core::Resources::Material*>(instance->ParentMaterial()))
 			{
 				return QStringLiteral("instance of ") + QFileInfo(QString::fromStdString(definition->path)).fileName();
 			}
@@ -987,7 +987,7 @@ namespace MOON {
 			{
 				return QString::fromStdString(asset->path);
 			}
-			if (auto* definition = dynamic_cast<::Core::Resources::Material*>(instance->Definition()))
+			if (auto* definition = dynamic_cast<::Core::Resources::Material*>(instance->ParentMaterial()))
 			{
 				return QString::fromStdString(definition->path);
 			}

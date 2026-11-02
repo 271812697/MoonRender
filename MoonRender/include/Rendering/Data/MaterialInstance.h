@@ -6,6 +6,7 @@
 #include <variant>
 #include <vector>
 #include <Maths/FMatrix3.h>
+#include <Rendering/Data/DescriptorSet.h>
 #include <Rendering/Data/StateMask.h>
 #include <Rendering/Data/UniformBufferPool.h>
 #include <Rendering/Data/FeatureSet.h>
@@ -18,6 +19,7 @@
 namespace Rendering::Data
 {
 	class Material;
+	class MaterialDefinition;
 	class MaterialInstance;
 
 	/** The value type a material parameter can carry. Shared by the definition (the defaults the
@@ -72,8 +74,8 @@ namespace Rendering::Data
 		MaterialInstance(const MaterialInstance&) = delete;
 		MaterialInstance& operator=(const MaterialInstance&) = delete;
 
-		/** The definition this instance overrides. Null for a Material (it is its own definition). */
-		Material* Definition() const { return m_definition; }
+		/** The Material this instance overrides. Null for a Material (it is its own definition). */
+		Material* ParentMaterial() const { return m_definition; }
 
 		/** Bumped whenever this object's parameter values change. An instance compares it against
 		 * the value it last uploaded, which is how an edit on the definition reaches the instances
@@ -85,6 +87,10 @@ namespace Rendering::Data
 		 * instead of through Material. */
 		Rendering::Resources::Shader* Shader() const { return ShaderOf(); }
 		Rendering::Resources::Shader* GetShader() const { return ShaderOf(); }
+
+		/** The immutable package data behind Shader(): block layout, sampler fields and state.
+		 * An instance reads offsets and units from here; the shader only owns the programs. */
+		const MaterialDefinition* Definition() const;
 
 		/** Re-reads a texture assigned by path (the designer saves a path, not a handle). */
 		void LateUpdateTexture(const std::string& p_name, const std::string& p_path);
@@ -221,9 +227,10 @@ namespace Rendering::Data
 			Rendering::HAL::Texture* p_brdfLut,
 			Rendering::HAL::Texture* p_flatNormalTexture
 		);
-		void EnsureParameterSlice();
-		void ReleaseParameterSlice();
-		void WriteBlockValue(const std::string& p_type, const MaterialPropertyType& p_value, uint32_t p_offset);
+		void EnsureDescriptorSet();
+		void ReleaseDescriptorSet();
+		void WriteBlockValue(std::vector<uint8_t>& p_data, const std::string& p_type,
+			const MaterialPropertyType& p_value, uint32_t p_offset);
 		MaterialSignatureSet CalculateSignature(
 			Rendering::HAL::ShaderProgram& p_selectedProgram,
 			Rendering::HAL::Texture* p_emptyTexture2D = nullptr,
@@ -241,8 +248,9 @@ namespace Rendering::Data
 		size_t m_singleUsePropertySignatureVersion = 0ULL;
 		Tools::Utils::OptRef<Rendering::HAL::ShaderProgram> m_programInUse = std::nullopt;
 
-		UniformBufferPool::Slice m_parameterSlice;
-		std::vector<uint8_t> m_parameterData;
+		/** The PerMaterial binding set: one uniform-block range plus a texture per sampler. The
+		 * definition's layout validates every insertion; Bind() binds the whole set. */
+		DescriptorSet m_descriptorSet;
 
 		// Render state, Filament's way: the definition holds the values its material block declared
 		// (and the engine defaults for the rest); a plain instance stores only the fields it

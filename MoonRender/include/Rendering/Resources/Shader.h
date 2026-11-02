@@ -8,6 +8,7 @@
 #include <vector>
 
 #include <Rendering/Data/FeatureSet.h>
+#include <Rendering/Data/MaterialDefinition.h>
 #include <Rendering/HAL/ShaderProgram.h>
 #include <Rendering/Settings/EBlendMode.h>
 
@@ -48,46 +49,16 @@ namespace Rendering::Resources
 		 * list instead of asking the driver which uniforms stayed active in some variant.
 		 *
 		 * The package stays the source of truth: a shader built from source has no table, and
-		 * its material falls back to the driver's reflection. */
-		struct Parameter
-		{
-			std::string name;
-			std::string type;         // the GLSL type: "float", "vec4", "sampler2D", ...
-			std::string defaultValue; // the initialiser the material declared, empty when none
-			std::string label;        // the designer label ("Base Color"), empty when not declared
-			std::string group;        // the designer group ("Base"), empty when not declared
-			float min = 0.0f;         // the designer range, valid when hasRange
-			float max = 0.0f;
-			float step = 0.0f;        // the designer step, valid when hasStep
-			uint32_t count = 0;       // array size, 0 when the parameter is not an array
-			int32_t offset = -1;      // std140 offset in the material parameter block, -1 = no layout
-			uint32_t stride = 0;      // std140 element stride (arrays)
-			uint32_t binding = 0;     // texture unit of a sampler
-			/** What to bind when the material instance has no texture in this slot: 0 = the
-			 * engine's default (white 2D / black cube), 1 = the flat normal map
-			 * (SamplerFallback in ShaderPackage). Always 0 for a non-sampler. */
-			uint8_t fallback = 0;
-			bool isSampler = false;   // a texture slot rather than a plain uniform
-			bool hasRange = false;
-			bool hasStep = false;
-			bool isColor = false;     // force a colour picker rather than N number fields
-			bool isUi = true;         // false hides engine-owned parameters from the designer
-		};
+		 * its material falls back to the driver's reflection.
+		 *
+		 * The definition is the one that owns the table now; the alias keeps the call sites that
+		 * say Shader::Parameter unchanged. */
+		using Parameter = Data::MaterialParameter;
 
 		/** The render state the material block declares - what filament compiles into
 		 * MAT_BLEN / MAT_CUMO / MAT_DWRIT. An absent field means the material said nothing about
-		 * it, and the instance keeps the engine's default.
-		 *
-		 * This is the definition's state, not the instance's: a material starts from it and may
-		 * override it afterwards (a .mat's settings, or the call site's Set* calls). */
-		struct State
-		{
-			std::optional<bool> blendable;        // blending: opaque = false, transparent = true
-			std::optional<Rendering::Settings::EBlendMode> blendMode; // opaque/transparent/add/...
-			std::optional<bool> backfaceCulling;  // culling: back
-			std::optional<bool> frontfaceCulling; // culling: front
-			std::optional<bool> depthWriting;     // depthWrite
-		};
+		 * it, and the instance keeps the engine's default. */
+		using State = Data::MaterialState;
 
 		/**
 		* Returns the associated shader program for a given feature set
@@ -148,6 +119,16 @@ namespace Rendering::Resources
 		/** The state the material block declared. Empty fields keep the engine's defaults. */
 		const State& GetState() const;
 
+		/** The immutable definition this shader was built from. Null for a shader built from
+		 * source before it has been given one; Material then derives a definition from the
+		 * shader's own reflection. */
+		const Data::MaterialDefinition* GetDefinition() const;
+		const std::shared_ptr<const Data::MaterialDefinition>& GetDefinitionPtr() const;
+
+		/** Attaches the definition a package was read into. A hot reload replaces it as a
+		 * whole, which is what lets every material and instance see the new layout. */
+		void SetDefinition(std::shared_ptr<const Data::MaterialDefinition> p_definition);
+
 		/** True when the shader came with a material state (a package does; one built from
 		 * source does not). */
 		bool HasState() const;
@@ -189,5 +170,8 @@ namespace Rendering::Resources
 		bool m_hasState = false;
 		bool m_usesVariantKeys = false;
 		std::unordered_set<std::string> m_variantKeys;
+		/** The package's immutable half. The programs stay in m_variants; this is what a
+		 * MaterialInstance reads for offsets, bindings and render state. */
+		std::shared_ptr<const Data::MaterialDefinition> m_definition;
 	};
 }

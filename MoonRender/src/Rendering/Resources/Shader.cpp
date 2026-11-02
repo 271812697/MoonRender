@@ -197,6 +197,23 @@ const Rendering::Resources::Shader::State& Rendering::Resources::Shader::GetStat
 	return m_state;
 }
 
+const Rendering::Data::MaterialDefinition* Rendering::Resources::Shader::GetDefinition() const
+{
+	return m_definition.get();
+}
+
+const std::shared_ptr<const Rendering::Data::MaterialDefinition>&
+Rendering::Resources::Shader::GetDefinitionPtr() const
+{
+	return m_definition;
+}
+
+void Rendering::Resources::Shader::SetDefinition(
+	std::shared_ptr<const Rendering::Data::MaterialDefinition> p_definition)
+{
+	m_definition = std::move(p_definition);
+}
+
 bool Rendering::Resources::Shader::HasState() const
 {
 	return m_hasState;

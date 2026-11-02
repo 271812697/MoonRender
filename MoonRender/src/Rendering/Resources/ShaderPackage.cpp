@@ -1,421 +1,365 @@
 #include <Rendering/Settings/EBindingPoint.h>
 #include <Rendering/Resources/ShaderPackage.h>
+#include <Rendering/Resources/MaterialChunkType.h>
+#include <Rendering/Resources/MaterialParameterType.h>
+#include <Rendering/Resources/Unflattener.h>
 
 #include <cstring>
 #include <iostream>
 
-namespace
-{
-	constexpr char kMagic[8] = { 'M', 'O', 'O', 'N', 'S', 'D', 'R', '1' };
-
-	/** Reads one little-endian field out of a chunk payload and moves the cursor past it. */
-	template<typename T>
-	bool Take(std::string_view& p_cursor, T& p_out)
-	{
-		if (p_cursor.size() < sizeof(T))
-		{
-			return false;
-		}
-		std::memcpy(&p_out, p_cursor.data(), sizeof(T));
-		p_cursor.remove_prefix(sizeof(T));
-		return true;
-	}
-
-	bool TakeString(std::string_view& p_cursor, std::string& p_out)
-	{
-		uint32_t size = 0;
-		if (!Take(p_cursor, size) || p_cursor.size() < size)
-		{
-			return false;
-		}
-		p_out.assign(p_cursor.data(), size);
-		p_cursor.remove_prefix(size);
-		return true;
-	}
-
-	bool TakeView(std::string_view& p_cursor, std::string_view& p_out)
-	{
-		uint32_t size = 0;
-		if (!Take(p_cursor, size) || p_cursor.size() < size)
-		{
-			return false;
-		}
-		p_out = p_cursor.substr(0, size);
-		p_cursor.remove_prefix(size);
-		return true;
-	}
-}
-
 namespace Rendering::Resources
 {
+	namespace
+	{
+		using Moon::Material::ChunkType;
+		using Moon::Material::ParameterType;
+
+		const ChunkContainer::Chunk* ChunkOf(const ChunkContainer& p_container, ChunkType p_type)
+		{
+			return p_container.GetChunk(p_type);
+		}
+
+		bool ReadString(Unflattener& p_reader, std::string& p_out)
+		{
+			return p_reader.ReadString(p_out);
+		}
+
+		/** The shared-stage text's placeholder: the variant's define lines are spliced there. */
+		constexpr std::string_view kDefinesPlaceholder = "//@MOON_VARIANT_DEFINES@";
+	}
+
 	bool ShaderPackage::IsPackage(const void* p_data, uint32_t p_size)
 	{
-		return p_data != nullptr && p_size >= sizeof(kMagic)
-			&& std::memcmp(p_data, kMagic, sizeof(kMagic)) == 0;
+		if (p_data == nullptr || p_size < sizeof(uint64_t) + sizeof(uint32_t))
+		{
+			return false;
+		}
+
+		uint64_t type = 0;
+		uint32_t size = 0;
+		std::memcpy(&type, p_data, sizeof(type));
+		std::memcpy(&size, static_cast<const uint8_t*>(p_data) + sizeof(type), sizeof(size));
+		return static_cast<ChunkType>(type) == ChunkType::MaterialVersion
+			&& size <= p_size - sizeof(type) - sizeof(size);
 	}
 
 	ShaderPackage::ShaderPackage(const void* p_data, uint32_t p_size)
+		: m_container(p_data, p_size)
 	{
-		if (!IsPackage(p_data, p_size))
+		if (!m_container.Parse())
 		{
+			std::cerr << "[ShaderPackage] the chunk list is truncated or empty" << std::endl;
 			return;
 		}
 
-		std::string_view remaining(static_cast<const char*>(p_data) + sizeof(kMagic), p_size - sizeof(kMagic));
-
-		while (remaining.size() >= 12)
+		// MAT_VERS / MAT_NAME / MAT_UUID: what this package is.
+		if (const ChunkContainer::Chunk* version = ChunkOf(m_container, ChunkType::MaterialVersion))
 		{
-			const std::string_view tag = remaining.substr(0, 8);
-			remaining.remove_prefix(8);
+			Unflattener reader(version->start, version->size);
+			uint32_t number = 0;
+			if (reader.Read(&number) && number != 3)
+			{
+				std::cerr << "[ShaderPackage] unsupported package version " << number << std::endl;
+			}
+		}
+		if (const ChunkContainer::Chunk* name = ChunkOf(m_container, ChunkType::MaterialName))
+		{
+			Unflattener reader(name->start, name->size);
+			ReadString(reader, m_name);
+		}
 
-			uint32_t size = 0;
-			if (!Take(remaining, size) || remaining.size() < size)
+		// DIC_TEXT: the unique line table the stage texts are encoded against.
+		if (const ChunkContainer::Chunk* dictionary = ChunkOf(m_container, ChunkType::DictionaryText))
+		{
+			Unflattener reader(dictionary->start, dictionary->size);
+			uint32_t count = 0;
+			if (reader.Read(&count))
 			{
-				break;
-			}
-			std::string_view payload = remaining.substr(0, size);
-			remaining.remove_prefix(size);
-
-			if (tag == "SHDRNAME")
-			{
-				m_name.assign(payload);
-			}
-			else if (tag == "SHDRVARI")
-			{
-				uint32_t count = 0;
-				if (!Take(payload, count))
-				{
-					continue;
-				}
-				for (uint32_t i = 0; i < count; ++i)
-				{
-					Variant variant;
-					uint32_t featureCount = 0;
-					if (!TakeString(payload, variant.pass) || !Take(payload, featureCount))
-					{
-						break;
-					}
-					for (uint32_t f = 0; f < featureCount; ++f)
-					{
-						std::string feature;
-						if (!TakeString(payload, feature))
-						{
-							break;
-						}
-						variant.features.insert(feature);
-					}
-					m_variants.push_back(std::move(variant));
-				}
-			}
-			else if (tag == "SHDRFEAT")
-			{
-				uint32_t count = 0;
-				if (!Take(payload, count))
-				{
-					continue;
-				}
-				for (uint32_t i = 0; i < count; ++i)
-				{
-					std::string feature;
-					if (!TakeString(payload, feature))
-					{
-						break;
-					}
-					m_declaredFeatures.push_back(std::move(feature));
-				}
-			}
-			else if (tag == "SHDRPROP")
-			{
-				uint32_t count = 0;
-				if (!Take(payload, count))
-				{
-					continue;
-				}
-				m_parameters.clear();
-				for (uint32_t i = 0; i < count; ++i)
-				{
-					Parameter parameter;
-					if (!TakeString(payload, parameter.name)
-						|| !TakeString(payload, parameter.type)
-						|| !TakeString(payload, parameter.glslType)
-						|| !Take(payload, parameter.count))
-					{
-						break;
-					}
-					uint8_t sampler = 0;
-					if (!Take(payload, sampler) || !TakeString(payload, parameter.defaultValue))
-					{
-						break;
-					}
-					parameter.isSampler = sampler != 0;
-
-					// The designer fields were added after the first packages were written; a
-					// package from before them simply ends here and keeps the fallbacks.
-					if (!payload.empty())
-					{
-						uint8_t flags = 0;
-						if (!TakeString(payload, parameter.label)
-							|| !TakeString(payload, parameter.group)
-							|| !Take(payload, parameter.min)
-							|| !Take(payload, parameter.max)
-							|| !Take(payload, parameter.step)
-							|| !Take(payload, flags))
-						{
-							break;
-						}
-						parameter.hasRange = (flags & 0x01) != 0;
-						parameter.hasStep = (flags & 0x02) != 0;
-						parameter.isColor = (flags & 0x04) != 0;
-						parameter.isUi = (flags & 0x08) == 0;
-
-						// The descriptor layout came after the designer fields: packages from
-						// between the two carry none and keep the loose-uniform path.
-						if (payload.size() >= sizeof(uint32_t) * 3)
-						{
-							if (!Take(payload, parameter.offset)
-								|| !Take(payload, parameter.stride)
-								|| !Take(payload, parameter.binding))
-							{
-								break;
-							}
-						}
-					}
-					m_parameters.push_back(std::move(parameter));
-				}
-
-				// The chunk ends with the std140 size of the block (new packages only).
-				if (payload.size() >= sizeof(uint32_t))
-				{
-					Take(payload, m_parameterBlockSize);
-				}
-			}
-			else if (tag == "SHDRFALL")
-			{
-				uint32_t count = 0;
-				if (!Take(payload, count))
-				{
-					continue;
-				}
-				for (uint32_t i = 0; i < count; ++i)
-				{
-					SamplerFallbackEntry entry;
-					uint8_t kind = 0;
-					if (!TakeString(payload, entry.name) || !Take(payload, kind))
-					{
-						break;
-					}
-					entry.kind = static_cast<SamplerFallback>(kind);
-					m_samplerFallbacks.push_back(std::move(entry));
-				}
-			}
-			else if (tag == "SHDRSTAT")
-			{
-				uint32_t count = 0;
-				if (!Take(payload, count))
-				{
-					continue;
-				}
-				for (uint32_t i = 0; i < count; ++i)
-				{
-					std::string key;
-					std::string value;
-					if (!TakeString(payload, key) || !TakeString(payload, value))
-					{
-						break;
-					}
-					m_states[std::move(key)] = std::move(value);
-				}
-			}
-			else if (tag == "SHDRATTR")
-			{
-				uint32_t count = 0;
-				if (!Take(payload, count))
-				{
-					continue;
-				}
-				for (uint32_t i = 0; i < count; ++i)
-				{
-					Attribute attribute;
-					if (!Take(payload, attribute.location)
-						|| !TakeString(payload, attribute.glslType)
-						|| !TakeString(payload, attribute.name))
-					{
-						break;
-					}
-					m_attributes.push_back(std::move(attribute));
-				}
-			}
-			else if (tag == "SHDRPARM")
-			{
-				// The old name/type table. A package also carries SHDRPROP, which is written
-				// after this chunk and replaces these entries with the full records; a package
-				// from before SHDRPROP existed just keeps what is here.
-				uint32_t count = 0;
-				if (!Take(payload, count))
-				{
-					continue;
-				}
-				for (uint32_t i = 0; i < count; ++i)
-				{
-					Parameter parameter;
-					if (!TakeString(payload, parameter.name) || !TakeString(payload, parameter.type))
-					{
-						break;
-					}
-					m_parameters.push_back(std::move(parameter));
-				}
-			}
-			else if (tag == "SHDRUBO")
-			{
-				// The PerMaterial uniform block: size, name, then one record per field. The
-				// offsets are the layout's single source of truth - the parameter records are
-				// updated from them below, so a reflection entry cannot disagree with the block.
-				uint32_t size = 0;
-				std::string name;
-				uint32_t count = 0;
-				if (!Take(payload, size) || !TakeString(payload, name) || !Take(payload, count))
-				{
-					continue;
-				}
-				m_uniformBlockSize = size;
-				m_layout.Add(name, ::Rendering::Data::DescriptorSetLayout::Kind::UniformBuffer,
-					::Rendering::Settings::kMaterialParameterBinding);
-				m_uniformFields.reserve(count);
-				for (uint32_t i = 0; i < count; ++i)
-				{
-					UniformField field;
-					if (!TakeString(payload, field.name) || !TakeString(payload, field.type)
-						|| !Take(payload, field.offset) || !Take(payload, field.stride)
-						|| !Take(payload, field.count))
-					{
-						break;
-					}
-					m_uniformFields.push_back(std::move(field));
-				}
-
-				for (Parameter& parameter : m_parameters)
-				{
-					for (const UniformField& field : m_uniformFields)
-					{
-						if (field.name != parameter.name) { continue; }
-						parameter.offset = static_cast<int32_t>(field.offset);
-						parameter.stride = field.stride;
-						parameter.count = field.count > 1 ? field.count : 0;
-						break;
-					}
-				}
-			}
-			else if (tag == "SHDRSMP")
-			{
-				// The PerMaterial sampler block: one descriptor per sampler (unit, type,
-				// fallback). Same rule: the block decides the binding the runtime will use.
-				std::string name;
-				uint32_t count = 0;
-				if (!TakeString(payload, name) || !Take(payload, count))
-				{
-					continue;
-				}
-				m_samplerFields.reserve(count);
-				for (uint32_t i = 0; i < count; ++i)
-				{
-					SamplerField field;
-					if (!TakeString(payload, field.name) || !TakeString(payload, field.type)
-						|| !Take(payload, field.binding) || !Take(payload, field.fallback))
-					{
-						break;
-					}
-					m_samplerFields.push_back(std::move(field));
-					m_layout.Add(m_samplerFields.back().name,
-						::Rendering::Data::DescriptorSetLayout::Kind::Texture, m_samplerFields.back().binding);
-				}
-
-				for (Parameter& parameter : m_parameters)
-				{
-					for (const SamplerField& field : m_samplerFields)
-					{
-						if (field.name != parameter.name) { continue; }
-						parameter.binding = field.binding;
-						break;
-					}
-				}
-
-				// The fallback kind lives in its own record (SHDRFALL); the block carries the
-				// same value, so a package without that chunk still gets its fallbacks.
-				for (const SamplerField& field : m_samplerFields)
-				{
-					const auto existing = std::find_if(m_samplerFallbacks.begin(), m_samplerFallbacks.end(),
-						[&field](const SamplerFallbackEntry& p_entry) { return p_entry.name == field.name; });
-					if (existing != m_samplerFallbacks.end()) { continue; }
-					m_samplerFallbacks.push_back(SamplerFallbackEntry{
-						field.name, static_cast<SamplerFallback>(field.fallback) });
-				}
-			}
-			else if (tag == "SHDRDICT")
-			{
-				uint32_t count = 0;
-				if (!Take(payload, count))
-				{
-					continue;
-				}
 				m_lines.reserve(count);
 				for (uint32_t i = 0; i < count; ++i)
 				{
-					std::string_view line;
-					if (!TakeView(payload, line))
+					std::string line;
+					if (!ReadString(reader, line))
 					{
 						break;
 					}
-					m_lines.emplace_back(line);
+					m_lines.push_back(std::move(line));
 				}
 			}
-			else if (tag == "SHDRSTAG")
+		}
+
+		// MON_STAG: each stage's whole text, reconstructed from its line ids.
+		if (const ChunkContainer::Chunk* stages = ChunkOf(m_container, ChunkType::MoonStageText))
+		{
+			Unflattener reader(stages->start, stages->size);
+			uint32_t count = 0;
+			if (reader.Read(&count))
 			{
-				uint32_t count = 0;
-				if (!Take(payload, count))
-				{
-					continue;
-				}
 				for (uint32_t i = 0; i < count; ++i)
 				{
 					std::string stage;
 					uint32_t lineCount = 0;
-					if (!TakeString(payload, stage) || !Take(payload, lineCount))
+					if (!ReadString(reader, stage) || !reader.Read(&lineCount))
 					{
 						break;
 					}
 
-					// The stage is the join of its lines, exactly as LineDictionary encoded it
-					// (a text that ended with a newline keeps its empty last line).
 					std::string text;
 					for (uint32_t line = 0; line < lineCount; ++line)
 					{
 						uint32_t id = 0;
-						if (!Take(payload, id) || id >= m_lines.size())
+						if (!reader.Read(&id) || id >= m_lines.size())
 						{
 							break;
 						}
 						if (line != 0) { text += '\n'; }
 						text += m_lines[id];
 					}
-					m_stageTexts[stage] = std::move(text);
+					m_stageTexts[std::move(stage)] = std::move(text);
 				}
 			}
-			else if (tag == "SHDRGLSL")
+		}
+
+		// MAT_GLSL: one entry per (pass, feature set, stage), carrying the variant's #define
+		// lines. The stage text itself is shared in MON_STAG.
+		if (const ChunkContainer::Chunk* glsl = ChunkOf(m_container, ChunkType::MaterialGlsl))
+		{
+			Unflattener reader(glsl->start, glsl->size);
+			uint32_t count = 0;
+			if (reader.Read(&count))
 			{
-				uint32_t count = 0;
-				if (!Take(payload, count))
-				{
-					continue;
-				}
+				m_blobs.reserve(count);
 				for (uint32_t i = 0; i < count; ++i)
 				{
 					Blob blob;
-					if (!TakeView(payload, blob.name) || !TakeView(payload, blob.source))
+					if (!ReadString(reader, blob.name) || !ReadString(reader, blob.source))
 					{
 						break;
 					}
-					m_blobs.push_back(blob);
+					m_blobs.push_back(std::move(blob));
 				}
+			}
+		}
+
+		// MON_VARI: the variant table.
+		if (const ChunkContainer::Chunk* variants = ChunkOf(m_container, ChunkType::MoonVariantTable))
+		{
+			Unflattener reader(variants->start, variants->size);
+			uint32_t count = 0;
+			if (reader.Read(&count))
+			{
+				m_variants.reserve(count);
+				for (uint32_t i = 0; i < count; ++i)
+				{
+					Variant variant;
+					uint32_t featureCount = 0;
+					if (!ReadString(reader, variant.pass) || !reader.Read(&featureCount))
+					{
+						break;
+					}
+					for (uint32_t f = 0; f < featureCount; ++f)
+					{
+						std::string feature;
+						if (!ReadString(reader, feature))
+						{
+							break;
+						}
+						variant.features.insert(std::move(feature));
+					}
+					m_variants.push_back(std::move(variant));
+				}
+			}
+		}
+
+		// MON_FEAT: the features the material declared.
+		if (const ChunkContainer::Chunk* features = ChunkOf(m_container, ChunkType::MoonFeatureSet))
+		{
+			Unflattener reader(features->start, features->size);
+			uint32_t count = 0;
+			if (reader.Read(&count))
+			{
+				m_declaredFeatures.reserve(count);
+				for (uint32_t i = 0; i < count; ++i)
+				{
+					std::string feature;
+					if (!ReadString(reader, feature))
+					{
+						break;
+					}
+					m_declaredFeatures.push_back(std::move(feature));
+				}
+			}
+		}
+
+		// MAT_PROP: the reflected parameters. Type and count are typed; only the name / label /
+		// group and the GLSL default expression are text.
+		if (const ChunkContainer::Chunk* properties = ChunkOf(m_container, ChunkType::MaterialProperties))
+		{
+			Unflattener reader(properties->start, properties->size);
+			uint32_t count = 0;
+			if (reader.Read(&count))
+			{
+				m_parameters.reserve(count);
+				for (uint32_t i = 0; i < count; ++i)
+				{
+					Parameter parameter;
+					uint8_t type = 0;
+					uint8_t flags = 0;
+					if (!ReadString(reader, parameter.name)
+						|| !reader.Read(&type)
+						|| !reader.Read(&parameter.count)
+						|| !ReadString(reader, parameter.defaultValue)
+						|| !ReadString(reader, parameter.label)
+						|| !ReadString(reader, parameter.group)
+						|| !reader.Read(&flags)
+						|| !reader.ReadFloat(&parameter.min)
+						|| !reader.ReadFloat(&parameter.max)
+						|| !reader.ReadFloat(&parameter.step))
+					{
+						break;
+					}
+
+					const ParameterType parameterType = static_cast<ParameterType>(type);
+					parameter.type = Moon::Material::ParameterTypeName(parameterType);
+					parameter.glslType = Moon::Material::ParameterTypeGlsl(parameterType);
+					parameter.hasRange = (flags & 0x01) != 0;
+					parameter.hasStep = (flags & 0x02) != 0;
+					parameter.isColor = (flags & 0x04) != 0;
+					parameter.isUi = (flags & 0x08) == 0;
+					parameter.isSampler = Moon::Material::IsSamplerType(parameterType);
+
+					if (!reader.Read(&parameter.offset) || !reader.Read(&parameter.stride)
+						|| !reader.Read(&parameter.binding))
+					{
+						break;
+					}
+					m_parameters.push_back(std::move(parameter));
+				}
+			}
+		}
+
+		// MAT_ATTR: the vertex attributes the material reads.
+		if (const ChunkContainer::Chunk* attributes = ChunkOf(m_container, ChunkType::MaterialAttributeInfo))
+		{
+			Unflattener reader(attributes->start, attributes->size);
+			uint32_t count = 0;
+			if (reader.Read(&count))
+			{
+				m_attributes.reserve(count);
+				for (uint32_t i = 0; i < count; ++i)
+				{
+					Attribute attribute;
+					if (!reader.Read(&attribute.location)
+						|| !ReadString(reader, attribute.glslType)
+						|| !ReadString(reader, attribute.name))
+					{
+						break;
+					}
+					m_attributes.push_back(std::move(attribute));
+				}
+			}
+		}
+
+		// MAT_UIB: the std140 block layout. The block size is the one field filament derives
+		// from the field list; we store it because the runtime allocates exactly that range.
+		if (const ChunkContainer::Chunk* ubo = ChunkOf(m_container, ChunkType::MaterialUib))
+		{
+			Unflattener reader(ubo->start, ubo->size);
+			std::string name;
+			uint32_t blockSize = 0;
+			uint32_t count = 0;
+			if (ReadString(reader, name) && reader.Read(&blockSize) && reader.Read(&count))
+			{
+				m_uniformBlockSize = blockSize;
+				m_parameterBlockSize = blockSize;
+				m_layout.Add(name.empty() ? "MaterialParams" : name,
+					::Rendering::Data::DescriptorSetLayout::Kind::UniformBuffer,
+					::Rendering::Settings::kMaterialParameterBinding);
+
+				m_uniformFields.reserve(count);
+				for (uint32_t i = 0; i < count; ++i)
+				{
+					UniformField field;
+					uint8_t type = 0;
+					if (!ReadString(reader, field.name) || !reader.Read(&type)
+						|| !reader.Read(&field.offset) || !reader.Read(&field.stride)
+						|| !reader.Read(&field.count))
+					{
+						break;
+					}
+					field.type = Moon::Material::ParameterTypeGlsl(static_cast<ParameterType>(type));
+					m_uniformFields.push_back(std::move(field));
+				}
+			}
+		}
+
+		// MAT_SIB: one descriptor per sampler.
+		if (const ChunkContainer::Chunk* sib = ChunkOf(m_container, ChunkType::MaterialSib))
+		{
+			Unflattener reader(sib->start, sib->size);
+			std::string name;
+			uint32_t count = 0;
+			if (ReadString(reader, name) && reader.Read(&count))
+			{
+				m_samplerFields.reserve(count);
+				for (uint32_t i = 0; i < count; ++i)
+				{
+					SamplerField field;
+					uint8_t type = 0;
+					uint8_t fallback = 0;
+					if (!ReadString(reader, field.name) || !reader.Read(&type)
+						|| !reader.Read(&fallback) || !reader.Read(&field.binding))
+					{
+						break;
+					}
+					field.type = Moon::Material::ParameterTypeName(static_cast<ParameterType>(type));
+					field.fallback = fallback;
+					m_samplerFields.push_back(field);
+					m_layout.Add(field.name, ::Rendering::Data::DescriptorSetLayout::Kind::Texture,
+						field.binding);
+					m_samplerFallbacks.push_back(SamplerFallbackEntry{
+						field.name, static_cast<ShaderPackage::SamplerFallback>(fallback) });
+				}
+			}
+		}
+
+		// MON_STAT: the material block's render state.
+		if (const ChunkContainer::Chunk* state = ChunkOf(m_container, ChunkType::MoonMaterialState))
+		{
+			Unflattener reader(state->start, state->size);
+			uint32_t count = 0;
+			if (reader.Read(&count))
+			{
+				for (uint32_t i = 0; i < count; ++i)
+				{
+					std::string key;
+					std::string value;
+					if (!ReadString(reader, key) || !ReadString(reader, value))
+					{
+						break;
+					}
+					m_states[std::move(key)] = std::move(value);
+				}
+			}
+		}
+
+		// Apply the block layout to the reflection records, so a consumer cannot see an offset
+		// that disagrees with MAT_UIB / MAT_SIB.
+		for (Parameter& parameter : m_parameters)
+		{
+			for (const UniformField& field : m_uniformFields)
+			{
+				if (field.name != parameter.name) { continue; }
+				parameter.offset = static_cast<int32_t>(field.offset);
+				parameter.stride = field.stride;
+				parameter.count = field.count > 1 ? field.count : 0;
+				break;
+			}
+			for (const SamplerField& field : m_samplerFields)
+			{
+				if (field.name != parameter.name) { continue; }
+				parameter.binding = field.binding;
+				break;
 			}
 		}
 
@@ -475,10 +419,8 @@ namespace Rendering::Resources
 			return {};
 		}
 
-		// Stage name -> the text every variant shares, with a placeholder for the defines this
-		// variant contributes. A package from before the shared-stage chunk has no such text
-		// and its blobs are whole stages, so it keeps working unchanged.
-		const std::string_view stageName = [p_stage] {
+		const std::string_view stageName = [p_stage]
+		{
 			switch (p_stage)
 			{
 			case Stage::Vertex: return std::string_view{ "vertex" };
@@ -486,17 +428,18 @@ namespace Rendering::Resources
 			default: return std::string_view{ "geometry" };
 			}
 		}();
+
 		const auto shared = m_stageTexts.find(std::string{ stageName });
 		if (shared == m_stageTexts.end())
 		{
-			return std::string{ blob->source };
+			return blob->source;
 		}
 
-		std::string text{ shared->second };
-		const size_t at = text.find(kShaderDefinesPlaceholder);
+		std::string text = shared->second;
+		const size_t at = text.find(kDefinesPlaceholder);
 		if (at != std::string::npos)
 		{
-			text.replace(at, kShaderDefinesPlaceholder.size(), blob->source);
+			text.replace(at, kDefinesPlaceholder.size(), blob->source);
 		}
 		return text;
 	}

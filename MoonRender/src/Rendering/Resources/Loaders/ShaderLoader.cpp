@@ -14,6 +14,8 @@
 #include <glad/glad.h>
 #include <Rendering/HAL/ShaderProgram.h>
 #include <Rendering/HAL/ShaderStage.h>
+#include <Rendering/Data/MaterialBuilder.h>
+#include <Rendering/Data/MaterialDefinition.h>
 #include <Rendering/Resources/Loaders/ShaderLoader.h>
 #include <Rendering/Resources/Shader.h>
 #include <Rendering/Resources/ShaderArchive.h>
@@ -1045,93 +1047,6 @@ void main()
 
 		return variants;
 	}
-
-	/** The package's parameter records, in the runtime's form.
-	 *
-	 * The package is the load-time format; Shader keeps this list so Material can describe its
-	 * properties from the material the package was built from instead of asking the driver
-	 * which uniforms stayed active (see Shader::HasParameterTable). */
-	std::vector<Rendering::Resources::Shader::Parameter> RuntimeParameters(
-		const Rendering::Resources::ShaderPackage& p_package)
-	{
-		std::vector<Rendering::Resources::Shader::Parameter> parameters;
-		parameters.reserve(p_package.Parameters().size());
-
-		const auto fallbackOf = [&p_package](const std::string& p_name) -> uint8_t {
-			for (const Rendering::Resources::ShaderPackage::SamplerFallbackEntry& entry
-				: p_package.SamplerFallbacks())
-			{
-				if (entry.name == p_name)
-				{
-					return static_cast<uint8_t>(entry.kind);
-				}
-			}
-			return static_cast<uint8_t>(Rendering::Resources::ShaderPackage::SamplerFallback::Default);
-		};
-
-		for (const Rendering::Resources::ShaderPackage::Parameter& parameter : p_package.Parameters())
-		{
-			parameters.push_back(Rendering::Resources::Shader::Parameter{
-				.name = parameter.name,
-				.type = parameter.glslType,
-				.defaultValue = parameter.defaultValue,
-				.label = parameter.label,
-				.group = parameter.group,
-				.min = parameter.min,
-				.max = parameter.max,
-				.step = parameter.step,
-				.count = parameter.count,
-				.offset = parameter.offset,
-				.stride = parameter.stride,
-				.binding = parameter.binding,
-				.fallback = parameter.isSampler ? fallbackOf(parameter.name) : uint8_t{ 0 },
-				.isSampler = parameter.isSampler,
-				.hasRange = parameter.hasRange,
-				.hasStep = parameter.hasStep,
-				.isColor = parameter.isColor,
-				.isUi = parameter.isUi });
-		}
-
-		return parameters;
-	}
-
-	/** The material block's state, as the runtime's optional overrides.
-	 *
-	 * The package keeps the values as the material's text ("back", "transparent", "false");
-	 * the runtime works in booleans. Leaving a field unset means the material did not declare
-	 * it, and the material instance keeps the engine's default for that field. */
-	Rendering::Resources::Shader::State RuntimeState(
-		const Rendering::Resources::ShaderPackage& p_package)
-	{
-		Rendering::Resources::Shader::State state;
-		const std::map<std::string, std::string>& states = p_package.States();
-
-		if (const auto it = states.find("blending"); it != states.end())
-		{
-			// filament's names: opaque | transparent | add | multiply | screen | fade. "masked"
-			// clips in the shader and blends like opaque, so it lands on OPAQUE too.
-			using Rendering::Settings::EBlendMode;
-			state.blendable = it->second != "opaque";
-			state.blendMode =
-				it->second == "transparent" ? EBlendMode::BLEND_TRANSPARENT :
-				it->second == "add" ? EBlendMode::BLEND_ADD :
-				it->second == "multiply" ? EBlendMode::BLEND_MULTIPLY :
-				it->second == "screen" ? EBlendMode::BLEND_SCREEN :
-				it->second == "fade" ? EBlendMode::BLEND_FADE :
-				EBlendMode::BLEND_OPAQUE;
-		}
-		if (const auto it = states.find("culling"); it != states.end())
-		{
-			state.backfaceCulling = it->second == "back";
-			state.frontfaceCulling = it->second == "front";
-		}
-		if (const auto it = states.find("depthWrite"); it != states.end())
-		{
-			state.depthWriting = it->second == "true";
-		}
-
-		return state;
-	}
 }
 
 namespace Rendering::Resources::Loaders
@@ -1157,10 +1072,17 @@ namespace Rendering::Resources::Loaders
 				const Rendering::Resources::ShaderPackage package(file->data, file->size);
 				if (package.IsValid())
 				{
-					Shader* shader = new Shader(p_filePath, AssembleFromPackage(package), RuntimeParameters(package));
-					shader->SetState(RuntimeState(package));
-					shader->SetParameterBlockSize(package.ParameterBlockSize());
-					shader->SetDeclaredFeatures(std::vector<std::string>(package.DeclaredFeatures().begin(), package.DeclaredFeatures().end()));
+					// The package is read into its immutable half first (the definition), then
+					// the programs are compiled from the same bytes: both sides use the same
+					// layout, so an offset or a sampler unit cannot drift.
+					const auto definition = Rendering::Data::MaterialBuilder::Build(package);
+					Shader* shader = new Shader(p_filePath, AssembleFromPackage(package),
+						std::vector<Shader::Parameter>(definition->Parameters()));
+					shader->SetDefinition(definition);
+					shader->SetState(definition->GetState());
+					shader->SetParameterBlockSize(definition->ParameterBlockSize());
+					shader->SetDeclaredFeatures(std::vector<std::string>(
+						definition->DeclaredFeatures().begin(), definition->DeclaredFeatures().end()));
 					return shader;
 				}
 			}
@@ -1195,10 +1117,14 @@ namespace Rendering::Resources::Loaders
 		}
 
 		if (p_error != nullptr) { p_error->clear(); }
-		Shader* shader = new Shader(p_name, std::move(variants), RuntimeParameters(package));
-		shader->SetState(RuntimeState(package));
-		shader->SetParameterBlockSize(package.ParameterBlockSize());
-		shader->SetDeclaredFeatures(std::vector<std::string>(package.DeclaredFeatures().begin(), package.DeclaredFeatures().end()));
+		const auto definition = Rendering::Data::MaterialBuilder::Build(package);
+		Shader* shader = new Shader(p_name, std::move(variants),
+			std::vector<Shader::Parameter>(definition->Parameters()));
+		shader->SetDefinition(definition);
+		shader->SetState(definition->GetState());
+		shader->SetParameterBlockSize(definition->ParameterBlockSize());
+		shader->SetDeclaredFeatures(std::vector<std::string>(
+			definition->DeclaredFeatures().begin(), definition->DeclaredFeatures().end()));
 		return shader;
 	}
 
@@ -1259,10 +1185,13 @@ namespace Rendering::Resources::Loaders
 		}
 
 		p_shader.SetVariants(std::move(variants));
-		p_shader.SetParameters(RuntimeParameters(package));
-		p_shader.SetState(RuntimeState(package));
-		p_shader.SetParameterBlockSize(package.ParameterBlockSize());
-		p_shader.SetDeclaredFeatures(std::vector<std::string>(package.DeclaredFeatures().begin(), package.DeclaredFeatures().end()));
+		const auto definition = Rendering::Data::MaterialBuilder::Build(package);
+		p_shader.SetDefinition(definition);
+		p_shader.SetParameters(std::vector<Shader::Parameter>(definition->Parameters()));
+		p_shader.SetState(definition->GetState());
+		p_shader.SetParameterBlockSize(definition->ParameterBlockSize());
+		p_shader.SetDeclaredFeatures(std::vector<std::string>(
+			definition->DeclaredFeatures().begin(), definition->DeclaredFeatures().end()));
 		if (p_error != nullptr) { p_error->clear(); }
 		return true;
 	}

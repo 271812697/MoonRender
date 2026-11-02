@@ -11,6 +11,7 @@
 #include <vector>
 #include <tracy/Tracy.hpp>
 #include <Rendering/Data/Material.h>
+#include <Rendering/Data/MaterialBuilder.h>
 #include <Rendering/HAL/UniformBuffer.h>
 #include <Rendering/HAL/TextureHandle.h>
 #include <Rendering/Resources/ShaderPackage.h>
@@ -308,7 +309,7 @@ Rendering::Data::MaterialInstance::MaterialInstance()
 }
 Rendering::Data::MaterialInstance::~MaterialInstance()
 {
-	ReleaseParameterSlice();
+	ReleaseDescriptorSet();
 }
 
 const Rendering::Data::MaterialProperty* Rendering::Data::MaterialInstance::FindProperty(const std::string& p_name) const
@@ -329,6 +330,12 @@ Rendering::Resources::Shader* Rendering::Data::MaterialInstance::ShaderOf() cons
 	return m_definition != nullptr ? m_definition->GetShader() : nullptr;
 }
 
+const Rendering::Data::MaterialDefinition* Rendering::Data::MaterialInstance::Definition() const
+{
+	Rendering::Resources::Shader* shader = ShaderOf();
+	return shader != nullptr ? shader->GetDefinition() : nullptr;
+}
+
 std::unique_ptr<Rendering::Data::MaterialInstance> Rendering::Data::Material::CreateInstance()
 {
 	return std::make_unique<MaterialInstance>(*this);
@@ -341,7 +348,7 @@ Rendering::Data::Material::Material(Rendering::Resources::Shader* p_shader)
 Rendering::Data::Material::~Material()
 {
 	// The pool keeps the byte range; it only lives as long as the material does.
-	ReleaseParameterSlice();
+	ReleaseDescriptorSet();
 }
 
 void Rendering::Data::Material::SetShader(Rendering::Resources::Shader* p_shader)
@@ -349,7 +356,15 @@ void Rendering::Data::Material::SetShader(Rendering::Resources::Shader* p_shader
 	m_shader = p_shader;
 
 	// The block layout (or the presence of a block) belongs to the shader.
-	ReleaseParameterSlice();
+	ReleaseDescriptorSet();
+
+	// A shader built from source (the present pass, the debug line) has no package behind it.
+	// Give it an empty definition anyway, so every material answers the same questions through
+	// Definition() and the instance never has to special-case "no package".
+	if (m_shader != nullptr && m_shader->GetDefinition() == nullptr)
+	{
+		m_shader->SetDefinition(MaterialBuilder::Build(*m_shader));
+	}
 
 	// Rebinding to a shader re-creates the instance's state from the definition: the package's
 	// material block is the authority for blending / culling / depth writing, and whatever the
@@ -366,6 +381,11 @@ void Rendering::Data::Material::SetShader(Rendering::Resources::Shader* p_shader
 		m_properties.clear();
 		InvalidatePropertySignature();
 	}
+}
+
+const Rendering::Data::MaterialDefinition* Rendering::Data::Material::Definition() const
+{
+	return m_shader != nullptr ? m_shader->GetDefinition() : nullptr;
 }
 
 void Rendering::Data::Material::ResetStateToShader()
@@ -428,24 +448,28 @@ void Rendering::Data::MaterialInstance::UploadProperties(bool uploadStableProper
 	// Packaged shaders carry their parameters as one std140 block (the per-material descriptor):
 	// write the values by offset into it and bind it once, instead of resolving each name
 	// against the program's reflected uniforms.
-	const bool hasParameterBlock = ShaderOf() != nullptr && ShaderOf()->HasParameterBlock();
-	if (hasParameterBlock)
+	const MaterialDefinition* definition = Definition();
+	const bool hasDefinitionParameters = definition != nullptr && definition->HasParameterTable();
+	if (hasDefinitionParameters)
 	{
 		UploadParameterBlock(uploadStableProperties, uploadSingleUseProperties, p_emptyTexture2D, p_emptyTextureCube, p_brdfLut, p_flatNormalTexture);
 	}
 
 	/** The 1x1 texture a sampler gets when the material instance has none: the material's own
 	 * `fallback :` kind when the package declared one, the engine's defaults otherwise. */
-	const auto fallbackTexture = [this, p_emptyTexture2D, p_emptyTextureCube, p_flatNormalTexture](
+	const auto fallbackTexture = [definition, p_emptyTexture2D, p_emptyTextureCube, p_flatNormalTexture](
 		const std::string& p_name, bool p_isCube) -> Rendering::HAL::Texture*
 	{
-		for (const Rendering::Resources::Shader::Parameter& parameter : ShaderOf()->GetParameters())
+		if (definition != nullptr)
 		{
-			if (parameter.isSampler && parameter.name == p_name
-				&& parameter.fallback == static_cast<uint8_t>(Rendering::Resources::ShaderPackage::SamplerFallback::FlatNormal)
-				&& p_flatNormalTexture != nullptr)
+			for (const MaterialDefinition::Parameter& parameter : definition->Parameters())
 			{
-				return p_flatNormalTexture;
+				if (parameter.isSampler && parameter.name == p_name
+					&& parameter.fallback == static_cast<uint8_t>(Rendering::Resources::ShaderPackage::SamplerFallback::FlatNormal)
+					&& p_flatNormalTexture != nullptr)
+				{
+					return p_flatNormalTexture;
+				}
 			}
 		}
 		return p_isCube ? p_emptyTextureCube : p_emptyTexture2D;
@@ -454,8 +478,12 @@ void Rendering::Data::MaterialInstance::UploadProperties(bool uploadStableProper
 	// Properties the shader does not declare (an include's own uniforms, like PBR.glsl's
 	// u_ReceiveShadows) are not in the block: they still go through the per-name path below,
 	// while the declared ones were written by UploadParameterBlock.
-	const auto isDeclaredParameter = [this](const std::string& p_name) {
-		for (const Rendering::Resources::Shader::Parameter& parameter : ShaderOf()->GetParameters())
+	const auto isDeclaredParameter = [definition](const std::string& p_name) {
+		if (definition == nullptr)
+		{
+			return false;
+		}
+		for (const MaterialDefinition::Parameter& parameter : definition->Parameters())
 		{
 			if (parameter.name == p_name || p_name.starts_with(parameter.name + "["))
 			{
@@ -473,7 +501,7 @@ void Rendering::Data::MaterialInstance::UploadProperties(bool uploadStableProper
 	{
 		if (!uploadStableProperties && !prop.singleUse) continue;
 		if (!uploadSingleUseProperties && prop.singleUse) continue;
-		if (hasParameterBlock && isDeclaredParameter(name)) continue;
+		if (hasDefinitionParameters && isDeclaredParameter(name)) continue;
 
 		const auto uniformData = program.GetUniformInfo(name);
 
@@ -556,55 +584,65 @@ void Rendering::Data::MaterialInstance::UploadProperties(bool uploadStableProper
 	}
 }
 
-void Rendering::Data::MaterialInstance::EnsureParameterSlice()
+void Rendering::Data::MaterialInstance::EnsureDescriptorSet()
 {
-	const uint32_t blockSize = ShaderOf()->GetParameterBlockSize();
+	const MaterialDefinition* definition = Definition();
+	if (definition == nullptr)
+	{
+		ReleaseDescriptorSet();
+		return;
+	}
+
+	// The layout is the definition's, not the instance's: every instance of a material fills
+	// the same slots, and the set validates each texture against it. A hot reload can replace
+	// the definition (and its layout) while an instance is alive, so a changed layout starts
+	// the set over.
+	if (m_descriptorSet.Layout() != &definition->Layout())
+	{
+		m_descriptorSet.Release();
+		m_descriptorSet.SetLayout(&definition->Layout());
+	}
+
+	const uint32_t blockSize = definition->ParameterBlockSize();
 	if (blockSize == 0)
 	{
-		ReleaseParameterSlice();
-		return;
+		return; // a material whose parameters are all samplers has no block to acquire
 	}
 
-	if (m_parameterSlice.size == blockSize)
+	if (m_descriptorSet.BufferSize() != blockSize)
 	{
-		return;
+		// A hot-reloaded shader can change the block layout; the old range and the textures
+		// recorded against the old layout are not valid for the new one.
+		m_descriptorSet.Release();
+		m_descriptorSet.SetLayout(&definition->Layout());
+		m_descriptorSet.Buffer(blockSize, kMaterialParameterBinding);
 	}
-
-	// A hot reloaded shader can change the block layout; a destroyed one leaves nothing to bind.
-	ReleaseParameterSlice();
-	m_parameterSlice = UniformBufferPool::Get().Acquire(blockSize);
 }
 
-void Rendering::Data::MaterialInstance::ReleaseParameterSlice()
+void Rendering::Data::MaterialInstance::ReleaseDescriptorSet()
 {
-	if (m_parameterSlice.IsValid())
-	{
-		UniformBufferPool::Get().Release(m_parameterSlice);
-		m_parameterSlice = {};
-	}
+	m_descriptorSet.Release();
 }
 
 void Rendering::Data::MaterialInstance::BindParameterBlock()
 {
-	if (ShaderOf() == nullptr || !ShaderOf()->HasParameterBlock())
-	{
-		return;
-	}
+	EnsureDescriptorSet();
 
-	EnsureParameterSlice();
-	UniformBufferPool::Get().Bind(m_parameterSlice, kMaterialParameterBinding);
+	// One bind for the block and every sampler: the layout is the single source of truth for
+	// where they go, and a texture another material bound to one of our units is replaced.
+	m_descriptorSet.Bind();
 }
 
-void Rendering::Data::MaterialInstance::WriteBlockValue(const std::string& p_type, const MaterialPropertyType& p_value, uint32_t p_offset)
+void Rendering::Data::MaterialInstance::WriteBlockValue(std::vector<uint8_t>& p_data, const std::string& p_type, const MaterialPropertyType& p_value, uint32_t p_offset)
 {
 	using namespace Maths;
 
-	if (m_parameterData.size() < p_offset)
+	if (p_data.size() < p_offset)
 	{
 		return;
 	}
 
-	auto* data = m_parameterData.data() + p_offset;
+	auto* data = p_data.data() + p_offset;
 
 	if (p_type == "bool")
 	{
@@ -688,55 +726,53 @@ void Rendering::Data::MaterialInstance::UploadParameterBlock(
 	Rendering::HAL::Texture* p_brdfLut,
 	Rendering::HAL::Texture* p_flatNormalTexture)
 {
-	EnsureParameterSlice();
-	if (!m_parameterSlice.IsValid())
+	const MaterialDefinition* definition = Definition();
+	if (definition == nullptr)
 	{
 		return;
 	}
 
-	const uint32_t blockSize = ShaderOf()->GetParameterBlockSize();
-	m_parameterData.assign(blockSize, 0);
-
-	for (const Rendering::Resources::Shader::Parameter& parameter : ShaderOf()->GetParameters())
+	EnsureDescriptorSet();
+	const uint32_t blockSize = definition->ParameterBlockSize();
+	if (blockSize > 0)
 	{
-		if (parameter.isSampler || parameter.offset < 0)
-		{
-			continue;
-		}
+		std::vector<uint8_t>& block = m_descriptorSet.Buffer(blockSize, kMaterialParameterBinding);
+		block.assign(blockSize, 0);
 
-		if (parameter.count > 0)
+		// The definition is the single source of truth for where a value goes: its uniform
+		// fields are the std140 layout MoonMatc wrote into the package. No per-draw name lookup
+		// and no driver reflection is involved.
+		for (const MaterialDefinition::UniformField& field : definition->UniformFields())
 		{
-			// Arrays are addressed one element at a time ("samples[17]"), exactly how the
-			// property set stores them.
-			for (uint32_t i = 0; i < parameter.count; ++i)
+			if (field.count > 1)
 			{
-				const auto property = GetProperty(std::format("{}[{}]", parameter.name, i));
-				if (property)
+				// Arrays are addressed one element at a time ("samples[17]"), exactly how the
+				// property set stores them.
+				for (uint32_t i = 0; i < field.count; ++i)
 				{
-					WriteBlockValue(parameter.type, property->value,
-						static_cast<uint32_t>(parameter.offset) + parameter.stride * i);
+					const auto property = GetProperty(std::format("{}[{}]", field.name, i));
+					if (property)
+					{
+						WriteBlockValue(block, field.type, property->value,
+							field.offset + field.stride * i);
+					}
 				}
 			}
+			else if (const auto property = GetProperty(field.name))
+			{
+				WriteBlockValue(block, field.type, property->value, field.offset);
+			}
 		}
-		else if (const auto property = GetProperty(parameter.name))
-		{
-			WriteBlockValue(parameter.type, property->value, static_cast<uint32_t>(parameter.offset));
-		}
+
+		m_descriptorSet.Commit();
 	}
 
-	UniformBufferPool::Get().Write(m_parameterSlice, m_parameterData.data());
-	UniformBufferPool::Get().Bind(m_parameterSlice, kMaterialParameterBinding);
-
-	// Samplers: one fixed texture unit per declaration, set by the GLSL's layout(binding = N).
-	for (const Rendering::Resources::Shader::Parameter& parameter : ShaderOf()->GetParameters())
+	// Samplers: one fixed texture unit per declaration, written into the package by MoonMatc
+	// next to the block. The definition's sampler fields carry both the unit and the fallback.
+	for (const MaterialDefinition::SamplerField& field : definition->SamplerFields())
 	{
-		if (!parameter.isSampler)
-		{
-			continue;
-		}
-
 		Rendering::HAL::TextureHandle* handle = nullptr;
-		if (const auto property = GetProperty(parameter.name))
+		if (const auto property = GetProperty(field.name))
 		{
 			if (auto textureHandle = std::get_if<Rendering::HAL::TextureHandle*>(&property->value))
 			{
@@ -752,25 +788,32 @@ void Rendering::Data::MaterialInstance::UploadParameterBlock(
 		// The split-sum DFG LUT is global to the view, like Filament's frame uniform. Binding it
 		// through the material property was fragile: an instance without the parameter (the
 		// material preview) sampled the white empty 2D, giving DFG=(1,1), E~=1 and no diffuse.
-		if (parameter.name == "_BRDFLut" && p_brdfLut != nullptr)
+		if (field.name == "_BRDFLut" && p_brdfLut != nullptr && p_brdfLut->IsValid())
 		{
-			p_brdfLut->Bind(parameter.binding);
+			m_descriptorSet.SetTexture(field.binding, p_brdfLut);
+			continue;
+		}
+
+		// A buffer texture has no 1x1 stand-in in the engine; binding the 2D fallback to a
+		// samplerBuffer slot is a type error at draw time. An unassigned one is simply left
+		// unbound (the shader that declares it does not read it without a buffer).
+		if (handle == nullptr && field.type != "sampler2D" && field.type != "samplerCube")
+		{
+			m_descriptorSet.SetTexture(field.binding, nullptr);
 			continue;
 		}
 
 		Rendering::HAL::TextureHandle* fallback =
-			parameter.type == "samplerCube" ? p_emptyTextureCube : p_emptyTexture2D;
-		const char* fallbackName = parameter.type == "samplerCube" ? "empty cube (black)" : "empty 2D (white)";
-		if (parameter.fallback == static_cast<uint8_t>(Rendering::Resources::ShaderPackage::SamplerFallback::FlatNormal)
+			field.type == "samplerCube" ? p_emptyTextureCube : p_emptyTexture2D;
+		const char* fallbackName = field.type == "samplerCube" ? "empty cube (black)" : "empty 2D (white)";
+		if (field.fallback == static_cast<uint8_t>(Rendering::Resources::ShaderPackage::SamplerFallback::FlatNormal)
 			&& p_flatNormalTexture != nullptr)
 		{
 			fallback = p_flatNormalTexture;
 			fallbackName = "flat normal (0.5,0.5,1)";
 		}
-		if (auto* target = handle != nullptr ? handle : fallback)
-		{
-			target->Bind(parameter.binding);
-		}
+
+		m_descriptorSet.SetTexture(field.binding, handle != nullptr ? handle : fallback);
 
 		// MOON_DEBUG_SAMPLERS: what each sampler slot actually got, once per shader and slot.
 		// The "why is my texture ignored" question has two very different answers (the material
@@ -778,15 +821,17 @@ void Rendering::Data::MaterialInstance::UploadParameterBlock(
 		if (std::getenv("MOON_DEBUG_SAMPLERS") != nullptr)
 		{
 			static std::set<std::string> reported;
-			const std::string key = (ShaderOf() != nullptr ? ShaderOf()->path : std::string("?")) + "|" + parameter.name;
+			const std::string key = (ShaderOf() != nullptr ? ShaderOf()->path : std::string("?")) + "|" + field.name;
 			if (reported.insert(key).second)
 			{
 				std::cout << "[Sampler] " << (ShaderOf() != nullptr ? ShaderOf()->path : "?") << " "
-					<< parameter.name << " unit " << parameter.binding << " <- "
+					<< field.name << " unit " << field.binding << " <- "
 					<< (handle != nullptr ? "material texture" : fallbackName) << std::endl;
 			}
 		}
 	}
+
+	m_descriptorSet.Bind();
 
 	// Single-use properties are per-frame scratch: put them back to their defaults, like the
 	// loose path did, so a value set for one draw never sticks to the material.
@@ -797,12 +842,12 @@ void Rendering::Data::MaterialInstance::UploadParameterBlock(
 			continue;
 		}
 
-		const auto parameter = std::ranges::find_if(ShaderOf()->GetParameters(),
-			[&name](const Rendering::Resources::Shader::Parameter& p_parameter) {
+		const auto parameter = std::ranges::find_if(definition->Parameters(),
+			[&name](const MaterialDefinition::Parameter& p_parameter) {
 				return p_parameter.name == name
 					|| name.starts_with(p_parameter.name + "[");
 			});
-		if (parameter != ShaderOf()->GetParameters().end())
+		if (parameter != definition->Parameters().end())
 		{
 			property.value = ParameterDefaultValue(*parameter);
 		}
@@ -815,42 +860,46 @@ void Rendering::Data::MaterialInstance::UploadParameterBlock(
 
 void Rendering::Data::MaterialInstance::BindGlobalTexture(const std::string& p_name, Rendering::HAL::Texture* p_texture)
 {
-	if (ShaderOf() == nullptr || p_texture == nullptr)
+	// A view-owned texture (the DFG LUT, the environment cubes) is allocated by an earlier
+	// pass; on the first frames it may not exist yet, and binding an unallocated name is a GL
+	// error rather than a no-op.
+	if (Definition() == nullptr || p_texture == nullptr || !p_texture->IsValid())
 	{
 		return;
 	}
 
-	for (const Rendering::Resources::Shader::Parameter& parameter : ShaderOf()->GetParameters())
+	if (const MaterialDefinition::SamplerField* field = Definition()->FindSampler(p_name))
 	{
-		if (parameter.isSampler && parameter.name == p_name)
+		// Remember it in the set as well: the next Bind() must not put back whatever the
+		// material's own upload recorded for this slot.
+		m_descriptorSet.SetTexture(field->binding, p_texture);
+		m_descriptorSet.Bind();
+
+		// MOON_DEBUG_SAMPLERS also reports the per-draw bindings: the ones in UploadParameterBlock
+		// happen once (and may have run before the sky pass baked the environment), while these
+		// happen on every draw and are what the shader really samples.
+		if (std::getenv("MOON_DEBUG_SAMPLERS") != nullptr)
 		{
-			p_texture->Bind(parameter.binding);
-			// MOON_DEBUG_SAMPLERS also reports the per-draw bindings: the ones in UploadParameterBlock
-			// happen once (and may have run before the sky pass baked the environment), while these
-			// happen on every draw and are what the shader really samples.
-			if (std::getenv("MOON_DEBUG_SAMPLERS") != nullptr)
+			static std::set<std::string> reported;
+			const std::string key = ShaderOf()->path + "|draw|" + field->name;
+			if (reported.insert(key).second)
 			{
-				static std::set<std::string> reported;
-				const std::string key = ShaderOf()->path + "|draw|" + parameter.name;
-				if (reported.insert(key).second)
-				{
-					std::cout << "[Sampler] " << ShaderOf()->path << " " << parameter.name << " unit "
-						<< parameter.binding << " <- view texture (per draw)" << std::endl;
-				}
+				std::cout << "[Sampler] " << ShaderOf()->path << " " << field->name << " unit "
+					<< field->binding << " <- view texture (per draw)" << std::endl;
 			}
-			return;
 		}
 	}
 }
 
 bool Rendering::Data::MaterialInstance::ResetPropertyToDefault(const std::string& p_name)
 {
-	if (ShaderOf() == nullptr || !ShaderOf()->HasParameterTable())
+	const MaterialDefinition* definition = Definition();
+	if (definition == nullptr || !definition->HasParameterTable())
 	{
 		return false;
 	}
 
-	for (const Rendering::Resources::Shader::Parameter& parameter : ShaderOf()->GetParameters())
+	for (const MaterialDefinition::Parameter& parameter : definition->Parameters())
 	{
 		if (parameter.name != p_name)
 		{
@@ -911,9 +960,10 @@ void Rendering::Data::MaterialInstance::UpdateProperties()
 	// that list keeps it independent of which uniforms a driver happened to keep active in a
 	// given variant - and it is the half of the package's reflection the runtime was not reading
 	// yet (see Shader::HasParameterTable).
-	if (ShaderOf() != nullptr && ShaderOf()->HasParameterTable())
+	const MaterialDefinition* definition = Definition();
+	if (definition != nullptr && definition->HasParameterTable())
 	{
-		for (const Rendering::Resources::Shader::Parameter& parameter : ShaderOf()->GetParameters())
+		for (const MaterialDefinition::Parameter& parameter : definition->Parameters())
 		{
 			const MaterialPropertyType value = ParameterDefaultValue(parameter);
 			if (std::holds_alternative<std::monostate>(value))

@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Copyright (C) 2017 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -102,15 +102,41 @@ protected:
     virtual bool readLexeme() noexcept = 0;
 
     void skipWhiteSpace() {
-        while (mCursor < mEnd && isWhiteSpaceCharacter(*mCursor)) {
-            consume();
-        }
+        // A comment can start after any amount of whitespace and another comment can follow
+        // it, so the whole run is consumed in one loop. Both comment forms keep the line
+        // counter right: consume() counts the newlines inside them.
+        for (;;) {
+            while (mCursor < mEnd && isWhiteSpaceCharacter(*mCursor)) {
+                consume();
+            }
 
-        // If a comment marker is detected "//", skip until the next return
-        // carriage is encountered.
-        if (hasMore() && *mCursor == '/' && mCursor < (mEnd - 1) && *(mCursor + 1) == '/') {
-            skipUntilEndOfLine();
-            skipWhiteSpace();
+            if (!hasMore() || *mCursor != '/' || mCursor + 1 >= mEnd) {
+                return;
+            }
+
+            // "//": skip until the next return carriage is encountered.
+            if (*(mCursor + 1) == '/') {
+                skipUntilEndOfLine();
+                continue;
+            }
+
+            // "/* ... */": skip the whole block. A block comment that is never closed
+            // consumes the rest of the input; the lexer then stops because hasMore() is false.
+            if (*(mCursor + 1) == '*') {
+                consume(); // '/'
+                consume(); // '*'
+                while (hasMore()) {
+                    if (*mCursor == '*' && mCursor + 1 < mEnd && *(mCursor + 1) == '/') {
+                        consume(); // '*'
+                        consume(); // '/'
+                        break;
+                    }
+                    consume();
+                }
+                continue;
+            }
+
+            return;
         }
     }
 

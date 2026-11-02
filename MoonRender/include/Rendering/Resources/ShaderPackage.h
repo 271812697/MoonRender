@@ -1,5 +1,6 @@
 #pragma once
 #include <Rendering/Data/DescriptorSetLayout.h>
+#include <Rendering/Resources/ChunkContainer.h>
 #include <cstdint>
 #include <map>
 #include <set>
@@ -15,8 +16,9 @@ namespace Rendering::Resources
 	 * already resolved to the final GLSL, the variant list, and the material's parameters.
 	 * Loading a shader is then a lookup and a compile, not a parse.
 	 *
-	 * Layout, modelled on filabridge/include/filament/MaterialChunkType.h: an 8 byte magic,
-	 * then chunks of (8 byte tag, uint32 size, payload). */
+	 * Layout is filament's chunk tree: a flat sequence of (uint64 chunk type, uint32 payload
+	 * size, payload), with no package header. MaterialVersion is the first chunk; the loader
+	 * recognises a package by it, exactly as filaflat's ChunkContainer does. */
 	class ShaderPackage
 	{
 	public:
@@ -92,7 +94,7 @@ namespace Rendering::Resources
 		 * is what a shader that has not been migrated yet still is. */
 		static bool IsPackage(const void* p_data, uint32_t p_size);
 
-		/** Walks the chunk table; the payloads are read on demand and never copied. */
+		/** Parses the chunk tree (MAT_VERS first, MAT_CRC last) and decodes the payloads. */
 		ShaderPackage(const void* p_data, uint32_t p_size);
 
 		bool IsValid() const { return m_valid; }
@@ -109,7 +111,7 @@ namespace Rendering::Resources
 		 * what a material panel reads instead of asking the driver for active uniforms. */
 		const std::vector<Parameter>& Parameters() const { return m_parameters; }
 
-		/** One field of the PerMaterial uniform block (SHDRUBO) - filament's UboBlockInfo. */
+		/** One field of the PerMaterial uniform block (MAT_UIB) - filament's UboBlockInfo. */
 		struct UniformField
 		{
 			std::string name;
@@ -119,7 +121,7 @@ namespace Rendering::Resources
 			uint32_t count = 1;
 		};
 
-		/** One descriptor of the PerMaterial sampler block (SHDRSMP) - SamplerBlockInfo. */
+		/** One descriptor of the PerMaterial sampler block (MAT_SIB) - SamplerBlockInfo. */
 		struct SamplerField
 		{
 			std::string name;
@@ -141,8 +143,8 @@ namespace Rendering::Resources
 		const ::Rendering::Data::DescriptorSetLayout& Layout() const { return m_layout; }
 		const std::vector<Attribute>& Attributes() const { return m_attributes; }
 
-		/** The samplers that asked for a non-default 1x1 fallback texture, empty for a package
-		 * whose samplers all take the engine default. */
+		/** One entry per sampler, carrying the 1x1 texture the runtime binds when the instance
+		 * assigned none (MAT_SIB's fallback field). */
 		const std::vector<SamplerFallbackEntry>& SamplerFallbacks() const { return m_samplerFallbacks; }
 
 		/** The state the `material { }` block declared besides the name, domain and shading model:
@@ -173,8 +175,8 @@ namespace Rendering::Resources
 	private:
 		struct Blob
 		{
-			std::string_view name;
-			std::string_view source;
+			std::string name;
+			std::string source;
 		};
 
 		const Blob* FindBlob(const Variant& p_variant, Stage p_stage) const;
@@ -188,10 +190,12 @@ namespace Rendering::Resources
 		uint32_t m_parameterBlockSize = 0;
 		std::vector<SamplerFallbackEntry> m_samplerFallbacks;
 		std::vector<Blob> m_blobs;
-		/** The package's line table (SHDRDICT): the shared stage texts are stored as ids into
+		/** The package's chunk list (filaflat's ChunkContainer). */
+		ChunkContainer m_container;
+		/** The package's line table (DIC_TEXT): the shared stage texts are stored as ids into
 		 * it, so the lines every stage repeats are stored once. */
 		std::vector<std::string> m_lines;
-		/** The PerMaterial layout (SHDRUBO / SHDRSMP), applied to m_parameters as it is read. */
+		/** The PerMaterial layout (MAT_UIB / MAT_SIB), applied to m_parameters as it is read. */
 		std::vector<UniformField> m_uniformFields;
 		std::vector<SamplerField> m_samplerFields;
 		uint32_t m_uniformBlockSize = 0;
@@ -204,8 +208,4 @@ namespace Rendering::Resources
 		std::map<std::string, std::string> m_stageTexts;
 		std::vector<std::string> m_declaredFeatures;
 	};
-
-	/** Where the per-variant defines are spliced into a stage's shared text. Kept in one place
-	 * because MoonMatc writes it and this parser reads it. */
-	constexpr std::string_view kShaderDefinesPlaceholder = "//@MOON_VARIANT_DEFINES@";
 }

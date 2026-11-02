@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Copyright (C) 2017 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -29,12 +29,13 @@ JsonType JsonishLexer::readIdentifier() noexcept {
 
     size_t lexemeSize = mCursor - lexemeStart;
 
-    // Check what kind of keyword we got here.
-    if (strncmp("true", lexemeStart, lexemeSize) == 0) {
+    // Check what kind of keyword we got here. The size is part of the comparison: strncmp
+    // alone would also accept "trueValue" as the boolean true.
+    if (lexemeSize == 4 && strncmp("true", lexemeStart, lexemeSize) == 0) {
         return BOOLEAN;
-    } else if (strncmp("false", lexemeStart, lexemeSize) == 0) {
+    } else if (lexemeSize == 5 && strncmp("false", lexemeStart, lexemeSize) == 0) {
         return BOOLEAN;
-    } else if (strncmp("null", lexemeStart, lexemeSize) == 0) {
+    } else if (lexemeSize == 4 && strncmp("null", lexemeStart, lexemeSize) == 0) {
         return NUll;
     } else {
         // Relax constraint where string MUST be surrounded by " characters.
@@ -46,6 +47,10 @@ JsonType JsonishLexer::readIdentifier() noexcept {
 void JsonishLexer::readString() noexcept {
     consume(); // Skip first double quote character.
     while (hasMore() && *mCursor != '"') {
+        // An escaped quote is part of the string, not its end.
+        if (*mCursor == '\\' && mCursor + 1 < mEnd) {
+            consume();
+        }
         consume();
     }
     if (hasMore()) {
@@ -64,7 +69,9 @@ JsonType JsonishLexer::readPunctuation() noexcept {
         case ']': return ARRAY_END;
         case '{': return BLOCK_START;
         case '}': return BLOCK_END;
-        default : return readIdentifier(); // Treat everything else as an identifier.
+        case '(': return PARENTHESIS_START;
+        case ')': return PARENTHESIS_END;
+        default : return SYMBOL; // Consumed a character the lexer does not name.
     }
 }
 
@@ -81,15 +88,28 @@ void JsonishLexer::readNumber() noexcept {
         return;
     }
 
-    // Read fraction if present (TODO: Handle exp).
-    if (*mCursor != '.') {
+    // Read fraction if present.
+    if (*mCursor == '.') {
+        consume();
+        while (hasMore() && isNumericCharacter(*mCursor)) {
+            consume();
+        }
+    }
+
+    if (!hasMore()) {
         return;
     }
 
-    // There is a fractional part.
-    consume();
-    while (hasMore() && isNumericCharacter(*mCursor)) {
+    // Read the exponent if present ("1e-6"): one token, so a value slice never has to
+    // guess where the number ended.
+    if (*mCursor == 'e' || *mCursor == 'E') {
         consume();
+        if (hasMore() && (*mCursor == '+' || *mCursor == '-')) {
+            consume();
+        }
+        while (hasMore() && isNumericCharacter(*mCursor)) {
+            consume();
+        }
     }
 }
 
@@ -130,13 +150,19 @@ bool JsonishLexer::readLexeme() noexcept {
         case ']':
         case '{':
         case '}':
+        case '(':
+        case ')':
             lexemeType = readPunctuation();
             break;
         default:
             if (isIdentifierCharacter(c)) {
                 lexemeType = readIdentifier();
             } else {
-                return false;
+                // Punctuation the material DSL may carry (`#`, `.`, `+`, ...): consume it and
+                // keep lexing. A strict JSON lexer would stop here, but this one feeds a
+                // block parser whose value text is sliced from the source between lexemes.
+                consume();
+                lexemeType = SYMBOL;
             }
             break;
     }

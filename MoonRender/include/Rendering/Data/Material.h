@@ -34,6 +34,11 @@ namespace Rendering::Data
 		bool HasShader() const;
 		Rendering::Resources::Shader*& GetShader() { return m_shader; }
 
+		/** The immutable package data this material draws with: block layout, samplers, state.
+		 * Shared with the shader (and therefore with every other material using it), so a hot
+		 * reload reaches all of them. Null only before a shader is set. */
+		const MaterialDefinition* Definition() const;
+
 		/** An override-only instance of this material: it answers from this definition for
 		 * everything it does not override itself. */
 		std::unique_ptr<MaterialInstance> CreateInstance();

@@ -2,101 +2,41 @@
 // handed to its processor - filament-matp's MaterialParser / mConfigProcessor shape. Every
 // processor writes into the MaterialBuilder the caller owns.
 //
-// MaterialParser.h declares the class; the block readers themselves (StripComments, LineOf,
-// TakeBlock, ParseMaterialBlock) live in this file's anonymous namespace because nothing else
-// needs them. Split out of Matc.cpp - see docs/MaterialPipeline.md.
+// MaterialParser.h declares the class; MaterialLexer does the scanning (comments, identifiers,
+// brace-balanced blocks and line numbers), so there is no separate StripComments / TakeBlock
+// pass here. Split out of Matc.cpp - see docs/MaterialPipeline.md.
 
 #include "MaterialParser.h"
 
 #include <cctype>
-#include <sstream>
 #include <unordered_map>
 
+#include "JsonishLexer.h"
+#include "JsonishParser.h"
+#include "MaterialLexeme.h"
+#include "MaterialLexer.h"
 #include "ParametersProcessor.h"
 #include "TextUtils.h"
 
 namespace Moon::Matc
 {
-
 	namespace
 	{
-	/** Removes // and block comments, keeping line breaks so that the #line numbers the
-	 * diagnostics show still match the file. */
-	std::string StripComments(const std::string& p_text)
-	{
-		std::string out;
-		out.reserve(p_text.size());
-		bool inLine = false;
-		bool inBlock = false;
-		for (size_t i = 0; i < p_text.size(); ++i)
+		/** The line of the first non-whitespace character inside a block. The block lexeme
+		 * starts on the line of its '{'; every line break between the brace and the body's
+		 * first code character moves the #line anchor down with it. */
+		uint32_t BodyLine(const MaterialLexeme& p_block)
 		{
-			const char c = p_text[i];
-			const char next = (i + 1 < p_text.size()) ? p_text[i + 1] : '\0';
-			if (inLine)
+			uint32_t line = static_cast<uint32_t>(p_block.getLine());
+			for (const char* at = p_block.getStart() + 1; at < p_block.getEnd() && std::isspace(static_cast<unsigned char>(*at)); ++at)
 			{
-				if (c == '\n') { inLine = false; out += c; }
-				continue;
-			}
-			if (inBlock)
-			{
-				if (c == '*' && next == '/') { inBlock = false; ++i; }
-				else if (c == '\n') { out += c; }
-				continue;
-			}
-			if (c == '/' && next == '/') { inLine = true; ++i; continue; }
-			if (c == '/' && next == '*') { inBlock = true; ++i; continue; }
-			out += c;
-		}
-		return out;
-	}
-
-	/** The 1-based line a fragment of the source starts on: the #line directives handed to
-	 * the driver point back here, so an error names the .shader line the user wrote. */
-	uint32_t LineOf(const std::string& p_text, const std::string& p_fragment)
-	{
-		const size_t at = p_text.find(p_fragment);
-		if (at == std::string::npos)
-		{
-			return 1;
-		}
-		return 1u + static_cast<uint32_t>(std::count(p_text.begin(), p_text.begin() + static_cast<ptrdiff_t>(at), '\n'));
-	}
-
-	/** Finds the body of a `keyword { ... }` block, braces balanced, and returns the index
-	 * just past the closing brace. Comments have already been stripped by the caller. */
-	bool TakeBlock(const std::string& p_text, const std::string& p_keyword, size_t p_from,
-		std::string& p_body, size_t& p_next)
-	{
-		const size_t at = p_text.find(p_keyword, p_from);
-		if (at == std::string::npos)
-		{
-			return false;
-		}
-		const size_t open = p_text.find('{', at);
-		if (open == std::string::npos)
-		{
-			return false;
-		}
-		int depth = 0;
-		for (size_t i = open; i < p_text.size(); ++i)
-		{
-			if (p_text[i] == '{') { ++depth; }
-			else if (p_text[i] == '}')
-			{
-				if (--depth == 0)
+				if (*at == '\n')
 				{
-					p_body = p_text.substr(open + 1, i - open - 1);
-					p_next = i + 1;
-					return true;
+					++line;
 				}
 			}
+			return line;
 		}
-		return false;
-	}
-
-	/** Splits `a : b, c : d` style material state into key/value pairs, and the parameters
-	 * array into Parameter records. Only what the slice needs - a hand written scanner, in
-	 * the spirit of filament-matp's lexeme readers rather than a general parser. */
 	}
 
 	const std::unordered_map<std::string, MaterialParser::ConfigProcessor>& MaterialParser::ConfigProcessors()
@@ -110,81 +50,128 @@ namespace Moon::Matc
 		return processors;
 	}
 
-	void MaterialParser::ProcessBlock(const std::string& p_keyword, const std::string& p_body)
+	void MaterialParser::ProcessBlock(const std::string& p_keyword, const std::string& p_body, uint32_t p_line)
 	{
 		const auto& processors = ConfigProcessors();
 		const auto it = processors.find(p_keyword);
 		if (it != processors.end())
 		{
-			(this->*(it->second))(p_body);
+			(this->*(it->second))(p_body, p_line);
 		}
 	}
 
-	void MaterialParser::ProcessMaterial(const std::string& p_body)
+	void MaterialParser::ProcessMaterial(const std::string& p_body, uint32_t)
 	{
+		// The parser wants an object including its braces; the block lexeme's body excludes
+		// them, so put them back around the body. The lexer/parser then hand the processor a
+		// JsonishObject - it never sees the body text again.
+		const std::string jsonText = "{" + p_body + "}";
+		JsonishLexer lexer;
+		lexer.lex(jsonText.data(), jsonText.size());
+		JsonishParser parser(lexer.getLexemes());
+
+		const std::unique_ptr<JsonishObject> object = parser.parse();
+		if (object == nullptr)
+		{
+			m_materialParseFailed = true;
+			return;
+		}
+
 		ParametersProcessor processor;
-		processor.ProcessBlock(p_body, *m_builder);
+		processor.ProcessBlock(*object, *m_builder);
 	}
 
-	void MaterialParser::ProcessVertex(const std::string& p_body)
+	void MaterialParser::ProcessVertex(const std::string& p_body, uint32_t p_line)
 	{
 		m_builder->vertexBody = Trim(p_body);
-		m_builder->vertexEntryLine = LineOf(*m_text, m_builder->vertexBody);
+		m_builder->vertexEntryLine = p_line;
 	}
 
-	void MaterialParser::ProcessGeometry(const std::string& p_body)
+	void MaterialParser::ProcessGeometry(const std::string& p_body, uint32_t p_line)
 	{
 		m_builder->geometryBody = Trim(p_body);
-		m_builder->geometryEntryLine = LineOf(*m_text, m_builder->geometryBody);
+		m_builder->geometryEntryLine = p_line;
 	}
 
-	void MaterialParser::ProcessFragment(const std::string& p_body)
+	void MaterialParser::ProcessFragment(const std::string& p_body, uint32_t p_line)
 	{
 		m_builder->fragmentBody = Trim(p_body);
-		m_builder->fragmentEntryLine = LineOf(*m_text, m_builder->fragmentBody);
+		m_builder->fragmentEntryLine = p_line;
 	}
 
 	bool MaterialParser::Parse(const std::string& p_source, MaterialBuilder& p_builder, std::string& p_error)
 	{
 		m_builder = &p_builder;
+		m_materialParseFailed = false;
+		p_builder.parseError.clear();
 
-		const std::string text = StripComments(p_source);
-		m_text = &text;
+		MaterialLexer lexer;
+		lexer.lex(p_source.data(), p_source.size());
+		const std::vector<MaterialLexeme>& lexemes = lexer.getLexemes();
 
-		std::string body;
-		size_t next = 0;
+		// Blocks are an identifier immediately followed by its `{ ... }` lexeme. Everything
+		// else the lexer emits (comments are skipped, stray characters are UNKNOWN) is ignored.
+		bool hasMaterial = false;
+		bool hasVertex = false;
+		bool hasGeometry = false;
+		bool hasFragment = false;
+
+		for (size_t i = 0; i + 1 < lexemes.size(); ++i)
+		{
+			if (lexemes[i].getType() != MaterialType::IDENTIFIER
+				|| lexemes[i + 1].getType() != MaterialType::BLOCK)
+			{
+				continue;
+			}
+
+			const MaterialLexeme& block = lexemes[i + 1];
+			const std::string keyword = lexemes[i].getStringValue();
+			const std::string body(block.getStart() + 1, block.getEnd());
+			const uint32_t line = BodyLine(block);
+
+			// The legacy loader's marker is spelled "#shader geomerty", so the misspelling is
+			// accepted as the same block. Duplicate blocks keep the first one, as the old
+			// sequential search did.
+			if (keyword == "material" && !hasMaterial)
+			{
+				ProcessBlock("material", body, line);
+				hasMaterial = true;
+			}
+			else if (keyword == "vertex" && !hasVertex)
+			{
+				ProcessBlock("vertex", body, line);
+				hasVertex = true;
+			}
+			else if ((keyword == "geometry" || keyword == "geomerty") && !hasGeometry)
+			{
+				ProcessBlock("geometry", body, line);
+				hasGeometry = true;
+			}
+			else if (keyword == "fragment" && !hasFragment)
+			{
+				ProcessBlock("fragment", body, line);
+				hasFragment = true;
+			}
+
+			++i; // skip the block lexeme as well
+		}
 
 		// material { } - required, and the first block a file carries.
-		if (!TakeBlock(text, "material", 0, body, next))
+		if (!hasMaterial)
 		{
 			p_error = "no material { } block";
 			return false;
 		}
-		ProcessBlock("material", body);
-
-		size_t afterVertex = 0;
-		if (TakeBlock(text, "vertex", next, body, next))
+		if (m_materialParseFailed)
 		{
-			afterVertex = next;
-			ProcessBlock("vertex", body);
+			p_error = "cannot parse material { } block";
+			return false;
 		}
-
-		if (TakeBlock(text, "fragment", next, body, next))
+		if (!p_builder.parseError.empty())
 		{
-			ProcessBlock("fragment", body);
+			p_error = p_builder.parseError;
+			return false;
 		}
-
-		// The geometry stage: our extension, and the old files put it between the vertex and
-		// the fragment sections - so it is searched from the end of the vertex block, not from
-		// wherever the fragment block ended. The legacy loader's marker is spelled
-		// "#shader geomerty", so the block keyword is accepted either way.
-		size_t geometryNext = 0;
-		if (TakeBlock(text, "geometry", afterVertex, body, geometryNext)
-			|| TakeBlock(text, "geomerty", afterVertex, body, geometryNext))
-		{
-			ProcessBlock("geometry", body);
-		}
-
 		if (p_builder.name.empty())
 		{
 			p_error = "material { name : ... } is required";

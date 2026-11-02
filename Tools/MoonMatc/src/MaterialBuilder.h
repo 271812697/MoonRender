@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 
+#include "ParameterTypes.h"
+
 /** What the material file parser accumulates: filament-matp's MaterialBuilder.
  *
  * The parser owns no state of its own - every block handler (material / vertex / geometry /
@@ -27,18 +29,25 @@ namespace Moon::Matc
 	 * here it lives in the material file itself, next to the parameter it describes. */
 	struct Parameter
 	{
-		std::string type;
+		/** The DSL type, as an enum: the layout, the GLSL declaration and the sampler tests
+		 * switch on it, and the two spellings (DSL / GLSL) are produced only when a package or
+		 * a dump is written. Unknown is a parse error, reported through MaterialBuilder::parseError. */
+		ParameterType type = ParameterType::Unknown;
 		std::string name;
-		std::string count;
-		std::string defaultValue;
+		/** Array size, 0 when the parameter is not an array (the package stores 0 as "plain"). */
+		uint32_t count = 0;
+		/** The GLSL initialiser the material declared, e.g. `vec4(1.0, 0.5, 0.5, 1.0)` or
+		 * `false`. This is source text by nature - it is emitted as it is - not a scalar the
+		 * parser could reduce to one type. Empty when the parameter declared none. */
+		std::string defaultExpression;
 		std::string label;
 		std::string group;
 		/** Which 1x1 texture the runtime binds for a sampler nobody assigned, `fallback : ...`
-		 * in the material file. Empty means the engine's default (white for sampler2D, black for
-		 * samplerCube). "flatNormal" is the neutral tangent-space normal (0, 0, 1), which a
+		 * in the material file. Default means the engine's default (white for sampler2D, black
+		 * for samplerCube). FlatNormal is the neutral tangent-space normal (0, 0, 1), which a
 		 * normal map samples as "no perturbation" - without it the white fallback would decode
 		 * to (1, 1, 1) and bend every normal. */
-		std::string fallback;
+		SamplerFallback fallback = SamplerFallback::Default;
 		float min = 0.0f;
 		float max = 0.0f;
 		float step = 0.0f;
@@ -91,6 +100,9 @@ namespace Moon::Matc
 		std::string domain = "surface";
 		std::map<std::string, std::string> state; // blending, culling, depthWrite, ...
 		std::vector<Parameter> parameters;
+		/** The first semantic error the material block produced (an unknown parameter type,
+		 * a field of the wrong JSON type, ...). MaterialParser turns it into the compile error. */
+		std::string parseError;
 		/** The std140 size of the per-material uniform block: what the runtime allocates and
 		 * uploads, and what the generated GLSL's block must describe. 0 when every parameter is
 		 * a sampler (or there are none). */

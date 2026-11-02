@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Copyright (C) 2017 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -32,6 +32,15 @@ enum JsonType {
     ARRAY_START,
     ARRAY_END,
     COLUMN,
+    /** Parentheses are not JSON, but the material DSL writes GLSL initialisers after the
+     * colon (`default : vec4(1.0, 0.5, 0.5, 1.0)`). They are tokens so the caller can keep
+     * the commas inside a constructor from ending the property value. */
+    PARENTHESIS_START,
+    PARENTHESIS_END,
+    /** Any other single character (the GTX/GLSL punctuation a value may contain). The text
+     * between two lexemes is still sliced from getStart()/getEnd(), so the token only has
+     * to let the lexer move past the character without stopping. */
+    SYMBOL,
 };
 
 class JsonLexeme final: public Lexeme<JsonType > {
@@ -48,6 +57,9 @@ public:
             case ARRAY_START: return "ARRAY_START";
             case ARRAY_END: return "ARRAY_END";
             case COLUMN: return "COLUMN";
+            case PARENTHESIS_START: return "PARENTHESIS_START";
+            case PARENTHESIS_END: return "PARENTHESIS_END";
+            case SYMBOL: return "SYMBOL";
         }
         return "UNKNOWN";
     }

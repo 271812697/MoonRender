@@ -1,61 +1,107 @@
 #include "ParametersProcessor.h"
 
-#include <cctype>
-#include <sstream>
-
-#include "TextUtils.h"
-
 namespace Moon::Matc
 {
 	namespace
 	{
-		void ApplyType(Parameter& p_parameter, const std::string& p_value)
+		/** The text of a string value. Numbers, booleans and enums are read as themselves; the
+		 * only source text a Parameter keeps is the name / label / group and the GLSL
+		 * initialiser, which are strings by definition. */
+		std::string TextOf(const JsonishValue& p_value)
 		{
-			p_parameter.type = p_value;
+			switch (p_value.getType())
+			{
+			case JsonishValue::Type::String:
+				return p_value.toJsonString()->getString();
+			case JsonishValue::Type::Number:
+				return p_value.toJsonNumber()->getString();
+			case JsonishValue::Type::Bool:
+				return p_value.toJsonBool()->getBool() ? "true" : "false";
+			case JsonishValue::Type::Null:
+				return "null";
+			default:
+				return {};
+			}
 		}
 
-		void ApplyName(Parameter& p_parameter, const std::string& p_value)
+		void ApplyType(Parameter& p_parameter, const JsonishValue& p_value)
 		{
-			p_parameter.name = p_value;
+			if (const JsonishString* value = p_value.toJsonString())
+			{
+				p_parameter.type = ParseParameterType(value->getString());
+			}
 		}
 
-		void ApplyCount(Parameter& p_parameter, const std::string& p_value)
+		void ApplyName(Parameter& p_parameter, const JsonishValue& p_value)
 		{
-			p_parameter.count = p_value;
+			if (const JsonishString* value = p_value.toJsonString())
+			{
+				p_parameter.name = value->getString();
+			}
 		}
 
-		void ApplyDefault(Parameter& p_parameter, const std::string& p_value)
+		void ApplyCount(Parameter& p_parameter, const JsonishValue& p_value)
 		{
-			p_parameter.defaultValue = p_value;
+			if (const JsonishNumber* number = p_value.toJsonNumber())
+			{
+				p_parameter.count = static_cast<uint32_t>(number->getFloat());
+			}
 		}
 
-		void ApplyLabel(Parameter& p_parameter, const std::string& p_value)
+		void ApplyDefault(Parameter& p_parameter, const JsonishValue& p_value)
 		{
-			p_parameter.label = Unquote(p_value);
+			// A GLSL initialiser (`vec4(...)`, `false`, `1.5`): source text, kept as written.
+			p_parameter.defaultExpression = TextOf(p_value);
 		}
 
-		void ApplyGroup(Parameter& p_parameter, const std::string& p_value)
+		void ApplyLabel(Parameter& p_parameter, const JsonishValue& p_value)
 		{
-			p_parameter.group = Unquote(p_value);
+			// A quoted label arrives without its quotes: JsonishParser stores the string's
+			// content, not the source spelling.
+			if (const JsonishString* value = p_value.toJsonString())
+			{
+				p_parameter.label = value->getString();
+			}
 		}
 
-		void ApplyColor(Parameter& p_parameter, const std::string& p_value)
+		void ApplyGroup(Parameter& p_parameter, const JsonishValue& p_value)
 		{
-			p_parameter.color = p_value == "true";
+			if (const JsonishString* value = p_value.toJsonString())
+			{
+				p_parameter.group = value->getString();
+			}
 		}
 
-		void ApplyUi(Parameter& p_parameter, const std::string& p_value)
+		void ApplyColor(Parameter& p_parameter, const JsonishValue& p_value)
+		{
+			if (const JsonishBool* value = p_value.toJsonBool())
+			{
+				p_parameter.color = value->getBool();
+			}
+		}
+
+		void ApplyUi(Parameter& p_parameter, const JsonishValue& p_value)
 		{
 			// "ui : false" hides engine-owned parameters (the shadow matrix, the environment
 			// map) from the material designer; anything else leaves them visible.
-			p_parameter.ui = p_value != "false";
+			if (const JsonishBool* value = p_value.toJsonBool())
+			{
+				p_parameter.ui = value->getBool();
+			}
+			else if (const JsonishString* value = p_value.toJsonString())
+			{
+				p_parameter.ui = value->getString() != "false";
+			}
 		}
 
-		void ApplyFallback(Parameter& p_parameter, const std::string& p_value)
+		void ApplyFallback(Parameter& p_parameter, const JsonishValue& p_value)
 		{
 			// `fallback : flatNormal` on a sampler says which 1x1 texture the runtime binds when
 			// the designer assigned no map - see ShaderPackage::SamplerFallback.
-			p_parameter.fallback = p_value;
+			if (const JsonishString* value = p_value.toJsonString())
+			{
+				p_parameter.fallback = ParseSamplerFallback(value->getString());
+			}
 		}
 	}
 
@@ -67,7 +113,7 @@ namespace Moon::Matc
 			{ "domain", &ParametersProcessor::OnDomain },
 			{ "specularAntiAliasing", &ParametersProcessor::OnCodeFlag },
 			{ "clearCoatIorChange", &ParametersProcessor::OnCodeFlag },
-			{ "parameters", &ParametersProcessor::OnParameters },
+			{ "parameters", static_cast<PropertyProcessor>(&ParametersProcessor::OnParameters) },
 			{ "features", &ParametersProcessor::OnNameList },
 			{ "defaultFeatures", &ParametersProcessor::OnNameList },
 			{ "variantFilter", &ParametersProcessor::OnNameList },
@@ -94,61 +140,129 @@ namespace Moon::Matc
 		return fields;
 	}
 
-	void ParametersProcessor::OnName(const std::string&, const std::string& p_value)
+	void ParametersProcessor::OnName(const std::string&, const JsonishValue& p_value)
 	{
-		m_builder->name = p_value;
+		m_builder->name = TextOf(p_value);
 	}
 
-	void ParametersProcessor::OnShadingModel(const std::string&, const std::string& p_value)
+	void ParametersProcessor::OnShadingModel(const std::string&, const JsonishValue& p_value)
 	{
-		m_builder->shadingModel = p_value;
+		m_builder->shadingModel = TextOf(p_value);
 	}
 
-	void ParametersProcessor::OnDomain(const std::string&, const std::string& p_value)
+	void ParametersProcessor::OnDomain(const std::string&, const JsonishValue& p_value)
 	{
-		m_builder->domain = p_value;
+		m_builder->domain = TextOf(p_value);
 	}
 
-	void ParametersProcessor::OnCodeFlag(const std::string& p_key, const std::string& p_value)
+	void ParametersProcessor::OnCodeFlag(const std::string& p_key, const JsonishValue& p_value)
 	{
-		const bool enabled = p_value == "true";
+		const bool enabled = TextOf(p_value) == "true";
 		if (p_key == "specularAntiAliasing") { m_builder->specularAntiAliasing = enabled; }
 		else if (p_key == "clearCoatIorChange") { m_builder->clearCoatIorChange = enabled; }
 	}
 
-	void ParametersProcessor::OnParameters(const std::string&, const std::string& p_value)
+	void ParametersProcessor::OnParameters(const std::string&, const JsonishValue& p_value)
 	{
-		size_t at = 0;
-		while ((at = p_value.find('{', at)) != std::string::npos)
+		if (const JsonishArray* array = p_value.toJsonArray())
 		{
-			const size_t end = p_value.find('}', at);
-			if (end == std::string::npos) { break; }
-			ProcessParameterObject(p_value.substr(at + 1, end - at - 1));
-			at = end + 1;
+			for (const JsonishValue* element : array->getElements())
+			{
+				if (element != nullptr && element->getType() == JsonishValue::Type::Object)
+				{
+					OnParameters(*element->toJsonObject());
+				}
+			}
+			return;
+		}
+
+		// A single object is accepted as well; the DSL normally writes an array.
+		if (const JsonishObject* object = p_value.toJsonObject())
+		{
+			OnParameters(*object);
 		}
 	}
 
-	void ParametersProcessor::OnNameList(const std::string& p_key, const std::string& p_value)
+	void ParametersProcessor::OnParameters(const JsonishObject& p_parameter)
+	{
+		Parameter parameter;
+		for (const auto& [field, apply] : Fields())
+		{
+			if (const JsonishValue* value = p_parameter.getValue(field))
+			{
+				apply(parameter, *value);
+			}
+		}
+
+		// min / max / step are not single fields: they only form a range when both ends are
+		// numbers, so they are read together rather than through the table above.
+		const JsonishValue* minValue = p_parameter.getValue("min");
+		const JsonishValue* maxValue = p_parameter.getValue("max");
+		const JsonishNumber* minNumber = minValue != nullptr ? minValue->toJsonNumber() : nullptr;
+		const JsonishNumber* maxNumber = maxValue != nullptr ? maxValue->toJsonNumber() : nullptr;
+		parameter.hasRange = minNumber != nullptr && maxNumber != nullptr;
+		if (parameter.hasRange)
+		{
+			parameter.min = minNumber->getFloat();
+			parameter.max = maxNumber->getFloat();
+		}
+
+		if (const JsonishValue* stepValue = p_parameter.getValue("step"))
+		{
+			if (const JsonishNumber* stepNumber = stepValue->toJsonNumber())
+			{
+				parameter.hasStep = true;
+				parameter.step = stepNumber->getFloat();
+			}
+		}
+
+		if (parameter.type == ParameterType::Unknown)
+		{
+			if (m_builder->parseError.empty())
+			{
+				m_builder->parseError = parameter.name.empty()
+					? "parameters: entry without a valid 'type'"
+					: "parameters: unknown type for '" + parameter.name + "'";
+			}
+			return;
+		}
+
+		if (!parameter.name.empty())
+		{
+			m_builder->parameters.push_back(std::move(parameter));
+		}
+	}
+
+	void ParametersProcessor::OnNameList(const std::string& p_key, const JsonishValue& p_value)
 	{
 		// An explicit `defaultFeatures : [ ]` means "no optional feature", which is different
 		// from the key being absent: the variant enumeration reads that.
 		if (p_key == "defaultFeatures") { m_builder->hasDefaultFeatures = true; }
 
-		std::istringstream stream(p_value);
-		std::string item;
-		while (std::getline(stream, item, ','))
+		const auto add = [this, &p_key](const JsonishValue& p_item)
 		{
-			const std::string trimmed = Trim(item);
-			if (trimmed.empty()) { continue; }
-			if (p_key == "features") { m_builder->features.push_back(trimmed); }
-			else if (p_key == "defaultFeatures") { m_builder->defaultFeatures.push_back(trimmed); }
-			else if (p_key == "variantFilter") { m_builder->variantFilter.push_back(trimmed); }
-			else if (p_key == "vertexAttributes") { m_builder->vertexAttributes.push_back(trimmed); }
-			else if (p_key == "passes") { m_builder->passes.push_back(trimmed); }
+			const std::string item = TextOf(p_item);
+			if (item.empty()) { return; }
+			if (p_key == "features") { m_builder->features.push_back(item); }
+			else if (p_key == "defaultFeatures") { m_builder->defaultFeatures.push_back(item); }
+			else if (p_key == "variantFilter") { m_builder->variantFilter.push_back(item); }
+			else if (p_key == "vertexAttributes") { m_builder->vertexAttributes.push_back(item); }
+			else if (p_key == "passes") { m_builder->passes.push_back(item); }
+		};
+
+		if (const JsonishArray* array = p_value.toJsonArray())
+		{
+			for (const JsonishValue* element : array->getElements())
+			{
+				if (element != nullptr) { add(*element); }
+			}
+			return;
 		}
+
+		add(p_value);
 	}
 
-	void ParametersProcessor::ApplyProperty(const std::string& p_key, const std::string& p_value)
+	void ParametersProcessor::ApplyProperty(const std::string& p_key, const JsonishValue& p_value)
 	{
 		const auto& properties = Properties();
 		const auto it = properties.find(p_key);
@@ -160,105 +274,21 @@ namespace Moon::Matc
 
 		// Everything else the block declares is render state: blending, culling, depthWrite,
 		// polygonOffset, ... The package's state chunk carries it to the runtime.
-		m_builder->state[p_key] = p_value;
+		m_builder->state[p_key] = TextOf(p_value);
 	}
 
-	void ParametersProcessor::ProcessBlock(const std::string& p_body, MaterialBuilder& p_builder)
+	void ParametersProcessor::ProcessBlock(const JsonishObject& p_object, MaterialBuilder& p_builder)
 	{
 		m_builder = &p_builder;
 
-		size_t i = 0;
-		const auto skipSpace = [&]() { while (i < p_body.size() && std::isspace(static_cast<unsigned char>(p_body[i]))) { ++i; } };
-		const auto readName = [&]() {
-			skipSpace();
-			std::string name;
-			while (i < p_body.size() && (std::isalnum(static_cast<unsigned char>(p_body[i])) || p_body[i] == '_' || p_body[i] == '.'))
-			{
-				name += p_body[i++];
-			}
-			return name;
-		};
-
-		while (i < p_body.size())
+		// The object has already been parsed: no key/value text is scanned here, and the
+		// handlers below query the fields they own directly.
+		for (const auto& [key, value] : p_object.getEntries())
 		{
-			const std::string key = readName();
-			skipSpace();
-			if (key.empty())
+			if (value != nullptr)
 			{
-				++i;
-				continue;
+				ApplyProperty(key, *value);
 			}
-			if (i >= p_body.size() || p_body[i] != ':')
-			{
-				continue;
-			}
-			++i; // ':'
-			skipSpace();
-
-			if (i < p_body.size() && p_body[i] == '[')
-			{
-				// Array: the parameters (objects) or a plain name list (features / passes / ...).
-				const size_t close = p_body.find(']', i);
-				const std::string array = p_body.substr(i + 1, (close == std::string::npos ? p_body.size() : close) - i - 1);
-				i = (close == std::string::npos) ? p_body.size() : close + 1;
-				ApplyProperty(key, array);
-				continue;
-			}
-
-			// Scalar value: up to the next ',' at this level.
-			const size_t end = p_body.find(',', i);
-			const std::string value = Trim(p_body.substr(i, (end == std::string::npos ? p_body.size() : end) - i));
-			i = (end == std::string::npos) ? p_body.size() : end + 1;
-			ApplyProperty(key, value);
 		}
-	}
-
-	void ParametersProcessor::ProcessParameterObject(const std::string& p_object) const
-	{
-		Parameter parameter;
-		for (const auto& [field, apply] : Fields())
-		{
-			const std::string value = ValueOf(p_object, field);
-			if (!value.empty()) { apply(parameter, value); }
-		}
-
-		// min / max / step are not single fields: they only form a range when both ends are
-		// numbers, so they are read together rather than through the table above.
-		parameter.hasRange = ParseFloatText(ValueOf(p_object, "min"), parameter.min)
-			&& ParseFloatText(ValueOf(p_object, "max"), parameter.max);
-		parameter.hasStep = ParseFloatText(ValueOf(p_object, "step"), parameter.step);
-
-		if (!parameter.name.empty())
-		{
-			m_builder->parameters.push_back(parameter);
-		}
-	}
-
-	std::string ParametersProcessor::ValueOf(const std::string& p_object, const std::string& p_field)
-	{
-		size_t at = p_object.find(p_field);
-		while (at != std::string::npos)
-		{
-			const size_t after = at + p_field.size();
-			const size_t colon = p_object.find(':', after);
-			const bool wordStart = at == 0
-				|| !std::isalnum(static_cast<unsigned char>(p_object[at - 1]))
-				&& p_object[at - 1] != '_';
-			if (wordStart && colon != std::string::npos && Trim(p_object.substr(after, colon - after)).empty())
-			{
-				size_t end = colon + 1;
-				int depth = 0;
-				for (; end < p_object.size(); ++end)
-				{
-					const char c = p_object[end];
-					if (c == '(' || c == '[') { ++depth; }
-					else if (c == ')' || c == ']') { --depth; }
-					else if (c == ',' && depth == 0) { break; }
-				}
-				return Trim(p_object.substr(colon + 1, end - colon - 1));
-			}
-			at = p_object.find(p_field, at + 1);
-		}
-		return {};
 	}
 }
