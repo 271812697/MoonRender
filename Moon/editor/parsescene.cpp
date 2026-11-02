@@ -196,7 +196,7 @@ namespace MOON {
 				actor.AddComponent<Core::ECS::Components::CModelRenderer>().SetModel(model);
 				//actor.GetComponent<Core::ECS::Components::CTransform>()->SetMatrix(xform.data);
 				auto& materilaRener = actor.AddComponent<Core::ECS::Components::CMaterialRenderer>();
-				materilaRener.SetMaterialAtIndex(0, *tempMat);
+				materilaRener.SetMaterialAtIndex(0, tempMat->DefaultInstance());
 				materilaRener.UpdateMaterialList();
 			}
 
@@ -486,7 +486,7 @@ namespace MOON {
 	//				actor.GetComponent<Core::ECS::Components::CTransform>()->SetMatrix(transformMat.data);
 	//				auto& materilaRener = actor.AddComponent<Core::ECS::Components::CMaterialRenderer>();
 	//				auto mat = Core::Global::ServiceLocator::Get<Core::ResourceManagement::MaterialManager>().GetResource(matName);
-	//				materilaRener.SetMaterialAtIndex(0, *mat);
+	//				materilaRener.SetMaterialAtIndex(0, mat->DefaultInstance());
 	//				materilaRener.UpdateMaterialList();
 
 	//			}
@@ -925,7 +925,7 @@ namespace MOON {
 							}
 
 							auto mat = Core::Global::ServiceLocator::Get<Core::ResourceManagement::MaterialManager>().GetResource(materilaMap[prims[i].materialIndex < 0 ? 0 : prims[i].materialIndex]);
-							materilaRener.SetMaterialAtIndex(0, *mat);
+							materilaRener.SetMaterialAtIndex(0, mat->DefaultInstance());
 							materilaRener.UpdateMaterialList();
 
 						}

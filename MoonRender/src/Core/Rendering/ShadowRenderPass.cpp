@@ -113,7 +113,7 @@ void Core::Rendering::ShadowRenderPass::_DrawShadows(
 							auto& targetMaterial =
 								material->HasPass(shadowPassName) ?
 								*material :
-								m_shadowMaterial;
+								m_shadowMaterial.DefaultInstance();
 
 							::Rendering::Entities::Drawable drawable;
 							drawable.mesh = *mesh;

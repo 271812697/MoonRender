@@ -146,7 +146,7 @@ void Core::ECS::Components::CMaterialRenderer::OnDeserialize(tinyxml2::XMLDocume
 		while (currentMaterial)
 		{
 			if (auto material = Global::ServiceLocator::Get<ResourceManagement::MaterialManager>()[currentMaterial->GetText()])
-				m_materials[materialIndex] = material;
+				m_materials[materialIndex] = material->DefaultInstancePtr();
 
 			currentMaterial = currentMaterial->NextSiblingElement("material");
 			++materialIndex;

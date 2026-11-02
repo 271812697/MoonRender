@@ -133,7 +133,7 @@ namespace Core::ECS::Components
         lineMat->SetCastShadows(false);
         lineMat->SetReceiveShadows(false);
         lineMat->SetLineWidth(2.0);
-        lineRener.SetMaterialAtIndex(0, *lineMat);
+        lineRener.SetMaterialAtIndex(0, lineMat->DefaultInstance());
         lineRener.UpdateMaterialList();
 	}
 }

@@ -1078,7 +1078,6 @@ namespace Rendering::Resources::Loaders
 					const auto definition = Rendering::Data::MaterialBuilder::Build(package);
 					Shader* shader = new Shader(p_filePath, AssembleFromPackage(package),
 						std::vector<Shader::Parameter>(definition->Parameters()));
-					shader->SetDefinition(definition);
 					shader->SetState(definition->GetState());
 					shader->SetParameterBlockSize(definition->ParameterBlockSize());
 					shader->SetDeclaredFeatures(std::vector<std::string>(
@@ -1120,7 +1119,6 @@ namespace Rendering::Resources::Loaders
 		const auto definition = Rendering::Data::MaterialBuilder::Build(package);
 		Shader* shader = new Shader(p_name, std::move(variants),
 			std::vector<Shader::Parameter>(definition->Parameters()));
-		shader->SetDefinition(definition);
 		shader->SetState(definition->GetState());
 		shader->SetParameterBlockSize(definition->ParameterBlockSize());
 		shader->SetDeclaredFeatures(std::vector<std::string>(
@@ -1186,7 +1184,6 @@ namespace Rendering::Resources::Loaders
 
 		p_shader.SetVariants(std::move(variants));
 		const auto definition = Rendering::Data::MaterialBuilder::Build(package);
-		p_shader.SetDefinition(definition);
 		p_shader.SetParameters(std::vector<Shader::Parameter>(definition->Parameters()));
 		p_shader.SetState(definition->GetState());
 		p_shader.SetParameterBlockSize(definition->ParameterBlockSize());

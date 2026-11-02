@@ -1056,8 +1056,7 @@ namespace MOON
 		// Re-link the instance and regenerate its parameters from the new shader. The .mat is
 		// only written on Save, so this is an edit like any other (and Undo can take it back).
 		m_material->SetShader(shader);
-		m_material->GetProperties().clear();
-		m_material->UpdateProperties();
+		m_material->ResetProperties();
 		MarkDirty();
 		RebuildForm();
 		emit materialEdited();
@@ -1646,7 +1645,7 @@ namespace MOON
 		Snapshot snapshot;
 		if (m_material != nullptr)
 		{
-			snapshot.properties = m_material->GetProperties();
+			snapshot.properties = m_material->SnapshotProperties();
 			snapshot.features = m_material->GetFeatures();
 			snapshot.blendable = m_material->IsBlendable();
 			snapshot.blendMode = m_material->GetBlendMode();

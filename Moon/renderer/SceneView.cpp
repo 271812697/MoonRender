@@ -574,7 +574,7 @@ bool Editor::Panels::SceneView::IsSelectActor()
 Core::Rendering::SceneRenderer::SceneDescriptor Editor::Panels::SceneView::CreateSceneDescriptor()
 {
 	auto descriptor = AViewControllable::CreateSceneDescriptor();
-	descriptor.fallbackMaterial = m_fallbackMaterial;
+	descriptor.fallbackMaterial = m_fallbackMaterial.DefaultInstance();
 
 	if (false)
 	{

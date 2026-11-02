@@ -220,7 +220,7 @@ namespace MOON {
 					modelRender.GetModel()->computeBoxAndShpere();
 
 					auto& matRender = actor.AddComponent<::Core::ECS::Components::CMaterialRenderer>();
-					matRender.SetMaterialAtIndex(0, *tempMat);
+					matRender.SetMaterialAtIndex(0, tempMat->DefaultInstance());
 					matRender.UpdateMaterialList();
 					GetViewerWidget.addActorToTreeView(&actor);
 

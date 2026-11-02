@@ -260,7 +260,7 @@ namespace
 					if (desc.actor.GetTag() == "SkyBox") continue;
 
 					drawable.pass = "";
-					drawable.material = m_parityMaterial;
+					drawable.material = m_parityMaterial.DefaultInstance();
 					// The pass owns the material from here on, so it owns the variant key too:
 					// leaving the drawable's own override on it asks the single-variant parity
 					// shader for another material's feature set and sends Material::Bind through
@@ -317,7 +317,7 @@ namespace
 
 				Rendering::Entities::Drawable drawable;
 				drawable.mesh = m_renderer.m_unitQuad;
-				drawable.material = m_capMaterial;
+				drawable.material = m_capMaterial.DefaultInstance();
 				drawable.stateMask = m_capMaterial.GenerateStateMask();
 				drawable.stateMask.depthWriting = true;
 				drawable.stateMask.frontfaceCulling = false;
@@ -403,7 +403,7 @@ namespace
 					if (desc.actor.GetTag() == "SkyBox") continue;
 
 					drawable.pass = "";
-					drawable.material = m_contourMaterial;
+					drawable.material = m_contourMaterial.DefaultInstance();
 					drawable.featureSetOverride.reset();   // see the parity pass above
 					drawable.stateMask = m_contourMaterial.GenerateStateMask();
 					m_renderer.DrawEntity(p_pso, drawable);
@@ -607,7 +607,7 @@ void main()
 					mBlendColorMat.SetProperty("colorLayer",&color.value());
 					Rendering::Entities::Drawable blit;
 					blit.mesh = m_renderer.m_unitQuad;
-					blit.material = mBlendColorMat;
+					blit.material = mBlendColorMat.DefaultInstance();
 					blit.stateMask.depthWriting = false;
 					blit.stateMask.colorWriting = true;
 					blit.stateMask.blendable = true;
@@ -808,7 +808,7 @@ void Core::Rendering::SceneRenderer::DrawModelWithSingleMaterial(::Rendering::Da
 	{
 		::Rendering::Entities::Drawable element;
 		element.mesh = *mesh;
-		element.material = p_material;
+		element.material = p_material.DefaultInstance();
 		element.stateMask = stateMask;
 		element.AddDescriptor(engineDrawableDescriptor);
 

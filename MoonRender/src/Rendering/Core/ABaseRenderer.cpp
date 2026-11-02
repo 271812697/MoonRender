@@ -247,7 +247,7 @@ void Rendering::Core::ABaseRenderer::Blit(
 
 	Rendering::Entities::Drawable blit;
 	blit.mesh = m_unitQuad;
-	blit.material = p_material;
+	blit.material = p_material.DefaultInstance();
 
 	if (Rendering::Settings::IsFlagSet(Rendering::Settings::EBlitFlags::USE_MATERIAL_STATE_MASK, p_flags))
 	{
@@ -298,7 +298,7 @@ void Rendering::Core::ABaseRenderer::Present(Rendering::Data::Material& mat)
 	
 	Rendering::Entities::Drawable blit;
 	blit.mesh = m_unitQuad;
-	blit.material = mat;
+	blit.material = mat.DefaultInstance();
 	blit.stateMask.depthWriting = false;
 	blit.stateMask.colorWriting = true;
 	blit.stateMask.blendable = false;

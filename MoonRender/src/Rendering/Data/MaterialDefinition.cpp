@@ -151,6 +151,7 @@ namespace Rendering::Data
 		std::shared_ptr<MaterialDefinition> definition{ new MaterialDefinition() };
 
 		definition->m_name = p_shader.path;
+		definition->m_shader = const_cast<Rendering::Resources::Shader*>(&p_shader);
 		definition->m_parameters = p_shader.GetParameters();
 		definition->m_parameterBlockSize = p_shader.GetParameterBlockSize();
 		definition->m_hasParameterTable = p_shader.HasParameterTable();

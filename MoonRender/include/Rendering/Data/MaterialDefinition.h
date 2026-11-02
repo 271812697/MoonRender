@@ -101,6 +101,10 @@ namespace Rendering::Data
 			const Rendering::Resources::Shader& p_shader);
 
 		const std::string& Name() const { return m_name; }
+		/** The shader this definition describes. The definition owns the immutable description;
+		 * the shader keeps the compiled variants. */
+		const Rendering::Resources::Shader* Shader() const { return m_shader; }
+		Rendering::Resources::Shader* Shader() { return m_shader; }
 		const std::vector<Parameter>& Parameters() const { return m_parameters; }
 		const std::vector<UniformField>& UniformFields() const { return m_uniformFields; }
 		const std::vector<SamplerField>& SamplerFields() const { return m_samplerFields; }
@@ -120,6 +124,7 @@ namespace Rendering::Data
 		MaterialDefinition() = default;
 
 		std::string m_name;
+		Rendering::Resources::Shader* m_shader = nullptr;
 		std::vector<Parameter> m_parameters;
 		std::vector<UniformField> m_uniformFields;
 		std::vector<SamplerField> m_samplerFields;

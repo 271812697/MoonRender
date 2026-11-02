@@ -23,7 +23,7 @@ void Editor::Rendering::DebugModelRenderFeature::DrawModelWithSingleMaterial(::R
 	{
 		::Rendering::Entities::Drawable element;
 		element.mesh = *mesh;
-		element.material = p_material;
+		element.material = p_material.DefaultInstance();
 		element.stateMask = stateMask;
 		element.AddDescriptor(engineDrawableDescriptor);
 

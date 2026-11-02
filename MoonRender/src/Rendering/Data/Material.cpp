@@ -172,8 +172,8 @@ namespace
 	 * What the property model cannot hold (bvec/ivec/uvec/uint/mat2) is skipped, exactly as the
 	 * driver's reflection skips it: a property no upload path understands would only turn up in
 	 * the editor as a widget that does nothing. */
-	Rendering::Data::MaterialPropertyType ParameterDefaultValue(
-		const Rendering::Resources::Shader::Parameter& p_parameter)
+	template<typename Parameter>
+	Rendering::Data::MaterialPropertyType ParameterDefaultValue(const Parameter& p_parameter)
 	{
 		using namespace Maths;
 		using namespace Rendering;
@@ -269,24 +269,255 @@ namespace
 			p_shader.SetUniform<int>(p_uniformName, p_textureSlot++);
 		}
 	}
+
+	/** Writes a typed value at a std140 offset. Returns false for a type/value mismatch. */
+	bool WriteBlockValue(
+		std::vector<uint8_t>& p_data,
+		const std::string& p_type,
+		const Rendering::Data::MaterialPropertyType& p_value,
+		uint32_t p_offset)
+	{
+		using namespace Maths;
+
+		if (p_offset >= p_data.size())
+		{
+			return false;
+		}
+
+		uint8_t* data = p_data.data() + p_offset;
+		const auto room = [&](size_t p_size) { return p_offset + p_size <= p_data.size(); };
+
+		if (p_type == "bool")
+		{
+			if (const auto* value = std::get_if<bool>(&p_value); value != nullptr && room(4))
+			{
+				const int32_t stored = *value ? 1 : 0;
+				std::memcpy(data, &stored, sizeof(stored));
+				return true;
+			}
+		}
+		else if (p_type == "int")
+		{
+			if (const auto* value = std::get_if<int>(&p_value); value != nullptr && room(4))
+			{
+				std::memcpy(data, value, sizeof(*value));
+				return true;
+			}
+		}
+		else if (p_type == "float")
+		{
+			if (const auto* value = std::get_if<float>(&p_value); value != nullptr && room(4))
+			{
+				std::memcpy(data, value, sizeof(*value));
+				return true;
+			}
+		}
+		else if (p_type == "vec2")
+		{
+			if (const auto* value = std::get_if<FVector2>(&p_value); value != nullptr && room(8))
+			{
+				std::memcpy(data, value, sizeof(float) * 2);
+				return true;
+			}
+		}
+		else if (p_type == "vec3")
+		{
+			if (const auto* value = std::get_if<FVector3>(&p_value); value != nullptr && room(12))
+			{
+				std::memcpy(data, value, sizeof(float) * 3);
+				return true;
+			}
+		}
+		else if (p_type == "vec4")
+		{
+			if (const auto* value = std::get_if<FVector4>(&p_value); value != nullptr && room(16))
+			{
+				std::memcpy(data, value, sizeof(float) * 4);
+				return true;
+			}
+		}
+		else if (p_type == "mat3")
+		{
+			if (const auto* value = std::get_if<FMatrix3>(&p_value); value != nullptr && room(48))
+			{
+				// std140 stores a matrix as columns of a vec4; the engine's matrices are row-major.
+				for (uint32_t column = 0; column < 3; ++column)
+				{
+					for (uint32_t row = 0; row < 3; ++row)
+					{
+						const float element = value->data[row * 3 + column];
+						std::memcpy(data + column * 16 + row * 4, &element, sizeof(element));
+					}
+				}
+				return true;
+			}
+		}
+		else if (p_type == "mat4")
+		{
+			if (const auto* value = std::get_if<FMatrix4>(&p_value); value != nullptr && room(64))
+			{
+				for (uint32_t column = 0; column < 4; ++column)
+				{
+					for (uint32_t row = 0; row < 4; ++row)
+					{
+						const float element = value->data[row * 4 + column];
+						std::memcpy(data + column * 16 + row * 4, &element, sizeof(element));
+					}
+				}
+				return true;
+			}
+		}
+		return false;
+	}
+
+	Rendering::Data::MaterialPropertyType ReadBlockValue(
+		const std::vector<uint8_t>& p_data,
+		const std::string& p_type,
+		uint32_t p_offset)
+	{
+		using namespace Maths;
+
+		const auto room = [&](size_t p_size) { return p_offset + p_size <= p_data.size(); };
+		const uint8_t* data = p_data.data() + p_offset;
+
+		if (p_type == "bool" && room(4))
+		{
+			int32_t stored = 0;
+			std::memcpy(&stored, data, sizeof(stored));
+			return stored != 0;
+		}
+		if (p_type == "int" && room(4))
+		{
+			int value = 0;
+			std::memcpy(&value, data, sizeof(value));
+			return value;
+		}
+		if (p_type == "float" && room(4))
+		{
+			float value = 0.0f;
+			std::memcpy(&value, data, sizeof(value));
+			return value;
+		}
+		if (p_type == "vec2" && room(8))
+		{
+			FVector2 value;
+			std::memcpy(&value, data, sizeof(float) * 2);
+			return value;
+		}
+		if (p_type == "vec3" && room(12))
+		{
+			FVector3 value;
+			std::memcpy(&value, data, sizeof(float) * 3);
+			return value;
+		}
+		if (p_type == "vec4" && room(16))
+		{
+			FVector4 value;
+			std::memcpy(&value, data, sizeof(float) * 4);
+			return value;
+		}
+		if (p_type == "mat3" && room(48))
+		{
+			FMatrix3 value;
+			for (uint32_t column = 0; column < 3; ++column)
+			{
+				for (uint32_t row = 0; row < 3; ++row)
+				{
+					std::memcpy(&value.data[row * 3 + column], data + column * 16 + row * 4, sizeof(float));
+				}
+			}
+			return value;
+		}
+		if (p_type == "mat4" && room(64))
+		{
+			FMatrix4 value;
+			for (uint32_t column = 0; column < 4; ++column)
+			{
+				for (uint32_t row = 0; row < 4; ++row)
+				{
+					std::memcpy(&value.data[row * 4 + column], data + column * 16 + row * 4, sizeof(float));
+				}
+			}
+			return value;
+		}
+		return std::monostate{};
+	}
+
+	uint32_t BlockFieldSize(const std::string& p_type)
+	{
+		if (p_type == "bool" || p_type == "int" || p_type == "float") { return 4; }
+		if (p_type == "vec2") { return 8; }
+		if (p_type == "vec3") { return 12; }
+		if (p_type == "vec4") { return 16; }
+		if (p_type == "mat3") { return 48; }
+		if (p_type == "mat4") { return 64; }
+		return 0;
+	}
+
+	/** Splits "samples[17]" into its base name and element index; no brackets means index 0. */
+	bool ParseParameterName(const std::string& p_name, std::string& p_base, uint32_t& p_index)
+	{
+		p_base = p_name;
+		p_index = 0;
+		const size_t open = p_name.rfind('[');
+		if (open == std::string::npos || p_name.back() != ']')
+		{
+			return true;
+		}
+		const std::string_view indexText(p_name.data() + open + 1,
+			p_name.size() - open - 2);
+		if (indexText.empty())
+		{
+			return false;
+		}
+		uint32_t index = 0;
+		for (const char c : indexText)
+		{
+			if (!std::isdigit(static_cast<unsigned char>(c)))
+			{
+				return false;
+			}
+			index = index * 10 + static_cast<uint32_t>(c - '0');
+		}
+		p_base = p_name.substr(0, open);
+		p_index = index;
+		return true;
+	}
+
+	const Rendering::Data::MaterialDefinition::Parameter* FindParameter(
+		const Rendering::Data::MaterialDefinition* p_definition,
+		const std::string& p_name,
+		uint32_t& p_index)
+	{
+		std::string base;
+		if (p_definition == nullptr || !ParseParameterName(p_name, base, p_index))
+		{
+			return nullptr;
+		}
+		for (const Rendering::Data::MaterialDefinition::Parameter& parameter : p_definition->Parameters())
+		{
+			if (parameter.name == base)
+			{
+				return &parameter;
+			}
+		}
+		return nullptr;
+	}
 }
 
 // ---- MaterialInstance: the override-only half of the pair -------------------------------------
 
-Rendering::Data::MaterialInstance::MaterialInstance(Material& p_definition)
+Rendering::Data::MaterialInstance::MaterialInstance(Material& p_definition, bool p_isDefault)
 	: m_definition(&p_definition)
+	, m_isDefaultInstance(p_isDefault)
 {
-	// Nothing is copied: parameters and render state are both answered by the definition until
-	// this instance sets them. That is what makes a material a live template - editing it (or
-	// reloading its shader) reaches every instance that did not override the field.
-	m_seenDefinitionRevision = 0;
-}
+	// A plain instance starts empty and inherits; the default instance is the definition's
+	// own value set, seeded from the engine defaults here and from the shader in ResetProperties.
+	if (!p_isDefault)
+	{
+		return;
+	}
 
-Rendering::Data::MaterialInstance::MaterialInstance()
-{
-	// The definition's own values: engine defaults, which the shader's material block then
-	// overrides in Material::ResetStateToShader. A plain instance leaves every one of these empty
-	// and inherits from its definition instead.
 	m_supportOrthographic = true;
 	m_supportPerspective = true;
 	m_userInterface = false;
@@ -307,22 +538,10 @@ Rendering::Data::MaterialInstance::MaterialInstance()
 	m_drawOrder = 1000;
 	m_lineWidth = 1.0f;
 }
+
 Rendering::Data::MaterialInstance::~MaterialInstance()
 {
 	ReleaseDescriptorSet();
-}
-
-const Rendering::Data::MaterialProperty* Rendering::Data::MaterialInstance::FindProperty(const std::string& p_name) const
-{
-	const auto it = m_properties.find(p_name);
-	if (it != m_properties.end())
-	{
-		return &it->second;
-	}
-
-	// Not overridden here: the definition's value is what this instance draws with. A Material
-	// overrides this member and answers from its own map, so the chain stops at the definition.
-	return m_definition != nullptr ? m_definition->FindProperty(p_name) : nullptr;
 }
 
 Rendering::Resources::Shader* Rendering::Data::MaterialInstance::ShaderOf() const
@@ -332,88 +551,81 @@ Rendering::Resources::Shader* Rendering::Data::MaterialInstance::ShaderOf() cons
 
 const Rendering::Data::MaterialDefinition* Rendering::Data::MaterialInstance::Definition() const
 {
-	Rendering::Resources::Shader* shader = ShaderOf();
-	return shader != nullptr ? shader->GetDefinition() : nullptr;
+	return m_definition != nullptr ? m_definition->Definition() : nullptr;
 }
 
 std::unique_ptr<Rendering::Data::MaterialInstance> Rendering::Data::Material::CreateInstance()
 {
-	return std::make_unique<MaterialInstance>(*this);
+	return std::make_unique<MaterialInstance>(*this, false);
 }
+
 Rendering::Data::Material::Material(Rendering::Resources::Shader* p_shader)
+	: m_defaultInstance(std::make_unique<MaterialInstance>(*this, true))
 {
 	SetShader(p_shader);
 }
 
-Rendering::Data::Material::~Material()
+Rendering::Data::Material::~Material() = default;
+
+bool Rendering::Data::Material::HasShader() const
 {
-	// The pool keeps the byte range; it only lives as long as the material does.
-	ReleaseDescriptorSet();
+	return m_definition != nullptr && m_definition->Shader() != nullptr;
+}
+
+Rendering::Resources::Shader* Rendering::Data::Material::GetShader() const
+{
+	return m_definition != nullptr
+		? const_cast<Rendering::Resources::Shader*>(m_definition->Shader())
+		: nullptr;
 }
 
 void Rendering::Data::Material::SetShader(Rendering::Resources::Shader* p_shader)
 {
-	m_shader = p_shader;
+	// The definition is the immutable half: package reflection, layout, state and the shader
+	// its variants were compiled from. Material itself keeps no shader pointer any more.
+	m_definition = p_shader != nullptr
+		? MaterialBuilder::Build(*p_shader)
+		: nullptr;
 
-	// The block layout (or the presence of a block) belongs to the shader.
-	ReleaseDescriptorSet();
-
-	// A shader built from source (the present pass, the debug line) has no package behind it.
-	// Give it an empty definition anyway, so every material answers the same questions through
-	// Definition() and the instance never has to special-case "no package".
-	if (m_shader != nullptr && m_shader->GetDefinition() == nullptr)
-	{
-		m_shader->SetDefinition(MaterialBuilder::Build(*m_shader));
-	}
-
-	// Rebinding to a shader re-creates the instance's state from the definition: the package's
+	// Rebinding to a shader re-creates the default instance from the definition: the package's
 	// material block is the authority for blending / culling / depth writing, and whatever the
 	// call site (or a .mat's settings) sets afterwards is the override.
+	m_defaultInstance->ResetProperties();
 	ResetStateToShader();
-
-	if (m_shader != nullptr)
-	{
-		m_properties.clear();
-		UpdateProperties();
-	}
-	else
-	{
-		m_properties.clear();
-		InvalidatePropertySignature();
-	}
 }
 
 const Rendering::Data::MaterialDefinition* Rendering::Data::Material::Definition() const
 {
-	return m_shader != nullptr ? m_shader->GetDefinition() : nullptr;
+	return m_definition.get();
 }
 
 void Rendering::Data::Material::ResetStateToShader()
 {
 	// Engine defaults first; the material block then says what this material is.
-	m_blendable = false;
-	m_blendMode = Rendering::Settings::EBlendMode::BLEND_OPAQUE;
-	m_backfaceCulling = true;
-	m_frontfaceCulling = false;
-	m_depthWriting = true;
+	m_defaultInstance->SetBlendable(false);
+	m_defaultInstance->SetBlendMode(Rendering::Settings::EBlendMode::BLEND_OPAQUE);
+	m_defaultInstance->SetBackfaceCulling(true);
+	m_defaultInstance->SetFrontfaceCulling(false);
+	m_defaultInstance->SetDepthWriting(true);
 
-	if (ShaderOf() != nullptr && ShaderOf()->HasState())
+	if (Rendering::Resources::Shader* shader = GetShader(); shader != nullptr && shader->HasState())
 	{
-		const Rendering::Resources::Shader::State& state = ShaderOf()->GetState();
+		const Rendering::Resources::Shader::State& state = shader->GetState();
 
-		if (state.blendable.has_value()) { m_blendable = state.blendable.value(); }
+		if (state.blendable.has_value()) { m_defaultInstance->SetBlendable(state.blendable.value()); }
 		if (state.blendMode.has_value())
 		{
-			m_blendMode = state.blendMode.value();
+			m_defaultInstance->SetBlendMode(state.blendMode.value());
 			// The definition decides how the colour is blended. Whether the material goes
 			// through the transparent (depth-peel) queue stays an instance decision: a
 			// transparent-by-DSL shader that does not implement the peel test (the grid, the
 			// gizmos) must not be peeled just because of its default.
-			m_blendable = m_blendMode != Rendering::Settings::EBlendMode::BLEND_OPAQUE;
+			m_defaultInstance->SetBlendable(
+				state.blendMode.value() != Rendering::Settings::EBlendMode::BLEND_OPAQUE);
 		}
-		if (state.backfaceCulling.has_value()) { m_backfaceCulling = state.backfaceCulling.value(); }
-		if (state.frontfaceCulling.has_value()) { m_frontfaceCulling = state.frontfaceCulling.value(); }
-		if (state.depthWriting.has_value()) { m_depthWriting = state.depthWriting.value(); }
+		if (state.backfaceCulling.has_value()) { m_defaultInstance->SetBackfaceCulling(state.backfaceCulling.value()); }
+		if (state.frontfaceCulling.has_value()) { m_defaultInstance->SetFrontfaceCulling(state.frontfaceCulling.value()); }
+		if (state.depthWriting.has_value()) { m_defaultInstance->SetDepthWriting(state.depthWriting.value()); }
 	}
 }
 
@@ -496,8 +708,20 @@ void Rendering::Data::MaterialInstance::UploadProperties(bool uploadStableProper
 	using namespace Maths;
 	using enum Rendering::Settings::EUniformType;
 	auto& program = m_programInUse.value();
+
+	// Loose uniforms live as Descriptors in the set; this per-upload view is only the name ->
+	// typed value the program's reflected uniform locations need.
+	std::map<std::string, MaterialProperty> looseProperties;
+	for (const Descriptor& descriptor : m_descriptorSet.Uniforms())
+	{
+		if (const Descriptor::UniformBinding* uniform = descriptor.GetUniform())
+		{
+			looseProperties.emplace(uniform->name, MaterialProperty{ uniform->value, false });
+		}
+	}
+
 	int textureSlot = 0;
-	for (auto& [name, prop] : m_properties)
+	for (auto& [name, prop] : looseProperties)
 	{
 		if (!uploadStableProperties && !prop.singleUse) continue;
 		if (!uploadSingleUseProperties && prop.singleUse) continue;
@@ -580,43 +804,47 @@ void Rendering::Data::MaterialInstance::UploadProperties(bool uploadStableProper
 		if (prop.singleUse)
 		{
 			value = UniformToPropertyValue(uniformData->defaultValue);
+			m_descriptorSet.SetUniform(name, value);
 		}
 	}
 }
 
-void Rendering::Data::MaterialInstance::EnsureDescriptorSet()
+void Rendering::Data::MaterialInstance::EnsureDescriptorSet() const
 {
 	const MaterialDefinition* definition = Definition();
 	if (definition == nullptr)
 	{
-		ReleaseDescriptorSet();
+		const_cast<DescriptorSet&>(m_descriptorSet).Release();
 		return;
 	}
+
+	DescriptorSet& set = const_cast<DescriptorSet&>(m_descriptorSet);
 
 	// The layout is the definition's, not the instance's: every instance of a material fills
 	// the same slots, and the set validates each texture against it. A hot reload can replace
 	// the definition (and its layout) while an instance is alive, so a changed layout starts
 	// the set over.
-	if (m_descriptorSet.Layout() != &definition->Layout())
+	if (set.Layout() != &definition->Layout())
 	{
-		m_descriptorSet.Release();
-		m_descriptorSet.SetLayout(&definition->Layout());
+		set.Release();
+		set.SetLayout(&definition->Layout());
 	}
 
 	const uint32_t blockSize = definition->ParameterBlockSize();
-	if (blockSize == 0)
-	{
-		return; // a material whose parameters are all samplers has no block to acquire
-	}
-
-	if (m_descriptorSet.BufferSize() != blockSize)
+	if (blockSize > 0 && set.BufferSize() != blockSize)
 	{
 		// A hot-reloaded shader can change the block layout; the old range and the textures
 		// recorded against the old layout are not valid for the new one.
-		m_descriptorSet.Release();
-		m_descriptorSet.SetLayout(&definition->Layout());
-		m_descriptorSet.Buffer(blockSize, kMaterialParameterBinding);
+		set.Release();
+		set.SetLayout(&definition->Layout());
+		set.Buffer(blockSize, kMaterialParameterBinding);
+		const_cast<MaterialInstance*>(this)->ResetBlockToDefinition();
 	}
+
+	// A plain instance inherits everything it does not override from the material's default
+	// instance. This runs on every upload/bind, not only once: a .mat value or a per-frame
+	// property set on the default instance after this instance was created must still arrive.
+	const_cast<MaterialInstance*>(this)->MergeDefaults();
 }
 
 void Rendering::Data::MaterialInstance::ReleaseDescriptorSet()
@@ -627,95 +855,230 @@ void Rendering::Data::MaterialInstance::ReleaseDescriptorSet()
 void Rendering::Data::MaterialInstance::BindParameterBlock()
 {
 	EnsureDescriptorSet();
+	MergeDefaults();
 
 	// One bind for the block and every sampler: the layout is the single source of truth for
 	// where they go, and a texture another material bound to one of our units is replaced.
 	m_descriptorSet.Bind();
 }
 
-void Rendering::Data::MaterialInstance::WriteBlockValue(std::vector<uint8_t>& p_data, const std::string& p_type, const MaterialPropertyType& p_value, uint32_t p_offset)
+void Rendering::Data::MaterialInstance::BindLooseUniforms(Rendering::HAL::ShaderProgram& p_program) const
 {
 	using namespace Maths;
 
-	if (p_data.size() < p_offset)
+	int textureSlot = 0;
+	for (const Descriptor& descriptor : m_descriptorSet.Uniforms())
+	{
+		const Descriptor::UniformBinding* uniform = descriptor.GetUniform();
+		if (uniform == nullptr)
+		{
+			continue;
+		}
+
+		Rendering::HAL::TextureHandle* texture = nullptr;
+		if (const auto* handle = std::get_if<Rendering::HAL::TextureHandle*>(&uniform->value))
+		{
+			texture = *handle;
+		}
+		else if (const auto* asset = std::get_if<Rendering::Resources::Texture*>(&uniform->value);
+			asset != nullptr && *asset != nullptr)
+		{
+			texture = &(*asset)->GetTexture();
+		}
+
+		if (texture != nullptr)
+		{
+			texture->Bind(textureSlot);
+			p_program.SetUniform<int>(uniform->name, textureSlot++);
+		}
+		else if (const auto* value = std::get_if<bool>(&uniform->value))
+		{
+			p_program.SetUniform<int>(uniform->name, *value ? 1 : 0);
+		}
+		else if (const auto* value = std::get_if<int>(&uniform->value))
+		{
+			p_program.SetUniform<int>(uniform->name, *value);
+		}
+		else if (const auto* value = std::get_if<float>(&uniform->value))
+		{
+			p_program.SetUniform<float>(uniform->name, *value);
+		}
+		else if (const auto* value = std::get_if<FVector2>(&uniform->value))
+		{
+			p_program.SetUniform<FVector2>(uniform->name, *value);
+		}
+		else if (const auto* value = std::get_if<FVector3>(&uniform->value))
+		{
+			p_program.SetUniform<FVector3>(uniform->name, *value);
+		}
+		else if (const auto* value = std::get_if<FVector4>(&uniform->value))
+		{
+			p_program.SetUniform<FVector4>(uniform->name, *value);
+		}
+		else if (const auto* value = std::get_if<FMatrix3>(&uniform->value))
+		{
+			p_program.SetUniform<FMatrix3>(uniform->name, *value);
+		}
+		else if (const auto* value = std::get_if<FMatrix4>(&uniform->value))
+		{
+			p_program.SetUniform<FMatrix4>(uniform->name, *value);
+		}
+	}
+}
+
+void Rendering::Data::MaterialInstance::ResetBlockToDefinition()
+{
+	const MaterialDefinition* definition = Definition();
+	if (definition == nullptr || definition->ParameterBlockSize() == 0)
 	{
 		return;
 	}
 
-	auto* data = p_data.data() + p_offset;
+	std::vector<uint8_t>& block = m_descriptorSet.Buffer(
+		definition->ParameterBlockSize(), kMaterialParameterBinding);
+	block.assign(definition->ParameterBlockSize(), 0);
 
-	if (p_type == "bool")
+	for (const MaterialDefinition::UniformField& field : definition->UniformFields())
 	{
-		if (const auto* value = std::get_if<bool>(&p_value))
+		const auto parameter = std::ranges::find_if(definition->Parameters(),
+			[&field](const MaterialDefinition::Parameter& p_parameter) {
+				return p_parameter.name == field.name;
+			});
+		if (parameter == definition->Parameters().end())
 		{
-			const int32_t stored = *value ? 1 : 0;
-			std::memcpy(data, &stored, sizeof(stored));
+			continue;
 		}
-	}
-	else if (p_type == "int")
-	{
-		if (const auto* value = std::get_if<int>(&p_value))
+
+		const MaterialPropertyType value = ParameterDefaultValue(*parameter);
+		if (std::holds_alternative<std::monostate>(value))
 		{
-			std::memcpy(data, value, sizeof(*value));
+			continue;
 		}
-	}
-	else if (p_type == "float")
-	{
-		if (const auto* value = std::get_if<float>(&p_value))
+
+		if (field.count > 1)
 		{
-			std::memcpy(data, value, sizeof(*value));
-		}
-	}
-	else if (p_type == "vec2")
-	{
-		if (const auto* value = std::get_if<FVector2>(&p_value))
-		{
-			std::memcpy(data, value, sizeof(float) * 2);
-		}
-	}
-	else if (p_type == "vec3")
-	{
-		if (const auto* value = std::get_if<FVector3>(&p_value))
-		{
-			std::memcpy(data, value, sizeof(float) * 3);
-		}
-	}
-	else if (p_type == "vec4")
-	{
-		if (const auto* value = std::get_if<FVector4>(&p_value))
-		{
-			std::memcpy(data, value, sizeof(float) * 4);
-		}
-	}
-	else if (p_type == "mat3")
-	{
-		if (const auto* value = std::get_if<FMatrix3>(&p_value))
-		{
-			// std140 stores a matrix as columns of a vec4; the engine's matrices are row-major.
-			for (uint32_t column = 0; column < 3; ++column)
+			for (uint32_t i = 0; i < field.count; ++i)
 			{
-				for (uint32_t row = 0; row < 3; ++row)
+				WriteBlockValue(block, field.type, value, field.offset + field.stride * i);
+			}
+		}
+		else
+		{
+			WriteBlockValue(block, field.type, value, field.offset);
+		}
+	}
+}
+
+void Rendering::Data::MaterialInstance::MergeDefaults()
+{
+	if (m_isDefaultInstance || m_definition == nullptr)
+	{
+		return;
+	}
+
+	const MaterialDefinition* definition = Definition();
+	if (definition == nullptr)
+	{
+		return;
+	}
+
+	const MaterialInstance& defaults = m_definition->DefaultInstance();
+	const uint32_t blockSize = definition->ParameterBlockSize();
+	if (blockSize > 0 && defaults.BufferSize() == blockSize)
+	{
+		std::vector<uint8_t>& block = m_descriptorSet.Buffer(blockSize, kMaterialParameterBinding);
+		const std::vector<uint8_t>& inherited = defaults.BufferData();
+		for (const MaterialDefinition::UniformField& field : definition->UniformFields())
+		{
+			if (m_overriddenUniforms.contains(field.name))
+			{
+				continue;
+			}
+
+			const uint32_t elementSize = BlockFieldSize(field.type);
+			if (elementSize == 0)
+			{
+				continue;
+			}
+			const uint32_t count = field.count > 0 ? field.count : 1;
+			for (uint32_t i = 0; i < count; ++i)
+			{
+				const uint32_t offset = field.offset + field.stride * i;
+				if (offset + elementSize <= block.size() && offset + elementSize <= inherited.size())
 				{
-					const float element = value->data[row * 3 + column];
-					std::memcpy(data + column * 16 + row * 4, &element, sizeof(element));
+					std::memcpy(block.data() + offset, inherited.data() + offset, elementSize);
 				}
 			}
 		}
 	}
-	else if (p_type == "mat4")
+
+	for (const MaterialDefinition::SamplerField& field : definition->SamplerFields())
 	{
-		if (const auto* value = std::get_if<FMatrix4>(&p_value))
+		if (m_overriddenSamplers.contains(field.binding))
 		{
-			for (uint32_t column = 0; column < 4; ++column)
-			{
-				for (uint32_t row = 0; row < 4; ++row)
-				{
-					const float element = value->data[row * 4 + column];
-					std::memcpy(data + column * 16 + row * 4, &element, sizeof(element));
-				}
-			}
+			continue;
+		}
+		Rendering::HAL::TextureHandle* handle = defaults.GetTexture(field.binding);
+		Rendering::Resources::Texture* asset = defaults.GetTextureAsset(field.binding);
+		if (handle != nullptr || asset != nullptr)
+		{
+			m_descriptorSet.SetTexture(field.binding, handle, asset);
 		}
 	}
+}
+
+void Rendering::Data::MaterialInstance::ResetSingleUseProperties()
+{
+	const MaterialDefinition* definition = Definition();
+	if (definition == nullptr)
+	{
+		m_singleUseUniforms.clear();
+		m_singleUseSamplers.clear();
+		return;
+	}
+
+	if (!m_singleUseUniforms.empty() && definition->ParameterBlockSize() > 0)
+	{
+		std::vector<uint8_t>& block = m_descriptorSet.Buffer(
+			definition->ParameterBlockSize(), kMaterialParameterBinding);
+		for (const std::string& name : m_singleUseUniforms)
+		{
+			uint32_t index = 0;
+			const MaterialDefinition::Parameter* parameter = FindParameter(definition, name, index);
+			if (parameter == nullptr || parameter->isSampler)
+			{
+				continue;
+			}
+			const MaterialPropertyType value = ParameterDefaultValue(*parameter);
+			if (std::holds_alternative<std::monostate>(value))
+			{
+				continue;
+			}
+			const MaterialDefinition::UniformField* field = definition->FindUniform(parameter->name);
+			const uint32_t offset = field != nullptr
+				? field->offset + (field->count > 1 ? field->stride * index : 0)
+				: static_cast<uint32_t>(std::max(parameter->offset, 0));
+			WriteBlockValue(block, parameter->type, value, offset);
+			m_overriddenUniforms.erase(parameter->name);
+		}
+	}
+
+	for (const uint32_t binding : m_singleUseSamplers)
+	{
+		Rendering::HAL::TextureHandle* handle = nullptr;
+		Rendering::Resources::Texture* asset = nullptr;
+		if (!m_isDefaultInstance && m_definition != nullptr)
+		{
+			handle = m_definition->DefaultInstance().GetTexture(binding);
+			asset = m_definition->DefaultInstance().GetTextureAsset(binding);
+		}
+		m_descriptorSet.SetTexture(binding, handle, asset);
+		m_overriddenSamplers.erase(binding);
+	}
+
+	m_singleUseUniforms.clear();
+	m_singleUseSamplers.clear();
+	InvalidatePropertySignature();
 }
 
 void Rendering::Data::MaterialInstance::UploadParameterBlock(
@@ -733,37 +1096,11 @@ void Rendering::Data::MaterialInstance::UploadParameterBlock(
 	}
 
 	EnsureDescriptorSet();
-	const uint32_t blockSize = definition->ParameterBlockSize();
-	if (blockSize > 0)
+
+	// The block values are written by SetProperty() directly into the CPU mirror at the
+	// definition's std140 offset; this is just the GPU upload.
+	if (definition->ParameterBlockSize() > 0)
 	{
-		std::vector<uint8_t>& block = m_descriptorSet.Buffer(blockSize, kMaterialParameterBinding);
-		block.assign(blockSize, 0);
-
-		// The definition is the single source of truth for where a value goes: its uniform
-		// fields are the std140 layout MoonMatc wrote into the package. No per-draw name lookup
-		// and no driver reflection is involved.
-		for (const MaterialDefinition::UniformField& field : definition->UniformFields())
-		{
-			if (field.count > 1)
-			{
-				// Arrays are addressed one element at a time ("samples[17]"), exactly how the
-				// property set stores them.
-				for (uint32_t i = 0; i < field.count; ++i)
-				{
-					const auto property = GetProperty(std::format("{}[{}]", field.name, i));
-					if (property)
-					{
-						WriteBlockValue(block, field.type, property->value,
-							field.offset + field.stride * i);
-					}
-				}
-			}
-			else if (const auto property = GetProperty(field.name))
-			{
-				WriteBlockValue(block, field.type, property->value, field.offset);
-			}
-		}
-
 		m_descriptorSet.Commit();
 	}
 
@@ -771,18 +1108,11 @@ void Rendering::Data::MaterialInstance::UploadParameterBlock(
 	// next to the block. The definition's sampler fields carry both the unit and the fallback.
 	for (const MaterialDefinition::SamplerField& field : definition->SamplerFields())
 	{
-		Rendering::HAL::TextureHandle* handle = nullptr;
-		if (const auto property = GetProperty(field.name))
+		Rendering::HAL::TextureHandle* handle = m_descriptorSet.GetTexture(field.binding);
+		Rendering::Resources::Texture* asset = m_descriptorSet.GetTextureAsset(field.binding);
+		if (handle == nullptr && asset != nullptr)
 		{
-			if (auto textureHandle = std::get_if<Rendering::HAL::TextureHandle*>(&property->value))
-			{
-				handle = *textureHandle;
-			}
-			else if (auto texture = std::get_if<Rendering::Resources::Texture*>(&property->value);
-				texture != nullptr && *texture != nullptr)
-			{
-				handle = &(*texture)->GetTexture();
-			}
+			handle = &asset->GetTexture();
 		}
 
 		// The split-sum DFG LUT is global to the view, like Filament's frame uniform. Binding it
@@ -813,7 +1143,8 @@ void Rendering::Data::MaterialInstance::UploadParameterBlock(
 			fallbackName = "flat normal (0.5,0.5,1)";
 		}
 
-		m_descriptorSet.SetTexture(field.binding, handle != nullptr ? handle : fallback);
+		m_descriptorSet.SetTexture(field.binding, handle != nullptr ? handle : fallback,
+			handle != nullptr ? asset : nullptr);
 
 		// MOON_DEBUG_SAMPLERS: what each sampler slot actually got, once per shader and slot.
 		// The "why is my texture ignored" question has two very different answers (the material
@@ -831,31 +1162,12 @@ void Rendering::Data::MaterialInstance::UploadParameterBlock(
 		}
 	}
 
+	m_descriptorSet.Commit();
 	m_descriptorSet.Bind();
 
-	// Single-use properties are per-frame scratch: put them back to their defaults, like the
-	// loose path did, so a value set for one draw never sticks to the material.
-	for (auto& [name, property] : m_properties)
-	{
-		if (!property.singleUse)
-		{
-			continue;
-		}
-
-		const auto parameter = std::ranges::find_if(definition->Parameters(),
-			[&name](const MaterialDefinition::Parameter& p_parameter) {
-				return p_parameter.name == name
-					|| name.starts_with(p_parameter.name + "[");
-			});
-		if (parameter != definition->Parameters().end())
-		{
-			property.value = ParameterDefaultValue(*parameter);
-		}
-		else
-		{
-			property.value = ZeroOf(property.value);
-		}
-	}
+	// Single-use values went to the GPU above; put the CPU side back to the default so the
+	// next draw that does not set them does not inherit this frame's scratch values.
+	ResetSingleUseProperties();
 }
 
 void Rendering::Data::MaterialInstance::BindGlobalTexture(const std::string& p_name, Rendering::HAL::Texture* p_texture)
@@ -873,6 +1185,7 @@ void Rendering::Data::MaterialInstance::BindGlobalTexture(const std::string& p_n
 		// Remember it in the set as well: the next Bind() must not put back whatever the
 		// material's own upload recorded for this slot.
 		m_descriptorSet.SetTexture(field->binding, p_texture);
+		m_overriddenSamplers.insert(field->binding);
 		m_descriptorSet.Bind();
 
 		// MOON_DEBUG_SAMPLERS also reports the per-draw bindings: the ones in UploadParameterBlock
@@ -894,129 +1207,124 @@ void Rendering::Data::MaterialInstance::BindGlobalTexture(const std::string& p_n
 bool Rendering::Data::MaterialInstance::ResetPropertyToDefault(const std::string& p_name)
 {
 	const MaterialDefinition* definition = Definition();
-	if (definition == nullptr || !definition->HasParameterTable())
+	if (definition == nullptr)
+	{
+		if (m_descriptorSet.GetUniform(p_name) != nullptr)
+		{
+			m_descriptorSet.RemoveUniform(p_name);
+			++m_revision;
+			InvalidatePropertySignature();
+			return true;
+		}
+		return false;
+	}
+
+	uint32_t index = 0;
+	const MaterialDefinition::Parameter* parameter = FindParameter(definition, p_name, index);
+	if (parameter == nullptr)
+	{
+		if (m_descriptorSet.GetUniform(p_name) != nullptr)
+		{
+			m_descriptorSet.RemoveUniform(p_name);
+			++m_revision;
+			InvalidatePropertySignature();
+			return true;
+		}
+		return false;
+	}
+
+	EnsureDescriptorSet();
+	if (parameter->isSampler)
+	{
+		Rendering::HAL::TextureHandle* handle = nullptr;
+		Rendering::Resources::Texture* asset = nullptr;
+		if (!m_isDefaultInstance && m_definition != nullptr)
+		{
+			handle = m_definition->DefaultInstance().GetTexture(parameter->binding);
+			asset = m_definition->DefaultInstance().GetTextureAsset(parameter->binding);
+		}
+		m_descriptorSet.SetTexture(parameter->binding, handle, asset);
+		m_overriddenSamplers.erase(parameter->binding);
+		++m_revision;
+		InvalidatePropertySignature();
+		return true;
+	}
+
+	const MaterialPropertyType value = ParameterDefaultValue(*parameter);
+	if (std::holds_alternative<std::monostate>(value))
 	{
 		return false;
 	}
 
-	for (const MaterialDefinition::Parameter& parameter : definition->Parameters())
-	{
-		if (parameter.name != p_name)
-		{
-			continue;
-		}
-		if (!parameter.isUi)
-		{
-			return false;
-		}
+	const MaterialDefinition::UniformField* field = definition->FindUniform(parameter->name);
+	std::vector<uint8_t>& block = m_descriptorSet.Buffer(
+		definition->ParameterBlockSize(), kMaterialParameterBinding);
+	const uint32_t offset = field != nullptr
+		? field->offset + (field->count > 1 ? field->stride * index : 0)
+		: static_cast<uint32_t>(std::max(parameter->offset, 0));
+	WriteBlockValue(block, parameter->type, value, offset);
+	m_overriddenUniforms.erase(parameter->name);
+	++m_revision;
+	InvalidatePropertySignature();
+	return true;
+}
 
-		const MaterialPropertyType value = ParameterDefaultValue(parameter);
-		if (std::holds_alternative<std::monostate>(value))
-		{
-			return false;
-		}
-
-		// On an instance, "reset" means "stop overriding": erasing the entry lets the value fall
-		// back to the definition, which is where the shader's default lives. A definition has no
-		// one to fall back to, so it writes the default into its own map.
-		if (m_definition != nullptr)
-		{
-			if (m_properties.erase(p_name) > 0)
-			{
-				++m_revision;
-				InvalidatePropertySignature();
-			}
-			return true;
-		}
-
-		if (HasProperty(p_name))
-		{
-			SetProperty(p_name, value);
-		}
-		else
-		{
-			m_properties.emplace(p_name, MaterialProperty{ .value = value, .singleUse = false });
-			InvalidatePropertySignature();
-		}
-		return true;
-	}
-	return false;
+void Rendering::Data::MaterialInstance::ResetProperties()
+{
+	InvalidatePropertySignature();
+	m_overriddenUniforms.clear();
+	m_overriddenSamplers.clear();
+	m_descriptorSet.ClearUniforms();
+	ReleaseDescriptorSet();
+	EnsureDescriptorSet();
+	++m_revision;
 }
 
 void Rendering::Data::MaterialInstance::UpdateProperties()
 {
-	InvalidatePropertySignature();
+	ResetProperties();
+}
 
-	// Only a definition owns the parameter values: it is the one seeded from the shader's declared
-	// initialisers. A plain instance starts empty and inherits, so seeding it here would turn the
-	// defaults into overrides and cut it off from later edits of the material.
-	if (m_definition != nullptr)
+std::map<std::string, Rendering::Data::MaterialProperty>
+Rendering::Data::MaterialInstance::SnapshotProperties() const
+{
+	std::map<std::string, MaterialProperty> snapshot;
+	const MaterialDefinition* definition = Definition();
+	if (definition == nullptr)
 	{
-		return;
+		return snapshot;
 	}
 
-	// A shader that came out of a package knows its parameters: name, GLSL type, texture slot or
-	// not, array size, and the initialiser the material declared. Building the property set from
-	// that list keeps it independent of which uniforms a driver happened to keep active in a
-	// given variant - and it is the half of the package's reflection the runtime was not reading
-	// yet (see Shader::HasParameterTable).
-	const MaterialDefinition* definition = Definition();
-	if (definition != nullptr && definition->HasParameterTable())
+	for (const MaterialDefinition::Parameter& parameter : definition->Parameters())
 	{
-		for (const MaterialDefinition::Parameter& parameter : definition->Parameters())
+		if (parameter.count > 1 && !parameter.isSampler)
 		{
-			const MaterialPropertyType value = ParameterDefaultValue(parameter);
-			if (std::holds_alternative<std::monostate>(value))
+			for (uint32_t i = 0; i < parameter.count; ++i)
 			{
-				continue;
-			}
-
-			if (parameter.count > 0)
-			{
-				// An array parameter is addressed one element at a time by the callers
-				// ("samples[17]"): the elements are the properties.
-				for (uint32_t i = 0; i < parameter.count; ++i)
+				const std::string name = std::format("{}[{}]", parameter.name, i);
+				if (auto value = GetProperty(name))
 				{
-					m_properties.try_emplace(std::format("{}[{}]", parameter.name, i),
-						MaterialProperty{ .value = value, .singleUse = false });
+					snapshot.emplace(name, std::move(*value));
 				}
 			}
-			else
-			{
-				m_properties.try_emplace(parameter.name,
-					MaterialProperty{ .value = value, .singleUse = false });
-			}
 		}
-		return;
-	}
-
-	// A shader built from source (the present pass, the blits) has no package behind it: the
-	// driver's list is the only description of its uniforms.
-	// Collect all uniform names currently used by the shader
-	std::unordered_set<std::string> usedUniforms;
-	auto variants_view = ShaderOf()->GetVariants()
-		| std::views::values
-		| std::views::join
-		| std::views::values;
-
-	for (const auto& variant : variants_view)
-	{
-		for (const auto& [name, uniformInfo] : variant->GetUniforms())
+		else if (auto value = GetProperty(parameter.name))
 		{
-			usedUniforms.insert(name);
-			if (!m_properties.contains(name))
-			{
-				m_properties.emplace(name, MaterialProperty{
-					.value = UniformToPropertyValue(uniformInfo.defaultValue),
-					.singleUse = false
-					});
-			}
+			snapshot.emplace(parameter.name, std::move(*value));
 		}
 	}
-	std::erase_if(m_properties, [&usedUniforms](const auto& property) {
-		return !usedUniforms.contains(property.first);
-		});
+
+	for (const Descriptor& descriptor : m_descriptorSet.Uniforms())
+	{
+		if (const Descriptor::UniformBinding* uniform = descriptor.GetUniform())
+		{
+			snapshot.emplace(uniform->name, MaterialProperty{ uniform->value, false });
+		}
+	}
+
+	return snapshot;
 }
+
 // Note: this function is critical for performance, as it may be called many times during a frame.
 // Avoid using any heavy operations or allocations inside this function.
 Rendering::Data::MaterialSignatureSet Rendering::Data::MaterialInstance::Bind(
@@ -1046,6 +1354,10 @@ Rendering::Data::MaterialSignatureSet Rendering::Data::MaterialInstance::Bind(
 
 	m_programInUse = program;
 
+	// Loose uniforms (a shader built without a package) are descriptors too: apply them to the
+	// program here, before the material's block and samplers are bound.
+	BindLooseUniforms(program);
+
 	// The parameter block is per material, not per program: bind it on every draw so it is the
 	// one bound even when another material uploaded its own buffer since the last draw.
 	BindParameterBlock();
@@ -1065,13 +1377,59 @@ void Rendering::Data::MaterialInstance::Unbind(bool p_resetBoundProgram)
 
 bool Rendering::Data::MaterialInstance::HasProperty(const std::string& p_name) const
 {
-	return FindProperty(p_name) != nullptr;
+	const MaterialDefinition* definition = Definition();
+	uint32_t index = 0;
+	return (definition != nullptr && FindParameter(definition, p_name, index) != nullptr)
+		|| m_descriptorSet.GetUniform(p_name) != nullptr;
 }
 
 void Rendering::Data::MaterialInstance::SetProperty(const std::string p_name, const MaterialPropertyType& p_value, bool p_singleUse)
 {
-	m_properties[p_name].value = p_value;
-	m_properties[p_name].singleUse = p_singleUse;
+	const MaterialDefinition* definition = Definition();
+	uint32_t index = 0;
+	const MaterialDefinition::Parameter* parameter =
+		definition != nullptr ? FindParameter(definition, p_name, index) : nullptr;
+
+	if (parameter != nullptr)
+	{
+		EnsureDescriptorSet();
+		if (parameter->isSampler)
+		{
+			Rendering::HAL::TextureHandle* handle = nullptr;
+			Rendering::Resources::Texture* asset = nullptr;
+			if (const auto* value = std::get_if<Rendering::HAL::TextureHandle*>(&p_value))
+			{
+				handle = *value;
+			}
+			else if (const auto* value = std::get_if<Rendering::Resources::Texture*>(&p_value))
+			{
+				asset = *value;
+				handle = asset != nullptr ? &asset->GetTexture() : nullptr;
+			}
+			m_descriptorSet.SetTexture(parameter->binding, handle, asset);
+			m_overriddenSamplers.insert(parameter->binding);
+			if (p_singleUse) { m_singleUseSamplers.insert(parameter->binding); }
+		}
+		else
+		{
+			const MaterialDefinition::UniformField* field = definition->FindUniform(parameter->name);
+			std::vector<uint8_t>& block = m_descriptorSet.Buffer(
+				definition->ParameterBlockSize(), kMaterialParameterBinding);
+			const uint32_t offset = field != nullptr
+				? field->offset + (field->count > 1 ? field->stride * index : 0)
+				: static_cast<uint32_t>(std::max(parameter->offset, 0));
+			WriteBlockValue(block, parameter->type, p_value, offset);
+			m_overriddenUniforms.insert(parameter->name);
+			if (p_singleUse) { m_singleUseUniforms.insert(p_name); }
+		}
+	}
+	else
+	{
+		// A shader built without a package has no block slot for this uniform; keep the loose
+		// name->value and upload it through the program's uniform location.
+		m_descriptorSet.SetUniform(p_name, p_value);
+	}
+
 	++m_revision;
 
 	if (p_singleUse)
@@ -1086,13 +1444,10 @@ void Rendering::Data::MaterialInstance::SetProperty(const std::string p_name, co
 
 void Rendering::Data::MaterialInstance::LateUpdateTexture(const std::string& p_name, const std::string& p_path)
 {
-	if (HasProperty(p_name)) {
-		auto& prop = m_properties[p_name];
-		if (auto texture = std::holds_alternative<Rendering::Resources::Texture*>(prop.value))
-		{
-			m_lateLoadTextures[p_name] = p_path;
-			++m_revision;
-		}
+	(void)p_path;
+	if (HasProperty(p_name))
+	{
+		++m_revision;
 	}
 }
 
@@ -1106,19 +1461,51 @@ bool Rendering::Data::MaterialInstance::TrySetProperty(const std::string& p_name
 	return false;
 }
 
-Tools::Utils::OptRef<const Rendering::Data::MaterialProperty> Rendering::Data::MaterialInstance::GetProperty(const std::string p_key) const
+std::optional<Rendering::Data::MaterialProperty>
+Rendering::Data::MaterialInstance::GetProperty(const std::string p_key) const
 {
-	// Resolved through the chain: an instance sees its own override, then its definition's value.
-	if (const MaterialProperty* property = FindProperty(p_key))
+	const MaterialDefinition* definition = Definition();
+	uint32_t index = 0;
+	const MaterialDefinition::Parameter* parameter =
+		definition != nullptr ? FindParameter(definition, p_key, index) : nullptr;
+
+	if (parameter != nullptr)
 	{
-		return *property;
+		EnsureDescriptorSet();
+		if (parameter->isSampler)
+		{
+			// The descriptor keeps both the GL handle and the serializable asset. Reporting the
+			// asset first lets a .mat write the path it came from; a view-owned texture has no
+			// asset, so the handle is what the editor sees.
+			if (auto* asset = m_descriptorSet.GetTextureAsset(parameter->binding))
+			{
+				return MaterialProperty{ asset, false };
+			}
+			if (auto* handle = m_descriptorSet.GetTexture(parameter->binding))
+			{
+				return MaterialProperty{ handle, false };
+			}
+			return MaterialProperty{ static_cast<Rendering::Resources::Texture*>(nullptr), false };
+		}
+
+		EnsureDescriptorSet();
+		const MaterialDefinition::UniformField* field = definition->FindUniform(parameter->name);
+		if (field != nullptr && m_descriptorSet.BufferSize() == definition->ParameterBlockSize())
+		{
+			const uint32_t offset = field->offset + (field->count > 1 ? field->stride * index : 0);
+			return MaterialProperty{
+				ReadBlockValue(m_descriptorSet.Buffer(definition->ParameterBlockSize(),
+					kMaterialParameterBinding), field->type, offset),
+				false
+			};
+		}
+	}
+
+	if (const Descriptor::UniformBinding* uniform = m_descriptorSet.GetUniform(p_key))
+	{
+		return MaterialProperty{ uniform->value, false };
 	}
 	return std::nullopt;
-}
-
-bool Rendering::Data::Material::HasShader() const
-{
-	return m_shader != nullptr;
 }
 
 bool Rendering::Data::MaterialInstance::IsValid() const

@@ -37,7 +37,7 @@ void Core::Resources::Material::OnSerialize(tinyxml2::XMLDocument& p_doc, tinyxm
 	using namespace Rendering::Settings;
 	using namespace Maths;
 
-	Serializer::SerializeShader(p_doc, p_node, "shader", m_shader);
+	Serializer::SerializeShader(p_doc, p_node, "shader", GetShader());
 
 	tinyxml2::XMLNode* settingsNode = p_doc.NewElement("settings");
 	p_node->InsertEndChild(settingsNode);
@@ -81,11 +81,11 @@ void Core::Resources::Material::OnSerialize(tinyxml2::XMLDocument& p_doc, tinyxm
 	// Block members are not in the program's reflected uniform map (they have no individual
 	// location); the shader's parameter table is what says the material has them.
 	const auto isDeclaredParameter = [this](const std::string& p_name) {
-		if (m_shader == nullptr)
+		if (GetShader() == nullptr)
 		{
 			return false;
 		}
-		for (const Rendering::Resources::Shader::Parameter& parameter : m_shader->GetParameters())
+		for (const Rendering::Resources::Shader::Parameter& parameter : GetShader()->GetParameters())
 		{
 			if (parameter.name == p_name || p_name.starts_with(parameter.name + "["))
 			{
@@ -95,7 +95,7 @@ void Core::Resources::Material::OnSerialize(tinyxml2::XMLDocument& p_doc, tinyxm
 		return false;
 	};
 
-	for (const auto& [name, prop] : m_properties)
+	for (const auto& [name, prop] : SnapshotProperties())
 	{
 		// Skip serialization of this property if neither the parameter table nor the current
 		// program knows it.
@@ -156,11 +156,11 @@ void Core::Resources::Material::OnSerialize(tinyxml2::XMLDocument& p_doc, tinyxm
 
 	std::string features;
 
-	for (auto it = m_features.begin(); it != m_features.end(); ++it)
+	for (auto it = GetFeatures().begin(); it != GetFeatures().end(); ++it)
 	{
 		features += *it;
 
-		if (std::next(it) != m_features.end())
+		if (std::next(it) != GetFeatures().end())
 		{
 			features += ",";
 		}
@@ -177,8 +177,6 @@ void Core::Resources::Material::OnDeserialize(tinyxml2::XMLDocument& p_doc, tiny
 	 * state (blending, culling, depth writing) to what its material block declares. The
 	 * <settings> below are the instance's overrides and have to win over that. */
 	const auto shader = Serializer::DeserializeShader(p_doc, p_node, "shader");
-
-	m_properties.clear();
 
 	/* We verify that the shader is valid (Not null) */
 	if (shader)
@@ -303,7 +301,7 @@ void Core::Resources::Material::OnDeserialize(tinyxml2::XMLDocument& p_doc, tiny
 		}
 	}
 
-	m_features.clear();
+	SetFeatures({});
 
 	const auto features = Serializer::DeserializeString(p_doc, p_node, "features");
 

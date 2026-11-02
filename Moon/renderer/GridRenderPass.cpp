@@ -130,7 +130,7 @@ void Editor::Rendering::GridRenderPass::Draw(::Rendering::Data::PipelineState p_
 		for (auto& drawable : drawables)
 		{
 			auto drawableCopy = drawable;
-			drawableCopy.material = m_ShadowMaterial;
+			drawableCopy.material = m_ShadowMaterial.DefaultInstance();
 			m_renderer.DrawEntity(p_pso, drawableCopy);
 		}
 	};

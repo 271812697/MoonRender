@@ -102,7 +102,7 @@ void Rendering::Features::DebugShapeRenderFeature::DrawLine(
 	p_pso.lineWidthPow2 = Utils::Conversions::FloatToPow2(p_lineWidth);
 
 	Rendering::Entities::Drawable drawable;
-	drawable.material = *m_lineMaterial;
+	drawable.material = m_lineMaterial->DefaultInstance();
 	drawable.mesh = m_lineMesh.get();
 	drawable.stateMask = m_lineMaterial->GenerateStateMask();
 	drawable.primitiveMode = Settings::EPrimitiveMode::LINES;

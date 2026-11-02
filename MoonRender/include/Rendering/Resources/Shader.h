@@ -119,16 +119,6 @@ namespace Rendering::Resources
 		/** The state the material block declared. Empty fields keep the engine's defaults. */
 		const State& GetState() const;
 
-		/** The immutable definition this shader was built from. Null for a shader built from
-		 * source before it has been given one; Material then derives a definition from the
-		 * shader's own reflection. */
-		const Data::MaterialDefinition* GetDefinition() const;
-		const std::shared_ptr<const Data::MaterialDefinition>& GetDefinitionPtr() const;
-
-		/** Attaches the definition a package was read into. A hot reload replaces it as a
-		 * whole, which is what lets every material and instance see the new layout. */
-		void SetDefinition(std::shared_ptr<const Data::MaterialDefinition> p_definition);
-
 		/** True when the shader came with a material state (a package does; one built from
 		 * source does not). */
 		bool HasState() const;
@@ -172,6 +162,5 @@ namespace Rendering::Resources
 		std::unordered_set<std::string> m_variantKeys;
 		/** The package's immutable half. The programs stay in m_variants; this is what a
 		 * MaterialInstance reads for offsets, bindings and render state. */
-		std::shared_ptr<const Data::MaterialDefinition> m_definition;
 	};
 }

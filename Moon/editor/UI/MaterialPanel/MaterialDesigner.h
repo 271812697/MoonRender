@@ -87,7 +87,7 @@ namespace MOON
 		 * itself is the definition and is not part of it. */
 		struct Snapshot
 		{
-			Rendering::Data::Material::PropertyMap properties;
+			std::map<std::string, Rendering::Data::MaterialProperty> properties;
 			Rendering::Data::FeatureSet features;
 			bool blendable = false;
 			Rendering::Settings::EBlendMode blendMode = Rendering::Settings::EBlendMode::BLEND_OPAQUE;
