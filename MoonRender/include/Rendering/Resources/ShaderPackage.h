@@ -1,4 +1,5 @@
 #pragma once
+#include <Rendering/Data/DescriptorSetLayout.h>
 #include <cstdint>
 #include <map>
 #include <set>
@@ -107,6 +108,37 @@ namespace Rendering::Resources
 		 * array size and declared default per parameter, plus the vertex attributes. This is
 		 * what a material panel reads instead of asking the driver for active uniforms. */
 		const std::vector<Parameter>& Parameters() const { return m_parameters; }
+
+		/** One field of the PerMaterial uniform block (SHDRUBO) - filament's UboBlockInfo. */
+		struct UniformField
+		{
+			std::string name;
+			std::string type;      // the GLSL type
+			uint32_t offset = 0;
+			uint32_t stride = 0;
+			uint32_t count = 1;
+		};
+
+		/** One descriptor of the PerMaterial sampler block (SHDRSMP) - SamplerBlockInfo. */
+		struct SamplerField
+		{
+			std::string name;
+			std::string type;
+			uint32_t binding = 0;
+			uint8_t fallback = 0;
+		};
+
+		/** The PerMaterial layout the build recorded: where each parameter lives in the uniform
+		 * block, and which texture unit each sampler owns. The runtime writes a
+		 * MaterialInstance's values through these two lists. */
+		const std::vector<UniformField>& UniformFields() const { return m_uniformFields; }
+		const std::vector<SamplerField>& SamplerFields() const { return m_samplerFields; }
+		uint32_t UniformBlockSize() const { return m_uniformBlockSize; }
+
+		/** The PerMaterial descriptor layout the package describes: the uniform block plus one
+		 * texture descriptor per sampler. A DescriptorSet built against it cannot bind a texture
+		 * into the block's slot. */
+		const ::Rendering::Data::DescriptorSetLayout& Layout() const { return m_layout; }
 		const std::vector<Attribute>& Attributes() const { return m_attributes; }
 
 		/** The samplers that asked for a non-default 1x1 fallback texture, empty for a package
@@ -156,10 +188,20 @@ namespace Rendering::Resources
 		uint32_t m_parameterBlockSize = 0;
 		std::vector<SamplerFallbackEntry> m_samplerFallbacks;
 		std::vector<Blob> m_blobs;
+		/** The package's line table (SHDRDICT): the shared stage texts are stored as ids into
+		 * it, so the lines every stage repeats are stored once. */
+		std::vector<std::string> m_lines;
+		/** The PerMaterial layout (SHDRUBO / SHDRSMP), applied to m_parameters as it is read. */
+		std::vector<UniformField> m_uniformFields;
+		std::vector<SamplerField> m_samplerFields;
+		uint32_t m_uniformBlockSize = 0;
+		/** The descriptor layout, built from those two blocks while the package is read. */
+		::Rendering::Data::DescriptorSetLayout m_layout;
 		/** Stage name ("vertex" / "fragment" / "geometry") -> the stage's whole text, with the
-		 * placeholder where the variant's #define lines go. Empty for a package written before
-		 * the shared-stage chunk existed: then the blobs are whole stages, as they used to be. */
-		std::map<std::string, std::string_view> m_stageTexts;
+		 * placeholder where the variant's #define lines go. Owned rather than a view: a stage is
+		 * reconstructed from the line table when the package is read. Empty for a package
+		 * written before the shared-stage chunk existed. */
+		std::map<std::string, std::string> m_stageTexts;
 		std::vector<std::string> m_declaredFeatures;
 	};
 

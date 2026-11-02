@@ -1,3 +1,4 @@
+#include <Rendering/Settings/EBindingPoint.h>
 #include <Rendering/Resources/ShaderPackage.h>
 
 #include <cstring>
@@ -264,6 +265,109 @@ namespace Rendering::Resources
 					m_parameters.push_back(std::move(parameter));
 				}
 			}
+			else if (tag == "SHDRUBO")
+			{
+				// The PerMaterial uniform block: size, name, then one record per field. The
+				// offsets are the layout's single source of truth - the parameter records are
+				// updated from them below, so a reflection entry cannot disagree with the block.
+				uint32_t size = 0;
+				std::string name;
+				uint32_t count = 0;
+				if (!Take(payload, size) || !TakeString(payload, name) || !Take(payload, count))
+				{
+					continue;
+				}
+				m_uniformBlockSize = size;
+				m_layout.Add(name, ::Rendering::Data::DescriptorSetLayout::Kind::UniformBuffer,
+					::Rendering::Settings::kMaterialParameterBinding);
+				m_uniformFields.reserve(count);
+				for (uint32_t i = 0; i < count; ++i)
+				{
+					UniformField field;
+					if (!TakeString(payload, field.name) || !TakeString(payload, field.type)
+						|| !Take(payload, field.offset) || !Take(payload, field.stride)
+						|| !Take(payload, field.count))
+					{
+						break;
+					}
+					m_uniformFields.push_back(std::move(field));
+				}
+
+				for (Parameter& parameter : m_parameters)
+				{
+					for (const UniformField& field : m_uniformFields)
+					{
+						if (field.name != parameter.name) { continue; }
+						parameter.offset = static_cast<int32_t>(field.offset);
+						parameter.stride = field.stride;
+						parameter.count = field.count > 1 ? field.count : 0;
+						break;
+					}
+				}
+			}
+			else if (tag == "SHDRSMP")
+			{
+				// The PerMaterial sampler block: one descriptor per sampler (unit, type,
+				// fallback). Same rule: the block decides the binding the runtime will use.
+				std::string name;
+				uint32_t count = 0;
+				if (!TakeString(payload, name) || !Take(payload, count))
+				{
+					continue;
+				}
+				m_samplerFields.reserve(count);
+				for (uint32_t i = 0; i < count; ++i)
+				{
+					SamplerField field;
+					if (!TakeString(payload, field.name) || !TakeString(payload, field.type)
+						|| !Take(payload, field.binding) || !Take(payload, field.fallback))
+					{
+						break;
+					}
+					m_samplerFields.push_back(std::move(field));
+					m_layout.Add(m_samplerFields.back().name,
+						::Rendering::Data::DescriptorSetLayout::Kind::Texture, m_samplerFields.back().binding);
+				}
+
+				for (Parameter& parameter : m_parameters)
+				{
+					for (const SamplerField& field : m_samplerFields)
+					{
+						if (field.name != parameter.name) { continue; }
+						parameter.binding = field.binding;
+						break;
+					}
+				}
+
+				// The fallback kind lives in its own record (SHDRFALL); the block carries the
+				// same value, so a package without that chunk still gets its fallbacks.
+				for (const SamplerField& field : m_samplerFields)
+				{
+					const auto existing = std::find_if(m_samplerFallbacks.begin(), m_samplerFallbacks.end(),
+						[&field](const SamplerFallbackEntry& p_entry) { return p_entry.name == field.name; });
+					if (existing != m_samplerFallbacks.end()) { continue; }
+					m_samplerFallbacks.push_back(SamplerFallbackEntry{
+						field.name, static_cast<SamplerFallback>(field.fallback) });
+				}
+			}
+			else if (tag == "SHDRDICT")
+			{
+				uint32_t count = 0;
+				if (!Take(payload, count))
+				{
+					continue;
+				}
+				m_lines.reserve(count);
+				for (uint32_t i = 0; i < count; ++i)
+				{
+					std::string_view line;
+					if (!TakeView(payload, line))
+					{
+						break;
+					}
+					m_lines.emplace_back(line);
+				}
+			}
 			else if (tag == "SHDRSTAG")
 			{
 				uint32_t count = 0;
@@ -274,12 +378,26 @@ namespace Rendering::Resources
 				for (uint32_t i = 0; i < count; ++i)
 				{
 					std::string stage;
-					std::string_view text;
-					if (!TakeString(payload, stage) || !TakeView(payload, text))
+					uint32_t lineCount = 0;
+					if (!TakeString(payload, stage) || !Take(payload, lineCount))
 					{
 						break;
 					}
-					m_stageTexts[stage] = text;
+
+					// The stage is the join of its lines, exactly as LineDictionary encoded it
+					// (a text that ended with a newline keeps its empty last line).
+					std::string text;
+					for (uint32_t line = 0; line < lineCount; ++line)
+					{
+						uint32_t id = 0;
+						if (!Take(payload, id) || id >= m_lines.size())
+						{
+							break;
+						}
+						if (line != 0) { text += '\n'; }
+						text += m_lines[id];
+					}
+					m_stageTexts[stage] = std::move(text);
 				}
 			}
 			else if (tag == "SHDRGLSL")
