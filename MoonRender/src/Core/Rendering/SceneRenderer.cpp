@@ -914,34 +914,6 @@ void Core::Rendering::SceneRenderer::UpdateParsedDrawables(Core::SceneSystem::Sc
 	uint64_t signature = 0xcbf29ce484222325ULL;
 	HashCombine(signature, renderers.size());
 
-	// The variant key of a keyed material depends on which lights exist and on whether a
-	// directional light casts shadows. A light added after the first parse (the material
-	// preview builds its lights that way) must re-run ParseScene, or the drawable keeps a
-	// key without the light bits and the shader compiles those lights out.
-	uint32_t directionalLights = 0;
-	uint32_t punctualLights = 0;
-	uint32_t shadowCastingDirectionals = 0;
-	for (::Core::ECS::Actor* actor : p_scene.GetActors())
-	{
-		if (actor == nullptr || !actor->IsActive())
-		{
-			continue;
-		}
-		if (auto* light = actor->GetComponent<::Core::ECS::Components::CDirectionalLight>())
-		{
-			++directionalLights;
-			if (light->GetCastShadows()) { ++shadowCastingDirectionals; }
-		}
-		if (actor->GetComponent<::Core::ECS::Components::CPointLight>() != nullptr
-			|| actor->GetComponent<::Core::ECS::Components::CSpotLight>() != nullptr)
-		{
-			++punctualLights;
-		}
-	}
-	HashCombine(signature, directionalLights);
-	HashCombine(signature, punctualLights);
-	HashCombine(signature, shadowCastingDirectionals);
-
 	for (const auto modelRenderer : renderers)
 	{
 		const auto& owner = modelRenderer->owner;
@@ -1045,50 +1017,31 @@ void Core::Rendering::SceneRenderer::UpdateParsedDrawables(Core::SceneSystem::Sc
 	// A view can strip features that make no sense for what it renders. The material preview
 	// removes distance fade: the fade is a scene-space LOD effect, and the preview's camera sits
 	// inside its range, so the shader's dither turned the whole ball into a dot pattern.
-	// Variant keys: the engine-side state keyed materials are compiled per draw for. The scene's
-	// lights decide the base bits here; passes (picking/depth) layer their own bit on top later.
-	::Rendering::Data::FeatureSet variantFeatures;
+	//
+	// This is the only thing that overrides a drawable's feature set now: the light-derived variant
+	// keys are gone (the scene always carries a directional light, so the lit shaders compile their
+	// directional/point/spot cases unconditionally - see Standard.shader, GeomertySurface.shader,
+	// FilamentPBR.shader). Only a drawable that actually carries one of the excluded features gets
+	// an override; the rest are left alone, because MaterialInstance::Bind then uses the material's
+	// own Features(), which is the set an unconditional override would have copied over anyway.
+	if (!m_excludedFeatures.empty())
 	{
-		bool directional = false;
-		bool dynamic = false;
-		for (::Core::ECS::Actor* actor : p_scene.GetActors())
+		for (auto& drawable : m_parsedDrawables.drawables)
 		{
-			if (actor == nullptr || !actor->IsActive()) { continue; }
-			if (actor->GetComponent<::Core::ECS::Components::CDirectionalLight>() != nullptr)
-			{
-				directional = true;
-			}
-			if (actor->GetComponent<::Core::ECS::Components::CPointLight>() != nullptr
-				|| actor->GetComponent<::Core::ECS::Components::CSpotLight>() != nullptr)
-			{
-				dynamic = true;
-			}
-		}
-		if (directional) { variantFeatures.insert("VARIANT_HAS_DIRECTIONAL_LIGHTING"); }
-		if (dynamic) { variantFeatures.insert("VARIANT_HAS_DYNAMIC_LIGHTING"); }
-		// No SHADOWING bit: the shadow pass is not wired into the scene draw, so a material whose
-		// shader filters it would only be asked for a variant that was never compiled. The bit
-		// belongs here next to the pass that fills the shadow map.
-	}
+			if (!drawable.material) { continue; }
 
-	for (auto& drawable : m_parsedDrawables.drawables)
-	{
-		if (!drawable.material) { continue; }
-		const bool keyed = drawable.material->Shader() != nullptr
-			&& drawable.material->Shader()->UsesVariantKeys();
-		if (!keyed && m_excludedFeatures.empty()) { continue; }
-		::Rendering::Data::FeatureSet features = drawable.material->Features();
-		for (const std::string& excluded : m_excludedFeatures) { features.erase(excluded); }
-		if (keyed)
-		{
-			// Only the bits this shader actually compiled a variant for.
-			const auto& variantKeys = drawable.material->Shader()->GetVariantKeys();
-			for (const std::string& feature : variantFeatures)
-			{
-				if (variantKeys.contains(feature)) { features.insert(feature); }
-			}
+			const ::Rendering::Data::FeatureSet& materialFeatures = drawable.material->Features();
+			const bool stripped = std::ranges::any_of(m_excludedFeatures,
+				[&materialFeatures](const std::string& p_excluded)
+				{
+					return materialFeatures.contains(p_excluded);
+				});
+			if (!stripped) { continue; }
+
+			::Rendering::Data::FeatureSet features = materialFeatures;
+			for (const std::string& excluded : m_excludedFeatures) { features.erase(excluded); }
+			drawable.featureSetOverride = std::move(features);
 		}
-		drawable.featureSetOverride = std::move(features);
 	}
 
 	m_parsedDrawablesHash = signature;

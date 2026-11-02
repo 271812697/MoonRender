@@ -105,7 +105,6 @@ vec3 evaluateFilamentSurface(
 
         switch (light.type)
         {
-#if defined(VARIANT_HAS_DYNAMIC_LIGHTING)
             case 0: // Point
             {
                 const PointLight pointLight = ExtractPointLight(light);
@@ -114,9 +113,7 @@ vec3 evaluateFilamentSurface(
                 color += surfaceShading(pixel, n, v, contribution.L, contribution.radiance);
                 break;
             }
-#endif
 
-#if defined(VARIANT_HAS_DIRECTIONAL_LIGHTING)
             case 1: // Directional
             {
                 const DirectionalLight directionalLight = ExtractDirectionalLight(light);
@@ -130,9 +127,7 @@ vec3 evaluateFilamentSurface(
 #endif
                 break;
             }
-#endif
 
-#if defined(VARIANT_HAS_DYNAMIC_LIGHTING)
             case 2: // Spot
             {
                 const SpotLight spotLight = ExtractSpotLight(light);
@@ -141,7 +136,6 @@ vec3 evaluateFilamentSurface(
                 color += surfaceShading(pixel, n, v, contribution.L, contribution.radiance);
                 break;
             }
-#endif
 
             case 3: // Ambient box
             {

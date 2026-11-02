@@ -33,8 +33,8 @@ material {
     // the designer recompiles with whatever set the user enables.
     defaultFeatures : [],
 
-    // Engine state variants; the renderer selects one per draw (scene lights / shadows).
-    variantFilter : [DIRECTIONAL_LIGHTING, DYNAMIC_LIGHTING, SHADOWING],
+    // No variantFilter: the default scene always carries a directional light, so the lighting
+    // cases are compiled unconditionally instead of being keyed on "does this scene have a light".
 
     passes : [ SHADOW_PASS, REFLECTION_PASS ],
 

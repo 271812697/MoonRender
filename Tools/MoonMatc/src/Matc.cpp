@@ -1975,6 +1975,15 @@ namespace
 		// A material with optional features declares defaultFeatures (possibly empty).
 		appendVariants(material.hasDefaultFeatures ? material.defaultFeatures : std::vector<std::string>{});
 	}
+	else if (material.hasDefaultFeatures)
+	{
+		// The archive build with no engine variants: the default feature set is exactly what the
+		// archive ships, the same way the filter path treats it. Only the materials without a
+		// defaultFeatures declaration (the ones that rely on per-instance features) fall through
+		// to the power set below - the lit materials used to land there once their variantFilter
+		// was dropped, which multiplied Standard's five optional features into 96 variants.
+		appendVariants(material.defaultFeatures);
+	}
 	else
 	{
 		const size_t featureCount = material.features.size();

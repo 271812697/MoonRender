@@ -29,11 +29,9 @@ material {
     culling      : back,
     depthWrite   : true,
 
-    // Without a variant filter the renderer never sets the lighting variant bits, so
-    // `evaluateFilamentSurface` compiled without its directional/point cases: the surface got the
-    // ambient sphere light and the IBL but no sun - a flat, dark ball with the sun's highlight
-    // missing. That is the same list Standard declares.
-    variantFilter : [DIRECTIONAL_LIGHTING, DYNAMIC_LIGHTING, SHADOWING],
+    // No variantFilter: the lighting cases in surface_lighting.glsl are compiled unconditionally.
+    // Keying them on the scene's lights only ever produced a variant without the sun, which is
+    // what made the reference ball flat and dark.
 
     // Filament's per-material `specularAntiAliasing` (GEOMETRIC_SPECULAR_AA). Off to match the
     // Qt-Filament reference material (aiDefaultMat does not declare it).
