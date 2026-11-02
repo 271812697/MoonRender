@@ -1,5 +1,9 @@
 #include <Rendering/Overlay/Im2DRender.h>
 
+// The header only forward declares them; the implementation builds the list and the font.
+#include <Rendering/Overlay/Im2D.h>
+#include <Rendering/Overlay/Im2DFont.h>
+
 #include <glad/glad.h>
 
 #include <cstddef>

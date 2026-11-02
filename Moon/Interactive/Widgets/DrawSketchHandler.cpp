@@ -2,6 +2,8 @@
 #include "DrawSketchHandler.h"
 #include "Interactive/Im3DRenderer.h"
 #include <Rendering/Overlay/Im2DRender.h>
+#include <Rendering/Overlay/Im2D.h>
+#include <Rendering/Overlay/Im2DFont.h>
 #include "Sketcher/SketcherObjManager.h"
 #include "Sketcher/SketcherObj.h"
 #include "Interactive/SketchPicking.h"

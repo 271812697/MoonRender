@@ -1,8 +1,15 @@
 #pragma once
 #include <cstdint>
 
-#include <Rendering/Overlay/Im2D.h>
-#include <Rendering/Overlay/Im2DFont.h>
+// The two types the interface hands out are only ever used by reference here, so they are
+// forward declared: a translation unit that includes this header for the renderer does not get
+// the draw list and the font implementation with it. The .cpp that needs their members, and the
+// callers that append to the list, include Im2D.h / Im2DFont.h themselves.
+namespace Rendering::Overlay::Im2D
+{
+	class DrawList;
+	class Font;
+}
 
 namespace Rendering::Context {
 	class Driver;

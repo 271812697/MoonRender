@@ -7,6 +7,8 @@
 #include "Core/Global/ServiceLocator.h"
 #include "core/log.h"
 #include <Rendering/Overlay/Im2DRender.h>
+#include <Rendering/Overlay/Im2D.h>
+#include <Rendering/Overlay/Im2DFont.h>
 #include "Sketcher/SketcheTool2D.h"
 #include "editor/UI/IconCache.h"
 #include <QInputDialog>

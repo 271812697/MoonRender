@@ -2,6 +2,8 @@
 #include "Interactive/Im3DRenderer.h"
 #include "renderer/SceneView.h"
 #include <Rendering/Overlay/Im2DRender.h>
+#include <Rendering/Overlay/Im2D.h>
+#include <Rendering/Overlay/Im2DFont.h>
 #include <ThirdParty/imgui/imgui/imgui.h>
 #include "Interactive/Interactive/Event.h"
 #include "Interactive/Interactive/ExecuteCommand.h"

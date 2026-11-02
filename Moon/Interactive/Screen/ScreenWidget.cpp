@@ -2,6 +2,7 @@
 #include "Interactive/Interactive/RenderWindowInteractor.h"
 #include "Interactive/Screen/ScreenOverlayRegistry.h"
 #include <Rendering/Overlay/Im2DRender.h>
+#include <Rendering/Overlay/Im2D.h>
 #include <ThirdParty/imgui/imgui/imgui.h>
 #include <cmath>
 
