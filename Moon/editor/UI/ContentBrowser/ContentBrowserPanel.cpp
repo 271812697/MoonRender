@@ -102,6 +102,16 @@ namespace
 		return filters;
 	}
 
+	/** The resource key of a .mat on disk. The path is taken relative to the Materials root, the
+	 * same way the shader branch below does it, so a material keeps the folder it lives in
+	 * (":Materials/CAD/Metal/Steel.mat"). Keying by file name alone put every material in the
+	 * root, which resolved to the wrong file - or to nothing - as soon as a folder was used. */
+	std::string MaterialKeyFor(const QString& p_path)
+	{
+		const QString relative = QDir(EngineRoot() + "/Materials").relativeFilePath(p_path);
+		return (QStringLiteral(":Materials/") + relative).toStdString();
+	}
+
 	/** The colour a material tile is drawn with. The .mat stores the panel's sRGB value
 	 * (u_Albedo, four floats); reading it here keeps the tile recognisable without compiling
 	 * the shader or rendering a preview, and falls back to Moon's default grey. */
@@ -924,8 +934,7 @@ QTreeView::branch:open:has-children:has-siblings {
 		if (type == static_cast<int>(ContentAssetType::Material))
 		{
 			// The material designer keys its list by the serializer's resource path.
-			GetService(MaterialEditorPanel).OpenMaterial(
-				(":Materials/" + QFileInfo(path).fileName()).toStdString());
+			GetService(MaterialEditorPanel).OpenMaterial(MaterialKeyFor(path));
 		}
 		else if (type == static_cast<int>(ContentAssetType::Shader))
 		{
@@ -1200,7 +1209,7 @@ QTreeView::branch:open:has-children:has-siblings {
 			return;
 		}
 
-		const std::string key = ":Materials/" + name.toStdString();
+		const std::string key = MaterialKeyFor(target);
 		std::string failure;
 		Core::Resources::Material* created = nullptr;
 		{

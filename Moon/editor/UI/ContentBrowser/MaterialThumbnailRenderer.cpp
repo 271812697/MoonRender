@@ -19,6 +19,7 @@
 #include "Rendering/View/EPreviewMesh.h"
 #include "Rendering/View/PreviewView.h"
 #include "renderer/Context.h"
+#include <Tools/Utils/PathParser.h>
 
 namespace
 {
@@ -94,8 +95,13 @@ namespace MOON
 		// The CAD materials read a per-face domain id and sample a domain colour table with it: on
 		// the sphere that path reads garbage and the thumbnail comes out black, so they are shown
 		// on the CAD part instead.
-		// The material designer keys its list with the serializer's resource path.
-		const std::string key = (":Materials/" + QFileInfo(p_materialPath).fileName()).toStdString();
+		// The material designer keys its list with the serializer's resource path: relative to the
+		// Materials root, so a material keeps the folder it lives in (see ContentBrowserPanel's
+		// MaterialKeyFor; keying by file name alone would look for it in the root).
+		const QString materialsRoot =
+			QString::fromStdString(Tools::Utils::PathParser::GetExeDirectory()) + "/Moon/Data/Engine/Materials";
+		const std::string key = (QStringLiteral(":Materials/") +
+			QDir(materialsRoot).relativeFilePath(p_materialPath)).toStdString();
 		auto* material = Core::Global::ServiceLocator::Get<Core::ResourceManagement::MaterialManager>()
 			.GetResource(key, true);
 		if (material == nullptr)

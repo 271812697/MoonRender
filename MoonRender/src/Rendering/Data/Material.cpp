@@ -1369,6 +1369,16 @@ Rendering::Data::MaterialSignatureSet Rendering::Data::MaterialInstance::Calcula
 	// Stable Properties
 	signature.stablePropertySignature = signature.bindSignature;
 	HashCombine(signature.stablePropertySignature, m_stablePropertySignatureVersion);
+	// ...and the definition's revision: an instance answers every property it does not override
+	// from its definition (the .mat asset the designer edits), so an edit there has to invalidate
+	// the upload. It did not, and the revision check in UploadProperties sat behind this very
+	// signature - a texture assigned in the material editor therefore never reached an instance
+	// that already existed (the preview, or a shape drawing with the asset), and the map looked
+	// like it did nothing until the material was reopened.
+	if (m_definition != nullptr)
+	{
+		HashCombine(signature.stablePropertySignature, m_definition->Revision());
+	}
 	HashCombine(signature.stablePropertySignature, p_emptyTexture2D);
 	HashCombine(signature.stablePropertySignature, p_emptyTextureCube);
 
