@@ -1,3 +1,5 @@
+#include <algorithm>
+
 #include <Rendering/Data/DescriptorSet.h>
 
 namespace Rendering::Data
@@ -12,66 +14,58 @@ namespace Rendering::Data
 		m_layout = p_layout;
 	}
 
-	void DescriptorSet::EnsureBufferSize(uint32_t p_binding)
+	Descriptor* DescriptorSet::FindBufferMutable(
+		uint32_t p_binding,
+		Descriptor::BufferType p_type)
 	{
-		if (m_buffers.size() <= p_binding)
+		for (Descriptor& descriptor : m_descriptors)
 		{
-			m_buffers.resize(p_binding + 1);
-		}
-	}
-
-	void DescriptorSet::EnsureTextureSize(uint32_t p_binding)
-	{
-		if (m_textures.size() <= p_binding)
-		{
-			m_textures.resize(p_binding + 1);
-		}
-	}
-
-	std::vector<uint8_t>& DescriptorSet::Buffer(uint32_t p_size, uint32_t p_binding)
-	{
-		EnsureBufferSize(p_binding);
-		m_bufferBinding = p_binding;
-
-		Descriptor& descriptor = m_buffers[p_binding];
-		const bool sizeChanged = !descriptor.IsBuffer()
-			|| descriptor.GetBuffer()->slice.size != p_size;
-
-		// A hot-reloaded shader can change the block size; the pool slice has to match it or
-		// glBufferSubData would write outside the range.
-		if (sizeChanged)
-		{
-			descriptor.Release();
-			descriptor = Descriptor::MakeBuffer(UniformBufferPool::Get().Acquire(p_size));
-		}
-		if (m_data.size() != p_size)
-		{
-			m_data.assign(p_size, 0);
-		}
-
-		m_bufferDirty = true;
-		return m_data;
-	}
-
-	int DescriptorSet::FindBufferBinding() const
-	{
-		if (m_bufferBinding < m_buffers.size() && m_buffers[m_bufferBinding].IsBuffer())
-		{
-			return static_cast<int>(m_bufferBinding);
-		}
-		for (uint32_t i = 0; i < m_buffers.size(); ++i)
-		{
-			if (m_buffers[i].IsBuffer())
+			if (const Descriptor::BufferInfo* buffer = descriptor.GetBuffer();
+				buffer != nullptr && buffer->binding == p_binding && buffer->type == p_type)
 			{
-				return static_cast<int>(i);
+				return &descriptor;
 			}
 		}
-		return -1;
+		return nullptr;
 	}
 
-	bool DescriptorSet::HasBuffer() const
+	Descriptor* DescriptorSet::FindTextureMutable(uint32_t p_binding)
 	{
-		return FindBufferBinding() >= 0;
+		for (Descriptor& descriptor : m_descriptors)
+		{
+			if (const Descriptor::TextureInfo* texture = descriptor.GetTexture();
+				texture != nullptr && texture->binding == p_binding)
+			{
+				return &descriptor;
+			}
+		}
+		return nullptr;
+	}
+
+	bool DescriptorSet::SetBuffer(
+		Descriptor::BufferType p_type,
+		uint32_t p_binding,
+		uint32_t p_bufferId,
+		uint32_t p_offset,
+		uint32_t p_size)
+	{
+		if (m_layout != nullptr && p_type == Descriptor::BufferType::Uniform
+			&& !m_layout->Validate(DescriptorSetLayout::Kind::UniformBuffer, p_binding))
+		{
+			return false;
+		}
+
+		Descriptor* existing = FindBufferMutable(p_binding, p_type);
+		if (existing != nullptr)
+		{
+			*existing = Descriptor::MakeBuffer(p_type, p_binding, p_bufferId, p_offset, p_size);
+		}
+		else
+		{
+			m_descriptors.push_back(
+				Descriptor::MakeBuffer(p_type, p_binding, p_bufferId, p_offset, p_size));
+		}
+		return true;
 	}
 
 	bool DescriptorSet::SetTexture(
@@ -79,122 +73,107 @@ namespace Rendering::Data
 		Rendering::HAL::TextureHandle* p_texture,
 		Rendering::Resources::Texture* p_asset)
 	{
-		// A set without a layout is a source-built shader's: there is no contract to check.
-		if (m_layout != nullptr && !m_layout->Validate(DescriptorSetLayout::Kind::Texture, p_binding))
+		if (m_layout != nullptr
+			&& !m_layout->Validate(DescriptorSetLayout::Kind::Texture, p_binding))
 		{
 			return false;
 		}
 
-		EnsureTextureSize(p_binding);
-		Descriptor& descriptor = m_textures[p_binding];
-		descriptor.Release();
-		descriptor = p_texture != nullptr
-			? Descriptor::MakeTexture(p_texture, p_asset)
-			: Descriptor{};
+		Descriptor* existing = FindTextureMutable(p_binding);
+		if (p_texture == nullptr)
+		{
+			if (existing != nullptr)
+			{
+				m_descriptors.erase(std::remove_if(m_descriptors.begin(), m_descriptors.end(),
+					[p_binding](const Descriptor& p_descriptor) {
+						const Descriptor::TextureInfo* texture = p_descriptor.GetTexture();
+						return texture != nullptr && texture->binding == p_binding;
+					}), m_descriptors.end());
+			}
+		}
+		else if (existing != nullptr)
+		{
+			*existing = Descriptor::MakeTexture(p_binding, p_texture, p_asset);
+		}
+		else
+		{
+			m_descriptors.push_back(
+				Descriptor::MakeTexture(p_binding, p_texture, p_asset));
+		}
 		return true;
 	}
 
-	Rendering::HAL::TextureHandle* DescriptorSet::GetTexture(uint32_t p_binding) const
+	const Descriptor* DescriptorSet::FindBuffer(
+		uint32_t p_binding,
+		Descriptor::BufferType p_type) const
 	{
-		if (p_binding >= m_textures.size())
+		for (const Descriptor& descriptor : m_descriptors)
 		{
-			return nullptr;
-		}
-		const Descriptor::TextureBinding* texture = m_textures[p_binding].GetTexture();
-		return texture != nullptr ? texture->handle : nullptr;
-	}
-
-	Rendering::Resources::Texture* DescriptorSet::GetTextureAsset(uint32_t p_binding) const
-	{
-		if (p_binding >= m_textures.size())
-		{
-			return nullptr;
-		}
-		const Descriptor::TextureBinding* texture = m_textures[p_binding].GetTexture();
-		return texture != nullptr ? texture->asset : nullptr;
-	}
-
-	void DescriptorSet::SetUniform(const std::string& p_name, const MaterialPropertyType& p_value)
-	{
-		for (Descriptor& descriptor : m_uniforms)
-		{
-			if (Descriptor::UniformBinding* uniform = descriptor.GetUniform();
-				uniform != nullptr && uniform->name == p_name)
+			if (const Descriptor::BufferInfo* buffer = descriptor.GetBuffer();
+				buffer != nullptr && buffer->binding == p_binding && buffer->type == p_type)
 			{
-				uniform->value = p_value;
-				return;
-			}
-		}
-		m_uniforms.push_back(Descriptor::MakeUniform(p_name, p_value));
-	}
-
-	const Descriptor::UniformBinding* DescriptorSet::GetUniform(const std::string& p_name) const
-	{
-		for (const Descriptor& descriptor : m_uniforms)
-		{
-			if (const Descriptor::UniformBinding* uniform = descriptor.GetUniform();
-				uniform != nullptr && uniform->name == p_name)
-			{
-				return uniform;
+				return &descriptor;
 			}
 		}
 		return nullptr;
 	}
 
-	void DescriptorSet::RemoveUniform(const std::string& p_name)
+	const Descriptor* DescriptorSet::FindTexture(uint32_t p_binding) const
 	{
-		std::erase_if(m_uniforms, [&p_name](const Descriptor& p_descriptor) {
-			const Descriptor::UniformBinding* uniform = p_descriptor.GetUniform();
-			return uniform != nullptr && uniform->name == p_name;
-		});
+		for (const Descriptor& descriptor : m_descriptors)
+		{
+			if (const Descriptor::TextureInfo* texture = descriptor.GetTexture();
+				texture != nullptr && texture->binding == p_binding)
+			{
+				return &descriptor;
+			}
+		}
+		return nullptr;
 	}
 
-	void DescriptorSet::Commit()
+	Rendering::HAL::TextureHandle* DescriptorSet::GetTexture(uint32_t p_binding) const
 	{
-		const int bufferBinding = FindBufferBinding();
-		if (!m_bufferDirty || bufferBinding < 0 || m_data.empty())
-		{
-			return;
-		}
+		const Descriptor* descriptor = FindTexture(p_binding);
+		const Descriptor::TextureInfo* texture =
+			descriptor != nullptr ? descriptor->GetTexture() : nullptr;
+		return texture != nullptr ? texture->handle : nullptr;
+	}
 
-		UniformBufferPool::Get().Write(m_buffers[bufferBinding].GetBuffer()->slice, m_data.data());
-		m_bufferDirty = false;
+	Rendering::Resources::Texture* DescriptorSet::GetTextureAsset(uint32_t p_binding) const
+	{
+		const Descriptor* descriptor = FindTexture(p_binding);
+		const Descriptor::TextureInfo* texture =
+			descriptor != nullptr ? descriptor->GetTexture() : nullptr;
+		return texture != nullptr ? texture->asset : nullptr;
+	}
+
+	void DescriptorSet::UploadBuffer(
+		uint32_t p_binding,
+		Descriptor::BufferType p_type,
+		const void* p_data,
+		uint32_t p_size)
+	{
+		Descriptor* descriptor = FindBufferMutable(p_binding, p_type);
+		if (descriptor != nullptr)
+		{
+			descriptor->Upload(p_data, p_size);
+		}
 	}
 
 	void DescriptorSet::Bind() const
 	{
-		for (uint32_t binding = 0; binding < m_buffers.size(); ++binding)
+		for (const Descriptor& descriptor : m_descriptors)
 		{
-			if (m_buffers[binding].IsValid())
+			if (descriptor.IsValid())
 			{
-				m_buffers[binding].Bind(binding);
-			}
-		}
-		for (uint32_t binding = 0; binding < m_textures.size(); ++binding)
-		{
-			if (m_textures[binding].IsValid())
-			{
-				m_textures[binding].Bind(binding);
+				descriptor.Bind();
 			}
 		}
 	}
 
 	void DescriptorSet::Release()
 	{
-		for (Descriptor& descriptor : m_buffers)
-		{
-			descriptor.Release();
-		}
-		for (Descriptor& descriptor : m_textures)
-		{
-			descriptor.Release();
-		}
-		m_buffers.clear();
-		m_textures.clear();
-		m_uniforms.clear();
-		m_data.clear();
-		m_bufferDirty = false;
-		m_bufferBinding = 0;
+		m_descriptors.clear();
 		m_layout = nullptr;
 	}
 }

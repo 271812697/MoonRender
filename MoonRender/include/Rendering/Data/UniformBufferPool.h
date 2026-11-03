@@ -40,8 +40,14 @@ namespace Rendering::Data
 		Slice Acquire(uint32_t p_size);
 		void Release(Slice p_slice);
 
+		/** The GL name of the pool's buffer object (0 before the first acquisition). */
+		uint32_t GetBufferId() const;
+
 		/** Copies p_data into the slice and uploads that range. Needs the GL context current. */
 		void Write(Slice p_slice, const void* p_data);
+
+		/** Keeps the pool's CPU mirror in sync when a descriptor uploaded the range itself. */
+		void StoreCPU(Slice p_slice, const void* p_data);
 
 		/** Binds the slice to p_bindingPoint with glBindBufferRange. */
 		void Bind(Slice p_slice, uint32_t p_bindingPoint) const;

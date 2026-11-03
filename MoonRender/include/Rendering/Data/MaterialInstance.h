@@ -36,9 +36,8 @@ namespace Rendering::Data
 	 * doing both, which meant every actor that needed a different `domainColorTex` or line width
 	 * had to own a full material (its own shader pointer, its own feature set, its own state).
 	 *
-	 * A Material is its own default instance (m_definition == nullptr means "I am the definition"),
-	 * which is Filament's getDefaultInstance() and what keeps the existing call sites - they all
-	 * hold a Material& - compiling and behaving exactly as before.
+	 * Filament splits the two: `Material` owns the immutable MaterialDefinition and the
+	 * default instance; a MaterialInstance holds only its own values and descriptor set.
 	 */
 	class MaterialInstance
 	{
@@ -135,8 +134,8 @@ namespace Rendering::Data
 		{
 			return m_descriptorSet.GetTextureAsset(p_binding);
 		}
-		const std::vector<uint8_t>& BufferData() const { return m_descriptorSet.BufferData(); }
-		uint32_t BufferSize() const { return m_descriptorSet.BufferSize(); }
+		const std::vector<uint8_t>& BufferData() const { return m_uniformData; }
+		uint32_t BufferSize() const { return static_cast<uint32_t>(m_uniformData.size()); }
 
 		void SetBlendable(bool p_blendable);
 		void SetBlendMode(Rendering::Settings::EBlendMode p_blendMode);
@@ -204,6 +203,7 @@ namespace Rendering::Data
 		Rendering::HAL::Texture* TextureOf(const std::string& p_name) const;
 
 	protected:
+		struct LooseUniform;
 		/** The definition's shader (the one the variant comes from). */
 		Rendering::Resources::Shader* ShaderOf() const;
 		/** The feature set this instance draws with: its own, seeded from the definition. */
@@ -225,7 +225,9 @@ namespace Rendering::Data
 		void ResetBlockToDefinition();
 		void MergeDefaults();
 		void ResetSingleUseProperties();
-		void BindLooseUniforms(Rendering::HAL::ShaderProgram& p_program) const;
+		LooseUniform* FindLooseUniform(const std::string& p_name);
+		const LooseUniform* FindLooseUniform(const std::string& p_name) const;
+		void SetLooseUniform(const std::string& p_name, const MaterialPropertyType& p_value, bool p_singleUse);
 		MaterialSignatureSet CalculateSignature(
 			Rendering::HAL::ShaderProgram& p_selectedProgram,
 			Rendering::HAL::Texture* p_emptyTexture2D = nullptr,
@@ -235,7 +237,6 @@ namespace Rendering::Data
 	protected:
 		Material* m_definition = nullptr;
 		bool m_isDefaultInstance = false;
-		std::map<std::string, std::string> m_lateLoadTextures;
 		Data::FeatureSet m_features;
 		uint64_t m_revision = 0;
 		uint64_t m_seenDefinitionRevision = 0;
@@ -246,6 +247,19 @@ namespace Rendering::Data
 		/** The PerMaterial binding set: one uniform-block range plus a texture per sampler. The
 		 * definition's layout validates every insertion; Bind() binds the whole set. */
 		mutable DescriptorSet m_descriptorSet;
+		/** CPU side of the PerMaterial UBO: SetProperty writes here by std140 offset; upload
+		 * happens once per dirty commit into the descriptor's GL buffer range. */
+		mutable std::vector<uint8_t> m_uniformData;
+		mutable UniformBufferPool::Slice m_uniformSlice;
+		struct LooseUniform
+		{
+			std::string name;
+			MaterialPropertyType value;
+			bool singleUse = false;
+		};
+		/** Source-built shaders have no package block; these uniforms are uploaded through the
+		 * program's reflected uniform locations instead of a UBO range. */
+		std::vector<LooseUniform> m_looseUniforms;
 		/** Which parameters this instance actually overrides; everything else is merged from
 		 * the material's default instance on upload. */
 		std::set<std::string> m_overriddenUniforms;

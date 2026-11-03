@@ -1,101 +1,88 @@
+#include <algorithm>
+
 #include <glad/glad.h>
 
 #include <Rendering/Data/Descriptor.h>
 
 namespace Rendering::Data
 {
-	Descriptor::~Descriptor()
-	{
-		Release();
-	}
-
-	Descriptor::Descriptor(Descriptor&& p_other) noexcept
-		: m_value(std::move(p_other.m_value))
-	{
-		p_other.m_value = std::monostate{};
-	}
-
-	Descriptor& Descriptor::operator=(Descriptor&& p_other) noexcept
-	{
-		if (this != &p_other)
-		{
-			Release();
-			m_value = std::move(p_other.m_value);
-			p_other.m_value = std::monostate{};
-		}
-		return *this;
-	}
-
-	Descriptor Descriptor::MakeBuffer(UniformBufferPool::Slice p_slice)
+	Descriptor Descriptor::MakeBuffer(
+		BufferType p_type,
+		uint32_t p_binding,
+		uint32_t p_bufferId,
+		uint32_t p_offset,
+		uint32_t p_size)
 	{
 		Descriptor descriptor;
-		descriptor.m_value = BufferBinding{ p_slice };
+		descriptor.m_value = BufferInfo{
+			p_binding, p_bufferId, p_offset, p_size, p_type };
 		return descriptor;
 	}
 
 	Descriptor Descriptor::MakeTexture(
+		uint32_t p_binding,
 		Rendering::HAL::TextureHandle* p_handle,
 		Rendering::Resources::Texture* p_asset)
 	{
 		Descriptor descriptor;
-		descriptor.m_value = TextureBinding{ p_handle, p_asset };
-		return descriptor;
-	}
-
-	Descriptor Descriptor::MakeUniform(std::string p_name, const MaterialPropertyType& p_value)
-	{
-		Descriptor descriptor;
-		descriptor.m_value = UniformBinding{ std::move(p_name), p_value };
+		descriptor.m_value = TextureInfo{ p_binding, p_handle, p_asset };
 		return descriptor;
 	}
 
 	bool Descriptor::IsValid() const
 	{
-		if (const BufferBinding* buffer = GetBuffer())
+		if (const BufferInfo* buffer = GetBuffer())
 		{
-			return buffer->slice.IsValid();
+			return buffer->bufferId != 0 && buffer->size > 0;
 		}
-		if (const TextureBinding* texture = GetTexture())
+		if (const TextureInfo* texture = GetTexture())
 		{
 			return texture->handle != nullptr;
-		}
-		if (const UniformBinding* uniform = GetUniform())
-		{
-			return !uniform->name.empty()
-				&& !std::holds_alternative<std::monostate>(uniform->value);
 		}
 		return false;
 	}
 
-	const Descriptor::BufferBinding* Descriptor::GetBuffer() const
+	const Descriptor::BufferInfo* Descriptor::GetBuffer() const
 	{
-		return std::get_if<BufferBinding>(&m_value);
+		return std::get_if<BufferInfo>(&m_value);
 	}
 
-	const Descriptor::TextureBinding* Descriptor::GetTexture() const
+	const Descriptor::TextureInfo* Descriptor::GetTexture() const
 	{
-		return std::get_if<TextureBinding>(&m_value);
+		return std::get_if<TextureInfo>(&m_value);
 	}
 
-	const Descriptor::UniformBinding* Descriptor::GetUniform() const
+	uint32_t Descriptor::Binding() const
 	{
-		return std::get_if<UniformBinding>(&m_value);
-	}
-
-	Descriptor::UniformBinding* Descriptor::GetUniform()
-	{
-		return std::get_if<UniformBinding>(&m_value);
-	}
-
-	void Descriptor::Bind(uint32_t p_binding) const
-	{
-		if (const BufferBinding* buffer = GetBuffer())
+		if (const BufferInfo* buffer = GetBuffer())
 		{
-			UniformBufferPool::Get().Bind(buffer->slice, p_binding);
+			return buffer->binding;
+		}
+		if (const TextureInfo* texture = GetTexture())
+		{
+			return texture->binding;
+		}
+		return 0;
+	}
+
+	Descriptor::BufferType Descriptor::GetBufferType() const
+	{
+		const BufferInfo* buffer = GetBuffer();
+		return buffer != nullptr ? buffer->type : BufferType::Uniform;
+	}
+
+	void Descriptor::Bind() const
+	{
+		if (const BufferInfo* buffer = GetBuffer())
+		{
+			const GLenum target = buffer->type == BufferType::ShaderStorage
+				? GL_SHADER_STORAGE_BUFFER : GL_UNIFORM_BUFFER;
+			glBindBufferRange(target, buffer->binding, buffer->bufferId,
+				buffer->offset, buffer->size);
 			return;
 		}
 
-		if (const TextureBinding* texture = GetTexture())
+		if (const TextureInfo* texture = GetTexture())
 		{
 			// A material property can hold a handle whose texture was deleted (a resource
 			// reloaded while an instance still points at the old one). Binding a stale name is
@@ -104,20 +91,19 @@ namespace Rendering::Data
 				&& texture->handle->GetID() != 0
 				&& glIsTexture(texture->handle->GetID()))
 			{
-				texture->handle->Bind(p_binding);
+				texture->handle->Bind(texture->binding);
 			}
 		}
 	}
 
-	void Descriptor::Release()
+	void Descriptor::Upload(const void* p_data, uint32_t p_size) const
 	{
-		if (BufferBinding* buffer = std::get_if<BufferBinding>(&m_value))
+		const BufferInfo* buffer = GetBuffer();
+		if (buffer == nullptr || buffer->bufferId == 0 || p_data == nullptr)
 		{
-			if (buffer->slice.IsValid())
-			{
-				UniformBufferPool::Get().Release(buffer->slice);
-			}
-			m_value = std::monostate{};
+			return;
 		}
+		glNamedBufferSubData(buffer->bufferId, buffer->offset,
+			std::min(p_size, buffer->size), p_data);
 	}
 }
