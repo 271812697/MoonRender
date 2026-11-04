@@ -1,4 +1,6 @@
-﻿#include <array>
+#include <array>
+#include <cstdlib>
+#include <iostream>
 #include <glad/glad.h>
 
 #include <Rendering/HAL/OpenGL/GLShaderProgram.h>
@@ -42,6 +44,74 @@ template<>
 uint32_t Rendering::HAL::GLShaderProgram::GetID() const
 {
 	return m_context.id;
+}
+
+void Rendering::HAL::GLShaderProgramContext::InitializeDescriptorBindings(
+	uint32_t p_programId,
+	const Rendering::Data::DescriptorSetInfo& p_bindings)
+{
+	if (descriptorSlotsInitialized)
+	{
+		return;
+	}
+
+	glUseProgram(p_programId);
+
+	// Filament's rule: walk the sets and assign sequential GL slots per resource namespace.
+	// The shader block bindings / sampler units are set now, so later DescriptorSet::Bind only
+	// has to look the slot up in this map.
+	GLuint bufferSlot = 0;
+	GLuint textureSlot = 0;
+
+	for (uint32_t set = 0; set < p_bindings.size(); ++set)
+	{
+		for (const Rendering::Data::DescriptorSetLayout::Binding& binding : p_bindings[set])
+		{
+			const bool textureKind =
+				binding.kind == Rendering::Data::DescriptorSetLayout::Kind::Texture;
+			const uint32_t slot = textureKind ? textureSlot++ : bufferSlot++;
+			const uint64_t key = (static_cast<uint64_t>(set) << 32) | binding.binding;
+			if (std::getenv("MOON_DEBUG_BINDINGS") != nullptr)
+			{
+				std::cout << "[BindingMap] set " << set << " " << binding.name << " kind "
+					<< static_cast<int>(binding.kind) << " binding " << binding.binding
+					<< " -> slot " << slot << std::endl;
+			}
+
+			if (textureKind)
+			{
+				const GLint location = glGetUniformLocation(p_programId, binding.name.c_str());
+				if (location >= 0)
+				{
+					glUniform1i(location, static_cast<GLint>(slot));
+					descriptorSlots[key] = slot;
+				}
+			}
+			else
+			{
+				const GLuint index = glGetUniformBlockIndex(p_programId, binding.name.c_str());
+				const GLuint resolvedIndex = index != GL_INVALID_INDEX
+					? index
+					: glGetUniformBlockIndex(p_programId, "MaterialParams");
+				if (resolvedIndex != GL_INVALID_INDEX)
+				{
+					glUniformBlockBinding(p_programId, resolvedIndex, slot);
+					descriptorSlots[key] = slot;
+				}
+			}
+		}
+	}
+
+	descriptorSlotsInitialized = true;
+}
+
+uint32_t Rendering::HAL::GLShaderProgramContext::GetDescriptorSlot(
+	uint32_t p_set,
+	uint32_t p_binding) const
+{
+	const uint64_t key = (static_cast<uint64_t>(p_set) << 32) | p_binding;
+	const auto it = descriptorSlots.find(key);
+	return it != descriptorSlots.end() ? it->second : UINT32_MAX;
 }
 
 template<>
@@ -98,6 +168,8 @@ Rendering::Settings::ShaderLinkingResult Rendering::HAL::GLShaderProgram::Link()
 	}
 
 	QueryUniforms();
+	m_context.descriptorSlots.clear();
+	m_context.descriptorSlotsInitialized = false;
 
 	return {
 		.success = true

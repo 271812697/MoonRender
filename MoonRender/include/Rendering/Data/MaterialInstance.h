@@ -88,6 +88,11 @@ namespace Rendering::Data
 			std::optional<const std::string_view> p_pass = std::nullopt,
 			Tools::Utils::OptRef<const Data::FeatureSet> p_override = std::nullopt) const;
 
+		Rendering::HAL::ShaderProgram* BoundProgram() const
+		{
+			return m_programInUse ? &m_programInUse.value() : nullptr;
+		}
+
 		/** Binds the program for p_pass / the drawable's feature set and the instance's parameter
 		 * block. Returns the signatures the renderer uses to skip redundant uploads. */
 		MaterialSignatureSet Bind(
@@ -135,11 +140,11 @@ namespace Rendering::Data
 		 * defaults when a plain instance is created). */
 		Rendering::HAL::TextureHandle* GetTexture(uint32_t p_binding) const
 		{
-			return m_descriptorSet.GetTexture(p_binding);
+			return const_cast<DescriptorSet&>(m_descriptorSet).GetTexture(p_binding);
 		}
 		Rendering::Resources::Texture* GetTextureAsset(uint32_t p_binding) const
 		{
-			return m_descriptorSet.GetTextureAsset(p_binding);
+			return const_cast<DescriptorSet&>(m_descriptorSet).GetTextureAsset(p_binding);
 		}
 		const std::vector<uint8_t>& BufferData() const { return m_uniformData; }
 		uint32_t BufferSize() const { return static_cast<uint32_t>(m_uniformData.size()); }
@@ -218,7 +223,7 @@ namespace Rendering::Data
 
 		void InvalidatePropertySignature();
 
-		void BindParameterBlock();
+		void BindParameterBlock(const Rendering::HAL::ShaderProgram& p_program);
 		void UploadParameterBlock(
 			bool p_uploadStableProperties,
 			bool p_uploadSingleUseProperties,

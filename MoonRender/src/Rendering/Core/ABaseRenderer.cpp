@@ -1,6 +1,8 @@
 #include <functional>
 #include <tracy/Tracy.hpp>
 #include <Rendering/Core/ABaseRenderer.h>
+#include <Rendering/Data/DescriptorSet.h>
+#include <Rendering/Data/ProgramDescriptorBindings.h>
 #include <Rendering/HAL/TextureHandle.h>
 #include <Rendering/Resources/Loaders/TextureLoader.h>
 #include <Rendering/Resources/Loaders/ShaderLoader.h>
@@ -461,6 +463,18 @@ void Rendering::Core::ABaseRenderer::DrawEntity(
 		std::nullopt,
 		m_previousMaterialSignature
 	);
+
+	if (Rendering::HAL::ShaderProgram* program = p_drawable.material->BoundProgram())
+	{
+		if (m_perViewSet != nullptr)
+		{
+			m_perViewSet->Bind(*program, Rendering::Data::kPerViewDescriptorSet);
+		}
+		if (m_perRenderableSet != nullptr)
+		{
+			m_perRenderableSet->Bind(*program, Rendering::Data::kPerRenderableDescriptorSet);
+		}
+	}
 	const bool uploadStableProperties = !m_previousMaterialSignature.has_value() || signature.stablePropertySignature != m_previousMaterialSignature->stablePropertySignature;
 	const bool uploadSingleUseProperties = !m_previousMaterialSignature.has_value() || signature.singleUsePropertySignature != m_previousMaterialSignature->singleUsePropertySignature;
 

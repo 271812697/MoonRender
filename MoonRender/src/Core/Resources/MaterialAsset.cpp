@@ -123,7 +123,7 @@ void Core::Resources::MaterialAsset::OnSerialize(tinyxml2::XMLDocument& p_doc, t
 	tinyxml2::XMLNode* uniformsNode = p_doc.NewElement("uniforms");
 	p_node->InsertEndChild(uniformsNode);
 
-	if (GetShader() == nullptr || GetShader()->GetVariants().empty())
+	if (GetShader() == nullptr || GetShader()->GetParameters().empty())
 	{
 		return;
 	}

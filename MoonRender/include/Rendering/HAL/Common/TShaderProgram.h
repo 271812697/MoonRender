@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <unordered_map>
 
 #include <Maths/FMatrix3.h>
@@ -8,6 +8,7 @@
 #include <Maths/FVector4.h>
 
 #include <Rendering/HAL/ShaderStage.h>
+#include <Rendering/Data/ProgramDescriptorBindings.h>
 #include <Rendering/Settings/EGraphicsBackend.h>
 #include <Rendering/Settings/UniformInfo.h>
 #include <Rendering/Settings/ShaderLinkingResult.h>
@@ -107,6 +108,20 @@ namespace Rendering::HAL
 		* Queries the uniforms from the program and caches them in memory.
 		*/
 		void QueryUniforms();
+
+		/** Lazily assigns descriptor slots and tells the shader which slot each block/sampler
+		 * uses. Called the first time a variant is bound with its material layout. */
+		void InitializeDescriptorBindings(const Rendering::Data::DescriptorSetInfo& p_bindings)
+		{
+			m_context.InitializeDescriptorBindings(m_context.id, p_bindings);
+		}
+
+		bool HasDescriptorBindings() const { return m_context.descriptorSlotsInitialized; }
+
+		uint32_t GetDescriptorSlot(uint32_t p_set, uint32_t p_binding) const
+		{
+			return m_context.GetDescriptorSlot(p_set, p_binding);
+		}
 
 		/**
 		* Returns the uniforms associated with this program.

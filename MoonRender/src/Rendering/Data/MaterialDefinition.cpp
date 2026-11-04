@@ -1,6 +1,7 @@
 #include <Rendering/Data/MaterialDefinition.h>
 
 #include <map>
+#include <algorithm>
 #include <utility>
 
 #include <Rendering/Data/MaterialParser.h>
@@ -159,6 +160,54 @@ namespace Rendering::Data
 			}
 		}
 
+		// Normalize the per-material set: UBO at binding 0 and samplers at 1..N. The package's
+		// original GLSL bindings are irrelevant once the program binding map assigns slots; a
+		// set cannot have two descriptors at the same array index.
+		{
+			DescriptorSetLayout normalized;
+			if (definition->m_parameterBlockSize > 0)
+			{
+				normalized.Add("MaterialParams", DescriptorSetLayout::Kind::UniformBuffer, 0);
+			}
+			uint32_t samplerBinding = 1;
+			for (SamplerField& field : definition->m_samplerFields)
+			{
+				field.binding = samplerBinding;
+				normalized.Add(field.name, DescriptorSetLayout::Kind::Texture, samplerBinding++);
+			}
+			definition->m_layout = std::move(normalized);
+
+			// Keep the parameter table's sampler bindings in sync with the normalized set.
+			for (Parameter& parameter : definition->m_parameters)
+			{
+				if (!parameter.isSampler)
+				{
+					continue;
+				}
+				const auto sampler = std::ranges::find_if(definition->m_samplerFields,
+					[&](const SamplerField& p_field) { return p_field.name == parameter.name; });
+				if (sampler != definition->m_samplerFields.end())
+				{
+					parameter.binding = sampler->binding;
+				}
+			}
+		}
+
+		// The complete shader-side binding table (filament's Program::DescriptorSetInfo). Sets
+		// 0 and 1 are the engine's fixed per-view / per-renderable blocks; set 2 is the material
+		// reflection built above.
+		definition->m_programBindings[0] = {
+			{ "EngineUBO", DescriptorSetLayout::Kind::UniformBuffer,
+				Rendering::Settings::kEngineUBOBinding },
+			{ "ReflectionUBO", DescriptorSetLayout::Kind::UniformBuffer,
+				Rendering::Settings::kReflectionUBOBinding },
+		};
+		definition->m_programBindings[1] = {
+			{ "ObjectUBO", DescriptorSetLayout::Kind::UniformBuffer,
+				Rendering::Settings::kObjectUBOBinding },
+		};
+		definition->m_programBindings[2] = definition->m_layout.Bindings();
+
 		return definition;
 	}
 
@@ -203,6 +252,18 @@ namespace Rendering::Data
 			definition->m_layout.Add("MaterialParams", DescriptorSetLayout::Kind::UniformBuffer,
 				Rendering::Settings::kMaterialParameterBinding);
 		}
+
+		definition->m_programBindings[0] = {
+			{ "EngineUBO", DescriptorSetLayout::Kind::UniformBuffer,
+				Rendering::Settings::kEngineUBOBinding },
+			{ "ReflectionUBO", DescriptorSetLayout::Kind::UniformBuffer,
+				Rendering::Settings::kReflectionUBOBinding },
+		};
+		definition->m_programBindings[1] = {
+			{ "ObjectUBO", DescriptorSetLayout::Kind::UniformBuffer,
+				Rendering::Settings::kObjectUBOBinding },
+		};
+		definition->m_programBindings[2] = definition->m_layout.Bindings();
 
 		return definition;
 	}

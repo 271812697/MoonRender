@@ -1,6 +1,8 @@
-#include <algorithm>
-
 #include <Rendering/Data/DescriptorSet.h>
+
+#include <cstdlib>
+#include <iostream>
+#include <limits>
 
 namespace Rendering::Data
 {
@@ -14,57 +16,26 @@ namespace Rendering::Data
 		m_layout = p_layout;
 	}
 
-	Descriptor* DescriptorSet::FindBufferMutable(
-		uint32_t p_binding,
-		Descriptor::BufferType p_type)
-	{
-		for (Descriptor& descriptor : m_descriptors)
-		{
-			if (const Descriptor::BufferInfo* buffer = descriptor.GetBuffer();
-				buffer != nullptr && buffer->binding == p_binding && buffer->type == p_type)
-			{
-				return &descriptor;
-			}
-		}
-		return nullptr;
-	}
-
-	Descriptor* DescriptorSet::FindTextureMutable(uint32_t p_binding)
-	{
-		for (Descriptor& descriptor : m_descriptors)
-		{
-			if (const Descriptor::TextureInfo* texture = descriptor.GetTexture();
-				texture != nullptr && texture->binding == p_binding)
-			{
-				return &descriptor;
-			}
-		}
-		return nullptr;
-	}
-
 	bool DescriptorSet::SetBuffer(
-		Descriptor::BufferType p_type,
 		uint32_t p_binding,
+		Descriptor::BufferType p_type,
 		uint32_t p_bufferId,
 		uint32_t p_offset,
 		uint32_t p_size)
 	{
-		if (m_layout != nullptr && p_type == Descriptor::BufferType::Uniform
-			&& !m_layout->Validate(DescriptorSetLayout::Kind::UniformBuffer, p_binding))
+		if (m_layout != nullptr
+			&& !m_layout->Validate(DescriptorSetLayout::Kind::UniformBuffer, p_binding)
+			&& !m_layout->Validate(DescriptorSetLayout::Kind::StorageBuffer, p_binding))
 		{
 			return false;
 		}
 
-		Descriptor* existing = FindBufferMutable(p_binding, p_type);
-		if (existing != nullptr)
+		if (p_binding >= m_descriptors.size())
 		{
-			*existing = Descriptor::MakeBuffer(p_type, p_binding, p_bufferId, p_offset, p_size);
+			m_descriptors.resize(p_binding + 1);
 		}
-		else
-		{
-			m_descriptors.push_back(
-				Descriptor::MakeBuffer(p_type, p_binding, p_bufferId, p_offset, p_size));
-		}
+		m_descriptors[p_binding] =
+			Descriptor::MakeBuffer(p_type, p_bufferId, p_offset, p_size);
 		return true;
 	}
 
@@ -79,27 +50,13 @@ namespace Rendering::Data
 			return false;
 		}
 
-		Descriptor* existing = FindTextureMutable(p_binding);
-		if (p_texture == nullptr)
+		if (p_binding >= m_descriptors.size())
 		{
-			if (existing != nullptr)
-			{
-				m_descriptors.erase(std::remove_if(m_descriptors.begin(), m_descriptors.end(),
-					[p_binding](const Descriptor& p_descriptor) {
-						const Descriptor::TextureInfo* texture = p_descriptor.GetTexture();
-						return texture != nullptr && texture->binding == p_binding;
-					}), m_descriptors.end());
-			}
+			m_descriptors.resize(p_binding + 1);
 		}
-		else if (existing != nullptr)
-		{
-			*existing = Descriptor::MakeTexture(p_binding, p_texture, p_asset);
-		}
-		else
-		{
-			m_descriptors.push_back(
-				Descriptor::MakeTexture(p_binding, p_texture, p_asset));
-		}
+		m_descriptors[p_binding] = p_texture != nullptr
+			? Descriptor::MakeTexture(p_texture, p_asset)
+			: Descriptor{};
 		return true;
 	}
 
@@ -107,28 +64,22 @@ namespace Rendering::Data
 		uint32_t p_binding,
 		Descriptor::BufferType p_type) const
 	{
-		for (const Descriptor& descriptor : m_descriptors)
+		if (p_binding >= m_descriptors.size())
 		{
-			if (const Descriptor::BufferInfo* buffer = descriptor.GetBuffer();
-				buffer != nullptr && buffer->binding == p_binding && buffer->type == p_type)
-			{
-				return &descriptor;
-			}
+			return nullptr;
 		}
-		return nullptr;
+		const Descriptor& descriptor = m_descriptors[p_binding];
+		return descriptor.IsBuffer() && descriptor.GetBufferType() == p_type
+			? &descriptor : nullptr;
 	}
 
 	const Descriptor* DescriptorSet::FindTexture(uint32_t p_binding) const
 	{
-		for (const Descriptor& descriptor : m_descriptors)
+		if (p_binding >= m_descriptors.size() || !m_descriptors[p_binding].IsTexture())
 		{
-			if (const Descriptor::TextureInfo* texture = descriptor.GetTexture();
-				texture != nullptr && texture->binding == p_binding)
-			{
-				return &descriptor;
-			}
+			return nullptr;
 		}
-		return nullptr;
+		return &m_descriptors[p_binding];
 	}
 
 	Rendering::HAL::TextureHandle* DescriptorSet::GetTexture(uint32_t p_binding) const
@@ -153,20 +104,38 @@ namespace Rendering::Data
 		const void* p_data,
 		uint32_t p_size)
 	{
-		Descriptor* descriptor = FindBufferMutable(p_binding, p_type);
-		if (descriptor != nullptr)
+		if (p_binding >= m_descriptors.size())
 		{
-			descriptor->Upload(p_data, p_size);
+			return;
+		}
+		Descriptor& descriptor = m_descriptors[p_binding];
+		if (descriptor.IsBuffer() && descriptor.GetBufferType() == p_type)
+		{
+			descriptor.Upload(p_data, p_size);
 		}
 	}
 
-	void DescriptorSet::Bind() const
+	void DescriptorSet::Bind(
+		const Rendering::HAL::ShaderProgram& p_program,
+		uint32_t p_set) const
 	{
-		for (const Descriptor& descriptor : m_descriptors)
+		for (uint32_t binding = 0; binding < m_descriptors.size(); ++binding)
 		{
-			if (descriptor.IsValid())
+			const Descriptor& descriptor = m_descriptors[binding];
+			if (!descriptor.IsValid())
 			{
-				descriptor.Bind();
+				continue;
+			}
+			const uint32_t slot = p_program.GetDescriptorSlot(p_set, binding);
+			if (slot != std::numeric_limits<uint32_t>::max())
+			{
+				if (std::getenv("MOON_DEBUG_BINDINGS") != nullptr)
+				{
+					std::cout << "[DescriptorSet] set " << p_set << " binding " << binding
+						<< " -> slot " << slot << " ("
+						<< (descriptor.IsBuffer() ? "buffer" : "texture") << ")" << std::endl;
+				}
+				descriptor.Bind(slot);
 			}
 		}
 	}

@@ -24,7 +24,7 @@ namespace Moon::Matc
 
 	struct UboBlockInfo
 	{
-		std::string name = "UboMaterial";
+		std::string name = "MaterialParams";
 		uint32_t size = 0;     // the block's std140 size, what the runtime allocates
 		std::vector<UniformInfo> uniforms;
 	};

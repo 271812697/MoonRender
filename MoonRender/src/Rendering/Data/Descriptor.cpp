@@ -8,24 +8,21 @@ namespace Rendering::Data
 {
 	Descriptor Descriptor::MakeBuffer(
 		BufferType p_type,
-		uint32_t p_binding,
 		uint32_t p_bufferId,
 		uint32_t p_offset,
 		uint32_t p_size)
 	{
 		Descriptor descriptor;
-		descriptor.m_value = BufferInfo{
-			p_binding, p_bufferId, p_offset, p_size, p_type };
+		descriptor.m_value = BufferInfo{ p_bufferId, p_offset, p_size, p_type };
 		return descriptor;
 	}
 
 	Descriptor Descriptor::MakeTexture(
-		uint32_t p_binding,
 		Rendering::HAL::TextureHandle* p_handle,
 		Rendering::Resources::Texture* p_asset)
 	{
 		Descriptor descriptor;
-		descriptor.m_value = TextureInfo{ p_binding, p_handle, p_asset };
+		descriptor.m_value = TextureInfo{ p_handle, p_asset };
 		return descriptor;
 	}
 
@@ -52,32 +49,19 @@ namespace Rendering::Data
 		return std::get_if<TextureInfo>(&m_value);
 	}
 
-	uint32_t Descriptor::Binding() const
-	{
-		if (const BufferInfo* buffer = GetBuffer())
-		{
-			return buffer->binding;
-		}
-		if (const TextureInfo* texture = GetTexture())
-		{
-			return texture->binding;
-		}
-		return 0;
-	}
-
 	Descriptor::BufferType Descriptor::GetBufferType() const
 	{
 		const BufferInfo* buffer = GetBuffer();
 		return buffer != nullptr ? buffer->type : BufferType::Uniform;
 	}
 
-	void Descriptor::Bind() const
+	void Descriptor::Bind(uint32_t p_slot) const
 	{
 		if (const BufferInfo* buffer = GetBuffer())
 		{
 			const GLenum target = buffer->type == BufferType::ShaderStorage
 				? GL_SHADER_STORAGE_BUFFER : GL_UNIFORM_BUFFER;
-			glBindBufferRange(target, buffer->binding, buffer->bufferId,
+			glBindBufferRange(target, p_slot, buffer->bufferId,
 				buffer->offset, buffer->size);
 			return;
 		}
@@ -91,7 +75,7 @@ namespace Rendering::Data
 				&& texture->handle->GetID() != 0
 				&& glIsTexture(texture->handle->GetID()))
 			{
-				texture->handle->Bind(texture->binding);
+				texture->handle->Bind(p_slot);
 			}
 		}
 	}

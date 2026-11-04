@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <chrono>
 #include <map>
 #include <memory>
@@ -6,6 +6,8 @@
 #include <Rendering/Features/ARenderFeature.h>
 #include <Rendering/HAL/UniformBuffer.h>
 #include <Rendering/Data/UniformBufferPool.h>
+#include <Rendering/Data/DescriptorSet.h>
+#include <Rendering/Data/DescriptorSetLayout.h>
 #include <Rendering/Entities/Camera.h>
 
 namespace Core::Rendering
@@ -44,6 +46,13 @@ namespace Core::Rendering
 		/** The per-renderable block: a range of the shared uniform buffer, rewritten before
 		 * every drawable and bound to kObjectUBOBinding. */
 		::Rendering::Data::UniformBufferPool::Slice m_objectSlice;
+
+		/** The engine-owned descriptor sets: set 0 per view, set 1 per renderable. Their
+		 * layouts are fixed; the buffers are updated each frame/draw. */
+		::Rendering::Data::DescriptorSetLayout m_perViewLayout;
+		::Rendering::Data::DescriptorSetLayout m_perRenderableLayout;
+		::Rendering::Data::DescriptorSet m_perViewSet;
+		::Rendering::Data::DescriptorSet m_perRenderableSet;
 
 		LateUboData* m_LateUboData;
 	};

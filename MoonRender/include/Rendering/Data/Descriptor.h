@@ -35,7 +35,6 @@ namespace Rendering::Data
 
 		struct BufferInfo
 		{
-			uint32_t binding = 0;
 			uint32_t bufferId = 0;   // GL buffer name
 			uint32_t offset = 0;
 			uint32_t size = 0;
@@ -44,7 +43,6 @@ namespace Rendering::Data
 
 		struct TextureInfo
 		{
-			uint32_t binding = 0;
 			Rendering::HAL::TextureHandle* handle = nullptr;
 			/** The serializable asset behind the handle, when there is one (a .mat stores a
 			 * path, not a GL name). Null for view-owned textures (DFG LUT, shadows, IBL). */
@@ -59,12 +57,10 @@ namespace Rendering::Data
 
 		static Descriptor MakeBuffer(
 			BufferType p_type,
-			uint32_t p_binding,
 			uint32_t p_bufferId,
 			uint32_t p_offset,
 			uint32_t p_size);
 		static Descriptor MakeTexture(
-			uint32_t p_binding,
 			Rendering::HAL::TextureHandle* p_handle,
 			Rendering::Resources::Texture* p_asset = nullptr);
 
@@ -76,11 +72,10 @@ namespace Rendering::Data
 		const BufferInfo* GetBuffer() const;
 		const TextureInfo* GetTexture() const;
 
-		uint32_t Binding() const;
 		Descriptor::BufferType GetBufferType() const;
 
-		/** Binds the wrapped resource at its own binding point. */
-		void Bind() const;
+		/** Binds the wrapped resource at p_slot (the descriptor array index). */
+		void Bind(uint32_t p_slot) const;
 
 		/** Uploads CPU bytes into the buffer range (glNamedBufferSubData). */
 		void Upload(const void* p_data, uint32_t p_size) const;

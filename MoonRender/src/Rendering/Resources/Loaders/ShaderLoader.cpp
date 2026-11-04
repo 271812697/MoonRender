@@ -1079,7 +1079,7 @@ namespace Rendering::Resources::Loaders
 					const auto definition = Rendering::Data::MaterialDefinition::FromParser(parser);
 					Shader* shader = Rendering::Data::MaterialBuilder::BuildMaterial(
 						p_filePath, definition,
-						AssembleFromPackage(*parser)).release();
+						Rendering::Data::Material::Variants{}).release();
 					shader->SetDeclaredFeatures(std::vector<std::string>(
 						definition->DeclaredFeatures().begin(), definition->DeclaredFeatures().end()));
 					return shader;
@@ -1198,5 +1198,70 @@ namespace Rendering::Resources::Loaders
 		}
 
 		return false;
+	}
+
+	std::shared_ptr<Rendering::HAL::ShaderProgram> ShaderLoader::CompileVariant(
+		const Rendering::Data::MaterialParser& p_package,
+		const Rendering::Data::MaterialParser::Variant& p_variant,
+		std::string* p_error)
+	{
+		using Stage = Rendering::Data::MaterialParser::Stage;
+
+		struct StageSpec
+		{
+			Stage stage;
+			Rendering::Settings::EShaderType type;
+			const char* name;
+			bool optional;
+		};
+		static constexpr StageSpec kStages[] = {
+			{ Stage::Vertex,   Rendering::Settings::EShaderType::VERTEX,   "vertex",   false },
+			{ Stage::Fragment, Rendering::Settings::EShaderType::FRAGMENT, "fragment", false },
+			{ Stage::Geometry, Rendering::Settings::EShaderType::GEOMETRY, "geometry", true },
+		};
+
+		std::vector<std::shared_ptr<Rendering::HAL::ShaderStage>> stages;
+		for (const StageSpec& spec : kStages)
+		{
+			std::string source = p_package.Source(p_variant, spec.stage);
+			if (source.empty())
+			{
+				if (spec.optional) { continue; }
+				if (p_error != nullptr)
+				{
+					*p_error = std::format("{}<{}> (pass '{}'): no source",
+						p_package.Name(), spec.name, p_variant.pass);
+				}
+				return nullptr;
+			}
+
+			auto stage = std::make_shared<Rendering::HAL::ShaderStage>(spec.type);
+			stage->Upload(std::move(source));
+			if (const auto result = stage->Compile(); !result.success)
+			{
+				if (p_error != nullptr)
+				{
+					*p_error = std::format("{}<{}> (pass '{}'): {}",
+						p_package.Name(), spec.name, p_variant.pass, result.message);
+				}
+				return nullptr;
+			}
+			stages.push_back(std::move(stage));
+		}
+
+		auto program = std::make_shared<Rendering::HAL::ShaderProgram>();
+		for (const auto& stage : stages) { program->Attach(*stage); }
+		const auto linkResult = program->Link();
+		for (const auto& stage : stages) { program->Detach(*stage); }
+		if (!linkResult.success)
+		{
+			if (p_error != nullptr)
+			{
+				*p_error = std::format("{} (pass '{}'): {}",
+					p_package.Name(), p_variant.pass, linkResult.message);
+			}
+			return nullptr;
+		}
+		return program;
 	}
 }

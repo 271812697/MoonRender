@@ -8,6 +8,8 @@
 
 #include <Rendering/Data/Material.h>
 #include <Rendering/Data/MaterialBuilder.h>
+#include <Rendering/Data/MaterialParser.h>
+#include <Rendering/Resources/Loaders/ShaderLoader.h>
 
 // ---- Material: the package material, its definition and variant program cache -----------------
 
@@ -31,6 +33,28 @@ Rendering::Data::Material::Material(
 	path = std::move(p_path);
 	m_definition = std::move(p_definition);
 	SetVariants(std::move(p_variants));
+
+	// A package material starts with no compiled programs; its passes/features still come from
+	// the parser so feature queries work before the first variant is used.
+	if (m_variants.empty() && m_definition != nullptr && m_definition->Parser() != nullptr)
+	{
+		for (const MaterialParser::Variant& variant : m_definition->Parser()->Variants())
+		{
+			m_passes.insert(variant.pass);
+			for (const std::string& feature : variant.features)
+			{
+				if (feature.starts_with("VARIANT_"))
+				{
+					m_usesVariantKeys = true;
+					m_variantKeys.insert(feature);
+				}
+				else
+				{
+					m_features.insert(feature);
+				}
+			}
+		}
+	}
 }
 
 Rendering::Data::Material::~Material() = default;
@@ -100,49 +124,124 @@ Rendering::HAL::ShaderProgram& Rendering::Data::Material::GetVariant(
 	std::optional<const std::string_view> p_pass,
 	const Data::FeatureSet& p_featureSet)
 {
-	const std::string pass = std::string{ p_pass.value_or("") };
+	const MaterialParser* parser =
+		m_definition != nullptr ? m_definition->Parser() : nullptr;
+	std::string pass = std::string{ p_pass.value_or("") };
+
+	if (m_variants.empty() && parser != nullptr && !parser->Variants().empty())
+	{
+		pass = p_pass.has_value() ? pass : parser->Variants().front().pass;
+	}
 
 	auto passIt = m_variants.find(pass);
-	if (passIt == m_variants.end() || passIt->second.empty())
+	if (passIt == m_variants.end() && parser != nullptr)
+	{
+		// A package material compiles its variants lazily: the pass entry exists as soon as
+		// the first feature combination for it is requested.
+		passIt = m_variants.emplace(pass, FeatureVariants{}).first;
+	}
+	if (passIt == m_variants.end())
 	{
 		passIt = m_variants.begin();
 	}
-	if (passIt == m_variants.end() || passIt->second.empty())
+	if (passIt == m_variants.end())
 	{
 		throw std::runtime_error("material has no variant");
 	}
 
 	auto& variants = passIt->second;
 	auto it = variants.find(p_featureSet);
-	if (it == variants.end())
+	if (it != variants.end())
 	{
+		return *it->second;
+	}
+
+	if (parser != nullptr)
+	{
+		const MaterialParser::Variant* chosen = nullptr;
 		size_t bestCommon = 0;
 		size_t bestExtra = static_cast<size_t>(-1);
-		for (auto candidate = variants.begin(); candidate != variants.end(); ++candidate)
+		for (const MaterialParser::Variant& candidate : parser->Variants())
 		{
+			if (candidate.pass != passIt->first)
+			{
+				continue;
+			}
 			size_t common = 0;
-			for (const std::string& feature : candidate->first)
+			for (const std::string& feature : candidate.features)
 			{
 				if (p_featureSet.contains(feature)) { ++common; }
 			}
-			const size_t extra = candidate->first.size() - common;
-			if (common > bestCommon || (common == bestCommon && extra < bestExtra))
+			const size_t extra = candidate.features.size() - common;
+			if (chosen == nullptr || common > bestCommon
+				|| (common == bestCommon && extra < bestExtra))
 			{
+				chosen = &candidate;
 				bestCommon = common;
 				bestExtra = extra;
-				it = candidate;
 			}
 		}
 
-		static std::set<std::string> reported;
-		std::string requestKey = path + "|" + pass;
-		for (const std::string& feature : p_featureSet) { requestKey += "|" + feature; }
-		if (reported.insert(std::move(requestKey)).second)
+		if (chosen == nullptr)
 		{
-			std::cout << "[Material] " << path << " has no variant for pass " << pass
-				<< " with " << p_featureSet.size() << " feature(s); using the closest one ("
-				<< bestCommon << " match(es), " << bestExtra << " extra)." << std::endl;
+			// The requested pass may not exist in this package (a fallback draw path). Use the
+			// closest variant of any pass rather than failing the draw.
+			for (const MaterialParser::Variant& candidate : parser->Variants())
+			{
+				if (chosen == nullptr || candidate.features.size() < chosen->features.size())
+				{
+					chosen = &candidate;
+				}
+			}
 		}
+
+		if (chosen != nullptr)
+		{
+			std::string error;
+			auto program = Rendering::Resources::Loaders::ShaderLoader::CompileVariant(
+				*parser, *chosen, &error);
+			if (program == nullptr)
+			{
+				std::cerr << "[Material] " << path << ": " << error << std::endl;
+				throw std::runtime_error("material variant failed to compile");
+			}
+			variants.emplace(p_featureSet, std::move(program));
+			return *variants[p_featureSet];
+		}
+	}
+
+	// Source-built material with a precompiled table: fall back to the closest program.
+	size_t bestCommon = 0;
+	size_t bestExtra = static_cast<size_t>(-1);
+	for (auto candidate = variants.begin(); candidate != variants.end(); ++candidate)
+	{
+		size_t common = 0;
+		for (const std::string& feature : candidate->first)
+		{
+			if (p_featureSet.contains(feature)) { ++common; }
+		}
+		const size_t extra = candidate->first.size() - common;
+		if (common > bestCommon || (common == bestCommon && extra < bestExtra))
+		{
+			bestCommon = common;
+			bestExtra = extra;
+			it = candidate;
+		}
+	}
+
+	if (it == variants.end())
+	{
+		throw std::runtime_error("material has no variant");
+	}
+
+	static std::set<std::string> reported;
+	std::string requestKey = path + "|" + pass;
+	for (const std::string& feature : p_featureSet) { requestKey += "|" + feature; }
+	if (reported.insert(std::move(requestKey)).second)
+	{
+		std::cout << "[Material] " << path << " has no variant for pass " << pass
+			<< " with " << p_featureSet.size() << " feature(s); using the closest one ("
+			<< bestCommon << " match(es), " << bestExtra << " extra)." << std::endl;
 	}
 
 	return *it->second;

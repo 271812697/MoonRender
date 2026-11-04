@@ -45,6 +45,19 @@ Core::Rendering::EngineBufferRenderFeature::EngineBufferRenderFeature(
 		};
 		m_reflectionBuffer->Upload(&reflection);
 	}
+	m_perViewLayout.Add("EngineUBO", ::Rendering::Data::DescriptorSetLayout::Kind::UniformBuffer,
+		::Rendering::Settings::kEngineUBOBinding);
+	m_perViewLayout.Add("ReflectionUBO", ::Rendering::Data::DescriptorSetLayout::Kind::UniformBuffer,
+		::Rendering::Settings::kReflectionUBOBinding);
+	m_perRenderableLayout.Add("ObjectUBO",
+		::Rendering::Data::DescriptorSetLayout::Kind::UniformBuffer,
+		::Rendering::Settings::kObjectUBOBinding);
+
+	m_perViewSet.SetLayout(&m_perViewLayout);
+	m_perRenderableSet.SetLayout(&m_perRenderableLayout);
+
+	p_renderer.SetEngineDescriptorSets(&m_perViewSet, &m_perRenderableSet);
+
 	m_startTime = std::chrono::high_resolution_clock::now();
 	m_LateUboData = new LateUboData();
 }
@@ -57,6 +70,8 @@ Core::Rendering::EngineBufferRenderFeature::~EngineBufferRenderFeature()
 		::Rendering::Data::UniformBufferPool::Get().Release(m_objectSlice);
 		m_objectSlice = {};
 	}
+
+	m_renderer.SetEngineDescriptorSets(nullptr, nullptr);
 
 	if (m_LateUboData) {
 		delete m_LateUboData;
@@ -170,15 +185,18 @@ void Core::Rendering::EngineBufferRenderFeature::OnBeginFrame(const ::Rendering:
 	m_engineBuffer->Upload(&enableClip, ::Rendering::HAL::BufferMemoryRange{
 		.offset = offsetof(EngineUBO, ubo_enableClip), .size = sizeof(enableClip) });
 
-	m_engineBuffer->Bind(kEngineUBOBinding);
-	// The IBL shaders read the reflection probe block even when no probe exists: an unbound
-	// block reads as zero, and a zero brightness would switch environment lighting off.
-	m_reflectionBuffer->Bind(kReflectionUBOBinding);
+	m_perViewSet.SetBuffer(::Rendering::Settings::kEngineUBOBinding,
+		::Rendering::Data::Descriptor::BufferType::Uniform,
+		m_engineBuffer->GetID(), 0, static_cast<uint32_t>(m_engineBuffer->GetSize()));
+	m_perViewSet.SetBuffer(::Rendering::Settings::kReflectionUBOBinding,
+		::Rendering::Data::Descriptor::BufferType::Uniform,
+		m_reflectionBuffer->GetID(), 0, static_cast<uint32_t>(m_reflectionBuffer->GetSize()));
+
 }
 
 void Core::Rendering::EngineBufferRenderFeature::OnEndFrame()
 {
-	m_engineBuffer->Unbind();
+	// The per-view set owns the bindings now; nothing to unbind here.
 }
 
 void Core::Rendering::EngineBufferRenderFeature::OnBeforeDraw(::Rendering::Data::PipelineState& p_pso, const ::Rendering::Entities::Drawable& p_drawable)
@@ -204,6 +222,8 @@ void Core::Rendering::EngineBufferRenderFeature::OnBeforeDraw(::Rendering::Data:
 
 		auto& pool = ::Rendering::Data::UniformBufferPool::Get();
 		pool.Write(m_objectSlice, &object);
-		pool.Bind(m_objectSlice, kObjectUBOBinding);
+		m_perRenderableSet.SetBuffer(::Rendering::Settings::kObjectUBOBinding,
+			::Rendering::Data::Descriptor::BufferType::Uniform, pool.GetBufferId(),
+			m_objectSlice.offset, m_objectSlice.size);
 	}
 }

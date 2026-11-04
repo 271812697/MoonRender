@@ -6,6 +6,7 @@
 #include <vector>
 
 #include <Rendering/Data/DescriptorSetLayout.h>
+#include <Rendering/Data/ProgramDescriptorBindings.h>
 #include <Rendering/Settings/EBlendMode.h>
 
 /** The immutable data a material is made of: what the material package described, with no GL
@@ -103,6 +104,7 @@ namespace Rendering::Data
 		const std::vector<UniformField>& UniformFields() const { return m_uniformFields; }
 		const std::vector<SamplerField>& SamplerFields() const { return m_samplerFields; }
 		const DescriptorSetLayout& Layout() const { return m_layout; }
+		const DescriptorSetInfo& ProgramBindings() const { return m_programBindings; }
 		uint32_t ParameterBlockSize() const { return m_parameterBlockSize; }
 		const State& GetState() const { return m_state; }
 		bool HasState() const { return m_hasState; }
@@ -125,6 +127,7 @@ namespace Rendering::Data
 		std::vector<UniformField> m_uniformFields;
 		std::vector<SamplerField> m_samplerFields;
 		DescriptorSetLayout m_layout;
+		DescriptorSetInfo m_programBindings;
 		State m_state;
 		uint32_t m_parameterBlockSize = 0;
 		bool m_hasState = false;

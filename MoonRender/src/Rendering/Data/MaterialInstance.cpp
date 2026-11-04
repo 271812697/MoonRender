@@ -5,6 +5,7 @@
 #include <cstring>
 #include <format>
 #include <iostream>
+#include <limits>
 #include <ranges>
 #include <set>
 #include <string_view>
@@ -719,10 +720,15 @@ Tools::Utils::OptRef<Rendering::HAL::ShaderProgram> Rendering::Data::MaterialIns
 {
 	if (ShaderOf() != nullptr)
 	{
-		return ShaderOf()->GetVariant(
+		auto& program = ShaderOf()->GetVariant(
 			p_pass,
 			p_override.value_or(FeaturesOf())
 		);
+		if (Definition() != nullptr)
+		{
+			program.InitializeDescriptorBindings(Definition()->ProgramBindings());
+		}
+		return program;
 	}
 
 	return std::nullopt;
@@ -907,10 +913,8 @@ void Rendering::Data::MaterialInstance::EnsureDescriptorSet() const
 	DescriptorSet& set = const_cast<DescriptorSet&>(m_descriptorSet);
 	MaterialInstance& self = *const_cast<MaterialInstance*>(this);
 
-	// The layout is the definition's, not the instance's: every instance of a material fills
-	// the same slots, and the set validates each texture against it. A hot reload can replace
-	// the definition (and its layout) while an instance is alive, so a changed layout starts
-	// the set over.
+	// The layout is the definition's, not the instance's. A hot reload that changes the
+	// layout starts the set over.
 	if (set.Layout() != &definition->Layout())
 	{
 		self.ReleaseDescriptorSet();
@@ -933,8 +937,11 @@ void Rendering::Data::MaterialInstance::EnsureDescriptorSet() const
 				pool.Release(m_uniformSlice);
 			}
 			m_uniformSlice = pool.Acquire(blockSize);
-			set.SetBuffer(Descriptor::BufferType::Uniform, kMaterialParameterBinding,
-				pool.GetBufferId(), m_uniformSlice.offset, m_uniformSlice.size);
+			const DescriptorSetLayout::Binding* uniform =
+				definition->Layout().Find("MaterialParams");
+			set.SetBuffer(uniform != nullptr ? uniform->binding : 0,
+				Descriptor::BufferType::Uniform, pool.GetBufferId(),
+				m_uniformSlice.offset, m_uniformSlice.size);
 		}
 	}
 	else
@@ -965,15 +972,15 @@ void Rendering::Data::MaterialInstance::ReleaseDescriptorSet()
 	m_descriptorSet.Release();
 }
 
-
-void Rendering::Data::MaterialInstance::BindParameterBlock()
+void Rendering::Data::MaterialInstance::BindParameterBlock(
+	const Rendering::HAL::ShaderProgram& p_program)
 {
 	EnsureDescriptorSet();
 	MergeDefaults();
 
-	// One bind for the block and every sampler: the layout is the single source of truth for
-	// where they go, and a texture another material bound to one of our units is replaced.
-	m_descriptorSet.Bind();
+	// Per-material descriptor set (filament's PER_MATERIAL): the array is indexed by the
+	// normalized binding point, and the program's binding map says which GL slot it got.
+	m_descriptorSet.Bind(p_program, kPerMaterialDescriptorSet);
 }
 
 
@@ -1163,7 +1170,10 @@ void Rendering::Data::MaterialInstance::UploadParameterBlock(
 	if (definition->ParameterBlockSize() > 0 && m_uniformSlice.IsValid()
 		&& m_uniformData.size() >= definition->ParameterBlockSize())
 	{
-		m_descriptorSet.UploadBuffer(kMaterialParameterBinding,
+		const DescriptorSetLayout::Binding* uniform =
+			definition->Layout().Find("MaterialParams");
+		m_descriptorSet.UploadBuffer(
+			uniform != nullptr ? uniform->binding : 0,
 			Descriptor::BufferType::Uniform, m_uniformData.data(),
 			definition->ParameterBlockSize());
 		UniformBufferPool::Get().StoreCPU(m_uniformSlice, m_uniformData.data());
@@ -1227,8 +1237,6 @@ void Rendering::Data::MaterialInstance::UploadParameterBlock(
 		}
 	}
 
-	m_descriptorSet.Bind();
-
 	// Single-use values went to the GPU above; put the CPU side back to the default so the
 	// next draw that does not set them does not inherit this frame's scratch values.
 	ResetSingleUseProperties();
@@ -1251,7 +1259,10 @@ void Rendering::Data::MaterialInstance::BindGlobalTexture(const std::string& p_n
 		// material's own upload recorded for this slot.
 		m_descriptorSet.SetTexture(field->binding, p_texture);
 		m_overriddenSamplers.insert(field->binding);
-		m_descriptorSet.Bind();
+		if (m_programInUse)
+		{
+			m_descriptorSet.Bind(m_programInUse.value(), kPerMaterialDescriptorSet);
+		}
 
 		// MOON_DEBUG_SAMPLERS also reports the per-draw bindings: the ones in UploadParameterBlock
 		// happen once (and may have run before the sky pass baked the environment), while these
@@ -1393,6 +1404,10 @@ Rendering::Data::MaterialSignatureSet Rendering::Data::MaterialInstance::Bind(
 		p_pass,
 		p_featureSetOverride.value_or(FeaturesOf())
 	);
+	if (Definition() != nullptr)
+	{
+		program.InitializeDescriptorBindings(Definition()->ProgramBindings());
+	}
 
 	const auto signature = CalculateSignature(
 		program,
@@ -1412,7 +1427,7 @@ Rendering::Data::MaterialSignatureSet Rendering::Data::MaterialInstance::Bind(
 
 	// The parameter block is per material, not per program: bind it on every draw so it is the
 	// one bound even when another material uploaded its own buffer since the last draw.
-	BindParameterBlock();
+	BindParameterBlock(program);
 
 	return signature;
 }
