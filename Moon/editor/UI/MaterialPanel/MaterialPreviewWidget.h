@@ -15,7 +15,7 @@ namespace Editor::Panels {
 	class PreviewView;
 }
 namespace Core::Resources {
-	class Material;
+	class MaterialAsset;
 }
 
 namespace MOON
@@ -44,7 +44,7 @@ namespace MOON
 		 * preview as it is - a compile the panel could not even produce must not blank what is
 		 * on screen. The shader is compiled on the next paint, with the module's context
 		 * current. */
-		void SetShaderPackage(const std::string& p_package, const std::string& p_shaderKey);
+		void SetMaterialPackage(const std::string& p_package, const std::string& p_shaderKey);
 
 		/** The last compile error, empty when the shader was accepted. */
 		const std::string& GetError() const;
@@ -52,7 +52,7 @@ namespace MOON
 		/** Shows p_material instead of the material built from the panel's package - what the
 		 * material designer edits. Passing nullptr goes back to the package material. The
 		 * pointer is not owned; it has to outlive the widget's next paint. */
-		void ShowMaterial(::Core::Resources::Material* p_material);
+		void ShowMaterial(::Core::Resources::MaterialAsset* p_material);
 
 		/** What the material is shown on (sphere, cube, plane). The view is created lazily on
 		 * the first paint, so the choice is remembered and applied when it exists. */
@@ -120,9 +120,9 @@ namespace MOON
 		std::unique_ptr<::Rendering::HAL::Texture> m_refractionCube;
 		/** The material the preview sphere carries. The scene holds a pointer to it, so it
 		 * outlives the view (both are released together, view first). */
-		std::unique_ptr<::Core::Resources::Material> m_material;
+		std::unique_ptr<::Core::Resources::MaterialAsset> m_material;
 		/** The designer's material, when one is being shown; null means m_material. */
-		::Core::Resources::Material* m_shownMaterial = nullptr;
+		::Core::Resources::MaterialAsset* m_shownMaterial = nullptr;
 		Rendering::View::FramePaster m_paster;
 	};
 }

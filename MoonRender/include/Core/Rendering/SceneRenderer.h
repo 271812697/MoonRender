@@ -12,7 +12,7 @@
 #include <Core/ECS/Actor.h>
 #include <Core/ECS/Components/CCamera.h>
 #include <Core/Rendering/EVisibilityFlags.h>
-#include <Core/Resources/Material.h>
+#include <Core/Resources/MaterialAsset.h>
 #include <Core/SceneSystem/Scene.h>
 
 namespace Core::Rendering
@@ -138,6 +138,12 @@ namespace Core::Rendering
 			::Rendering::Data::PipelineState p_pso,
 			::Rendering::Resources::Model& p_model,
 			::Rendering::Data::Material& p_material,
+			const Maths::FMatrix4& p_modelMatrix
+		);
+		virtual void DrawModelWithSingleMaterial(
+			::Rendering::Data::PipelineState p_pso,
+			::Rendering::Resources::Model& p_model,
+			::Rendering::Data::MaterialInstance& p_material,
 			const Maths::FMatrix4& p_modelMatrix
 		);
 

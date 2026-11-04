@@ -91,12 +91,22 @@ namespace Rendering::Core
 			Rendering::Data::PipelineState p_pso,
 			Rendering::HAL::Framebuffer& p_src,
 			Rendering::HAL::Framebuffer& p_dst,
+			Rendering::Data::MaterialInstance& p_material,
+			Rendering::Settings::EBlitFlags p_flags = Rendering::Settings::EBlitFlags::DEFAULT
+		);
+		virtual void Blit(
+			Rendering::Data::PipelineState p_pso,
+			Rendering::HAL::Framebuffer& p_src,
+			Rendering::HAL::Framebuffer& p_dst,
 			Rendering::Data::Material& p_material,
 			Rendering::Settings::EBlitFlags p_flags = Rendering::Settings::EBlitFlags::DEFAULT
 		);
 		void Present(Rendering::HAL::Framebuffer& p_src);
+		void Present(Rendering::HAL::Framebuffer& p_src, Rendering::Data::MaterialInstance& mat);
 		void Present(Rendering::HAL::Framebuffer& p_src, Rendering::Data::Material& mat);
+		void Present(Rendering::HAL::Texture& p_src, Rendering::Data::MaterialInstance& mat);
 		void Present(Rendering::HAL::Texture& p_src, Rendering::Data::Material& mat);
+		void Present(Rendering::Data::MaterialInstance& mat);
 		void Present(Rendering::Data::Material& mat);
 		void Present(Rendering::HAL::Texture& p_src);
 		/**
@@ -145,7 +155,7 @@ namespace Rendering::Core
 		Rendering::Data::PipelineState m_basePipelineState;
 		bool m_isDrawing;
 		std::optional<Rendering::Data::MaterialSignatureSet> m_previousMaterialSignature = std::nullopt;
-		Rendering::Resources::Shader* m_presentShader;
+		Rendering::Data::Material* m_presentShader;
 		Rendering::Data::Material m_presentMaterial;
 	private:
 		static std::atomic_bool s_isDrawing;

@@ -8,12 +8,6 @@
 #include <Rendering/Data/DescriptorSetLayout.h>
 #include <Rendering/Settings/EBlendMode.h>
 
-namespace Rendering::Resources
-{
-	class Shader;
-	class ShaderPackage;
-}
-
 /** The immutable data a material is made of: what the material package described, with no GL
  * object and no value in it.
  *
@@ -29,6 +23,9 @@ namespace Rendering::Resources
  * reading. */
 namespace Rendering::Data
 {
+	class MaterialParser;
+	class Material;
+
 	/** One parameter the material declares (the runtime form of the package's reflection). */
 	struct MaterialParameter
 	{
@@ -90,21 +87,18 @@ namespace Rendering::Data
 		using UniformField = MaterialUniformField;
 		using SamplerField = MaterialSamplerField;
 
-		/** Reads the immutable half of a material package. This is the package -> definition
-		 * step; ShaderLoader then compiles the programs from the same package. */
-		static std::shared_ptr<const MaterialDefinition> FromPackage(
-			const Rendering::Resources::ShaderPackage& p_package);
+		/** The parser is the definition's package reader: reflection, render state and the
+		 * per-variant stage sources all come from it. */
+		static std::shared_ptr<const MaterialDefinition> FromParser(
+			std::shared_ptr<const MaterialParser> p_parser);
 
-		/** The fallback for a shader built from source (the present pass, the debug line):
-		 * whatever the driver's reflection ended up in Shader becomes the definition. */
-		static std::shared_ptr<const MaterialDefinition> FromShader(
-			const Rendering::Resources::Shader& p_shader);
+		const MaterialParser* Parser() const { return m_parser.get(); }
+
+		/** The fallback for a material built from source (the present pass, the debug line):
+		 * whatever the driver's reflection ended up in the material becomes the definition. */
+		static std::shared_ptr<const MaterialDefinition> FromMaterial(const Material& p_material);
 
 		const std::string& Name() const { return m_name; }
-		/** The shader this definition describes. The definition owns the immutable description;
-		 * the shader keeps the compiled variants. */
-		const Rendering::Resources::Shader* Shader() const { return m_shader; }
-		Rendering::Resources::Shader* Shader() { return m_shader; }
 		const std::vector<Parameter>& Parameters() const { return m_parameters; }
 		const std::vector<UniformField>& UniformFields() const { return m_uniformFields; }
 		const std::vector<SamplerField>& SamplerFields() const { return m_samplerFields; }
@@ -122,9 +116,11 @@ namespace Rendering::Data
 
 	private:
 		MaterialDefinition() = default;
+		static std::shared_ptr<const MaterialDefinition> BuildFromParser(
+			const MaterialParser& p_package);
 
 		std::string m_name;
-		Rendering::Resources::Shader* m_shader = nullptr;
+		std::shared_ptr<const MaterialParser> m_parser;
 		std::vector<Parameter> m_parameters;
 		std::vector<UniformField> m_uniformFields;
 		std::vector<SamplerField> m_samplerFields;

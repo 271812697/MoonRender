@@ -31,9 +31,9 @@
 #include <QVBoxLayout>
 
 #include "Core/Global/ServiceLocator.h"
-#include "Core/Resources/Material.h"
+#include "Core/Resources/MaterialAsset.h"
 #include "Rendering/Resources/ShaderArchive.h"
-#include "Rendering/Resources/ShaderPackage.h"
+#include <Rendering/Data/MaterialParser.h>
 #include "renderer/Context.h"
 #include "Rendering/Context/Driver.h"
 #include "Rendering/Resources/Loaders/ShaderLoader.h"
@@ -472,7 +472,7 @@ public:
 		QObject::connect(m_modeMaterial, &QToolButton::clicked, m_owner, [this] { SetMode(true); });
 
 		QObject::connect(m_designer, &::MOON::MaterialDesigner::materialShown, m_owner,
-			[this](Core::Resources::Material* p_material) {
+			[this](Core::Resources::MaterialAsset* p_material) {
 				// The window title is the material name, so the editor never leaves it ambiguous
 				// which .mat the form and the preview belong to.
 				if (p_material != nullptr)
@@ -626,7 +626,7 @@ public:
 			return;
 		}
 
-		const Rendering::Resources::ShaderPackage package(
+		const Rendering::Data::MaterialParser package(
 			p_package.data(), static_cast<uint32_t>(p_package.size()));
 		if (!package.IsValid() || package.Variants().empty())
 		{
@@ -696,7 +696,7 @@ public:
 			return;
 		}
 
-		const Rendering::Resources::ShaderPackage package(
+		const Rendering::Data::MaterialParser package(
 			m_glslPackage.data(), static_cast<uint32_t>(m_glslPackage.size()));
 		if (!package.IsValid())
 		{
@@ -706,11 +706,11 @@ public:
 
 		const auto& chosen = m_glslVariants[static_cast<size_t>(p_index)];
 		const std::string vertex = package.Source(
-			chosen, Rendering::Resources::ShaderPackage::Stage::Vertex);
+			chosen, Rendering::Data::MaterialParser::Stage::Vertex);
 		const std::string fragment = package.Source(
-			chosen, Rendering::Resources::ShaderPackage::Stage::Fragment);
+			chosen, Rendering::Data::MaterialParser::Stage::Fragment);
 		const std::string geometry = package.Source(
-			chosen, Rendering::Resources::ShaderPackage::Stage::Geometry);
+			chosen, Rendering::Data::MaterialParser::Stage::Geometry);
 
 		m_vertexEditor->setPlainText(QString::fromStdString(vertex));
 		m_fragmentEditor->setPlainText(QString::fromStdString(fragment));
@@ -1119,7 +1119,7 @@ public:
 			{
 				m_compileStatus->setText(QStringLiteral("Compile failed - see OUTPUT"));
 			}
-			m_preview->SetShaderPackage({}, {});
+			m_preview->SetMaterialPackage({}, {});
 			UpdateGlslTabs({});
 			return;
 		}
@@ -1130,7 +1130,7 @@ public:
 			m_compileStatus->setText(QStringLiteral("Compiled %1 variant(s)")
 				.arg(result.variantCount));
 		}
-		m_preview->SetShaderPackage(result.package, ToShaderKey(m_current));
+		m_preview->SetMaterialPackage(result.package, ToShaderKey(m_current));
 	}
 
 	/** The first time the panel is shown: compile the source the file picker landed on and hand
@@ -1212,7 +1212,7 @@ public:
 	QTabWidget* m_glslTabs = nullptr;
 	QComboBox* m_variantPicker = nullptr;
 	std::string m_glslPackage;
-	std::vector<Rendering::Resources::ShaderPackage::Variant> m_glslVariants;
+	std::vector<Rendering::Data::MaterialParser::Variant> m_glslVariants;
 	::MOON::MaterialCodeEditor* m_vertexEditor = nullptr;
 	::MOON::MaterialCodeEditor* m_fragmentEditor = nullptr;
 	::MOON::MaterialCodeEditor* m_geometryEditor = nullptr;

@@ -19,7 +19,7 @@ class QScrollArea;
 class QToolButton;
 class QVBoxLayout;
 
-namespace Core::Resources { class Material; }
+namespace Core::Resources { class MaterialAsset; }
 namespace MOON
 
 {
@@ -48,7 +48,7 @@ namespace MOON
 		explicit MaterialDesigner(QWidget* p_parent = nullptr);
 		~MaterialDesigner() override;
 
-		Core::Resources::Material* GetMaterial() const;
+		Core::Resources::MaterialAsset* GetMaterial() const;
 		/** The resource key of the material being edited (":Materials/Name.mat"). */
 		std::string CurrentKey() const;
 
@@ -67,7 +67,7 @@ namespace MOON
 		void SetThumbnail(const QImage& p_image);
 
 	signals:
-		void materialShown(Core::Resources::Material* p_material);
+		void materialShown(Core::Resources::MaterialAsset* p_material);
 		void materialEdited();
 		void statusMessage(const QString& p_message, bool p_error);
 
@@ -152,7 +152,7 @@ namespace MOON
 		std::string m_texturesRoot;
 		std::string m_selectedKey;
 		std::vector<TextureAsset> m_textures;
-		Core::Resources::Material* m_material = nullptr;
+		Core::Resources::MaterialAsset* m_material = nullptr;
 		std::unique_ptr<PropertyComponent> m_component;
 		bool m_dirty = false;
 

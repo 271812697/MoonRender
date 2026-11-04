@@ -8,9 +8,10 @@
 #include <string_view>
 #include <vector>
 
-namespace Rendering::Resources
+namespace Rendering::Data
 {
-	/** A shader package, as MoonMatc writes it (the counterpart of filament's .filamat).
+	/** A material package parser, the counterpart of filament's MaterialParser. It takes the
+	 * MoonMatc package bytes (the counterpart of .filamat) and decodes the chunk tree.
 	 *
 	 * It holds the work the runtime used to do on every launch: every (pass, variant, stage)
 	 * already resolved to the final GLSL, the variant list, and the material's parameters.
@@ -18,8 +19,8 @@ namespace Rendering::Resources
 	 *
 	 * Layout is filament's chunk tree: a flat sequence of (uint64 chunk type, uint32 payload
 	 * size, payload), with no package header. MaterialVersion is the first chunk; the loader
-	 * recognises a package by it, exactly as filaflat's ChunkContainer does. */
-	class ShaderPackage
+	 * recognises a package by it, exactly as filaflat's Rendering::Resources::ChunkContainer does. */
+	class MaterialParser
 	{
 	public:
 		struct Variant
@@ -95,7 +96,7 @@ namespace Rendering::Resources
 		static bool IsPackage(const void* p_data, uint32_t p_size);
 
 		/** Parses the chunk tree (MAT_VERS first, MAT_CRC last) and decodes the payloads. */
-		ShaderPackage(const void* p_data, uint32_t p_size);
+		MaterialParser(const void* p_data, uint32_t p_size);
 
 		bool IsValid() const { return m_valid; }
 		const std::string& Name() const { return m_name; }
@@ -190,8 +191,8 @@ namespace Rendering::Resources
 		uint32_t m_parameterBlockSize = 0;
 		std::vector<SamplerFallbackEntry> m_samplerFallbacks;
 		std::vector<Blob> m_blobs;
-		/** The package's chunk list (filaflat's ChunkContainer). */
-		ChunkContainer m_container;
+		/** The package's chunk list (filaflat's Rendering::Resources::ChunkContainer). */
+		Rendering::Resources::ChunkContainer m_container;
 		/** The package's line table (DIC_TEXT): the shared stage texts are stored as ids into
 		 * it, so the lines every stage repeats are stored once. */
 		std::vector<std::string> m_lines;

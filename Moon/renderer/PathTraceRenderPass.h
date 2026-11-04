@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <Rendering/Core/ARenderPass.h>
 #include <Rendering/HAL/Framebuffer.h>
 #include <Rendering/HAL/OpenGL/GLTexture.h>
@@ -10,7 +10,6 @@ namespace Rendering {
 		class Texture;
 		class Mesh;
 		class Model;
-		class Shader;
 	}
 }
 namespace Editor::Rendering
@@ -42,7 +41,7 @@ namespace Editor::Rendering
 		::Rendering::Data::Material outputShader;
 		::Rendering::Data::Material tonemapShader;
 		//line split output to screen
-		::Rendering::Resources::Shader* lineOutputShader;
+		::Rendering::Data::Material* lineOutputShader = nullptr;
 		::Rendering::Data::Material lineOutputMat;
 
 		::Rendering::HAL::GLTexture* BVHTex = nullptr;

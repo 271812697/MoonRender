@@ -1,7 +1,6 @@
-﻿#pragma once
+#pragma once
 #include <string>
 #include "Rendering/HAL/Common/TBuffer.h"
-namespace Rendering::Resources { class Shader; }
 namespace Rendering::HAL
 {
 	/**

@@ -1,20 +1,22 @@
 #include <Rendering/Data/MaterialBuilder.h>
 
+#include <Rendering/Data/Material.h>
 #include <Rendering/Data/MaterialDefinition.h>
-#include <Rendering/Resources/Shader.h>
-#include <Rendering/Resources/ShaderPackage.h>
 
 namespace Rendering::Data
 {
 	std::shared_ptr<const MaterialDefinition> MaterialBuilder::Build(
-		const Rendering::Resources::ShaderPackage& p_package)
+		const Material& p_material)
 	{
-		return MaterialDefinition::FromPackage(p_package);
+		return MaterialDefinition::FromMaterial(p_material);
 	}
 
-	std::shared_ptr<const MaterialDefinition> MaterialBuilder::Build(
-		const Rendering::Resources::Shader& p_shader)
+	std::unique_ptr<Material> MaterialBuilder::BuildMaterial(
+		std::string p_path,
+		std::shared_ptr<const MaterialDefinition> p_definition,
+		Material::Variants p_variants)
 	{
-		return MaterialDefinition::FromShader(p_shader);
+		return std::make_unique<Material>(
+			std::move(p_path), std::move(p_definition), std::move(p_variants));
 	}
 }

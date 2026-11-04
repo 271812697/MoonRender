@@ -1,32 +1,17 @@
-﻿#pragma once
+#pragma once
 #include <Rendering/Resources/Loaders/ShaderLoader.h>
 #include "Core/ResourceManagement/AResourceManager.h"
 
 namespace Core::ResourceManagement
 {
-	/**
-	* ResourceManager of shaders
-	*/
-	class ShaderManager : public AResourceManager<::Rendering::Resources::Shader>
+	/** Manages package materials. The historical name is kept for the service locator; a
+	 * package is now a Material, not a separate Shader class. */
+	class ShaderManager : public AResourceManager<::Rendering::Data::Material>
 	{
 	public:
-		/**
-		* Create the resource identified by the given path
-		* @param p_path
-		*/
-		virtual ::Rendering::Resources::Shader* CreateResource(const std::string & p_path) override;
-		::Rendering::Resources::Shader* CreateFromSource(const std::string& p_source) ;
-		/**
-		* Destroy the given resource
-		* @param p_resource
-		*/
-		virtual void DestroyResource(::Rendering::Resources::Shader* p_resource) override;
-
-		/**
-		* Reload the given resource
-		* @param p_resource
-		* @param p_path
-		*/
-		virtual void ReloadResource(::Rendering::Resources::Shader* p_resource, const std::string& p_path) override;
+		virtual ::Rendering::Data::Material* CreateResource(const std::string& p_path) override;
+		::Rendering::Data::Material* CreateFromSource(const std::string& p_source);
+		virtual void DestroyResource(::Rendering::Data::Material* p_resource) override;
+		virtual void ReloadResource(::Rendering::Data::Material* p_resource, const std::string& p_path) override;
 	};
 }

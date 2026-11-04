@@ -157,7 +157,7 @@ void Core::Helpers::Serializer::SerializeTexture(tinyxml2::XMLDocument& p_doc, t
 	SerializeString(p_doc, p_node, p_name.c_str(), p_value ? p_value->path : "?");
 }
 
-void Core::Helpers::Serializer::SerializeShader(tinyxml2::XMLDocument& p_doc, tinyxml2::XMLNode* p_node, const std::string& p_name, Rendering::Resources::Shader* p_value)
+void Core::Helpers::Serializer::SerializeShader(tinyxml2::XMLDocument& p_doc, tinyxml2::XMLNode* p_node, const std::string& p_name, Rendering::Data::Material* p_value)
 {
 	SerializeString(p_doc, p_node, p_name.c_str(), p_value ? p_value->path : "?");
 }
@@ -168,7 +168,7 @@ void Core::Helpers::Serializer::DeserializeBoolean(tinyxml2::XMLDocument& p_doc,
 		element->QueryBoolText(&p_out);
 }
 
-void Core::Helpers::Serializer::SerializeMaterial(tinyxml2::XMLDocument& p_doc, tinyxml2::XMLNode* p_node, const std::string& p_name, Core::Resources::Material* p_value)
+void Core::Helpers::Serializer::SerializeMaterial(tinyxml2::XMLDocument& p_doc, tinyxml2::XMLNode* p_node, const std::string& p_name, Core::Resources::MaterialAsset* p_value)
 {
 	SerializeString(p_doc, p_node, p_name.c_str(), p_value ? p_value->path : "?");
 }
@@ -310,7 +310,7 @@ void Core::Helpers::Serializer::DeserializeTexture(tinyxml2::XMLDocument& p_doc,
 		p_out = nullptr;
 }
 
-void Core::Helpers::Serializer::DeserializeShader(tinyxml2::XMLDocument& p_doc, tinyxml2::XMLNode* p_node, const std::string& p_name, Rendering::Resources::Shader*& p_out)
+void Core::Helpers::Serializer::DeserializeShader(tinyxml2::XMLDocument& p_doc, tinyxml2::XMLNode* p_node, const std::string& p_name, Rendering::Data::Material*& p_out)
 {
 	if (std::string path = DeserializeString(p_doc, p_node, p_name.c_str()); path != "?" && path != "")
 		p_out = Core::Global::ServiceLocator::Get<Core::ResourceManagement::ShaderManager>().GetResource(path);
@@ -318,7 +318,7 @@ void Core::Helpers::Serializer::DeserializeShader(tinyxml2::XMLDocument& p_doc, 
 		p_out = nullptr;
 }
 
-void Core::Helpers::Serializer::DeserializeMaterial(tinyxml2::XMLDocument& p_doc, tinyxml2::XMLNode* p_node, const std::string& p_name, Core::Resources::Material*& p_out)
+void Core::Helpers::Serializer::DeserializeMaterial(tinyxml2::XMLDocument& p_doc, tinyxml2::XMLNode* p_node, const std::string& p_name, Core::Resources::MaterialAsset*& p_out)
 {
 	if (std::string path = DeserializeString(p_doc, p_node, p_name.c_str()); path != "?" && path != "")
 		p_out = Core::Global::ServiceLocator::Get<Core::ResourceManagement::MaterialManager>().GetResource(path);
@@ -430,16 +430,16 @@ Rendering::Resources::Texture* Core::Helpers::Serializer::DeserializeTexture(tin
 	return result;
 }
 
-Rendering::Resources::Shader* Core::Helpers::Serializer::DeserializeShader(tinyxml2::XMLDocument& p_doc, tinyxml2::XMLNode* p_node, const std::string& p_name)
+Rendering::Data::Material* Core::Helpers::Serializer::DeserializeShader(tinyxml2::XMLDocument& p_doc, tinyxml2::XMLNode* p_node, const std::string& p_name)
 {
-	Rendering::Resources::Shader* result;
+	Rendering::Data::Material* result;
 	DeserializeShader(p_doc, p_node, p_name, result);
 	return result;
 }
 
-Core::Resources::Material* Core::Helpers::Serializer::DeserializeMaterial(tinyxml2::XMLDocument& p_doc, tinyxml2::XMLNode* p_node, const std::string& p_name)
+Core::Resources::MaterialAsset* Core::Helpers::Serializer::DeserializeMaterial(tinyxml2::XMLDocument& p_doc, tinyxml2::XMLNode* p_node, const std::string& p_name)
 {
-	Core::Resources::Material* result;
+	Core::Resources::MaterialAsset* result;
 	DeserializeMaterial(p_doc, p_node, p_name, result);
 	return result;
 }

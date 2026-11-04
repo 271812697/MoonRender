@@ -4,7 +4,7 @@
 #include <Core/ECS/Actor.h>
 #include <Core/SceneSystem/SceneManager.h>
 #include <Core/ECS/Components/CModelRenderer.h>
-#include <Core/Resources/Material.h>
+#include <Core/Resources/MaterialAsset.h>
 #include <Core/ECS/Components/CAmbientBoxLight.h>
 #include <Core/ECS/Components/CAmbientSphereLight.h>
 #include <Core/Rendering/SceneRenderer.h>
@@ -32,6 +32,6 @@ namespace Core::Rendering
 		);
 
 	private:
-		Core::Resources::Material m_shadowMaterial;
+		Core::Resources::MaterialAsset m_shadowMaterial;
 	};
 }

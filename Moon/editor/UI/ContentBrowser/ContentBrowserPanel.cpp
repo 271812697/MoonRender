@@ -6,8 +6,8 @@
 #include "Rendering/Resources/ShaderArchive.h"
 #include "Core/ResourceManagement/MaterialManager.h"
 #include "Core/ResourceManagement/ShaderManager.h"
-#include "Core/Resources/Loaders/MaterialLoader.h"
-#include "Core/Resources/Material.h"
+#include "Core/Resources/Loaders/MaterialAssetLoader.h"
+#include "Core/Resources/MaterialAsset.h"
 #include "Rendering/Context/Driver.h"
 #include "Rendering/Context/IGLContextHost.h"
 #include "Tools/Utils/PathParser.h"
@@ -1211,7 +1211,7 @@ QTreeView::branch:open:has-children:has-siblings {
 
 		const std::string key = MaterialKeyFor(target);
 		std::string failure;
-		Core::Resources::Material* created = nullptr;
+		Core::Resources::MaterialAsset* created = nullptr;
 		{
 			ModuleContextScope context;
 			if (!context)
@@ -1230,9 +1230,9 @@ QTreeView::branch:open:has-children:has-siblings {
 				{
 					// Scaffold the instance, write it, then let the manager load it back: that
 					// is what gives the material its (const) resource path.
-					Core::Resources::Material scaffold;
+					Core::Resources::MaterialAsset scaffold;
 					scaffold.SetShader(shader);
-					Core::Resources::Loaders::MaterialLoader::Save(scaffold, target.toStdString());
+					Core::Resources::Loaders::MaterialAssetLoader::Save(scaffold, target.toStdString());
 					created = Core::Global::ServiceLocator::Get<Core::ResourceManagement::MaterialManager>()
 						.GetResource(key, true);
 					if (created == nullptr)

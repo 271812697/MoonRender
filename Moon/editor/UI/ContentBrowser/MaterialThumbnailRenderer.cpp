@@ -11,7 +11,7 @@
 
 #include "Core/Global/ServiceLocator.h"
 #include "Core/ResourceManagement/MaterialManager.h"
-#include "Core/Resources/Material.h"
+#include "Core/Resources/MaterialAsset.h"
 #include "Core/Rendering/SceneRenderer.h"
 #include "Rendering/Context/Driver.h"
 #include "Rendering/Context/IGLContextHost.h"

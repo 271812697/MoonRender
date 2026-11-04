@@ -1,28 +1,22 @@
 #pragma once
 #include <memory>
+#include <string>
 
-namespace Rendering::Resources
-{
-	class Shader;
-	class ShaderPackage;
-}
+#include <Rendering/Data/Material.h>
+#include <Rendering/Data/MaterialDefinition.h>
 
 namespace Rendering::Data
 {
-	class MaterialDefinition;
-
-	/** The runtime counterpart of filamat's MaterialBuilder: it turns a package (or a shader
-	 * built from one) into the immutable MaterialDefinition the runtime draws with.
-	 *
-	 * All the package interpretation lives in MaterialDefinition; this class is the seam the
-	 * loader uses, so a future runtime material (a second default instance, a different state
-	 * mapping) has one place to go. */
+	/** The runtime counterpart of filamat's MaterialBuilder: a package (via MaterialParser)
+	 * becomes the immutable MaterialDefinition; the definition plus its compiled variants
+	 * becomes a Material (the variant-program cache). */
 	class MaterialBuilder
 	{
 	public:
-		static std::shared_ptr<const MaterialDefinition> Build(
-			const Rendering::Resources::ShaderPackage& p_package);
-		static std::shared_ptr<const MaterialDefinition> Build(
-			const Rendering::Resources::Shader& p_shader);
+		static std::shared_ptr<const MaterialDefinition> Build(const Material& p_material);
+		static std::unique_ptr<Material> BuildMaterial(
+			std::string p_path,
+			std::shared_ptr<const MaterialDefinition> p_definition,
+			Material::Variants p_variants);
 	};
 }

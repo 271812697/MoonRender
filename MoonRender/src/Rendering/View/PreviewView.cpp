@@ -15,7 +15,7 @@
 #include <Core/Rendering/HzbBuildPass.h>
 #include <Core/Rendering/SceneRenderer.h>
 #include <Core/Rendering/SkyBoxRenderPass .h>
-#include <Core/Resources/Material.h>
+#include <Core/Resources/MaterialAsset.h>
 #include <Maths/FMatrix4.h>
 #include <Maths/FVector3.h>
 #include <Rendering/Context/Driver.h>
@@ -844,7 +844,7 @@ void Editor::Panels::PreviewView::UpdateLightRig()
 	}
 }
 
-void Editor::Panels::PreviewView::SetMaterial(::Core::Resources::Material* p_material)
+void Editor::Panels::PreviewView::SetMaterial(::Core::Resources::MaterialAsset* p_material)
 {
 	m_material = p_material;
 
@@ -933,7 +933,7 @@ Editor::Panels::EPreviewMesh Editor::Panels::PreviewView::GetPreviewMesh() const
 	return m_previewMesh;
 }
 
-::Core::Resources::Material* Editor::Panels::PreviewView::GetMaterial() const
+::Core::Resources::MaterialAsset* Editor::Panels::PreviewView::GetMaterial() const
 {
 	return m_material;
 }

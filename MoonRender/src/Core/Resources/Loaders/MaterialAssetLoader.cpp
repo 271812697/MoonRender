@@ -1,5 +1,5 @@
 #include <tinyxml2.h>
-#include <Core/Resources/Loaders/MaterialLoader.h>
+#include <Core/Resources/Loaders/MaterialAssetLoader.h>
 #include <fstream>
 #include <iostream>
 #include <iterator>
@@ -36,7 +36,7 @@ namespace
 }
 
 
-Core::Resources::Material * Core::Resources::Loaders::MaterialLoader::Create(const std::string & p_path)
+Core::Resources::MaterialAsset * Core::Resources::Loaders::MaterialAssetLoader::Create(const std::string & p_path)
 {
 	MigrateLegacyShaderPath(p_path);
 
@@ -46,7 +46,7 @@ Core::Resources::Material * Core::Resources::Loaders::MaterialLoader::Create(con
 	{
 		tinyxml2::XMLNode* root = doc.FirstChild();
 
-		Material* material = new Material();
+		MaterialAsset* material = new MaterialAsset();
 
 		material->OnDeserialize(doc, root);
 
@@ -58,7 +58,7 @@ Core::Resources::Material * Core::Resources::Loaders::MaterialLoader::Create(con
 	}
 }
 
-void Core::Resources::Loaders::MaterialLoader::Reload(Material& p_material, const std::string& p_path)
+void Core::Resources::Loaders::MaterialAssetLoader::Reload(MaterialAsset& p_material, const std::string& p_path)
 {
 	MigrateLegacyShaderPath(p_path);
 
@@ -72,7 +72,7 @@ void Core::Resources::Loaders::MaterialLoader::Reload(Material& p_material, cons
 	}
 }
 
-void Core::Resources::Loaders::MaterialLoader::Save(Material& p_material, const std::string& p_path)
+void Core::Resources::Loaders::MaterialAssetLoader::Save(MaterialAsset& p_material, const std::string& p_path)
 {
 	tinyxml2::XMLDocument doc;
 	tinyxml2::XMLNode* node = doc.NewElement("root");
@@ -89,7 +89,7 @@ void Core::Resources::Loaders::MaterialLoader::Save(Material& p_material, const 
 		
 }
 
-bool Core::Resources::Loaders::MaterialLoader::Destroy(Material *& p_material)
+bool Core::Resources::Loaders::MaterialAssetLoader::Destroy(MaterialAsset*& p_material)
 {
 	if (p_material)
 	{

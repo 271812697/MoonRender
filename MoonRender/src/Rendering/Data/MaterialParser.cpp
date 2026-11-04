@@ -1,5 +1,5 @@
 #include <Rendering/Settings/EBindingPoint.h>
-#include <Rendering/Resources/ShaderPackage.h>
+#include <Rendering/Data/MaterialParser.h>
 #include <Rendering/Resources/MaterialChunkType.h>
 #include <Rendering/Resources/MaterialParameterType.h>
 #include <Rendering/Resources/Unflattener.h>
@@ -7,19 +7,19 @@
 #include <cstring>
 #include <iostream>
 
-namespace Rendering::Resources
+namespace Rendering::Data
 {
 	namespace
 	{
 		using Moon::Material::ChunkType;
 		using Moon::Material::ParameterType;
 
-		const ChunkContainer::Chunk* ChunkOf(const ChunkContainer& p_container, ChunkType p_type)
+		const Rendering::Resources::ChunkContainer::Chunk* ChunkOf(const Rendering::Resources::ChunkContainer& p_container, ChunkType p_type)
 		{
 			return p_container.GetChunk(p_type);
 		}
 
-		bool ReadString(Unflattener& p_reader, std::string& p_out)
+		bool ReadString(Rendering::Resources::Unflattener& p_reader, std::string& p_out)
 		{
 			return p_reader.ReadString(p_out);
 		}
@@ -28,7 +28,7 @@ namespace Rendering::Resources
 		constexpr std::string_view kDefinesPlaceholder = "//@MOON_VARIANT_DEFINES@";
 	}
 
-	bool ShaderPackage::IsPackage(const void* p_data, uint32_t p_size)
+	bool MaterialParser::IsPackage(const void* p_data, uint32_t p_size)
 	{
 		if (p_data == nullptr || p_size < sizeof(uint64_t) + sizeof(uint32_t))
 		{
@@ -43,35 +43,35 @@ namespace Rendering::Resources
 			&& size <= p_size - sizeof(type) - sizeof(size);
 	}
 
-	ShaderPackage::ShaderPackage(const void* p_data, uint32_t p_size)
+	MaterialParser::MaterialParser(const void* p_data, uint32_t p_size)
 		: m_container(p_data, p_size)
 	{
 		if (!m_container.Parse())
 		{
-			std::cerr << "[ShaderPackage] the chunk list is truncated or empty" << std::endl;
+			std::cerr << "[MaterialParser] the chunk list is truncated or empty" << std::endl;
 			return;
 		}
 
 		// MAT_VERS / MAT_NAME / MAT_UUID: what this package is.
-		if (const ChunkContainer::Chunk* version = ChunkOf(m_container, ChunkType::MaterialVersion))
+		if (const Rendering::Resources::ChunkContainer::Chunk* version = ChunkOf(m_container, ChunkType::MaterialVersion))
 		{
-			Unflattener reader(version->start, version->size);
+			Rendering::Resources::Unflattener reader(version->start, version->size);
 			uint32_t number = 0;
 			if (reader.Read(&number) && number != 3)
 			{
-				std::cerr << "[ShaderPackage] unsupported package version " << number << std::endl;
+				std::cerr << "[MaterialParser] unsupported package version " << number << std::endl;
 			}
 		}
-		if (const ChunkContainer::Chunk* name = ChunkOf(m_container, ChunkType::MaterialName))
+		if (const Rendering::Resources::ChunkContainer::Chunk* name = ChunkOf(m_container, ChunkType::MaterialName))
 		{
-			Unflattener reader(name->start, name->size);
+			Rendering::Resources::Unflattener reader(name->start, name->size);
 			ReadString(reader, m_name);
 		}
 
 		// DIC_TEXT: the unique line table the stage texts are encoded against.
-		if (const ChunkContainer::Chunk* dictionary = ChunkOf(m_container, ChunkType::DictionaryText))
+		if (const Rendering::Resources::ChunkContainer::Chunk* dictionary = ChunkOf(m_container, ChunkType::DictionaryText))
 		{
-			Unflattener reader(dictionary->start, dictionary->size);
+			Rendering::Resources::Unflattener reader(dictionary->start, dictionary->size);
 			uint32_t count = 0;
 			if (reader.Read(&count))
 			{
@@ -89,9 +89,9 @@ namespace Rendering::Resources
 		}
 
 		// MON_STAG: each stage's whole text, reconstructed from its line ids.
-		if (const ChunkContainer::Chunk* stages = ChunkOf(m_container, ChunkType::MoonStageText))
+		if (const Rendering::Resources::ChunkContainer::Chunk* stages = ChunkOf(m_container, ChunkType::MoonStageText))
 		{
-			Unflattener reader(stages->start, stages->size);
+			Rendering::Resources::Unflattener reader(stages->start, stages->size);
 			uint32_t count = 0;
 			if (reader.Read(&count))
 			{
@@ -122,9 +122,9 @@ namespace Rendering::Resources
 
 		// MAT_GLSL: one entry per (pass, feature set, stage), carrying the variant's #define
 		// lines. The stage text itself is shared in MON_STAG.
-		if (const ChunkContainer::Chunk* glsl = ChunkOf(m_container, ChunkType::MaterialGlsl))
+		if (const Rendering::Resources::ChunkContainer::Chunk* glsl = ChunkOf(m_container, ChunkType::MaterialGlsl))
 		{
-			Unflattener reader(glsl->start, glsl->size);
+			Rendering::Resources::Unflattener reader(glsl->start, glsl->size);
 			uint32_t count = 0;
 			if (reader.Read(&count))
 			{
@@ -142,9 +142,9 @@ namespace Rendering::Resources
 		}
 
 		// MON_VARI: the variant table.
-		if (const ChunkContainer::Chunk* variants = ChunkOf(m_container, ChunkType::MoonVariantTable))
+		if (const Rendering::Resources::ChunkContainer::Chunk* variants = ChunkOf(m_container, ChunkType::MoonVariantTable))
 		{
-			Unflattener reader(variants->start, variants->size);
+			Rendering::Resources::Unflattener reader(variants->start, variants->size);
 			uint32_t count = 0;
 			if (reader.Read(&count))
 			{
@@ -172,9 +172,9 @@ namespace Rendering::Resources
 		}
 
 		// MON_FEAT: the features the material declared.
-		if (const ChunkContainer::Chunk* features = ChunkOf(m_container, ChunkType::MoonFeatureSet))
+		if (const Rendering::Resources::ChunkContainer::Chunk* features = ChunkOf(m_container, ChunkType::MoonFeatureSet))
 		{
-			Unflattener reader(features->start, features->size);
+			Rendering::Resources::Unflattener reader(features->start, features->size);
 			uint32_t count = 0;
 			if (reader.Read(&count))
 			{
@@ -193,9 +193,9 @@ namespace Rendering::Resources
 
 		// MAT_PROP: the reflected parameters. Type and count are typed; only the name / label /
 		// group and the GLSL default expression are text.
-		if (const ChunkContainer::Chunk* properties = ChunkOf(m_container, ChunkType::MaterialProperties))
+		if (const Rendering::Resources::ChunkContainer::Chunk* properties = ChunkOf(m_container, ChunkType::MaterialProperties))
 		{
-			Unflattener reader(properties->start, properties->size);
+			Rendering::Resources::Unflattener reader(properties->start, properties->size);
 			uint32_t count = 0;
 			if (reader.Read(&count))
 			{
@@ -239,9 +239,9 @@ namespace Rendering::Resources
 		}
 
 		// MAT_ATTR: the vertex attributes the material reads.
-		if (const ChunkContainer::Chunk* attributes = ChunkOf(m_container, ChunkType::MaterialAttributeInfo))
+		if (const Rendering::Resources::ChunkContainer::Chunk* attributes = ChunkOf(m_container, ChunkType::MaterialAttributeInfo))
 		{
-			Unflattener reader(attributes->start, attributes->size);
+			Rendering::Resources::Unflattener reader(attributes->start, attributes->size);
 			uint32_t count = 0;
 			if (reader.Read(&count))
 			{
@@ -262,9 +262,9 @@ namespace Rendering::Resources
 
 		// MAT_UIB: the std140 block layout. The block size is the one field filament derives
 		// from the field list; we store it because the runtime allocates exactly that range.
-		if (const ChunkContainer::Chunk* ubo = ChunkOf(m_container, ChunkType::MaterialUib))
+		if (const Rendering::Resources::ChunkContainer::Chunk* ubo = ChunkOf(m_container, ChunkType::MaterialUib))
 		{
-			Unflattener reader(ubo->start, ubo->size);
+			Rendering::Resources::Unflattener reader(ubo->start, ubo->size);
 			std::string name;
 			uint32_t blockSize = 0;
 			uint32_t count = 0;
@@ -294,9 +294,9 @@ namespace Rendering::Resources
 		}
 
 		// MAT_SIB: one descriptor per sampler.
-		if (const ChunkContainer::Chunk* sib = ChunkOf(m_container, ChunkType::MaterialSib))
+		if (const Rendering::Resources::ChunkContainer::Chunk* sib = ChunkOf(m_container, ChunkType::MaterialSib))
 		{
-			Unflattener reader(sib->start, sib->size);
+			Rendering::Resources::Unflattener reader(sib->start, sib->size);
 			std::string name;
 			uint32_t count = 0;
 			if (ReadString(reader, name) && reader.Read(&count))
@@ -318,15 +318,15 @@ namespace Rendering::Resources
 					m_layout.Add(field.name, ::Rendering::Data::DescriptorSetLayout::Kind::Texture,
 						field.binding);
 					m_samplerFallbacks.push_back(SamplerFallbackEntry{
-						field.name, static_cast<ShaderPackage::SamplerFallback>(fallback) });
+						field.name, static_cast<MaterialParser::SamplerFallback>(fallback) });
 				}
 			}
 		}
 
 		// MON_STAT: the material block's render state.
-		if (const ChunkContainer::Chunk* state = ChunkOf(m_container, ChunkType::MoonMaterialState))
+		if (const Rendering::Resources::ChunkContainer::Chunk* state = ChunkOf(m_container, ChunkType::MoonMaterialState))
 		{
-			Unflattener reader(state->start, state->size);
+			Rendering::Resources::Unflattener reader(state->start, state->size);
 			uint32_t count = 0;
 			if (reader.Read(&count))
 			{
@@ -366,7 +366,7 @@ namespace Rendering::Resources
 		m_valid = !m_variants.empty() && !m_blobs.empty();
 		if (!m_valid)
 		{
-			std::cerr << "[ShaderPackage] the package is missing its variants or its sources" << std::endl;
+			std::cerr << "[MaterialParser] the package is missing its variants or its sources" << std::endl;
 		}
 	}
 
@@ -374,7 +374,7 @@ namespace Rendering::Resources
 	{
 		/** The blob key MoonMatc writes: "pass/feature|feature/stage" - the separators sit
 		 * between the features, not after each of them. */
-		std::string BlobKey(const ShaderPackage::Variant& p_variant, ShaderPackage::Stage p_stage)
+		std::string BlobKey(const MaterialParser::Variant& p_variant, MaterialParser::Stage p_stage)
 		{
 			std::string key = p_variant.pass + "/";
 			bool first = true;
@@ -390,15 +390,15 @@ namespace Rendering::Resources
 			key += "/";
 			switch (p_stage)
 			{
-			case ShaderPackage::Stage::Vertex: key += "vertex"; break;
-			case ShaderPackage::Stage::Fragment: key += "fragment"; break;
+			case MaterialParser::Stage::Vertex: key += "vertex"; break;
+			case MaterialParser::Stage::Fragment: key += "fragment"; break;
 			default: key += "geometry"; break;
 			}
 			return key;
 		}
 	}
 
-	const ShaderPackage::Blob* ShaderPackage::FindBlob(const Variant& p_variant, Stage p_stage) const
+	const MaterialParser::Blob* MaterialParser::FindBlob(const Variant& p_variant, Stage p_stage) const
 	{
 		const std::string key = BlobKey(p_variant, p_stage);
 		for (const Blob& blob : m_blobs)
@@ -411,7 +411,7 @@ namespace Rendering::Resources
 		return nullptr;
 	}
 
-	std::string ShaderPackage::Source(const Variant& p_variant, Stage p_stage) const
+	std::string MaterialParser::Source(const Variant& p_variant, Stage p_stage) const
 	{
 		const Blob* blob = FindBlob(p_variant, p_stage);
 		if (blob == nullptr)

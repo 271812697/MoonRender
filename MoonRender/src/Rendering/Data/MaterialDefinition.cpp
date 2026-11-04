@@ -3,8 +3,9 @@
 #include <map>
 #include <utility>
 
-#include <Rendering/Resources/Shader.h>
-#include <Rendering/Resources/ShaderPackage.h>
+#include <Rendering/Data/MaterialParser.h>
+#include <Rendering/Data/Material.h>
+
 #include <Rendering/Settings/EBindingPoint.h>
 
 namespace Rendering::Data
@@ -14,7 +15,7 @@ namespace Rendering::Data
 		/** The material block's state as the runtime's optional overrides. The package keeps the
 		 * values as the material's text ("back", "transparent", "false"); the runtime works in
 		 * booleans. Leaving a field unset means the material did not declare it. */
-		MaterialState StateFromPackage(const Rendering::Resources::ShaderPackage& p_package)
+		MaterialState StateFromPackage(const MaterialParser& p_package)
 		{
 			MaterialState state;
 			const std::map<std::string, std::string>& states = p_package.States();
@@ -47,8 +48,24 @@ namespace Rendering::Data
 		}
 	}
 
-	std::shared_ptr<const MaterialDefinition> MaterialDefinition::FromPackage(
-		const Rendering::Resources::ShaderPackage& p_package)
+	std::shared_ptr<const MaterialDefinition> MaterialDefinition::FromParser(
+		std::shared_ptr<const MaterialParser> p_parser)
+	{
+		if (p_parser == nullptr || !p_parser->IsValid())
+		{
+			return nullptr;
+		}
+		std::shared_ptr<const MaterialDefinition> definition =
+			BuildFromParser(*p_parser);
+		if (definition != nullptr)
+		{
+			const_cast<MaterialDefinition*>(definition.get())->m_parser = std::move(p_parser);
+		}
+		return definition;
+	}
+
+	std::shared_ptr<const MaterialDefinition> MaterialDefinition::BuildFromParser(
+		const MaterialParser& p_package)
 	{
 		// Private constructor: use new/delete through the shared_ptr, the class is immutable.
 		std::shared_ptr<MaterialDefinition> definition{ new MaterialDefinition() };
@@ -56,14 +73,14 @@ namespace Rendering::Data
 		definition->m_name = p_package.Name();
 		definition->m_parameterBlockSize = p_package.ParameterBlockSize();
 		definition->m_uniformFields.reserve(p_package.UniformFields().size());
-		for (const Rendering::Resources::ShaderPackage::UniformField& field : p_package.UniformFields())
+		for (const MaterialParser::UniformField& field : p_package.UniformFields())
 		{
 			definition->m_uniformFields.push_back(UniformField{
 				field.name, field.type, field.offset, field.stride, field.count });
 		}
 
 		definition->m_samplerFields.reserve(p_package.SamplerFields().size());
-		for (const Rendering::Resources::ShaderPackage::SamplerField& field : p_package.SamplerFields())
+		for (const MaterialParser::SamplerField& field : p_package.SamplerFields())
 		{
 			definition->m_samplerFields.push_back(SamplerField{
 				field.name, field.type, field.binding, field.fallback });
@@ -76,7 +93,7 @@ namespace Rendering::Data
 
 		const auto fallbackOf = [&p_package](const std::string& p_name) -> uint8_t
 		{
-			for (const Rendering::Resources::ShaderPackage::SamplerFallbackEntry& entry
+			for (const MaterialParser::SamplerFallbackEntry& entry
 				: p_package.SamplerFallbacks())
 			{
 				if (entry.name == p_name)
@@ -84,11 +101,11 @@ namespace Rendering::Data
 					return static_cast<uint8_t>(entry.kind);
 				}
 			}
-			return static_cast<uint8_t>(Rendering::Resources::ShaderPackage::SamplerFallback::Default);
+			return static_cast<uint8_t>(MaterialParser::SamplerFallback::Default);
 		};
 
 		definition->m_parameters.reserve(p_package.Parameters().size());
-		for (const Rendering::Resources::ShaderPackage::Parameter& parameter : p_package.Parameters())
+		for (const MaterialParser::Parameter& parameter : p_package.Parameters())
 		{
 			Parameter resolved;
 			resolved.name = parameter.name;
@@ -145,22 +162,21 @@ namespace Rendering::Data
 		return definition;
 	}
 
-	std::shared_ptr<const MaterialDefinition> MaterialDefinition::FromShader(
-		const Rendering::Resources::Shader& p_shader)
+	std::shared_ptr<const MaterialDefinition> MaterialDefinition::FromMaterial(
+		const Material& p_material)
 	{
 		std::shared_ptr<MaterialDefinition> definition{ new MaterialDefinition() };
 
-		definition->m_name = p_shader.path;
-		definition->m_shader = const_cast<Rendering::Resources::Shader*>(&p_shader);
-		definition->m_parameters = p_shader.GetParameters();
-		definition->m_parameterBlockSize = p_shader.GetParameterBlockSize();
-		definition->m_hasParameterTable = p_shader.HasParameterTable();
-		definition->m_hasState = p_shader.HasState();
+		definition->m_name = p_material.path;
+		definition->m_parameters = p_material.GetParameters();
+		definition->m_parameterBlockSize = p_material.GetParameterBlockSize();
+		definition->m_hasParameterTable = p_material.HasParameterTable();
+		definition->m_hasState = p_material.HasState();
 		if (definition->m_hasState)
 		{
-			definition->m_state = p_shader.GetState();
+			definition->m_state = p_material.GetState();
 		}
-		definition->m_declaredFeatures = p_shader.GetDeclaredFeatures();
+		definition->m_declaredFeatures = p_material.GetDeclaredFeatures();
 
 		// A shader built from source has no package block: its reflection lives in the
 		// program's uniforms and the loose upload path reads those. The definition is still

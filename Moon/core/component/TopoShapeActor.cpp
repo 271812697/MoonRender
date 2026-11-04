@@ -22,7 +22,7 @@
 	{
 		/** The CAD materials are assets under :Materials/; the manager owns them and loads one copy
 		 * per file, so a shape looks them up instead of building its own. */
-		::Core::Resources::Material* LoadCadMaterial(const std::string& p_key)
+		::Core::Resources::MaterialAsset* LoadCadMaterial(const std::string& p_key)
 		{
 			auto* material = Core::Global::ServiceLocator::Get<Core::ResourceManagement::MaterialManager>()
 				.GetResource(p_key, true);

@@ -7,7 +7,8 @@
 #include "Core/ECS/Components/CPointLight.h"
 #include "core/ECS/Components/CDirectionalLight.h"
 #include "core/component/CTopoShape.h"
-#include "core/Resources/Material.h"
+#include "Core/Resources/MaterialAsset.h"
+#include <Rendering/Data/Material.h>
 #include <Core/ResourceManagement/MaterialManager.h>
 #include "editor/UI/ContentBrowser/MaterialThumbnailRenderer.h"
 #include "renderer/SceneView.h"
@@ -956,13 +957,13 @@ namespace MOON {
 			{
 				return QStringLiteral("<none>");
 			}
-			if (auto* asset = dynamic_cast<::Core::Resources::Material*>(instance))
+			if (auto* asset = dynamic_cast<::Core::Resources::MaterialAsset*>(instance))
 			{
 				return QFileInfo(QString::fromStdString(asset->path)).fileName();
 			}
-			if (auto* definition = dynamic_cast<::Core::Resources::Material*>(instance->ParentMaterial()))
+			if (auto* parent = instance->ParentMaterial())
 			{
-				return QStringLiteral("instance of ") + QFileInfo(QString::fromStdString(definition->path)).fileName();
+				return QStringLiteral("instance of ") + QFileInfo(QString::fromStdString(parent->path)).fileName();
 			}
 			return QStringLiteral("<instance>");
 		}
@@ -983,13 +984,13 @@ namespace MOON {
 			{
 				return {};
 			}
-			if (auto* asset = dynamic_cast<::Core::Resources::Material*>(instance))
+			if (auto* asset = dynamic_cast<::Core::Resources::MaterialAsset*>(instance))
 			{
 				return QString::fromStdString(asset->path);
 			}
-			if (auto* definition = dynamic_cast<::Core::Resources::Material*>(instance->ParentMaterial()))
+			if (auto* parent = instance->ParentMaterial())
 			{
-				return QString::fromStdString(definition->path);
+				return QString::fromStdString(parent->path);
 			}
 			return {};
 		}

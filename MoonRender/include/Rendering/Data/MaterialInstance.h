@@ -9,8 +9,8 @@
 #include <Rendering/Data/StateMask.h>
 #include <Rendering/Data/UniformBufferPool.h>
 #include <Rendering/Data/FeatureSet.h>
+#include <Rendering/HAL/ShaderProgram.h>
 #include <Rendering/HAL/TextureHandle.h>
-#include <Rendering/Resources/Shader.h>
 #include <Rendering/Resources/Texture.h>
 #include <Rendering/Settings/EBindingPoint.h>
 #include <Rendering/Settings/EProjectionMode.h>
@@ -47,7 +47,14 @@ namespace Rendering::Data
 		/** p_isDefault marks the instance a Material owns: it is seeded from the definition's
 		 * declared defaults and engine state, and is what a plain instance falls back to. */
 		explicit MaterialInstance(Material& p_definition, bool p_isDefault = false);
+		MaterialInstance();
 		virtual ~MaterialInstance();
+
+		/** Reparents this instance to another material (a .mat asset points at a package
+		 * material this way). */
+		void SetMaterial(Material& p_material);
+		/** Seeds the engine defaults and then the material's declared render state. */
+		void ResetStateToMaterial();
 
 		MaterialInstance(const MaterialInstance&) = delete;
 		MaterialInstance& operator=(const MaterialInstance&) = delete;
@@ -65,8 +72,8 @@ namespace Rendering::Data
 		/** The definition's shader and feature set: what a variant is selected from. A drawable
 		 * holds an instance now, so the renderer asks these two questions through this pair
 		 * instead of through Material. */
-		Rendering::Resources::Shader* Shader() const { return ShaderOf(); }
-		Rendering::Resources::Shader* GetShader() const { return ShaderOf(); }
+		Material* Shader() const { return ShaderOf(); }
+		Material* GetShader() const { return ShaderOf(); }
 
 		/** The immutable package data behind Shader(): block layout, sampler fields and state.
 		 * An instance reads offsets and units from here; the shader only owns the programs. */
@@ -205,7 +212,7 @@ namespace Rendering::Data
 	protected:
 		struct LooseUniform;
 		/** The definition's shader (the one the variant comes from). */
-		Rendering::Resources::Shader* ShaderOf() const;
+		Material* ShaderOf() const;
 		/** The feature set this instance draws with: its own, seeded from the definition. */
 		const Data::FeatureSet& FeaturesOf() const { return m_features; }
 
@@ -224,6 +231,7 @@ namespace Rendering::Data
 		void ReleaseDescriptorSet();
 		void ResetBlockToDefinition();
 		void MergeDefaults();
+		void InitializeDefaultState();
 		void ResetSingleUseProperties();
 		LooseUniform* FindLooseUniform(const std::string& p_name);
 		const LooseUniform* FindLooseUniform(const std::string& p_name) const;

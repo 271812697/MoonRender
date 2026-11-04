@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <Maths/FVector2.h>
 #include <Maths/FVector3.h>
 #include <Maths/FVector4.h>
@@ -17,7 +17,6 @@ namespace Audio::Resources
 namespace Rendering::Resources
 {
 	class Model;
-	class Shader;
 	class Texture;
 }
 

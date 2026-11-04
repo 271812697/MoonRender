@@ -87,7 +87,7 @@ namespace Editor::Panels
 		::Core::SceneSystem::SceneManager& m_sceneManager;
 		Editor::Core::GizmoBehaviour m_gizmoOperations;
 		Editor::Core::EGizmoOperation m_currentOperation = Editor::Core::EGizmoOperation::TRANSLATE;
-		::Core::Resources::Material m_fallbackMaterial;
+		::Core::Resources::MaterialAsset m_fallbackMaterial;
 		Tools::Utils::OptRef<::Core::ECS::Actor> m_highlightedActor;
 		std::optional<Editor::Core::GizmoBehaviour::EDirection> m_highlightedGizmoDirection;
 		/** What the picking target last said about the cursor: the actor (or gizmo

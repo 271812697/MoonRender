@@ -16,10 +16,11 @@
 #include <Rendering/HAL/ShaderStage.h>
 #include <Rendering/Data/MaterialBuilder.h>
 #include <Rendering/Data/MaterialDefinition.h>
+#include <Rendering/Data/MaterialParser.h>
 #include <Rendering/Resources/Loaders/ShaderLoader.h>
 #include <Rendering/Resources/Shader.h>
 #include <Rendering/Resources/ShaderArchive.h>
-#include <Rendering/Resources/ShaderPackage.h>
+#include <Rendering/Data/MaterialParser.h>
 #include <Rendering/Settings/EBindingPoint.h>
 #include <Rendering/Utils/ShaderUtil.h>
 
@@ -800,7 +801,7 @@ void main()
 	 * is reported here as one line instead of being debugged as a visual bug. Members a
 	 * particular variant does not read are dropped by the linker and are simply skipped. */
 	void ValidateBindings(
-		const Rendering::Resources::ShaderPackage& p_package,
+		const Rendering::Data::MaterialParser& p_package,
 		Rendering::HAL::ShaderProgram& p_program)
 	{
 		const GLuint program = static_cast<GLuint>(p_program.GetID());
@@ -838,7 +839,7 @@ void main()
 					p_package.Name(), blockSize, p_package.ParameterBlockSize()) << std::endl;
 			}
 
-			for (const Rendering::Resources::ShaderPackage::Parameter& parameter : p_package.Parameters())
+			for (const Rendering::Data::MaterialParser::Parameter& parameter : p_package.Parameters())
 			{
 				if (parameter.isSampler || parameter.offset < 0)
 				{
@@ -871,7 +872,7 @@ void main()
 
 		// Samplers: layout(binding = N) should have put each one on the unit the runtime binds
 		// its texture to. The value is what the driver decided at link time.
-		for (const Rendering::Resources::ShaderPackage::Parameter& parameter : p_package.Parameters())
+		for (const Rendering::Data::MaterialParser::Parameter& parameter : p_package.Parameters())
 		{
 			if (!parameter.isSampler)
 			{
@@ -904,7 +905,7 @@ void main()
 	 * text: a material being edited is compiled into a package and loaded here, and the failure
 	 * has to be shown - with the .shader line the #line directives point at. */
 	Rendering::Resources::Shader::Variants AssembleFromPackage(
-		const Rendering::Resources::ShaderPackage& p_package,
+		const Rendering::Data::MaterialParser& p_package,
 		std::string* p_error = nullptr)
 	{
 		using namespace Rendering::Settings;
@@ -928,7 +929,7 @@ void main()
 			}
 		};
 
-		for (const Rendering::Resources::ShaderPackage::Variant& variant : p_package.Variants())
+		for (const Rendering::Data::MaterialParser::Variant& variant : p_package.Variants())
 		{
 			std::vector<std::shared_ptr<Rendering::HAL::ShaderStage>> stages;
 			std::string programKey;
@@ -936,15 +937,15 @@ void main()
 
 			struct StageSpec
 			{
-				Rendering::Resources::ShaderPackage::Stage stage;
+				Rendering::Data::MaterialParser::Stage stage;
 				EShaderType type;
 				const char* name;
 				bool optional;   // a geometry stage only exists for the shaders that expand primitives
 			};
 			static constexpr StageSpec kStages[] = {
-				{ Rendering::Resources::ShaderPackage::Stage::Vertex,   EShaderType::VERTEX,   "vertex",   false },
-				{ Rendering::Resources::ShaderPackage::Stage::Fragment, EShaderType::FRAGMENT, "fragment", false },
-				{ Rendering::Resources::ShaderPackage::Stage::Geometry, EShaderType::GEOMETRY, "geometry", true },
+				{ Rendering::Data::MaterialParser::Stage::Vertex,   EShaderType::VERTEX,   "vertex",   false },
+				{ Rendering::Data::MaterialParser::Stage::Fragment, EShaderType::FRAGMENT, "fragment", false },
+				{ Rendering::Data::MaterialParser::Stage::Geometry, EShaderType::GEOMETRY, "geometry", true },
 			};
 
 			for (const StageSpec& spec : kStages)
@@ -1067,19 +1068,18 @@ namespace Rendering::Resources::Loaders
 		// out of the archive as a package: nothing to parse, just compile what it lists.
 		if (const ShaderFile* file = Rendering::Resources::FindShaderFile(p_filePath))
 		{
-			if (Rendering::Resources::ShaderPackage::IsPackage(file->data, file->size))
+			if (Rendering::Data::MaterialParser::IsPackage(file->data, file->size))
 			{
-				const Rendering::Resources::ShaderPackage package(file->data, file->size);
-				if (package.IsValid())
+				auto parser = std::make_shared<Rendering::Data::MaterialParser>(
+					file->data, file->size);
+				if (parser->IsValid())
 				{
-					// The package is read into its immutable half first (the definition), then
-					// the programs are compiled from the same bytes: both sides use the same
-					// layout, so an offset or a sampler unit cannot drift.
-					const auto definition = Rendering::Data::MaterialBuilder::Build(package);
-					Shader* shader = new Shader(p_filePath, AssembleFromPackage(package),
-						std::vector<Shader::Parameter>(definition->Parameters()));
-					shader->SetState(definition->GetState());
-					shader->SetParameterBlockSize(definition->ParameterBlockSize());
+					// One parser/definition for both sides: the reflection the material
+					// reads and the programs compiled here come from the same bytes.
+					const auto definition = Rendering::Data::MaterialDefinition::FromParser(parser);
+					Shader* shader = Rendering::Data::MaterialBuilder::BuildMaterial(
+						p_filePath, definition,
+						AssembleFromPackage(*parser)).release();
 					shader->SetDeclaredFeatures(std::vector<std::string>(
 						definition->DeclaredFeatures().begin(), definition->DeclaredFeatures().end()));
 					return shader;
@@ -1088,7 +1088,7 @@ namespace Rendering::Resources::Loaders
 		}
 
 		auto result = CompileShaderFromFile(p_filePath, p_pathParser);
-		return new Shader(p_filePath, std::move(result.variants));
+		return Rendering::Data::MaterialBuilder::BuildMaterial(p_filePath, nullptr, std::move(result.variants)).release();
 	}
 
 	Shader* ShaderLoader::CreateFromPackage(const void* p_data, uint32_t p_size,
@@ -1100,15 +1100,15 @@ namespace Rendering::Resources::Loaders
 			return nullptr;
 		}
 
-		const Rendering::Resources::ShaderPackage package(p_data, p_size);
-		if (!package.IsValid())
+		auto parser = std::make_shared<Rendering::Data::MaterialParser>(p_data, p_size);
+		if (!parser->IsValid())
 		{
 			if (p_error != nullptr) { *p_error = "not a valid shader package"; }
 			return nullptr;
 		}
 
 		std::string error;
-		auto variants = AssembleFromPackage(package, &error);
+		auto variants = AssembleFromPackage(*parser, &error);
 		if (variants.empty())
 		{
 			if (p_error != nullptr) { *p_error = std::move(error); }
@@ -1116,11 +1116,8 @@ namespace Rendering::Resources::Loaders
 		}
 
 		if (p_error != nullptr) { p_error->clear(); }
-		const auto definition = Rendering::Data::MaterialBuilder::Build(package);
-		Shader* shader = new Shader(p_name, std::move(variants),
-			std::vector<Shader::Parameter>(definition->Parameters()));
-		shader->SetState(definition->GetState());
-		shader->SetParameterBlockSize(definition->ParameterBlockSize());
+		const auto definition = Rendering::Data::MaterialDefinition::FromParser(parser);
+		Shader* shader = Rendering::Data::MaterialBuilder::BuildMaterial(p_name, definition, std::move(variants)).release();
 		shader->SetDeclaredFeatures(std::vector<std::string>(
 			definition->DeclaredFeatures().begin(), definition->DeclaredFeatures().end()));
 		return shader;
@@ -1129,7 +1126,7 @@ namespace Rendering::Resources::Loaders
 	Shader* ShaderLoader::CreateFromSource(const std::string& p_vertexShader, const std::string& p_fragmentShader, const std::string& p_geomertyShader)
 	{
 		auto result = CompileShaderFromSources(p_vertexShader, p_fragmentShader, p_geomertyShader);
-		return new Shader({}, std::move(result.variants));
+		return Rendering::Data::MaterialBuilder::BuildMaterial({}, nullptr, std::move(result.variants)).release();
 	}
 
 	Shader* ShaderLoader::CreateFromSource(const std::string& p_sourceShader, Rendering::Resources::Loaders::ShaderLoader::FilePathParserCallback p_pathParser)
@@ -1137,7 +1134,7 @@ namespace Rendering::Resources::Loaders
 		auto shaderLoadResult =LoadShader(p_sourceShader,p_pathParser);
 		ShaderParseResult shaderParseResult=ParseShader(shaderLoadResult);
 		auto result=AssembleShader(shaderParseResult);
-		return new Shader("", std::move(result.variants));
+		return Rendering::Data::MaterialBuilder::BuildMaterial("", nullptr, std::move(result.variants)).release();
 	}
 
 	void ShaderLoader::Recompile(Shader& p_shader, const std::string& p_filePath, FilePathParserCallback p_pathParser)
@@ -1166,15 +1163,15 @@ namespace Rendering::Resources::Loaders
 			return false;
 		}
 
-		const Rendering::Resources::ShaderPackage package(p_data, p_size);
-		if (!package.IsValid())
+		auto parser = std::make_shared<Rendering::Data::MaterialParser>(p_data, p_size);
+		if (!parser->IsValid())
 		{
 			if (p_error != nullptr) { *p_error = "not a valid shader package"; }
 			return false;
 		}
 
 		std::string error;
-		auto variants = AssembleFromPackage(package, &error);
+		auto variants = AssembleFromPackage(*parser, &error);
 		if (variants.empty())
 		{
 			// Keep what the shader had: a broken edit must not blank out the preview or the scene.
@@ -1183,10 +1180,8 @@ namespace Rendering::Resources::Loaders
 		}
 
 		p_shader.SetVariants(std::move(variants));
-		const auto definition = Rendering::Data::MaterialBuilder::Build(package);
-		p_shader.SetParameters(std::vector<Shader::Parameter>(definition->Parameters()));
-		p_shader.SetState(definition->GetState());
-		p_shader.SetParameterBlockSize(definition->ParameterBlockSize());
+		const auto definition = Rendering::Data::MaterialDefinition::FromParser(parser);
+		p_shader.SetDefinition(definition);
 		p_shader.SetDeclaredFeatures(std::vector<std::string>(
 			definition->DeclaredFeatures().begin(), definition->DeclaredFeatures().end()));
 		if (p_error != nullptr) { p_error->clear(); }

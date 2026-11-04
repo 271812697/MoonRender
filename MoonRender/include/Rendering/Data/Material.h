@@ -3,11 +3,15 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
+#include <Rendering/Data/FeatureSet.h>
+#include <Rendering/Data/MaterialDefinition.h>
 #include <Rendering/Data/MaterialInstance.h>
 #include <Rendering/Data/StateMask.h>
-#include <Rendering/Resources/Shader.h>
+#include <Rendering/HAL/ShaderProgram.h>
 
 namespace Rendering::Data
 {
@@ -25,16 +29,50 @@ namespace Rendering::Data
 	class Material
 	{
 	public:
-		explicit Material(Rendering::Resources::Shader* p_shader = nullptr);
+		using Parameter = MaterialParameter;
+		using State = MaterialState;
+		using FeatureVariants = std::unordered_map<
+			Data::FeatureSet,
+			std::shared_ptr<Rendering::HAL::ShaderProgram>,
+			Data::FeatureSetHash,
+			Data::FeatureSetEqual>;
+		using Variants = std::unordered_map<std::string, FeatureVariants>;
+
+		Material();
+		explicit Material(Material* p_source);
+		Material(
+			std::string p_path,
+			std::shared_ptr<const MaterialDefinition> p_definition,
+			Variants p_variants);
 		virtual ~Material();
 		Material(const Material&) = delete;
 		Material& operator=(const Material&) = delete;
 
-		void SetShader(Rendering::Resources::Shader* p_shader);
+		/** Shares another material's definition and variant program cache. A .mat override
+		 * points at the package material this way. */
+		void SetShader(Material* p_shader);
 		bool HasShader() const;
-		Rendering::Resources::Shader* GetShader() const;
+		Material* GetShader() const;
 
 		const MaterialDefinition* Definition() const;
+		void SetDefinition(std::shared_ptr<const MaterialDefinition> p_definition);
+
+		Rendering::HAL::ShaderProgram& GetVariant(
+			std::optional<const std::string_view> p_pass = std::nullopt,
+			const Data::FeatureSet& p_featureSet = {});
+		const Variants& GetVariants() const { return m_variants; }
+		void SetVariants(Variants&& p_variants);
+		const Data::FeatureSet& GetFeatures() const { return m_features; }
+		const std::unordered_set<std::string>& GetPasses() const { return m_passes; }
+		const std::vector<Parameter>& GetParameters() const;
+		bool HasParameterTable() const;
+		uint32_t GetParameterBlockSize() const;
+		const State& GetState() const;
+		bool HasState() const;
+		bool UsesVariantKeys() const { return m_usesVariantKeys; }
+		const std::unordered_set<std::string>& GetVariantKeys() const { return m_variantKeys; }
+		const std::vector<std::string>& GetDeclaredFeatures() const;
+		void SetDeclaredFeatures(std::vector<std::string>&& p_features);
 
 		/** The default instance every Material owns (filament's getDefaultInstance()). */
 		MaterialInstance& DefaultInstance() const { return *m_defaultInstance; }
@@ -82,13 +120,7 @@ namespace Rendering::Data
 
 		// ---- variant / draw API ---------------------------------------------------------
 		uint64_t Revision() const { return m_defaultInstance->Revision(); }
-		Rendering::Resources::Shader* Shader() const { return GetShader(); }
-		Tools::Utils::OptRef<Rendering::HAL::ShaderProgram> GetVariant(
-			std::optional<const std::string_view> p_pass = std::nullopt,
-			Tools::Utils::OptRef<const Data::FeatureSet> p_override = std::nullopt) const
-		{
-			return m_defaultInstance->GetVariant(p_pass, p_override);
-		}
+		Material* Shader() const { return GetShader(); }
 		MaterialSignatureSet Bind(
 			Rendering::HAL::Texture* p_emptyTexture2D = nullptr,
 			Rendering::HAL::Texture* p_emptyTextureCube = nullptr,
@@ -114,7 +146,6 @@ namespace Rendering::Data
 
 		// ---- features -------------------------------------------------------------------
 		const Data::FeatureSet& Features() const { return m_defaultInstance->Features(); }
-		const Data::FeatureSet& GetFeatures() const { return m_defaultInstance->GetFeatures(); }
 		void SetFeatures(const Data::FeatureSet& p_features) { m_defaultInstance->SetFeatures(p_features); }
 		void AddFeature(const std::string& p_feature) { m_defaultInstance->AddFeature(p_feature); }
 		void RemoveFeature(const std::string& p_feature) { m_defaultInstance->RemoveFeature(p_feature); }
@@ -177,5 +208,18 @@ namespace Rendering::Data
 	private:
 		std::shared_ptr<const MaterialDefinition> m_definition;
 		std::unique_ptr<MaterialInstance> m_defaultInstance;
+
+	public:
+		/** The package/material asset path (the .shader key for a package material). */
+		std::string path;
+
+	private:
+		Material* m_source = nullptr;
+		Variants m_variants;
+		Data::FeatureSet m_features;
+		std::unordered_set<std::string> m_passes;
+		std::unordered_set<std::string> m_variantKeys;
+		std::vector<std::string> m_declaredFeatures;
+		bool m_usesVariantKeys = false;
 	};
 }

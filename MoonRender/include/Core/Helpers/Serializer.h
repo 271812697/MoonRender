@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <string>
 #include <Maths/FVector2.h>
 #include <Maths/FVector3.h>
@@ -12,7 +12,11 @@ namespace Rendering::Resources
 {
 	class Model;
 	class Texture;
-	class Shader;
+}
+
+namespace Rendering::Data
+{
+	class Material;
 }
 
 namespace Audio::Resources
@@ -22,7 +26,7 @@ namespace Audio::Resources
 
 namespace Core::Resources
 {
-	class Material;
+	class MaterialAsset;
 }
 
 namespace tinyxml2
@@ -52,8 +56,8 @@ namespace Core::Helpers
 
 		static void SerializeModel(tinyxml2::XMLDocument& p_doc, tinyxml2::XMLNode* p_node, const std::string& p_name, ::Rendering::Resources::Model* p_value);
 		static void SerializeTexture(tinyxml2::XMLDocument& p_doc, tinyxml2::XMLNode* p_node, const std::string& p_name, ::Rendering::Resources::Texture* p_value);
-		static void SerializeShader(tinyxml2::XMLDocument& p_doc, tinyxml2::XMLNode* p_node, const std::string& p_name, ::Rendering::Resources::Shader* p_value);
-		static void SerializeMaterial(tinyxml2::XMLDocument& p_doc, tinyxml2::XMLNode* p_node, const std::string& p_name, ::Core::Resources::Material* p_value);
+		static void SerializeShader(tinyxml2::XMLDocument& p_doc, tinyxml2::XMLNode* p_node, const std::string& p_name, ::Rendering::Data::Material* p_value);
+		static void SerializeMaterial(tinyxml2::XMLDocument& p_doc, tinyxml2::XMLNode* p_node, const std::string& p_name, ::Core::Resources::MaterialAsset* p_value);
 		static void SerializeSound(tinyxml2::XMLDocument& p_doc, tinyxml2::XMLNode* p_node, const std::string& p_name, Audio::Resources::Sound* p_value);
 #pragma endregion
 
@@ -73,8 +77,8 @@ namespace Core::Helpers
 
 		static void DeserializeModel(tinyxml2::XMLDocument& p_doc, tinyxml2::XMLNode* p_node, const std::string& p_name, ::Rendering::Resources::Model*& p_out);
 		static void DeserializeTexture(tinyxml2::XMLDocument& p_doc, tinyxml2::XMLNode* p_node, const std::string& p_name, ::Rendering::Resources::Texture*& p_out);
-		static void DeserializeShader(tinyxml2::XMLDocument& p_doc, tinyxml2::XMLNode* p_node, const std::string& p_name, ::Rendering::Resources::Shader*& p_out);
-		static void DeserializeMaterial(tinyxml2::XMLDocument& p_doc, tinyxml2::XMLNode* p_node, const std::string& p_name, Core::Resources::Material*& p_out);
+		static void DeserializeShader(tinyxml2::XMLDocument& p_doc, tinyxml2::XMLNode* p_node, const std::string& p_name, ::Rendering::Data::Material*& p_out);
+		static void DeserializeMaterial(tinyxml2::XMLDocument& p_doc, tinyxml2::XMLNode* p_node, const std::string& p_name, Core::Resources::MaterialAsset*& p_out);
 		static void DeserializeSound(tinyxml2::XMLDocument& p_doc, tinyxml2::XMLNode* p_node, const std::string& p_name, Audio::Resources::Sound*& p_out);
 
 		static bool DeserializeBoolean(tinyxml2::XMLDocument& p_doc, tinyxml2::XMLNode* p_node, const std::string& p_name);
@@ -92,8 +96,8 @@ namespace Core::Helpers
 
 		static ::Rendering::Resources::Model* DeserializeModel(tinyxml2::XMLDocument& p_doc, tinyxml2::XMLNode* p_node, const std::string& p_name);
 		static ::Rendering::Resources::Texture* DeserializeTexture(tinyxml2::XMLDocument& p_doc, tinyxml2::XMLNode* p_node, const std::string& p_name);
-		static ::Rendering::Resources::Shader* DeserializeShader(tinyxml2::XMLDocument& p_doc, tinyxml2::XMLNode* p_node, const std::string& p_name);
-		static Core::Resources::Material* DeserializeMaterial(tinyxml2::XMLDocument& p_doc, tinyxml2::XMLNode* p_node, const std::string& p_name);
+		static ::Rendering::Data::Material* DeserializeShader(tinyxml2::XMLDocument& p_doc, tinyxml2::XMLNode* p_node, const std::string& p_name);
+		static Core::Resources::MaterialAsset* DeserializeMaterial(tinyxml2::XMLDocument& p_doc, tinyxml2::XMLNode* p_node, const std::string& p_name);
 		static Audio::Resources::Sound* DeserializeSound(tinyxml2::XMLDocument& p_doc, tinyxml2::XMLNode* p_node, const std::string& p_name);
 #pragma endregion
 	};

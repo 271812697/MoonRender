@@ -1,7 +1,7 @@
 ﻿#pragma once
 #include <Core/ECS/Actor.h>
 
-#include <Core/Resources/Material.h>
+#include <Core/Resources/MaterialAsset.h>
 #include <Core/Rendering/SceneRenderer.h>
 #include <Core/SceneSystem/SceneManager.h>
 namespace MOON {

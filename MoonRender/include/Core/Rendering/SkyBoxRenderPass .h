@@ -2,7 +2,7 @@
 #include <Rendering/Core/ARenderPass.h>
 #include <Rendering/HAL/Framebuffer.h>
 #include <Core/Rendering/PostProcess/AEffect.h>
-#include <Core/Resources/Material.h>
+#include <Core/Resources/MaterialAsset.h>
 namespace Core::Rendering
 {
 	enum class SkyMode
@@ -48,11 +48,11 @@ namespace Core::Rendering
 		void computeIrradianceSH();
 		
 	private:
-		::Core::Resources::Material m_skyboxMaterial;
-		::Core::Resources::Material m_skyboxIrrandianceMaterial;
-		::Core::Resources::Material m_skyboxPrefilterMaterial;
-		::Core::Resources::Material m_brdfMaterial;
-		::Core::Resources::Material m_clearMaterial;
+		::Core::Resources::MaterialAsset m_skyboxMaterial;
+		::Core::Resources::MaterialAsset m_skyboxIrrandianceMaterial;
+		::Core::Resources::MaterialAsset m_skyboxPrefilterMaterial;
+		::Core::Resources::MaterialAsset m_brdfMaterial;
+		::Core::Resources::MaterialAsset m_clearMaterial;
 		::Rendering::HAL::Framebuffer skyBoxBuffer;
 		::Rendering::HAL::Framebuffer irradianceBuffer;
 		::Rendering::HAL::Framebuffer prefilterBuffer;

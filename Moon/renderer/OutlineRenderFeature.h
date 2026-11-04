@@ -6,7 +6,7 @@
 #include <Core/SceneSystem/SceneManager.h>
 #include <Core/ECS/Components/CModelRenderer.h>
 #include <Core/ECS/Components/CMaterialRenderer.h>
-#include <Core/Resources/Material.h>
+#include <Core/Resources/MaterialAsset.h>
 #include <Core/ECS/Components/CAmbientBoxLight.h>
 #include <Core/ECS/Components/CAmbientSphereLight.h>
 
@@ -48,7 +48,7 @@ namespace Editor::Rendering
 		void DrawModelOutline(::Rendering::Data::PipelineState p_pso, const Maths::FMatrix4& p_worldMatrix, ::Rendering::Resources::Model& p_model, const Maths::FVector4& p_color, Tools::Utils::OptRef<const ::Core::ECS::Components::CMaterialRenderer::MaterialList > p_materials = std::nullopt);
 
 	private:
-		::Core::Resources::Material m_stencilFillMaterial;
-		::Core::Resources::Material m_outlineMaterial;
+		::Core::Resources::MaterialAsset m_stencilFillMaterial;
+		::Core::Resources::MaterialAsset m_outlineMaterial;
 	};
 }

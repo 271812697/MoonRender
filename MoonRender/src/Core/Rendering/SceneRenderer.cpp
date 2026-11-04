@@ -796,6 +796,11 @@ void Core::Rendering::SceneRenderer::InvalidateParsedDrawables()
 }
 void Core::Rendering::SceneRenderer::DrawModelWithSingleMaterial(::Rendering::Data::PipelineState p_pso, ::Rendering::Resources::Model& p_model, ::Rendering::Data::Material& p_material, const Maths::FMatrix4& p_modelMatrix)
 {
+	DrawModelWithSingleMaterial(p_pso, p_model, p_material.DefaultInstance(), p_modelMatrix);
+}
+
+void Core::Rendering::SceneRenderer::DrawModelWithSingleMaterial(::Rendering::Data::PipelineState p_pso, ::Rendering::Resources::Model& p_model, ::Rendering::Data::MaterialInstance& p_material, const Maths::FMatrix4& p_modelMatrix)
+{
 	auto stateMask = p_material.GenerateStateMask();
 	auto userMatrix = Maths::FMatrix4::Identity;
 
@@ -808,7 +813,7 @@ void Core::Rendering::SceneRenderer::DrawModelWithSingleMaterial(::Rendering::Da
 	{
 		::Rendering::Entities::Drawable element;
 		element.mesh = *mesh;
-		element.material = p_material.DefaultInstance();
+		element.material = &p_material;
 		element.stateMask = stateMask;
 		element.AddDescriptor(engineDrawableDescriptor);
 

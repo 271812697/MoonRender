@@ -15,7 +15,7 @@
 #include <Rendering/Data/MaterialBuilder.h>
 #include <Rendering/HAL/UniformBuffer.h>
 #include <Rendering/HAL/TextureHandle.h>
-#include <Rendering/Resources/ShaderPackage.h>
+#include <Rendering/Data/MaterialParser.h>
 #include <Rendering/Resources/Texture.h>
 
 #include <Tools/Utils/OptRef.h>
@@ -513,11 +513,19 @@ Rendering::Data::MaterialInstance::MaterialInstance(Material& p_definition, bool
 {
 	// A plain instance starts empty and inherits; the default instance is the definition's
 	// own value set, seeded from the engine defaults here and from the shader in ResetProperties.
-	if (!p_isDefault)
+	if (p_isDefault)
 	{
-		return;
+		InitializeDefaultState();
 	}
+}
 
+Rendering::Data::MaterialInstance::MaterialInstance()
+{
+	InitializeDefaultState();
+}
+
+void Rendering::Data::MaterialInstance::InitializeDefaultState()
+{
 	m_supportOrthographic = true;
 	m_supportPerspective = true;
 	m_userInterface = false;
@@ -537,6 +545,40 @@ Rendering::Data::MaterialInstance::MaterialInstance(Material& p_definition, bool
 	m_gpuInstances = 1;
 	m_drawOrder = 1000;
 	m_lineWidth = 1.0f;
+}
+
+void Rendering::Data::MaterialInstance::SetMaterial(Material& p_material)
+{
+	m_definition = &p_material;
+	m_isDefaultInstance = false;
+	m_overriddenUniforms.clear();
+	m_overriddenSamplers.clear();
+	m_singleUseUniforms.clear();
+	m_singleUseSamplers.clear();
+	m_looseUniforms.clear();
+	ReleaseDescriptorSet();
+	ResetStateToMaterial();
+	ResetProperties();
+	++m_revision;
+}
+
+void Rendering::Data::MaterialInstance::ResetStateToMaterial()
+{
+	InitializeDefaultState();
+
+	if (m_definition != nullptr && m_definition->HasState())
+	{
+		const Material::State& state = m_definition->GetState();
+		if (state.blendable.has_value()) { m_blendable = state.blendable.value(); }
+		if (state.blendMode.has_value())
+		{
+			m_blendMode = state.blendMode.value();
+			m_blendable = state.blendMode.value() != Rendering::Settings::EBlendMode::BLEND_OPAQUE;
+		}
+		if (state.backfaceCulling.has_value()) { m_backfaceCulling = state.backfaceCulling.value(); }
+		if (state.frontfaceCulling.has_value()) { m_frontfaceCulling = state.frontfaceCulling.value(); }
+		if (state.depthWriting.has_value()) { m_depthWriting = state.depthWriting.value(); }
+	}
 }
 
 
@@ -658,7 +700,7 @@ Rendering::Data::MaterialInstance::GetProperty(const std::string p_key) const
 	return std::nullopt;
 }
 
-Rendering::Resources::Shader* Rendering::Data::MaterialInstance::ShaderOf() const
+Rendering::Data::Material* Rendering::Data::MaterialInstance::ShaderOf() const
 {
 	return m_definition != nullptr ? m_definition->GetShader() : nullptr;
 }
@@ -719,7 +761,7 @@ void Rendering::Data::MaterialInstance::UploadProperties(bool uploadStableProper
 			for (const MaterialDefinition::Parameter& parameter : definition->Parameters())
 			{
 				if (parameter.isSampler && parameter.name == p_name
-					&& parameter.fallback == static_cast<uint8_t>(Rendering::Resources::ShaderPackage::SamplerFallback::FlatNormal)
+					&& parameter.fallback == static_cast<uint8_t>(Rendering::Data::MaterialParser::SamplerFallback::FlatNormal)
 					&& p_flatNormalTexture != nullptr)
 				{
 					return p_flatNormalTexture;
@@ -1159,7 +1201,7 @@ void Rendering::Data::MaterialInstance::UploadParameterBlock(
 		Rendering::HAL::TextureHandle* fallback =
 			field.type == "samplerCube" ? p_emptyTextureCube : p_emptyTexture2D;
 		const char* fallbackName = field.type == "samplerCube" ? "empty cube (black)" : "empty 2D (white)";
-		if (field.fallback == static_cast<uint8_t>(Rendering::Resources::ShaderPackage::SamplerFallback::FlatNormal)
+		if (field.fallback == static_cast<uint8_t>(Rendering::Data::MaterialParser::SamplerFallback::FlatNormal)
 			&& p_flatNormalTexture != nullptr)
 		{
 			fallback = p_flatNormalTexture;

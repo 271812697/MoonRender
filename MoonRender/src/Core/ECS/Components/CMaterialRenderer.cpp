@@ -1,7 +1,7 @@
 ﻿#include <tinyxml2.h>
 #include <Core/ECS/Actor.h>
 #include <Core/ECS/Components/CMaterialRenderer.h>
-#include <Core/Resources/Material.h>
+#include <Core/Resources/MaterialAsset.h>
 #include <Core/ECS/Components/CModelRenderer.h>
 #include <Core/Global/ServiceLocator.h>
 #include <Core/ResourceManagement/MaterialManager.h>
@@ -125,7 +125,7 @@ void Core::ECS::Components::CMaterialRenderer::OnSerialize(tinyxml2::XMLDocument
 	{
 		// Only a material asset (a definition) has a path to serialize. A per-actor instance is
 		// rebuilt by whoever created it, so it is skipped rather than written as a dangling name.
-		if (auto* asset = dynamic_cast<Core::Resources::Material*>(m_materials[i]))
+		if (auto* asset = dynamic_cast<Core::Resources::MaterialAsset*>(m_materials[i]))
 		{
 			Core::Helpers::Serializer::SerializeMaterial(p_doc, materialsNode, "material", asset);
 		}

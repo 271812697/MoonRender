@@ -1,7 +1,7 @@
 ﻿#pragma once
 #include <Rendering/Core/ARenderPass.h>
 #include <Rendering/HAL/Framebuffer.h>
-#include <Core/Resources/Material.h>
+#include <Core/Resources/MaterialAsset.h>
 #include <Core/Rendering/PingPongFramebuffer.h>
 namespace Core::Rendering
 {
@@ -32,9 +32,9 @@ namespace Core::Rendering
 		virtual void ResizeRenderer(int width, int height) override;
 	private:
 		std::shared_ptr<::Rendering::HAL::Texture> noiseTexture;
-		::Core::Resources::Material gbufferMaterial;
-		::Core::Resources::Material ssaoMaterial;
-		::Core::Resources::Material ssaoblurMaterial;
+		::Core::Resources::MaterialAsset gbufferMaterial;
+		::Core::Resources::MaterialAsset ssaoMaterial;
+		::Core::Resources::MaterialAsset ssaoblurMaterial;
 		GbufferTextureData gbufferData;
 		::Rendering::HAL::Framebuffer gbuffer;
 		::Rendering::HAL::Framebuffer ssaobuffer;

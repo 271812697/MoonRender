@@ -1,4 +1,4 @@
-﻿#include "DebugModelRenderFeature.h"
+#include "DebugModelRenderFeature.h"
 #include "Core/Rendering/EngineDrawableDescriptor.h"
 #include "Rendering/Core/CompositeRenderer.h"
 
@@ -12,6 +12,11 @@ Editor::Rendering::DebugModelRenderFeature::DebugModelRenderFeature(
 
 void Editor::Rendering::DebugModelRenderFeature::DrawModelWithSingleMaterial(::Rendering::Data::PipelineState p_pso, ::Rendering::Resources::Model& p_model, ::Rendering::Data::Material& p_material, const Maths::FMatrix4& p_modelMatrix)
 {
+	DrawModelWithSingleMaterial(p_pso, p_model, p_material.DefaultInstance(), p_modelMatrix);
+}
+
+void Editor::Rendering::DebugModelRenderFeature::DrawModelWithSingleMaterial(::Rendering::Data::PipelineState p_pso, ::Rendering::Resources::Model& p_model, ::Rendering::Data::MaterialInstance& p_material, const Maths::FMatrix4& p_modelMatrix)
+{
 	auto stateMask = p_material.GenerateStateMask();
 
 	auto engineDrawableDescriptor = Core::Rendering::EngineDrawableDescriptor{
@@ -23,7 +28,7 @@ void Editor::Rendering::DebugModelRenderFeature::DrawModelWithSingleMaterial(::R
 	{
 		::Rendering::Entities::Drawable element;
 		element.mesh = *mesh;
-		element.material = p_material.DefaultInstance();
+		element.material = &p_material;
 		element.stateMask = stateMask;
 		element.AddDescriptor(engineDrawableDescriptor);
 

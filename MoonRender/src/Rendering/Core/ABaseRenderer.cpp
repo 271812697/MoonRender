@@ -229,6 +229,17 @@ void Rendering::Core::ABaseRenderer::Blit(
 	Rendering::Settings::EBlitFlags p_flags
 )
 {
+	Blit(p_pso, p_src, p_dst, p_material.DefaultInstance(), p_flags);
+}
+
+void Rendering::Core::ABaseRenderer::Blit(
+	Rendering::Data::PipelineState p_pso,
+	Rendering::HAL::Framebuffer& p_src,
+	Rendering::HAL::Framebuffer& p_dst,
+	Rendering::Data::MaterialInstance& p_material,
+	Rendering::Settings::EBlitFlags p_flags
+)
+{
 	ZoneScoped;
 
 	const auto [srcWidth, srcHeight] = p_src.GetSize();
@@ -247,7 +258,7 @@ void Rendering::Core::ABaseRenderer::Blit(
 
 	Rendering::Entities::Drawable blit;
 	blit.mesh = m_unitQuad;
-	blit.material = p_material.DefaultInstance();
+	blit.material = &p_material;
 
 	if (Rendering::Settings::IsFlagSet(Rendering::Settings::EBlitFlags::USE_MATERIAL_STATE_MASK, p_flags))
 	{
@@ -277,14 +288,30 @@ void Rendering::Core::ABaseRenderer::Blit(
 
 void Rendering::Core::ABaseRenderer::Present(Rendering::HAL::Framebuffer& p_src)
 {
-	Present(p_src, m_presentMaterial);
+	Present(p_src, m_presentMaterial.DefaultInstance());
 }
-void Rendering::Core::ABaseRenderer::Present(Rendering::HAL::Framebuffer& p_src,Rendering::Data::Material& mat)
+void Rendering::Core::ABaseRenderer::Present(
+	Rendering::HAL::Framebuffer& p_src,
+	Rendering::Data::Material& mat)
+{
+	Present(p_src, mat.DefaultInstance());
+}
+void Rendering::Core::ABaseRenderer::Present(
+	Rendering::HAL::Framebuffer& p_src,
+	Rendering::Data::MaterialInstance& mat)
 {
 	const auto colorTex = p_src.GetAttachment<HAL::Texture>(Settings::EFramebufferAttachment::COLOR);
-	Present(colorTex.value(),mat);
+	Present(colorTex.value(), mat);
 }
-void Rendering::Core::ABaseRenderer::Present(Rendering::HAL::Texture& p_src, Rendering::Data::Material& mat)
+void Rendering::Core::ABaseRenderer::Present(
+	Rendering::HAL::Texture& p_src,
+	Rendering::Data::Material& mat)
+{
+	Present(p_src, mat.DefaultInstance());
+}
+void Rendering::Core::ABaseRenderer::Present(
+	Rendering::HAL::Texture& p_src,
+	Rendering::Data::MaterialInstance& mat)
 {
 	ZoneScoped;
 	mat.SetProperty("_InputTexture", &p_src);
@@ -292,13 +319,17 @@ void Rendering::Core::ABaseRenderer::Present(Rendering::HAL::Texture& p_src, Ren
 }
 void Rendering::Core::ABaseRenderer::Present(Rendering::Data::Material& mat)
 {
+	Present(mat.DefaultInstance());
+}
+void Rendering::Core::ABaseRenderer::Present(Rendering::Data::MaterialInstance& mat)
+{
 	ZoneScoped;
 
 
 	
 	Rendering::Entities::Drawable blit;
 	blit.mesh = m_unitQuad;
-	blit.material = mat.DefaultInstance();
+	blit.material = &mat;
 	blit.stateMask.depthWriting = false;
 	blit.stateMask.colorWriting = true;
 	blit.stateMask.blendable = false;
