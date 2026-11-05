@@ -1,4 +1,4 @@
-﻿#include "MaterialEditorPanel.h"
+#include "MaterialEditorPanel.h"
 #include "MaterialCodeEditor.h"
 #include "MaterialDesigner.h"
 #include "MaterialPreviewWidget.h"
@@ -33,6 +33,7 @@
 #include "Core/Global/ServiceLocator.h"
 #include "Core/Resources/MaterialAsset.h"
 #include "Rendering/Resources/ShaderArchive.h"
+#include <Rendering/Data/MaterialDefinition.h>
 #include <Rendering/Data/MaterialParser.h>
 #include "renderer/Context.h"
 #include "Rendering/Context/Driver.h"
@@ -626,15 +627,21 @@ public:
 			return;
 		}
 
-		const Rendering::Data::MaterialParser package(
+		auto package = std::make_shared<Rendering::Data::MaterialParser>(
 			p_package.data(), static_cast<uint32_t>(p_package.size()));
-		if (!package.IsValid() || package.Variants().empty())
+		if (!package->IsValid())
+		{
+			ShowGlslVariant(-1);
+			return;
+		}
+		const auto definition = Rendering::Data::MaterialDefinition::FromParser(package);
+		if (definition == nullptr || definition->Variants().empty())
 		{
 			ShowGlslVariant(-1);
 			return;
 		}
 
-		m_glslVariants = package.Variants();
+		m_glslVariants = definition->Variants();
 
 		int defaultIndex = 0;
 		for (size_t i = 0; i < m_glslVariants.size(); ++i)

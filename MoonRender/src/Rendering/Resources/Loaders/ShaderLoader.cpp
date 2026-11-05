@@ -801,7 +801,8 @@ void main()
 	 * is reported here as one line instead of being debugged as a visual bug. Members a
 	 * particular variant does not read are dropped by the linker and are simply skipped. */
 	void ValidateBindings(
-		const Rendering::Data::MaterialParser& p_package,
+		const Rendering::Data::MaterialDefinition& p_definition,
+		const Rendering::Data::MaterialParser& p_parser,
 		Rendering::HAL::ShaderProgram& p_program)
 	{
 		const GLuint program = static_cast<GLuint>(p_program.GetID());
@@ -819,7 +820,7 @@ void main()
 			if (binding != p_expected)
 			{
 				std::cout << std::format("[Shader Binding] {}: {} is bound to {}, expected {}",
-					p_package.Name(), p_name, binding, p_expected) << std::endl;
+					p_parser.Name(), p_name, binding, p_expected) << std::endl;
 			}
 			return index;
 		};
@@ -829,17 +830,17 @@ void main()
 		const GLuint materialBlock =
 			checkBlock("MaterialParams", Rendering::Settings::kMaterialParameterBinding);
 
-		if (materialBlock != GL_INVALID_INDEX && p_package.ParameterBlockSize() > 0)
+		if (materialBlock != GL_INVALID_INDEX && p_definition.ParameterBlockSize() > 0)
 		{
 			GLint blockSize = -1;
 			glGetActiveUniformBlockiv(program, materialBlock, GL_UNIFORM_BLOCK_DATA_SIZE, &blockSize);
-			if (blockSize > static_cast<GLint>(p_package.ParameterBlockSize()))
+			if (blockSize > static_cast<GLint>(p_definition.ParameterBlockSize()))
 			{
 				std::cout << std::format("[Shader Binding] {}: the driver's block is {} bytes, the package says {}",
-					p_package.Name(), blockSize, p_package.ParameterBlockSize()) << std::endl;
+					p_parser.Name(), blockSize, p_definition.ParameterBlockSize()) << std::endl;
 			}
 
-			for (const Rendering::Data::MaterialParser::Parameter& parameter : p_package.Parameters())
+			for (const Rendering::Data::MaterialParameter& parameter : p_definition.Parameters())
 			{
 				if (parameter.isSampler || parameter.offset < 0)
 				{
@@ -865,14 +866,14 @@ void main()
 				if (offset != static_cast<GLint>(parameter.offset))
 				{
 					std::cout << std::format("[Shader Binding] {}: {} is at offset {}, the package says {}",
-						p_package.Name(), parameter.name, offset, parameter.offset) << std::endl;
+						p_parser.Name(), parameter.name, offset, parameter.offset) << std::endl;
 				}
 			}
 		}
 
 		// Samplers: layout(binding = N) should have put each one on the unit the runtime binds
 		// its texture to. The value is what the driver decided at link time.
-		for (const Rendering::Data::MaterialParser::Parameter& parameter : p_package.Parameters())
+		for (const Rendering::Data::MaterialParameter& parameter : p_definition.Parameters())
 		{
 			if (!parameter.isSampler)
 			{
@@ -890,7 +891,7 @@ void main()
 			if (unit != static_cast<GLint>(parameter.binding))
 			{
 				std::cout << std::format("[Shader Binding] {}: sampler {} is on unit {}, the package says {}",
-					p_package.Name(), parameter.name, unit, parameter.binding) << std::endl;
+					p_parser.Name(), parameter.name, unit, parameter.binding) << std::endl;
 			}
 		}
 	}
@@ -905,7 +906,8 @@ void main()
 	 * text: a material being edited is compiled into a package and loaded here, and the failure
 	 * has to be shown - with the .shader line the #line directives point at. */
 	Rendering::Resources::Shader::Variants AssembleFromPackage(
-		const Rendering::Data::MaterialParser& p_package,
+		const Rendering::Data::MaterialDefinition& p_definition,
+		const Rendering::Data::MaterialParser& p_parser,
 		std::string* p_error = nullptr)
 	{
 		using namespace Rendering::Settings;
@@ -929,7 +931,7 @@ void main()
 			}
 		};
 
-		for (const Rendering::Data::MaterialParser::Variant& variant : p_package.Variants())
+		for (const Rendering::Data::MaterialParser::Variant& variant : p_definition.Variants())
 		{
 			std::vector<std::shared_ptr<Rendering::HAL::ShaderStage>> stages;
 			std::string programKey;
@@ -950,7 +952,7 @@ void main()
 
 			for (const StageSpec& spec : kStages)
 			{
-				std::string source = p_package.Source(variant, spec.stage);
+				std::string source = p_parser.Source(variant, spec.stage);
 				if (source.empty())
 				{
 					if (spec.optional)
@@ -958,7 +960,7 @@ void main()
 						continue;
 					}
 					report(std::format("[Shader Package] {}<{}> (pass '{}'): no source",
-						p_package.Name(), spec.name, variant.pass));
+						p_parser.Name(), spec.name, variant.pass));
 					ok = false;
 					break;
 				}
@@ -973,7 +975,7 @@ void main()
 					if (const auto result = stage->Compile(); !result.success)
 					{
 						report(std::format("[Shader Compile] {}<{}> (pass '{}'): {}",
-							p_package.Name(), spec.name, variant.pass, result.message));
+							p_parser.Name(), spec.name, variant.pass, result.message));
 						ok = false;
 						break;
 					}
@@ -1007,7 +1009,7 @@ void main()
 				if (!linkResult.success)
 				{
 					report(std::format("[Shader Linking] {} (pass '{}'): {}",
-						p_package.Name(), variant.pass, linkResult.message));
+						p_parser.Name(), variant.pass, linkResult.message));
 					continue;
 				}
 
@@ -1016,7 +1018,7 @@ void main()
 				// a line in the log rather than a corrupted image.
 				if (!blockValidated)
 				{
-					ValidateBindings(p_package, *candidate);
+					ValidateBindings(p_definition, p_parser, *candidate);
 					blockValidated = true;
 				}
 
@@ -1042,7 +1044,7 @@ void main()
 				std::chrono::high_resolution_clock::now() - p_assemblyStart).count();
 			std::cout << std::format(
 				"[Shader Load] {:<28} variants={:<4} stages(compiled)={:<4} programs={:<4} {:8.1f} ms",
-				p_package.Name(), p_package.Variants().size(), stageCache.size(), programCache.size(), elapsedMs)
+				p_parser.Name(), p_definition.Variants().size(), stageCache.size(), programCache.size(), elapsedMs)
 				<< std::endl;
 		}
 
@@ -1107,8 +1109,15 @@ namespace Rendering::Resources::Loaders
 			return nullptr;
 		}
 
+		const auto definition = Rendering::Data::MaterialDefinition::FromParser(parser);
+		if (definition == nullptr)
+		{
+			if (p_error != nullptr) { *p_error = "the package has no reflection"; }
+			return nullptr;
+		}
+
 		std::string error;
-		auto variants = AssembleFromPackage(*parser, &error);
+		auto variants = AssembleFromPackage(*definition, *parser, &error);
 		if (variants.empty())
 		{
 			if (p_error != nullptr) { *p_error = std::move(error); }
@@ -1116,7 +1125,6 @@ namespace Rendering::Resources::Loaders
 		}
 
 		if (p_error != nullptr) { p_error->clear(); }
-		const auto definition = Rendering::Data::MaterialDefinition::FromParser(parser);
 		Shader* shader = Rendering::Data::MaterialBuilder::BuildMaterial(p_name, definition, std::move(variants)).release();
 		shader->SetDeclaredFeatures(std::vector<std::string>(
 			definition->DeclaredFeatures().begin(), definition->DeclaredFeatures().end()));
@@ -1170,8 +1178,15 @@ namespace Rendering::Resources::Loaders
 			return false;
 		}
 
+		const auto definition = Rendering::Data::MaterialDefinition::FromParser(parser);
+		if (definition == nullptr)
+		{
+			if (p_error != nullptr) { *p_error = "the package has no reflection"; }
+			return false;
+		}
+
 		std::string error;
-		auto variants = AssembleFromPackage(*parser, &error);
+		auto variants = AssembleFromPackage(*definition, *parser, &error);
 		if (variants.empty())
 		{
 			// Keep what the shader had: a broken edit must not blank out the preview or the scene.
@@ -1180,7 +1195,6 @@ namespace Rendering::Resources::Loaders
 		}
 
 		p_shader.SetVariants(std::move(variants));
-		const auto definition = Rendering::Data::MaterialDefinition::FromParser(parser);
 		p_shader.SetDefinition(definition);
 		p_shader.SetDeclaredFeatures(std::vector<std::string>(
 			definition->DeclaredFeatures().begin(), definition->DeclaredFeatures().end()));
@@ -1201,7 +1215,7 @@ namespace Rendering::Resources::Loaders
 	}
 
 	std::shared_ptr<Rendering::HAL::ShaderProgram> ShaderLoader::CompileVariant(
-		const Rendering::Data::MaterialParser& p_package,
+		const Rendering::Data::MaterialParser& p_parser,
 		const Rendering::Data::MaterialParser::Variant& p_variant,
 		std::string* p_error)
 	{
@@ -1223,14 +1237,14 @@ namespace Rendering::Resources::Loaders
 		std::vector<std::shared_ptr<Rendering::HAL::ShaderStage>> stages;
 		for (const StageSpec& spec : kStages)
 		{
-			std::string source = p_package.Source(p_variant, spec.stage);
+			std::string source = p_parser.Source(p_variant, spec.stage);
 			if (source.empty())
 			{
 				if (spec.optional) { continue; }
 				if (p_error != nullptr)
 				{
 					*p_error = std::format("{}<{}> (pass '{}'): no source",
-						p_package.Name(), spec.name, p_variant.pass);
+						p_parser.Name(), spec.name, p_variant.pass);
 				}
 				return nullptr;
 			}
@@ -1242,7 +1256,7 @@ namespace Rendering::Resources::Loaders
 				if (p_error != nullptr)
 				{
 					*p_error = std::format("{}<{}> (pass '{}'): {}",
-						p_package.Name(), spec.name, p_variant.pass, result.message);
+						p_parser.Name(), spec.name, p_variant.pass, result.message);
 				}
 				return nullptr;
 			}
@@ -1258,7 +1272,7 @@ namespace Rendering::Resources::Loaders
 			if (p_error != nullptr)
 			{
 				*p_error = std::format("{} (pass '{}'): {}",
-					p_package.Name(), p_variant.pass, linkResult.message);
+					p_parser.Name(), p_variant.pass, linkResult.message);
 			}
 			return nullptr;
 		}

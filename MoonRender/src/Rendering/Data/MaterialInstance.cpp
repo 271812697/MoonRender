@@ -976,7 +976,6 @@ void Rendering::Data::MaterialInstance::BindParameterBlock(
 	const Rendering::HAL::ShaderProgram& p_program)
 {
 	EnsureDescriptorSet();
-	MergeDefaults();
 
 	// Per-material descriptor set (filament's PER_MATERIAL): the array is indexed by the
 	// normalized binding point, and the program's binding map says which GL slot it got.
@@ -1041,6 +1040,14 @@ void Rendering::Data::MaterialInstance::MergeDefaults()
 	}
 
 	const MaterialInstance& defaults = m_definition->DefaultInstance();
+	const uint64_t defaultsRevision = defaults.Revision();
+	if (!m_defaultsDirty && defaultsRevision == m_seenDefaultsRevision)
+	{
+		return;
+	}
+	m_seenDefaultsRevision = defaultsRevision;
+	m_defaultsDirty = false;
+
 	const uint32_t blockSize = definition->ParameterBlockSize();
 	if (blockSize > 0 && defaults.BufferSize() == blockSize)
 	{
@@ -1379,6 +1386,7 @@ void Rendering::Data::MaterialInstance::ResetProperties()
 	m_singleUseUniforms.clear();
 	m_singleUseSamplers.clear();
 	m_looseUniforms.clear();
+	m_defaultsDirty = true;
 	ReleaseDescriptorSet();
 	EnsureDescriptorSet();
 	++m_revision;

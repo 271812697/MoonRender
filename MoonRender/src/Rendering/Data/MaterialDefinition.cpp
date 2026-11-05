@@ -16,10 +16,10 @@ namespace Rendering::Data
 		/** The material block's state as the runtime's optional overrides. The package keeps the
 		 * values as the material's text ("back", "transparent", "false"); the runtime works in
 		 * booleans. Leaving a field unset means the material did not declare it. */
-		MaterialState StateFromPackage(const MaterialParser& p_package)
+		MaterialState StateFromPackage(const std::map<std::string, std::string>& p_states)
 		{
 			MaterialState state;
-			const std::map<std::string, std::string>& states = p_package.States();
+			const std::map<std::string, std::string>& states = p_states;
 
 			if (const auto it = states.find("blending"); it != states.end())
 			{
@@ -50,7 +50,7 @@ namespace Rendering::Data
 	}
 
 	std::shared_ptr<const MaterialDefinition> MaterialDefinition::FromParser(
-		std::shared_ptr<const MaterialParser> p_parser)
+		std::shared_ptr<MaterialParser> p_parser)
 	{
 		if (p_parser == nullptr || !p_parser->IsValid())
 		{
@@ -66,36 +66,39 @@ namespace Rendering::Data
 	}
 
 	std::shared_ptr<const MaterialDefinition> MaterialDefinition::BuildFromParser(
-		const MaterialParser& p_package)
+		MaterialParser& p_parser)
 	{
 		// Private constructor: use new/delete through the shared_ptr, the class is immutable.
 		std::shared_ptr<MaterialDefinition> definition{ new MaterialDefinition() };
+		MaterialParser::ParsedData data = p_parser.TakeData();
 
-		definition->m_name = p_package.Name();
-		definition->m_parameterBlockSize = p_package.ParameterBlockSize();
-		definition->m_uniformFields.reserve(p_package.UniformFields().size());
-		for (const MaterialParser::UniformField& field : p_package.UniformFields())
+		definition->m_name = p_parser.Name();
+		definition->m_parameterBlockSize = data.parameterBlockSize;
+		definition->m_uniformFields.reserve(data.uniformFields.size());
+		for (MaterialParser::UniformField& field : data.uniformFields)
 		{
 			definition->m_uniformFields.push_back(UniformField{
-				field.name, field.type, field.offset, field.stride, field.count });
+				std::move(field.name), std::move(field.type),
+				field.offset, field.stride, field.count });
 		}
 
-		definition->m_samplerFields.reserve(p_package.SamplerFields().size());
-		for (const MaterialParser::SamplerField& field : p_package.SamplerFields())
+		definition->m_samplerFields.reserve(data.samplerFields.size());
+		for (MaterialParser::SamplerField& field : data.samplerFields)
 		{
 			definition->m_samplerFields.push_back(SamplerField{
-				field.name, field.type, field.binding, field.fallback });
+				std::move(field.name), std::move(field.type),
+				field.binding, field.fallback });
 		}
-		definition->m_layout = p_package.Layout();
-		definition->m_state = StateFromPackage(p_package);
+		definition->m_state = StateFromPackage(data.states);
 		definition->m_hasState = true;
 		definition->m_hasParameterTable = true;
-		definition->m_declaredFeatures = p_package.DeclaredFeatures();
+		definition->m_declaredFeatures = std::move(data.declaredFeatures);
+		definition->m_variants = std::move(data.variants);
+		definition->m_attributes = std::move(data.attributes);
 
-		const auto fallbackOf = [&p_package](const std::string& p_name) -> uint8_t
+		const auto fallbackOf = [&data](const std::string& p_name) -> uint8_t
 		{
-			for (const MaterialParser::SamplerFallbackEntry& entry
-				: p_package.SamplerFallbacks())
+			for (const MaterialParser::SamplerFallbackEntry& entry : data.samplerFallbacks)
 			{
 				if (entry.name == p_name)
 				{
@@ -105,8 +108,8 @@ namespace Rendering::Data
 			return static_cast<uint8_t>(MaterialParser::SamplerFallback::Default);
 		};
 
-		definition->m_parameters.reserve(p_package.Parameters().size());
-		for (const MaterialParser::Parameter& parameter : p_package.Parameters())
+		definition->m_parameters.reserve(data.parameters.size());
+		for (const MaterialParser::Parameter& parameter : data.parameters)
 		{
 			Parameter resolved;
 			resolved.name = parameter.name;

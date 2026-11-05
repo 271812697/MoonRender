@@ -100,29 +100,18 @@ namespace Rendering::Data
 
 		bool IsValid() const { return m_valid; }
 		const std::string& Name() const { return m_name; }
-		const std::vector<Variant>& Variants() const { return m_variants; }
-
-		/** The features the material declared (material { features : [...] }), independent of
-		 * which ones this package was compiled with. The designer's feature toggles come from
-		 * here: a fixed-feature package's variant union only lists the enabled ones. */
-		const std::vector<std::string>& DeclaredFeatures() const { return m_declaredFeatures; }
-
-		/** The material's reflection, straight out of the package: name, types, sampler flag,
-		 * array size and declared default per parameter, plus the vertex attributes. This is
-		 * what a material panel reads instead of asking the driver for active uniforms. */
-		const std::vector<Parameter>& Parameters() const { return m_parameters; }
 
 		/** One field of the PerMaterial uniform block (MAT_UIB) - filament's UboBlockInfo. */
 		struct UniformField
 		{
 			std::string name;
-			std::string type;      // the GLSL type
+			std::string type;
 			uint32_t offset = 0;
 			uint32_t stride = 0;
 			uint32_t count = 1;
 		};
 
-		/** One descriptor of the PerMaterial sampler block (MAT_SIB) - SamplerBlockInfo. */
+		/** One descriptor of the PerMaterial sampler block (MAT_SIB). */
 		struct SamplerField
 		{
 			std::string name;
@@ -131,32 +120,23 @@ namespace Rendering::Data
 			uint8_t fallback = 0;
 		};
 
-		/** The PerMaterial layout the build recorded: where each parameter lives in the uniform
-		 * block, and which texture unit each sampler owns. The runtime writes a
-		 * MaterialInstance's values through these two lists. */
-		const std::vector<UniformField>& UniformFields() const { return m_uniformFields; }
-		const std::vector<SamplerField>& SamplerFields() const { return m_samplerFields; }
-		uint32_t UniformBlockSize() const { return m_uniformBlockSize; }
+		/** Everything the package serialized. The parser keeps only the chunk/blob data needed
+		 * to rebuild stage source; MaterialDefinition takes ownership of this. */
+		struct ParsedData
+		{
+			std::vector<Variant> variants;
+			std::vector<Parameter> parameters;
+			std::vector<Attribute> attributes;
+			std::map<std::string, std::string> states;
+			std::vector<SamplerFallbackEntry> samplerFallbacks;
+			std::vector<UniformField> uniformFields;
+			std::vector<SamplerField> samplerFields;
+			std::vector<std::string> declaredFeatures;
+			uint32_t parameterBlockSize = 0;
+			uint32_t uniformBlockSize = 0;
+		};
 
-		/** The PerMaterial descriptor layout the package describes: the uniform block plus one
-		 * texture descriptor per sampler. A DescriptorSet built against it cannot bind a texture
-		 * into the block's slot. */
-		const ::Rendering::Data::DescriptorSetLayout& Layout() const { return m_layout; }
-		const std::vector<Attribute>& Attributes() const { return m_attributes; }
-
-		/** One entry per sampler, carrying the 1x1 texture the runtime binds when the instance
-		 * assigned none (MAT_SIB's fallback field). */
-		const std::vector<SamplerFallbackEntry>& SamplerFallbacks() const { return m_samplerFallbacks; }
-
-		/** The state the `material { }` block declared besides the name, domain and shading model:
-		 * `blending`, `culling`, `depthWrite`, ... as the text the material wrote. Filament bakes
-		 * the same fields into its own chunks (MAT_BLEN, MAT_CUMO, MAT_DWRIT); the runtime maps
-		 * them onto the material's render state. */
-		const std::map<std::string, std::string>& States() const { return m_states; }
-
-		/** The std140 size of the per-material parameter block, 0 when the material has none
-		 * (every parameter is a sampler, or the package predates the block). */
-		uint32_t ParameterBlockSize() const { return m_parameterBlockSize; }
+		ParsedData TakeData();
 
 		/** The final GLSL of one variant's stage, empty when the package holds no such
 		 * combination (i.e. one the build did not make, or no geometry stage at all).
@@ -184,29 +164,16 @@ namespace Rendering::Data
 
 		bool m_valid = false;
 		std::string m_name;
-		std::vector<Variant> m_variants;
-		std::vector<Parameter> m_parameters;
-		std::vector<Attribute> m_attributes;
-		std::map<std::string, std::string> m_states;
-		uint32_t m_parameterBlockSize = 0;
-		std::vector<SamplerFallbackEntry> m_samplerFallbacks;
 		std::vector<Blob> m_blobs;
 		/** The package's chunk list (filaflat's Rendering::Resources::ChunkContainer). */
 		Rendering::Resources::ChunkContainer m_container;
 		/** The package's line table (DIC_TEXT): the shared stage texts are stored as ids into
 		 * it, so the lines every stage repeats are stored once. */
 		std::vector<std::string> m_lines;
-		/** The PerMaterial layout (MAT_UIB / MAT_SIB), applied to m_parameters as it is read. */
-		std::vector<UniformField> m_uniformFields;
-		std::vector<SamplerField> m_samplerFields;
-		uint32_t m_uniformBlockSize = 0;
-		/** The descriptor layout, built from those two blocks while the package is read. */
-		::Rendering::Data::DescriptorSetLayout m_layout;
 		/** Stage name ("vertex" / "fragment" / "geometry") -> the stage's whole text, with the
 		 * placeholder where the variant's #define lines go. Owned rather than a view: a stage is
 		 * reconstructed from the line table when the package is read. Empty for a package
 		 * written before the shared-stage chunk existed. */
 		std::map<std::string, std::string> m_stageTexts;
-		std::vector<std::string> m_declaredFeatures;
 	};
 }

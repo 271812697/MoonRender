@@ -1,5 +1,6 @@
 ﻿#include <algorithm>
 #include <cmath>
+#include <optional>
 #include <glad/glad.h>
 #include <string>
 #include <tinyxml2.h>
@@ -134,38 +135,40 @@ namespace Core::SceneSystem
 		Material tempMat;
 		if (material) {
 			// Resolved through the chain: an instance may only override a few of these, the rest
-			// come from its material. Reading the instance's own map would miss them.
-			const auto propertyOf = [material](const std::string& p_name) {
-				const auto property = material->GetProperty(p_name);
-				return property ? &property.value() : nullptr;
+			// come from its material. Return by value: the optional owns the property, so a
+			// pointer into it would dangle as soon as this lambda returns.
+			const auto propertyOf = [material](const std::string& p_name)
+				-> std::optional<::Rendering::Data::MaterialProperty>
+			{
+				return material->GetProperty(p_name);
 			};
-			const ::Rendering::Data::MaterialProperty* it = propertyOf("u_Albedo");
-			if (it != nullptr) {
+			auto it = propertyOf("u_Albedo");
+			if (it.has_value()) {
 				tempMat.baseColor=std::get<Maths::FVector4>(it->value).ToFVector3();
 				tempMat.opacity = std::get<Maths::FVector4>(it->value).w;
 			
 			}
 			it = propertyOf("u_EmissiveColor");
-			if (it != nullptr) {
+			if (it.has_value()) {
 				tempMat.emission = std::get<Maths::FVector3>(it->value);
 			}
 			it = propertyOf("u_Metallic");
-			if (it != nullptr) {
+			if (it.has_value()) {
 				tempMat.metallic= std::get<float>(it->value);
 			}
 			it = propertyOf("u_Roughness");
-			if (it != nullptr) {
+			if (it.has_value()) {
 				tempMat.roughness = std::get<float>(it->value);
 			}
 			//u_RefractionIndex
 			it = propertyOf("u_RefractionIndex");
-			if (it != nullptr) {
+			if (it.has_value()) {
 				tempMat.ior = std::get<float>(it->value);
 			}
 
 			//Albedo Texture
 			it = propertyOf("u_AlbedoMap");
-			if (it != nullptr) {
+			if (it.has_value()) {
 				::Rendering::HAL::Texture* handle = nullptr;
 				if (auto textureHandle = std::get_if<::Rendering::HAL::TextureHandle*>(&it->value))
 				{
@@ -183,7 +186,7 @@ namespace Core::SceneSystem
 				}
 			}
 			it = propertyOf("u_RoughnessMap");
-			if (it != nullptr) {
+			if (it.has_value()) {
 				::Rendering::HAL::Texture* handle = nullptr;
 				if (auto textureHandle = std::get_if<::Rendering::HAL::TextureHandle*>(&it->value))
 				{
@@ -201,7 +204,7 @@ namespace Core::SceneSystem
 				}
 			}
 			it = propertyOf("u_EmissiveMap");
-			if (it != nullptr) {
+			if (it.has_value()) {
 				::Rendering::HAL::Texture* handle = nullptr;
 				if (auto textureHandle = std::get_if<::Rendering::HAL::TextureHandle*>(&it->value))
 				{
@@ -219,7 +222,7 @@ namespace Core::SceneSystem
 				}
 			}
 			it = propertyOf("u_NormalMap");
-			if (it != nullptr) {
+			if (it.has_value()) {
 				::Rendering::HAL::Texture* handle = nullptr;
 				if (auto textureHandle = std::get_if<::Rendering::HAL::TextureHandle*>(&it->value))
 				{

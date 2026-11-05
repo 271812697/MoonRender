@@ -54,7 +54,8 @@ namespace Moon::Matc
 	void LayoutParameters(MaterialFile& p_material)
 	{
 		uint32_t offset = 0;
-		uint32_t samplerBinding = 0;
+		// Per-material descriptor set: binding 0 is MaterialParams, samplers start at 1.
+		uint32_t samplerBinding = 1;
 
 		for (Parameter& parameter : p_material.parameters)
 		{

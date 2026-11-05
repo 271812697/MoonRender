@@ -253,6 +253,8 @@ namespace Rendering::Data
 		Data::FeatureSet m_features;
 		uint64_t m_revision = 0;
 		uint64_t m_seenDefinitionRevision = 0;
+		uint64_t m_seenDefaultsRevision = 0;
+		bool m_defaultsDirty = true;
 		size_t m_stablePropertySignatureVersion = 0ULL;
 		size_t m_singleUsePropertySignatureVersion = 0ULL;
 		Tools::Utils::OptRef<Rendering::HAL::ShaderProgram> m_programInUse = std::nullopt;

@@ -28,8 +28,7 @@ namespace Rendering::Data
 		constexpr std::string_view kDefinesPlaceholder = "//@MOON_VARIANT_DEFINES@";
 	}
 
-	bool MaterialParser::IsPackage(const void* p_data, uint32_t p_size)
-	{
+	bool MaterialParser::IsPackage(const void* p_data, uint32_t p_size)	{
 		if (p_data == nullptr || p_size < sizeof(uint64_t) + sizeof(uint32_t))
 		{
 			return false;
@@ -141,229 +140,8 @@ namespace Rendering::Data
 			}
 		}
 
-		// MON_VARI: the variant table.
-		if (const Rendering::Resources::ChunkContainer::Chunk* variants = ChunkOf(m_container, ChunkType::MoonVariantTable))
-		{
-			Rendering::Resources::Unflattener reader(variants->start, variants->size);
-			uint32_t count = 0;
-			if (reader.Read(&count))
-			{
-				m_variants.reserve(count);
-				for (uint32_t i = 0; i < count; ++i)
-				{
-					Variant variant;
-					uint32_t featureCount = 0;
-					if (!ReadString(reader, variant.pass) || !reader.Read(&featureCount))
-					{
-						break;
-					}
-					for (uint32_t f = 0; f < featureCount; ++f)
-					{
-						std::string feature;
-						if (!ReadString(reader, feature))
-						{
-							break;
-						}
-						variant.features.insert(std::move(feature));
-					}
-					m_variants.push_back(std::move(variant));
-				}
-			}
-		}
-
-		// MON_FEAT: the features the material declared.
-		if (const Rendering::Resources::ChunkContainer::Chunk* features = ChunkOf(m_container, ChunkType::MoonFeatureSet))
-		{
-			Rendering::Resources::Unflattener reader(features->start, features->size);
-			uint32_t count = 0;
-			if (reader.Read(&count))
-			{
-				m_declaredFeatures.reserve(count);
-				for (uint32_t i = 0; i < count; ++i)
-				{
-					std::string feature;
-					if (!ReadString(reader, feature))
-					{
-						break;
-					}
-					m_declaredFeatures.push_back(std::move(feature));
-				}
-			}
-		}
-
-		// MAT_PROP: the reflected parameters. Type and count are typed; only the name / label /
-		// group and the GLSL default expression are text.
-		if (const Rendering::Resources::ChunkContainer::Chunk* properties = ChunkOf(m_container, ChunkType::MaterialProperties))
-		{
-			Rendering::Resources::Unflattener reader(properties->start, properties->size);
-			uint32_t count = 0;
-			if (reader.Read(&count))
-			{
-				m_parameters.reserve(count);
-				for (uint32_t i = 0; i < count; ++i)
-				{
-					Parameter parameter;
-					uint8_t type = 0;
-					uint8_t flags = 0;
-					if (!ReadString(reader, parameter.name)
-						|| !reader.Read(&type)
-						|| !reader.Read(&parameter.count)
-						|| !ReadString(reader, parameter.defaultValue)
-						|| !ReadString(reader, parameter.label)
-						|| !ReadString(reader, parameter.group)
-						|| !reader.Read(&flags)
-						|| !reader.ReadFloat(&parameter.min)
-						|| !reader.ReadFloat(&parameter.max)
-						|| !reader.ReadFloat(&parameter.step))
-					{
-						break;
-					}
-
-					const ParameterType parameterType = static_cast<ParameterType>(type);
-					parameter.type = Moon::Material::ParameterTypeName(parameterType);
-					parameter.glslType = Moon::Material::ParameterTypeGlsl(parameterType);
-					parameter.hasRange = (flags & 0x01) != 0;
-					parameter.hasStep = (flags & 0x02) != 0;
-					parameter.isColor = (flags & 0x04) != 0;
-					parameter.isUi = (flags & 0x08) == 0;
-					parameter.isSampler = Moon::Material::IsSamplerType(parameterType);
-
-					if (!reader.Read(&parameter.offset) || !reader.Read(&parameter.stride)
-						|| !reader.Read(&parameter.binding))
-					{
-						break;
-					}
-					m_parameters.push_back(std::move(parameter));
-				}
-			}
-		}
-
-		// MAT_ATTR: the vertex attributes the material reads.
-		if (const Rendering::Resources::ChunkContainer::Chunk* attributes = ChunkOf(m_container, ChunkType::MaterialAttributeInfo))
-		{
-			Rendering::Resources::Unflattener reader(attributes->start, attributes->size);
-			uint32_t count = 0;
-			if (reader.Read(&count))
-			{
-				m_attributes.reserve(count);
-				for (uint32_t i = 0; i < count; ++i)
-				{
-					Attribute attribute;
-					if (!reader.Read(&attribute.location)
-						|| !ReadString(reader, attribute.glslType)
-						|| !ReadString(reader, attribute.name))
-					{
-						break;
-					}
-					m_attributes.push_back(std::move(attribute));
-				}
-			}
-		}
-
-		// MAT_UIB: the std140 block layout. The block size is the one field filament derives
-		// from the field list; we store it because the runtime allocates exactly that range.
-		if (const Rendering::Resources::ChunkContainer::Chunk* ubo = ChunkOf(m_container, ChunkType::MaterialUib))
-		{
-			Rendering::Resources::Unflattener reader(ubo->start, ubo->size);
-			std::string name;
-			uint32_t blockSize = 0;
-			uint32_t count = 0;
-			if (ReadString(reader, name) && reader.Read(&blockSize) && reader.Read(&count))
-			{
-				m_uniformBlockSize = blockSize;
-				m_parameterBlockSize = blockSize;
-				m_layout.Add(name.empty() ? "MaterialParams" : name,
-					::Rendering::Data::DescriptorSetLayout::Kind::UniformBuffer,
-					::Rendering::Settings::kMaterialParameterBinding);
-
-				m_uniformFields.reserve(count);
-				for (uint32_t i = 0; i < count; ++i)
-				{
-					UniformField field;
-					uint8_t type = 0;
-					if (!ReadString(reader, field.name) || !reader.Read(&type)
-						|| !reader.Read(&field.offset) || !reader.Read(&field.stride)
-						|| !reader.Read(&field.count))
-					{
-						break;
-					}
-					field.type = Moon::Material::ParameterTypeGlsl(static_cast<ParameterType>(type));
-					m_uniformFields.push_back(std::move(field));
-				}
-			}
-		}
-
-		// MAT_SIB: one descriptor per sampler.
-		if (const Rendering::Resources::ChunkContainer::Chunk* sib = ChunkOf(m_container, ChunkType::MaterialSib))
-		{
-			Rendering::Resources::Unflattener reader(sib->start, sib->size);
-			std::string name;
-			uint32_t count = 0;
-			if (ReadString(reader, name) && reader.Read(&count))
-			{
-				m_samplerFields.reserve(count);
-				for (uint32_t i = 0; i < count; ++i)
-				{
-					SamplerField field;
-					uint8_t type = 0;
-					uint8_t fallback = 0;
-					if (!ReadString(reader, field.name) || !reader.Read(&type)
-						|| !reader.Read(&fallback) || !reader.Read(&field.binding))
-					{
-						break;
-					}
-					field.type = Moon::Material::ParameterTypeName(static_cast<ParameterType>(type));
-					field.fallback = fallback;
-					m_samplerFields.push_back(field);
-					m_layout.Add(field.name, ::Rendering::Data::DescriptorSetLayout::Kind::Texture,
-						field.binding);
-					m_samplerFallbacks.push_back(SamplerFallbackEntry{
-						field.name, static_cast<MaterialParser::SamplerFallback>(fallback) });
-				}
-			}
-		}
-
-		// MON_STAT: the material block's render state.
-		if (const Rendering::Resources::ChunkContainer::Chunk* state = ChunkOf(m_container, ChunkType::MoonMaterialState))
-		{
-			Rendering::Resources::Unflattener reader(state->start, state->size);
-			uint32_t count = 0;
-			if (reader.Read(&count))
-			{
-				for (uint32_t i = 0; i < count; ++i)
-				{
-					std::string key;
-					std::string value;
-					if (!ReadString(reader, key) || !ReadString(reader, value))
-					{
-						break;
-					}
-					m_states[std::move(key)] = std::move(value);
-				}
-			}
-		}
-
-		// Apply the block layout to the reflection records, so a consumer cannot see an offset
-		// that disagrees with MAT_UIB / MAT_SIB.
-		for (Parameter& parameter : m_parameters)
-		{
-			for (const UniformField& field : m_uniformFields)
-			{
-				if (field.name != parameter.name) { continue; }
-				parameter.offset = static_cast<int32_t>(field.offset);
-				parameter.stride = field.stride;
-				parameter.count = field.count > 1 ? field.count : 0;
-				break;
-			}
-			for (const SamplerField& field : m_samplerFields)
-			{
-				if (field.name != parameter.name) { continue; }
-				parameter.binding = field.binding;
-				break;
-			}
-		}
-
-		m_valid = !m_variants.empty() && !m_blobs.empty();
+		m_valid = !m_blobs.empty()
+			&& ChunkOf(m_container, ChunkType::MoonVariantTable) != nullptr;
 		if (!m_valid)
 		{
 			std::cerr << "[MaterialParser] the package is missing its variants or its sources" << std::endl;
@@ -442,5 +220,228 @@ namespace Rendering::Data
 			text.replace(at, kDefinesPlaceholder.size(), blob->source);
 		}
 		return text;
+	}
+
+	MaterialParser::ParsedData MaterialParser::TakeData()
+	{
+		ParsedData data;
+		// MON_VARI: the variant table.
+		if (const Rendering::Resources::ChunkContainer::Chunk* variants = ChunkOf(m_container, ChunkType::MoonVariantTable))
+		{
+			Rendering::Resources::Unflattener reader(variants->start, variants->size);
+			uint32_t count = 0;
+			if (reader.Read(&count))
+			{
+				data.variants.reserve(count);
+				for (uint32_t i = 0; i < count; ++i)
+				{
+					Variant variant;
+					uint32_t featureCount = 0;
+					if (!ReadString(reader, variant.pass) || !reader.Read(&featureCount))
+					{
+						break;
+					}
+					for (uint32_t f = 0; f < featureCount; ++f)
+					{
+						std::string feature;
+						if (!ReadString(reader, feature))
+						{
+							break;
+						}
+						variant.features.insert(std::move(feature));
+					}
+					data.variants.push_back(std::move(variant));
+				}
+			}
+		}
+
+		// MON_FEAT: the features the material declared.
+		if (const Rendering::Resources::ChunkContainer::Chunk* features = ChunkOf(m_container, ChunkType::MoonFeatureSet))
+		{
+			Rendering::Resources::Unflattener reader(features->start, features->size);
+			uint32_t count = 0;
+			if (reader.Read(&count))
+			{
+				data.declaredFeatures.reserve(count);
+				for (uint32_t i = 0; i < count; ++i)
+				{
+					std::string feature;
+					if (!ReadString(reader, feature))
+					{
+						break;
+					}
+					data.declaredFeatures.push_back(std::move(feature));
+				}
+			}
+		}
+
+		// MAT_PROP: the reflected parameters. Type and count are typed; only the name / label /
+		// group and the GLSL default expression are text.
+		if (const Rendering::Resources::ChunkContainer::Chunk* properties = ChunkOf(m_container, ChunkType::MaterialProperties))
+		{
+			Rendering::Resources::Unflattener reader(properties->start, properties->size);
+			uint32_t count = 0;
+			if (reader.Read(&count))
+			{
+				data.parameters.reserve(count);
+				for (uint32_t i = 0; i < count; ++i)
+				{
+					Parameter parameter;
+					uint8_t type = 0;
+					uint8_t flags = 0;
+					if (!ReadString(reader, parameter.name)
+						|| !reader.Read(&type)
+						|| !reader.Read(&parameter.count)
+						|| !ReadString(reader, parameter.defaultValue)
+						|| !ReadString(reader, parameter.label)
+						|| !ReadString(reader, parameter.group)
+						|| !reader.Read(&flags)
+						|| !reader.ReadFloat(&parameter.min)
+						|| !reader.ReadFloat(&parameter.max)
+						|| !reader.ReadFloat(&parameter.step))
+					{
+						break;
+					}
+
+					const ParameterType parameterType = static_cast<ParameterType>(type);
+					parameter.type = Moon::Material::ParameterTypeName(parameterType);
+					parameter.glslType = Moon::Material::ParameterTypeGlsl(parameterType);
+					parameter.hasRange = (flags & 0x01) != 0;
+					parameter.hasStep = (flags & 0x02) != 0;
+					parameter.isColor = (flags & 0x04) != 0;
+					parameter.isUi = (flags & 0x08) == 0;
+					parameter.isSampler = Moon::Material::IsSamplerType(parameterType);
+
+					if (!reader.Read(&parameter.offset) || !reader.Read(&parameter.stride)
+						|| !reader.Read(&parameter.binding))
+					{
+						break;
+					}
+					data.parameters.push_back(std::move(parameter));
+				}
+			}
+		}
+
+		// MAT_ATTR: the vertex attributes the material reads.
+		if (const Rendering::Resources::ChunkContainer::Chunk* attributes = ChunkOf(m_container, ChunkType::MaterialAttributeInfo))
+		{
+			Rendering::Resources::Unflattener reader(attributes->start, attributes->size);
+			uint32_t count = 0;
+			if (reader.Read(&count))
+			{
+				data.attributes.reserve(count);
+				for (uint32_t i = 0; i < count; ++i)
+				{
+					Attribute attribute;
+					if (!reader.Read(&attribute.location)
+						|| !ReadString(reader, attribute.glslType)
+						|| !ReadString(reader, attribute.name))
+					{
+						break;
+					}
+					data.attributes.push_back(std::move(attribute));
+				}
+			}
+		}
+
+		// MAT_UIB: the std140 block layout. The block size is the one field filament derives
+		// from the field list; we store it because the runtime allocates exactly that range.
+		if (const Rendering::Resources::ChunkContainer::Chunk* ubo = ChunkOf(m_container, ChunkType::MaterialUib))
+		{
+			Rendering::Resources::Unflattener reader(ubo->start, ubo->size);
+			std::string name;
+			uint32_t blockSize = 0;
+			uint32_t count = 0;
+			if (ReadString(reader, name) && reader.Read(&blockSize) && reader.Read(&count))
+			{
+				data.uniformBlockSize = blockSize;
+				data.parameterBlockSize = blockSize;
+
+				data.uniformFields.reserve(count);
+				for (uint32_t i = 0; i < count; ++i)
+				{
+					UniformField field;
+					uint8_t type = 0;
+					if (!ReadString(reader, field.name) || !reader.Read(&type)
+						|| !reader.Read(&field.offset) || !reader.Read(&field.stride)
+						|| !reader.Read(&field.count))
+					{
+						break;
+					}
+					field.type = Moon::Material::ParameterTypeGlsl(static_cast<ParameterType>(type));
+					data.uniformFields.push_back(std::move(field));
+				}
+			}
+		}
+
+		// MAT_SIB: one descriptor per sampler.
+		if (const Rendering::Resources::ChunkContainer::Chunk* sib = ChunkOf(m_container, ChunkType::MaterialSib))
+		{
+			Rendering::Resources::Unflattener reader(sib->start, sib->size);
+			std::string name;
+			uint32_t count = 0;
+			if (ReadString(reader, name) && reader.Read(&count))
+			{
+				data.samplerFields.reserve(count);
+				for (uint32_t i = 0; i < count; ++i)
+				{
+					SamplerField field;
+					uint8_t type = 0;
+					uint8_t fallback = 0;
+					if (!ReadString(reader, field.name) || !reader.Read(&type)
+						|| !reader.Read(&fallback) || !reader.Read(&field.binding))
+					{
+						break;
+					}
+					field.type = Moon::Material::ParameterTypeName(static_cast<ParameterType>(type));
+					field.fallback = fallback;
+					data.samplerFields.push_back(field);
+					data.samplerFallbacks.push_back(SamplerFallbackEntry{
+						field.name, static_cast<MaterialParser::SamplerFallback>(fallback) });
+				}
+			}
+		}
+
+		// MON_STAT: the material block's render state.
+		if (const Rendering::Resources::ChunkContainer::Chunk* state = ChunkOf(m_container, ChunkType::MoonMaterialState))
+		{
+			Rendering::Resources::Unflattener reader(state->start, state->size);
+			uint32_t count = 0;
+			if (reader.Read(&count))
+			{
+				for (uint32_t i = 0; i < count; ++i)
+				{
+					std::string key;
+					std::string value;
+					if (!ReadString(reader, key) || !ReadString(reader, value))
+					{
+						break;
+					}
+					data.states[std::move(key)] = std::move(value);
+				}
+			}
+		}
+
+		// Apply the block layout to the reflection records, so a consumer cannot see an offset
+		// that disagrees with MAT_UIB / MAT_SIB.
+		for (Parameter& parameter : data.parameters)
+		{
+			for (const UniformField& field : data.uniformFields)
+			{
+				if (field.name != parameter.name) { continue; }
+				parameter.offset = static_cast<int32_t>(field.offset);
+				parameter.stride = field.stride;
+				parameter.count = field.count > 1 ? field.count : 0;
+				break;
+			}
+			for (const SamplerField& field : data.samplerFields)
+			{
+				if (field.name != parameter.name) { continue; }
+				parameter.binding = field.binding;
+				break;
+			}
+		}
+
+		return data;
 	}
 }

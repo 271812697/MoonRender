@@ -38,7 +38,7 @@ Rendering::Data::Material::Material(
 	// the parser so feature queries work before the first variant is used.
 	if (m_variants.empty() && m_definition != nullptr && m_definition->Parser() != nullptr)
 	{
-		for (const MaterialParser::Variant& variant : m_definition->Parser()->Variants())
+		for (const MaterialParser::Variant& variant : m_definition->Variants())
 		{
 			m_passes.insert(variant.pass);
 			for (const std::string& feature : variant.features)
@@ -128,9 +128,9 @@ Rendering::HAL::ShaderProgram& Rendering::Data::Material::GetVariant(
 		m_definition != nullptr ? m_definition->Parser() : nullptr;
 	std::string pass = std::string{ p_pass.value_or("") };
 
-	if (m_variants.empty() && parser != nullptr && !parser->Variants().empty())
+	if (m_variants.empty() && m_definition != nullptr && !m_definition->Variants().empty())
 	{
-		pass = p_pass.has_value() ? pass : parser->Variants().front().pass;
+		pass = p_pass.has_value() ? pass : m_definition->Variants().front().pass;
 	}
 
 	auto passIt = m_variants.find(pass);
@@ -161,7 +161,7 @@ Rendering::HAL::ShaderProgram& Rendering::Data::Material::GetVariant(
 		const MaterialParser::Variant* chosen = nullptr;
 		size_t bestCommon = 0;
 		size_t bestExtra = static_cast<size_t>(-1);
-		for (const MaterialParser::Variant& candidate : parser->Variants())
+		for (const MaterialParser::Variant& candidate : m_definition->Variants())
 		{
 			if (candidate.pass != passIt->first)
 			{
@@ -186,7 +186,7 @@ Rendering::HAL::ShaderProgram& Rendering::Data::Material::GetVariant(
 		{
 			// The requested pass may not exist in this package (a fallback draw path). Use the
 			// closest variant of any pass rather than failing the draw.
-			for (const MaterialParser::Variant& candidate : parser->Variants())
+			for (const MaterialParser::Variant& candidate : m_definition->Variants())
 			{
 				if (chosen == nullptr || candidate.features.size() < chosen->features.size())
 				{

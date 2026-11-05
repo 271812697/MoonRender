@@ -6,6 +6,7 @@
 #include <vector>
 
 #include <Rendering/Data/DescriptorSetLayout.h>
+#include <Rendering/Data/MaterialParser.h>
 #include <Rendering/Data/ProgramDescriptorBindings.h>
 #include <Rendering/Settings/EBlendMode.h>
 
@@ -91,7 +92,7 @@ namespace Rendering::Data
 		/** The parser is the definition's package reader: reflection, render state and the
 		 * per-variant stage sources all come from it. */
 		static std::shared_ptr<const MaterialDefinition> FromParser(
-			std::shared_ptr<const MaterialParser> p_parser);
+			std::shared_ptr<MaterialParser> p_parser);
 
 		const MaterialParser* Parser() const { return m_parser.get(); }
 
@@ -110,6 +111,8 @@ namespace Rendering::Data
 		bool HasState() const { return m_hasState; }
 		bool HasParameterTable() const { return m_hasParameterTable; }
 		const std::vector<std::string>& DeclaredFeatures() const { return m_declaredFeatures; }
+		const std::vector<MaterialParser::Variant>& Variants() const { return m_variants; }
+		const std::vector<MaterialParser::Attribute>& Attributes() const { return m_attributes; }
 
 		/** The sampler field with that name, or nullptr. */
 		const SamplerField* FindSampler(const std::string& p_name) const;
@@ -119,7 +122,7 @@ namespace Rendering::Data
 	private:
 		MaterialDefinition() = default;
 		static std::shared_ptr<const MaterialDefinition> BuildFromParser(
-			const MaterialParser& p_package);
+			MaterialParser& p_parser);
 
 		std::string m_name;
 		std::shared_ptr<const MaterialParser> m_parser;
@@ -133,5 +136,7 @@ namespace Rendering::Data
 		bool m_hasState = false;
 		bool m_hasParameterTable = false;
 		std::vector<std::string> m_declaredFeatures;
+		std::vector<MaterialParser::Variant> m_variants;
+		std::vector<MaterialParser::Attribute> m_attributes;
 	};
 }
