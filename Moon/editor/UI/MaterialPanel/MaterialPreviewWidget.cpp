@@ -15,7 +15,7 @@
 #include "renderer/Context.h"
 #include "renderer/SceneView.h"
 
-#include <Core/Resources/Material.h>
+#include <Core/Resources/MaterialAsset.h>
 #include <Rendering/Context/Driver.h>
 #include <Rendering/Context/IGLContextHost.h>
 #include <Rendering/Resources/Loaders/ShaderLoader.h>
@@ -59,7 +59,7 @@ MOON::MaterialPreviewWidget::~MaterialPreviewWidget()
 	}
 }
 
-void MOON::MaterialPreviewWidget::SetShaderPackage(const std::string& p_package, const std::string& p_shaderKey)
+void MOON::MaterialPreviewWidget::SetMaterialPackage(const std::string& p_package, const std::string& p_shaderKey)
 {
 	m_package = p_package;
 	m_shaderKey = p_shaderKey;
@@ -73,7 +73,7 @@ const std::string& MOON::MaterialPreviewWidget::GetError() const
 	return m_error;
 }
 
-void MOON::MaterialPreviewWidget::ShowMaterial(::Core::Resources::Material* p_material)
+void MOON::MaterialPreviewWidget::ShowMaterial(::Core::Resources::MaterialAsset* p_material)
 {
 	m_shownMaterial = p_material;
 
@@ -124,7 +124,7 @@ bool MOON::MaterialPreviewWidget::EnsureView()
 
 	m_view = new ::Editor::Panels::PreviewView(*context.driver);
 	m_view->SetPreviewMesh(m_previewMesh);
-	m_material = std::make_unique<::Core::Resources::Material>();
+	m_material = std::make_unique<::Core::Resources::MaterialAsset>();
 	m_view->SetMaterial(m_shownMaterial != nullptr ? m_shownMaterial : m_material.get());
 	return true;
 }
@@ -198,7 +198,7 @@ void MOON::MaterialPreviewWidget::BindEnvironmentTextures()
 		return;
 	}
 
-	const auto bind = [](::Core::Resources::Material* p_material, const char* p_name,
+	const auto bind = [](::Core::Resources::MaterialAsset* p_material, const char* p_name,
 		::Rendering::HAL::Texture* p_texture)
 	{
 		if (p_material == nullptr)
@@ -238,7 +238,7 @@ void MOON::MaterialPreviewWidget::BindEnvironmentTextures()
 			::Rendering::Settings::EPixelDataType::FLOAT);
 	}
 
-	for (::Core::Resources::Material* material : { m_shownMaterial, m_material.get() })
+	for (::Core::Resources::MaterialAsset* material : { m_shownMaterial, m_material.get() })
 	{
 		bind(material, "_IrradianceCube", irradiance);
 		bind(material, "_PrefilterCube", prefilter);

@@ -1,0 +1,153 @@
+/*
+ * Copyright (C) 2017 The Android Open Source Project
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#ifndef MOONMATC_LEXER_H
+#define MOONMATC_LEXER_H
+
+#include <cstddef>
+
+#include "Lexeme.h"
+
+namespace Moon::Matc {
+
+// Templated on the class of Lexemes to parse: Material lexeme, JSON Lexemes, GLSL lexemes.
+template <class T>
+class Lexer {
+public:
+    virtual ~Lexer() = default;
+
+    void lex(const char* text, size_t size, size_t lineOffset = 1) {
+        mCursor = text;
+        mEnd = mCursor + size;
+        mLineCounter = lineOffset;
+        while (hasMore()) {
+            if (!readLexeme()) {
+                return;
+            }
+        }
+    }
+
+    const std::vector<T>& getLexemes() {
+        return mLexemes;
+    }
+
+protected:
+
+    size_t getLine() const noexcept {
+        return mLineCounter;
+    }
+
+    size_t getCursor() const noexcept {
+        return mLinePosition;
+    }
+
+    inline bool isWhiteSpaceCharacter(char c) const noexcept {
+        return c < 33 || c > 127;
+    }
+
+    inline bool isAlphaCharacter(char c) const noexcept {
+        return (c >= 'A' && c <= 'Z') ||  (c >= 'a' && c <= 'z');
+    }
+
+    inline bool isNumericCharacter(char c) const noexcept {
+        return (c >= '0' && c <= '9');
+    }
+
+    inline bool isAphaNumericCharacter(char c) const noexcept {
+        return  isAlphaCharacter(c) || isNumericCharacter(c);
+    }
+
+    inline bool isIdentifierCharacter(char c) const noexcept {
+        return isAphaNumericCharacter(c) || (c == '_');
+    }
+
+    inline bool hasMore() const noexcept {
+        return mCursor < mEnd;
+    }
+
+    inline void skipUntilEndOfLine() {
+        while (hasMore() && *mCursor != '\n') {
+            consume();
+        }
+    }
+
+    inline char consume() noexcept {
+        if (*mCursor == '\n') {
+            mLineCounter++;
+            mLinePosition = 0;
+        }
+        mLinePosition++;
+        return *mCursor++;
+    }
+
+    inline char peek() const noexcept {
+        return *mCursor;
+    }
+
+    // Read the next Lexeme. It will be of the type peek() returned just before
+    // this method was called. This method can return false if it wishes lexing to stop.
+    virtual bool readLexeme() noexcept = 0;
+
+    void skipWhiteSpace() {
+        // A comment can start after any amount of whitespace and another comment can follow
+        // it, so the whole run is consumed in one loop. Both comment forms keep the line
+        // counter right: consume() counts the newlines inside them.
+        for (;;) {
+            while (mCursor < mEnd && isWhiteSpaceCharacter(*mCursor)) {
+                consume();
+            }
+
+            if (!hasMore() || *mCursor != '/' || mCursor + 1 >= mEnd) {
+                return;
+            }
+
+            // "//": skip until the next return carriage is encountered.
+            if (*(mCursor + 1) == '/') {
+                skipUntilEndOfLine();
+                continue;
+            }
+
+            // "/* ... */": skip the whole block. A block comment that is never closed
+            // consumes the rest of the input; the lexer then stops because hasMore() is false.
+            if (*(mCursor + 1) == '*') {
+                consume(); // '/'
+                consume(); // '*'
+                while (hasMore()) {
+                    if (*mCursor == '*' && mCursor + 1 < mEnd && *(mCursor + 1) == '/') {
+                        consume(); // '*'
+                        consume(); // '/'
+                        break;
+                    }
+                    consume();
+                }
+                continue;
+            }
+
+            return;
+        }
+    }
+
+    const char* mEnd = nullptr;
+    const char* mCursor = nullptr;
+    std::vector<T> mLexemes;
+
+    size_t mLineCounter = 1;
+    size_t mLinePosition = 0;
+};
+
+} // namespace Moon::Matc
+
+#endif // MOONMATC_LEXER_H

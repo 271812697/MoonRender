@@ -1,5 +1,7 @@
 #pragma once
 #include <functional>
+#include <memory>
+#include <Rendering/Data/MaterialParser.h>
 #include <Rendering/Resources/Shader.h>
 
 namespace Rendering::Resources::Loaders
@@ -53,5 +55,10 @@ namespace Rendering::Resources::Loaders
 	static bool RecompileFromPackage(Shader& p_shader, const void* p_data, uint32_t p_size,
 		std::string* p_error = nullptr);
 		static bool Destroy(Shader*& p_shader);
+
+		static std::shared_ptr<Rendering::HAL::ShaderProgram> CompileVariant(
+			const Rendering::Data::MaterialParser& p_package,
+			const Rendering::Data::MaterialParser::Variant& p_variant,
+			std::string* p_error = nullptr);
 	};
 }

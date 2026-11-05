@@ -33,8 +33,8 @@
 #include <QVBoxLayout>
 
 #include "Core/Global/ServiceLocator.h"
-#include "Core/Resources/Loaders/MaterialLoader.h"
-#include "Core/Resources/Material.h"
+#include "Core/Resources/Loaders/MaterialAssetLoader.h"
+#include "Core/Resources/MaterialAsset.h"
 #include "Core/ResourceManagement/MaterialManager.h"
 #include "Core/ResourceManagement/ShaderManager.h"
 #include "Core/ResourceManagement/TextureManager.h"
@@ -65,7 +65,7 @@ namespace MOON
 {
 	namespace
 	{
-		using Core::Resources::Material;
+		using Core::Resources::MaterialAsset;
 
 		std::string ToLower(std::string p_text)
 		{
@@ -212,7 +212,7 @@ namespace MOON
 		class DesignerMaterialComponent : public PropertyComponent
 		{
 		public:
-			DesignerMaterialComponent(Material& p_material,
+			DesignerMaterialComponent(MaterialAsset& p_material,
 				std::map<QString, std::string> p_uniformNames,
 				std::map<QString, std::string> p_featureNames,
 				std::map<QString, std::string> p_stateNames,
@@ -476,7 +476,7 @@ namespace MOON
 				return it != m_uniformNames.end() ? it->second : p_label.toStdString();
 			}
 
-			Material& m_material;
+			MaterialAsset& m_material;
 			std::function<void()> m_onChanged;
 			std::function<void()> m_onFeatureChanged;
 			std::map<QString, std::string> m_uniformNames;
@@ -491,7 +491,7 @@ namespace MOON
 		class TextureSlotRow : public QWidget
 		{
 		public:
-			TextureSlotRow(const QString& p_label, const std::string& p_name, Material& p_material,
+			TextureSlotRow(const QString& p_label, const std::string& p_name, MaterialAsset& p_material,
 				const std::vector<MaterialDesigner::TextureAsset>& p_assets,
 				const std::function<void()>& p_onChanged, QWidget* p_parent)
 				: QWidget(p_parent),
@@ -598,7 +598,7 @@ namespace MOON
 				m_thumb->clear();
 			}
 
-			Material& m_material;
+			MaterialAsset& m_material;
 			std::string m_name;
 			std::function<void()> m_onChanged;
 			QComboBox* m_combo = nullptr;
@@ -611,7 +611,7 @@ namespace MOON
 		class BlendModeRow : public QWidget
 		{
 		public:
-			BlendModeRow(const QString& p_label, Material& p_material,
+			BlendModeRow(const QString& p_label, MaterialAsset& p_material,
 				const std::function<void()>& p_onChanged, QWidget* p_parent)
 				: QWidget(p_parent),
 				m_material(p_material),
@@ -654,7 +654,7 @@ namespace MOON
 			}
 
 		private:
-			Material& m_material;
+			MaterialAsset& m_material;
 			std::function<void()> m_onChanged;
 			QComboBox* m_combo = nullptr;
 		};
@@ -693,7 +693,7 @@ namespace MOON
 
 	MaterialDesigner::~MaterialDesigner() = default;
 
-	Core::Resources::Material* MaterialDesigner::GetMaterial() const
+	Core::Resources::MaterialAsset* MaterialDesigner::GetMaterial() const
 	{
 		return m_material;
 	}
@@ -914,7 +914,7 @@ namespace MOON
 			return;
 		}
 
-		Core::Resources::Material* material = nullptr;
+		Core::Resources::MaterialAsset* material = nullptr;
 		{
 			ModuleContextScope context;
 			if (!context)
@@ -1056,8 +1056,7 @@ namespace MOON
 		// Re-link the instance and regenerate its parameters from the new shader. The .mat is
 		// only written on Save, so this is an edit like any other (and Undo can take it back).
 		m_material->SetShader(shader);
-		m_material->GetProperties().clear();
-		m_material->UpdateProperties();
+		m_material->ResetProperties();
 		MarkDirty();
 		RebuildForm();
 		emit materialEdited();
@@ -1466,7 +1465,7 @@ namespace MOON
 				SetStatus(QStringLiteral("The render context is not ready yet."), true);
 				return;
 			}
-			Core::Resources::Loaders::MaterialLoader::Reload(*m_material, realPath.string());
+			Core::Resources::Loaders::MaterialAssetLoader::Reload(*m_material, realPath.string());
 		}
 
 		m_dirty = false;
@@ -1490,7 +1489,7 @@ namespace MOON
 
 		const std::filesystem::path realPath =
 			std::filesystem::path(m_materialsRoot) / std::filesystem::path(m_selectedKey).filename();
-		Core::Resources::Loaders::MaterialLoader::Save(*m_material, realPath.string());
+		Core::Resources::Loaders::MaterialAssetLoader::Save(*m_material, realPath.string());
 		m_dirty = false;
 		// The content browser's tile is a render of this instance; tell it the asset changed.
 		emit materialEdited();
@@ -1646,7 +1645,7 @@ namespace MOON
 		Snapshot snapshot;
 		if (m_material != nullptr)
 		{
-			snapshot.properties = m_material->GetProperties();
+			snapshot.properties = m_material->SnapshotProperties();
 			snapshot.features = m_material->GetFeatures();
 			snapshot.blendable = m_material->IsBlendable();
 			snapshot.blendMode = m_material->GetBlendMode();

@@ -8,6 +8,8 @@
 #include <ThirdParty/imgui/implot/imGuizmo.h>
 #include "Im3DRenderer.h"
 #include <Rendering/Overlay/Im2DRender.h>
+#include <Rendering/Overlay/Im2D.h>
+#include <Rendering/Overlay/Im2DFont.h>
 #include "Interactive/MathUtil/MathUtil.h"
 #include "Settings/DebugSetting.h"
 #include "core/Global/ServiceLocator.h"

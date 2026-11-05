@@ -55,7 +55,7 @@ void Editor::Rendering::PointRenderPass::Draw(::Rendering::Data::PipelineState p
 			::Rendering::Entities::Drawable element;
 			
 			element.mesh = *sphere->GetMeshes()[0];
-			element.material = m_PointMaterial;
+			element.material = m_PointMaterial.DefaultInstance();
 			element.stateMask = stateMask;
 			element.AddDescriptor(engineDrawableDescriptor);
 			m_renderer.DrawEntity(p_pso, element);

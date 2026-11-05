@@ -71,7 +71,7 @@ void Core::SceneSystem::Scene::AddDefaultSkysphere()
 	
 	if (skysphereMaterial)
 	{
-		materialRenderer.SetMaterialAtIndex(0, *skysphereMaterial);
+		materialRenderer.SetMaterialAtIndex(0, skysphereMaterial->DefaultInstance());
 	}
 
 	if (sphereModel)
@@ -92,7 +92,7 @@ void Core::SceneSystem::Scene::AddDefaultAtmosphere()
 
 	if (atmosphereMaterial)
 	{
-		materialRenderer.SetMaterialAtIndex(0, *atmosphereMaterial);
+		materialRenderer.SetMaterialAtIndex(0, atmosphereMaterial->DefaultInstance());
 	}
 
 	if (sphereModel)

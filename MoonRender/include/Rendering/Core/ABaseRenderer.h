@@ -7,6 +7,8 @@
 #include "Rendering/Entities/Drawable.h"
 #include "Rendering/Settings/EBlitFlags.h"
 #include "Rendering/Context/Driver.h"
+
+namespace Rendering::Data { class DescriptorSet; }
 namespace Rendering::Core
 {
 	class ABaseRenderer : public IRenderer
@@ -91,12 +93,22 @@ namespace Rendering::Core
 			Rendering::Data::PipelineState p_pso,
 			Rendering::HAL::Framebuffer& p_src,
 			Rendering::HAL::Framebuffer& p_dst,
+			Rendering::Data::MaterialInstance& p_material,
+			Rendering::Settings::EBlitFlags p_flags = Rendering::Settings::EBlitFlags::DEFAULT
+		);
+		virtual void Blit(
+			Rendering::Data::PipelineState p_pso,
+			Rendering::HAL::Framebuffer& p_src,
+			Rendering::HAL::Framebuffer& p_dst,
 			Rendering::Data::Material& p_material,
 			Rendering::Settings::EBlitFlags p_flags = Rendering::Settings::EBlitFlags::DEFAULT
 		);
 		void Present(Rendering::HAL::Framebuffer& p_src);
+		void Present(Rendering::HAL::Framebuffer& p_src, Rendering::Data::MaterialInstance& mat);
 		void Present(Rendering::HAL::Framebuffer& p_src, Rendering::Data::Material& mat);
+		void Present(Rendering::HAL::Texture& p_src, Rendering::Data::MaterialInstance& mat);
 		void Present(Rendering::HAL::Texture& p_src, Rendering::Data::Material& mat);
+		void Present(Rendering::Data::MaterialInstance& mat);
 		void Present(Rendering::Data::Material& mat);
 		void Present(Rendering::HAL::Texture& p_src);
 		/**
@@ -121,6 +133,13 @@ namespace Rendering::Core
 		/** The view's split-sum DFG LUT: global, bound for every material that declares
 		 * _BRDFLut (see Material::UploadParameterBlock). Set by CompositeRenderer each frame. */
 		void SetBrdfLut(Rendering::HAL::Texture* p_lut) { m_brdfLut = p_lut; }
+		void SetEngineDescriptorSets(
+			Rendering::Data::DescriptorSet* p_perView,
+			Rendering::Data::DescriptorSet* p_perRenderable)
+		{
+			m_perViewSet = p_perView;
+			m_perRenderableSet = p_perRenderable;
+		}
 		/** The view's environment (filament's IndirectLight): the irradiance cube (diffuse) and
 		 * the prefiltered cube (specular). Bound per draw like the DFG LUT, so a material
 		 * instance created before the sky pass baked them still samples the view's environment
@@ -145,8 +164,10 @@ namespace Rendering::Core
 		Rendering::Data::PipelineState m_basePipelineState;
 		bool m_isDrawing;
 		std::optional<Rendering::Data::MaterialSignatureSet> m_previousMaterialSignature = std::nullopt;
-		Rendering::Resources::Shader* m_presentShader;
+		Rendering::Data::Material* m_presentShader;
 		Rendering::Data::Material m_presentMaterial;
+		Rendering::Data::DescriptorSet* m_perViewSet = nullptr;
+		Rendering::Data::DescriptorSet* m_perRenderableSet = nullptr;
 	private:
 		static std::atomic_bool s_isDrawing;
 	};

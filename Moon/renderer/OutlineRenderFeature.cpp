@@ -180,7 +180,7 @@ void Editor::Rendering::OutlineRenderFeature::DrawModelToStencil(
 			{
 				return *material;
 			}
-			return m_stencilFillMaterial;
+			return m_stencilFillMaterial.DefaultInstance();
 			};
 
 		auto& targetMaterial = getStencilMaterial();
@@ -224,7 +224,7 @@ void Editor::Rendering::OutlineRenderFeature::DrawModelOutline(
 			{
 				return *material;
 			}
-			return m_stencilFillMaterial;
+			return m_stencilFillMaterial.DefaultInstance();
 			};
 
 		auto& targetMaterial = getStencilMaterial();

@@ -3,7 +3,7 @@
 #include <Core/ECS/Components/CModelRenderer.h>
 #include <Core/ECS/Components/CReflectionProbe.h>
 #include <Core/Rendering/SceneRenderer.h>
-#include <Core/Resources/Material.h>
+#include <Core/Resources/MaterialAsset.h>
 #include <Core/SceneSystem/SceneManager.h>
 
 #include <Rendering/Entities/Camera.h>

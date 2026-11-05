@@ -1096,7 +1096,7 @@ void main()
 		{
 			::Rendering::Entities::Drawable blit;
 			blit.mesh = m_renderer.m_unitQuad;
-			blit.material = pathTraceShaderLowRes;
+			blit.material = pathTraceShaderLowRes.DefaultInstance();
 			blit.stateMask.depthWriting = false;
 			blit.stateMask.colorWriting = true;
 			blit.stateMask.blendable = false;
@@ -1119,7 +1119,7 @@ void main()
 		{
 			::Rendering::Entities::Drawable blit;
 			blit.mesh = m_renderer.m_unitQuad;
-			blit.material = pathTraceShader;
+			blit.material = pathTraceShader.DefaultInstance();
 			blit.stateMask.depthWriting = false;
 			blit.stateMask.colorWriting = true;
 			blit.stateMask.blendable = false;
@@ -1136,7 +1136,7 @@ void main()
 			glBlitNamedFramebuffer(pathTracefbo.GetID(), accumFBO.GetID(), 0, 0, tileWidth, tileHeight, tileWidth * tile.x, tileHeight * tile.y,
 				tileWidth * tile.x + tileWidth, tileHeight * tile.y + tileHeight, GL_COLOR_BUFFER_BIT, GL_NEAREST);
 			outputFBO[currentBuffer].Bind();
-			blit.material = tonemapShader;
+			blit.material = tonemapShader.DefaultInstance();
 			glViewport(0, 0, renderSize.x, renderSize.y);
 			m_renderer.DrawEntity(pso, blit);
 			outputFBO[currentBuffer].Unbind();

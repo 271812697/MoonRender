@@ -30,15 +30,16 @@ material {
     vertexAttributes : [POSITION, UV0, NORMAL, DOMAIN_ID],
 
     features : [ WITH_EDGE, DISABLE_DOMAIN_COLOR ],
+    // The archive ships the plain face material; the designer recompiles with whatever feature
+    // set the user enables (see the note in Standard.shader). Without this the archive fell back
+    // to the feature power set - four combinations per pass that nothing asks for.
+    defaultFeatures : [],
     passes   : [ Transparents ],
 
-    // Filament's per-material variant filter: the renderer adds these bits to the variant key for
-    // every draw, exactly as it does for Standard. The fragment used to declare
-    // VARIANT_HAS_DIRECTIONAL_LIGHTING / DYNAMIC_LIGHTING by hand because it had no filter and the
-    // keyed path was never taken for it; that pinned both light paths into every variant and could
-    // never produce a shadowed one. SHADOWING stays out of the list until the shadow pass is wired
-    // into the CAD draw (the filter only helps if there is a valid shadow map to sample).
-    variantFilter : [ DIRECTIONAL_LIGHTING, DYNAMIC_LIGHTING ],
+    // No variantFilter: the scene always carries a directional light (and the default scene a
+    // point light too), so the lighting cases are compiled unconditionally - see
+    // Lighting/Filament/surface_lighting.glsl. Keying them on "does this scene have a light" only
+    // ever produced variants that were missing the sun's contribution.
 
     parameters : [
         // label / group / min / max / step / color are the designer schema, read by the

@@ -139,6 +139,21 @@ namespace Rendering::Data
 		m_buffer->Upload(p_data, Rendering::HAL::BufferMemoryRange{ p_slice.offset, p_slice.size });
 	}
 
+	uint32_t UniformBufferPool::GetBufferId() const
+	{
+		return m_buffer != nullptr ? m_buffer->GetID() : 0;
+	}
+
+	void UniformBufferPool::StoreCPU(Slice p_slice, const void* p_data)
+	{
+		if (!p_slice.IsValid() || p_data == nullptr
+			|| p_slice.offset + p_slice.size > m_data.size())
+		{
+			return;
+		}
+		std::memcpy(m_data.data() + p_slice.offset, p_data, p_slice.size);
+	}
+
 	void UniformBufferPool::Bind(Slice p_slice, uint32_t p_bindingPoint) const
 	{
 		if (!p_slice.IsValid() || m_buffer == nullptr)

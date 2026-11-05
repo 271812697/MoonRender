@@ -473,7 +473,7 @@ void Editor::Rendering::PickingRenderPass::DrawPickableModels(
 				auto stateMask = m_TopoShapePickingFallbackMaterial.GenerateStateMask();
 
 				::Rendering::Entities::Drawable finalDrawable = drawable;
-				finalDrawable.material = m_TopoShapePickingFallbackMaterial;
+				finalDrawable.material = m_TopoShapePickingFallbackMaterial.DefaultInstance();
 				finalDrawable.stateMask = stateMask;
 				finalDrawable.stateMask.frontfaceCulling = false;
 				finalDrawable.stateMask.backfaceCulling = false;
@@ -492,7 +492,7 @@ void Editor::Rendering::PickingRenderPass::DrawPickableModels(
 				auto stateMask = m_TopoShapePickingFallbackMaterial.GenerateStateMask();
 
 				::Rendering::Entities::Drawable finalDrawable = drawable;
-				finalDrawable.material = m_TopoShapePickingFallbackMaterial;
+				finalDrawable.material = m_TopoShapePickingFallbackMaterial.DefaultInstance();
 				
 				finalDrawable.stateMask = stateMask;
 				finalDrawable.stateMask.frontfaceCulling = false;
@@ -525,7 +525,7 @@ void Editor::Rendering::PickingRenderPass::DrawPickableModels(
 				auto stateMask = m_TopoShapePickingFallbackMaterial.GenerateStateMask();
 
 				::Rendering::Entities::Drawable finalDrawable = drawable;
-				finalDrawable.material = m_TopoShapePickingFallbackMaterial;
+				finalDrawable.material = m_TopoShapePickingFallbackMaterial.DefaultInstance();
 				finalDrawable.stateMask = stateMask;
 				finalDrawable.stateMask.frontfaceCulling = false;
 				finalDrawable.stateMask.backfaceCulling = false;
@@ -539,7 +539,7 @@ void Editor::Rendering::PickingRenderPass::DrawPickableModels(
 				auto& targetMaterial =
 					(drawable.material && drawable.material->IsValid() && drawable.material->HasPass(pickingPassName)) ?
 					drawable.material.value() :
-					m_actorPickingFallbackMaterial;
+					m_actorPickingFallbackMaterial.DefaultInstance();
 
 				PreparePickingMaterial(actor, targetMaterial);
 				// Prioritize using the actual material state mask.

@@ -161,9 +161,9 @@ namespace MOON {
 			
 			auto model = GetService(Core::ResourceManagement::ModelManager).LoadResource(sceneName);
 			if (model) {
-				Core::Resources::Material* tempMat =GetService(Core::ResourceManagement::MaterialManager).GetResource(sceneName);
+				Core::Resources::MaterialAsset* tempMat =GetService(Core::ResourceManagement::MaterialManager).GetResource(sceneName);
 				if (tempMat == nullptr) {
-					tempMat = new Core::Resources::Material();
+					tempMat = new Core::Resources::MaterialAsset();
 					GetService(Core::ResourceManagement::MaterialManager).RegisterResource(sceneName, tempMat);
 
 					tempMat->SetShader(Core::Global::ServiceLocator::Get<Editor::Core::Context>().shaderManager[":Shaders\\Standard.shader"]);
@@ -196,7 +196,7 @@ namespace MOON {
 				actor.AddComponent<Core::ECS::Components::CModelRenderer>().SetModel(model);
 				//actor.GetComponent<Core::ECS::Components::CTransform>()->SetMatrix(xform.data);
 				auto& materilaRener = actor.AddComponent<Core::ECS::Components::CMaterialRenderer>();
-				materilaRener.SetMaterialAtIndex(0, *tempMat);
+				materilaRener.SetMaterialAtIndex(0, tempMat->DefaultInstance());
 				materilaRener.UpdateMaterialList();
 			}
 
@@ -364,7 +364,7 @@ namespace MOON {
 	//				sscanf(line, " mediumcolor %f %f %f", &material.mediumColor.x, &material.mediumColor.y, &material.mediumColor.z);
 	//				sscanf(line, " mediumanisotropy %f", &material.mediumAnisotropy);
 	//			}
-	//			Core::Resources::Material* tempMat = new Core::Resources::Material();
+	//			Core::Resources::MaterialAsset* tempMat = new Core::Resources::MaterialAsset();
 	//			Core::Global::ServiceLocator::Get<Core::ResourceManagement::MaterialManager>().RegisterResource(name, tempMat);
 	//			tempMat->SetShader(Core::Global::ServiceLocator::Get<Editor::Core::Context>().shaderManager[":Shaders\\Standard.shader"]);
 	//			tempMat->SetProperty("u_Albedo", Maths::FVector4{ material.baseColorR, material.baseColorG, material.baseColorB, material.opacity });
@@ -486,7 +486,7 @@ namespace MOON {
 	//				actor.GetComponent<Core::ECS::Components::CTransform>()->SetMatrix(transformMat.data);
 	//				auto& materilaRener = actor.AddComponent<Core::ECS::Components::CMaterialRenderer>();
 	//				auto mat = Core::Global::ServiceLocator::Get<Core::ResourceManagement::MaterialManager>().GetResource(matName);
-	//				materilaRener.SetMaterialAtIndex(0, *mat);
+	//				materilaRener.SetMaterialAtIndex(0, mat->DefaultInstance());
 	//				materilaRener.UpdateMaterialList();
 
 	//			}
@@ -771,7 +771,7 @@ namespace MOON {
 					materilaMap[i] = filename + "::material " + std::to_string(i);
 				}
 
-				Core::Resources::Material* tempMat = new Core::Resources::Material();
+				Core::Resources::MaterialAsset* tempMat = new Core::Resources::MaterialAsset();
 				Core::Global::ServiceLocator::Get<Core::ResourceManagement::MaterialManager>().RegisterResource(materilaMap[i], tempMat);
 				tempMat->AddFeature("NORMAL_MAPPING");
 				tempMat->AddFeature("CLIP_PLANE");
@@ -925,7 +925,7 @@ namespace MOON {
 							}
 
 							auto mat = Core::Global::ServiceLocator::Get<Core::ResourceManagement::MaterialManager>().GetResource(materilaMap[prims[i].materialIndex < 0 ? 0 : prims[i].materialIndex]);
-							materilaRener.SetMaterialAtIndex(0, *mat);
+							materilaRener.SetMaterialAtIndex(0, mat->DefaultInstance());
 							materilaRener.UpdateMaterialList();
 
 						}

@@ -11,6 +11,7 @@
 #include "Interactive/Widgets/RotateCenter.h"
 #include "Interactive/Widgets/Measurement.h"
 #include "Interactive/Widgets/ClipPlane.h"
+#include "Interactive/Widgets/Gizmo2DWidget.h"
 #include "Interactive/Widgets/SketchPlane.h"
 #include "Interactive/Widgets/SplitScreen.h"
 #include "Interactive/Widgets/DrawSketchHandlerPoint.h"
@@ -51,6 +52,18 @@ class Editor::Rendering::GizmoRenderPass::GizmoRenderPassInternal {
 			mWidgets["RotateCenter"] = new MOON::RotateCenter("RotateCenter");
 			mWidgets["Measure"] = new MOON::Measurement("Measure");
 			mWidgets["ClipPlane"] = new MOON::ClipPlane("ClipPlane");
+			// The in-plane gizmo: two axis arrows, a rectangular plane handle and a rotation ring.
+			// Active from the start so it can be tested; it puts itself at the scene centre facing
+			// the camera on its first update until an owner calls setUpOrigin/setUpDir.
+			mWidgets["Gizmo2D"] = new MOON::Gizmo2DWidget("Gizmo2D");
+			// MOON::Gizmo3DWidget (Interactive/Widgets/Gizmo3DWidget.h) is the three-axis version
+			// three axis arrows, three plane handles and three rotation rings, drawn and picked
+			// through WidgetViewData with ClipPlane's state machine. It is built and compiles with
+			// the editor, but nothing drives it yet, so it is left uninstantiated - its handles
+			// would sit in the viewport at the scene centre with no owner. To try it, include the
+			// header and add:
+			//     mWidgets["Gizmo3D"] = new MOON::Gizmo3DWidget("Gizmo3D");
+			// (the widget activates itself in its constructor).
 			mWidgets["SplitScreen"] = new MOON::SplitScreen("SplitScreen");
 			mWidgets["DrawSketchHandlerPoint"] = new MOON::DrawSketchHandlerPoint("DrawSketchHandlerPoint");
 			mWidgets["DrawSketchHandlerLine"]=new MOON::DrawSketchHandlerLine("DrawSketchHandlerLine");

@@ -5,7 +5,7 @@
 #include <vector>
 
 #include <Core/Rendering/HzbCuller.h>
-#include <Core/Resources/Material.h>
+#include <Core/Resources/MaterialAsset.h>
 #include <Rendering/Core/ARenderPass.h>
 #include <Rendering/HAL/Buffer.h>
 #include <Rendering/HAL/Framebuffer.h>
@@ -68,7 +68,7 @@ namespace Core::Rendering
 		/** Submits this frame's readback; skipped when the ring is saturated. */
 		void IssueReadback();
 
-		::Core::Resources::Material m_reduceMaterial;
+		::Core::Resources::MaterialAsset m_reduceMaterial;
 
 		/** Depth only framebuffer holding the resolved (non MSAA) scene depth. */
 		::Rendering::HAL::Framebuffer m_resolveFbo;

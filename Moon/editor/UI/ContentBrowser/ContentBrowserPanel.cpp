@@ -6,8 +6,8 @@
 #include "Rendering/Resources/ShaderArchive.h"
 #include "Core/ResourceManagement/MaterialManager.h"
 #include "Core/ResourceManagement/ShaderManager.h"
-#include "Core/Resources/Loaders/MaterialLoader.h"
-#include "Core/Resources/Material.h"
+#include "Core/Resources/Loaders/MaterialAssetLoader.h"
+#include "Core/Resources/MaterialAsset.h"
 #include "Rendering/Context/Driver.h"
 #include "Rendering/Context/IGLContextHost.h"
 #include "Tools/Utils/PathParser.h"
@@ -100,6 +100,16 @@ namespace
 			"*.png", "*.jpg", "*.jpeg", "*.bmp", "*.tga", "*.hdr", "*.exr", "*.dds"
 		};
 		return filters;
+	}
+
+	/** The resource key of a .mat on disk. The path is taken relative to the Materials root, the
+	 * same way the shader branch below does it, so a material keeps the folder it lives in
+	 * (":Materials/CAD/Metal/Steel.mat"). Keying by file name alone put every material in the
+	 * root, which resolved to the wrong file - or to nothing - as soon as a folder was used. */
+	std::string MaterialKeyFor(const QString& p_path)
+	{
+		const QString relative = QDir(EngineRoot() + "/Materials").relativeFilePath(p_path);
+		return (QStringLiteral(":Materials/") + relative).toStdString();
 	}
 
 	/** The colour a material tile is drawn with. The .mat stores the panel's sRGB value
@@ -924,8 +934,7 @@ QTreeView::branch:open:has-children:has-siblings {
 		if (type == static_cast<int>(ContentAssetType::Material))
 		{
 			// The material designer keys its list by the serializer's resource path.
-			GetService(MaterialEditorPanel).OpenMaterial(
-				(":Materials/" + QFileInfo(path).fileName()).toStdString());
+			GetService(MaterialEditorPanel).OpenMaterial(MaterialKeyFor(path));
 		}
 		else if (type == static_cast<int>(ContentAssetType::Shader))
 		{
@@ -1200,9 +1209,9 @@ QTreeView::branch:open:has-children:has-siblings {
 			return;
 		}
 
-		const std::string key = ":Materials/" + name.toStdString();
+		const std::string key = MaterialKeyFor(target);
 		std::string failure;
-		Core::Resources::Material* created = nullptr;
+		Core::Resources::MaterialAsset* created = nullptr;
 		{
 			ModuleContextScope context;
 			if (!context)
@@ -1221,9 +1230,9 @@ QTreeView::branch:open:has-children:has-siblings {
 				{
 					// Scaffold the instance, write it, then let the manager load it back: that
 					// is what gives the material its (const) resource path.
-					Core::Resources::Material scaffold;
+					Core::Resources::MaterialAsset scaffold;
 					scaffold.SetShader(shader);
-					Core::Resources::Loaders::MaterialLoader::Save(scaffold, target.toStdString());
+					Core::Resources::Loaders::MaterialAssetLoader::Save(scaffold, target.toStdString());
 					created = Core::Global::ServiceLocator::Get<Core::ResourceManagement::MaterialManager>()
 						.GetResource(key, true);
 					if (created == nullptr)

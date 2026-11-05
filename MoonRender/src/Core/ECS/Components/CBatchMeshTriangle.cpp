@@ -59,8 +59,8 @@ namespace Core::ECS::Components
 			// The slot may hold a material that has no domain colour table at all (the user can
 			// assign any .mat to the faces); .value() on the empty optional used to throw here,
 			// which took the editor down the moment a face was picked.
-			const auto property = mat != nullptr ? mat->GetProperty("domainColorTex")
-				: Tools::Utils::OptRef<const ::Rendering::Data::MaterialProperty>{};
+			const std::optional<::Rendering::Data::MaterialProperty> property =
+				mat != nullptr ? mat->GetProperty("domainColorTex") : std::nullopt;
 			const auto* texture = property ? std::get_if<::Rendering::HAL::TextureHandle*>(&property.value().value) : nullptr;
 			if (texture != nullptr) {
 				auto tex = *texture;

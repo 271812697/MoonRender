@@ -1,7 +1,8 @@
 #include <sstream>
 #include <tinyxml2.h>
 
-#include <Core/Resources/Material.h>
+#include <Core/Resources/MaterialAsset.h>
+#include <Rendering/Data/Material.h>
 
 namespace
 {
@@ -31,13 +32,65 @@ namespace
 	}
 }
 
-void Core::Resources::Material::OnSerialize(tinyxml2::XMLDocument& p_doc, tinyxml2::XMLNode* p_node)
+Core::Resources::MaterialAsset::MaterialAsset()
+	: m_instance(std::make_unique<Rendering::Data::MaterialInstance>())
+{
+}
+
+Core::Resources::MaterialAsset::MaterialAsset(Rendering::Data::Material* p_source)
+	: MaterialAsset()
+{
+	SetMaterial(p_source);
+}
+
+void Core::Resources::MaterialAsset::SetMaterial(Rendering::Data::Material* p_material)
+{
+	m_material = p_material;
+	if (m_material != nullptr)
+	{
+		m_instance->SetMaterial(*m_material);
+	}
+}
+
+std::unique_ptr<Rendering::Data::MaterialInstance>
+Core::Resources::MaterialAsset::CreateInstance() const
+{
+	std::unique_ptr<Rendering::Data::MaterialInstance> instance;
+	if (m_material != nullptr)
+	{
+		instance = std::make_unique<Rendering::Data::MaterialInstance>(*m_material);
+	}
+	else
+	{
+		instance = std::make_unique<Rendering::Data::MaterialInstance>();
+	}
+
+	// A drawable using this .mat must see the asset's overrides, not just the package defaults.
+	for (const auto& [name, property] : SnapshotProperties())
+	{
+		instance->SetProperty(name, property.value);
+	}
+	instance->SetBlendable(IsBlendable());
+	instance->SetBlendMode(GetBlendMode());
+	instance->SetTransparent(IsTransparent());
+	instance->SetBackfaceCulling(HasBackfaceCulling());
+	instance->SetFrontfaceCulling(HasFrontfaceCulling());
+	instance->SetDepthTest(HasDepthTest());
+	instance->SetDepthWriting(HasDepthWriting());
+	instance->SetColorWriting(HasColorWriting());
+	instance->SetLineWidth(GetLineWidth());
+	instance->SetDrawOrder(GetDrawOrder());
+	return instance;
+}
+
+void Core::Resources::MaterialAsset::OnSerialize(tinyxml2::XMLDocument& p_doc, tinyxml2::XMLNode* p_node)
 {
 	using namespace Core::Helpers;
 	using namespace Rendering::Settings;
 	using namespace Maths;
 
-	Serializer::SerializeShader(p_doc, p_node, "shader", m_shader);
+	// The .mat records the package material it instances, not a shader object.
+	Serializer::SerializeShader(p_doc, p_node, "material", GetShader());
 
 	tinyxml2::XMLNode* settingsNode = p_doc.NewElement("settings");
 	p_node->InsertEndChild(settingsNode);
@@ -70,22 +123,21 @@ void Core::Resources::Material::OnSerialize(tinyxml2::XMLDocument& p_doc, tinyxm
 	tinyxml2::XMLNode* uniformsNode = p_doc.NewElement("uniforms");
 	p_node->InsertEndChild(uniformsNode);
 
-	const auto program = GetVariant();
-
-	// If the material has no valid program for the current feature set, we skip serialization of properties.
-	if (!program)
+	if (GetShader() == nullptr || GetShader()->GetParameters().empty())
 	{
 		return;
 	}
 
+	const auto program = GetVariant();
+
 	// Block members are not in the program's reflected uniform map (they have no individual
-	// location); the shader's parameter table is what says the material has them.
+	// location); the material's parameter table is what says the material has them.
 	const auto isDeclaredParameter = [this](const std::string& p_name) {
-		if (m_shader == nullptr)
+		if (GetShader() == nullptr)
 		{
 			return false;
 		}
-		for (const Rendering::Resources::Shader::Parameter& parameter : m_shader->GetParameters())
+		for (const Rendering::Data::Material::Parameter& parameter : GetShader()->GetParameters())
 		{
 			if (parameter.name == p_name || p_name.starts_with(parameter.name + "["))
 			{
@@ -95,11 +147,11 @@ void Core::Resources::Material::OnSerialize(tinyxml2::XMLDocument& p_doc, tinyxm
 		return false;
 	};
 
-	for (const auto& [name, prop] : m_properties)
+	for (const auto& [name, prop] : SnapshotProperties())
 	{
 		// Skip serialization of this property if neither the parameter table nor the current
 		// program knows it.
-		if (!isDeclaredParameter(name) && !program->GetUniformInfo(name))
+		if (!isDeclaredParameter(name) && (!program || !program->GetUniformInfo(name)))
 		{
 			continue;
 		}
@@ -156,11 +208,11 @@ void Core::Resources::Material::OnSerialize(tinyxml2::XMLDocument& p_doc, tinyxm
 
 	std::string features;
 
-	for (auto it = m_features.begin(); it != m_features.end(); ++it)
+	for (auto it = GetFeatures().begin(); it != GetFeatures().end(); ++it)
 	{
 		features += *it;
 
-		if (std::next(it) != m_features.end())
+		if (std::next(it) != GetFeatures().end())
 		{
 			features += ",";
 		}
@@ -169,22 +221,24 @@ void Core::Resources::Material::OnSerialize(tinyxml2::XMLDocument& p_doc, tinyxm
 	Serializer::SerializeString(p_doc, p_node, "features", features);
 }
 
-void Core::Resources::Material::OnDeserialize(tinyxml2::XMLDocument& p_doc, tinyxml2::XMLNode* p_node)
+void Core::Resources::MaterialAsset::OnDeserialize(tinyxml2::XMLDocument& p_doc, tinyxml2::XMLNode* p_node)
 {
 	using namespace Core::Helpers;
 
 	/* The shader comes first: it is the definition, and SetShader resets the definition-owned
 	 * state (blending, culling, depth writing) to what its material block declares. The
 	 * <settings> below are the instance's overrides and have to win over that. */
-	const auto shader = Serializer::DeserializeShader(p_doc, p_node, "shader");
-
-	m_properties.clear();
-
-	/* We verify that the shader is valid (Not null) */
-	if (shader)
+	auto material = Serializer::DeserializeShader(p_doc, p_node, "material");
+	if (material == nullptr)
 	{
-		/* If the shader is valid, we set it to the material (Modify m_shader pointer + Query + FillUniforms) */
-		SetShader(shader);
+		// Older files called the package a "shader".
+		material = Serializer::DeserializeShader(p_doc, p_node, "shader");
+	}
+
+	/* We verify that the material package is valid (Not null) */
+	if (material)
+	{
+		SetShader(material);
 	}
 
 	tinyxml2::XMLNode* settingsNode = p_node->FirstChildElement("settings");
@@ -242,7 +296,7 @@ void Core::Resources::Material::OnDeserialize(tinyxml2::XMLDocument& p_doc, tiny
 		}
 	}
 
-	if (shader)
+	if (material)
 	{
 		const auto uniformsNode = p_node->FirstChildElement("uniforms"); // Access to "Uniforms" (Every uniform will be attached to "Uniforms")		
 
@@ -303,7 +357,7 @@ void Core::Resources::Material::OnDeserialize(tinyxml2::XMLDocument& p_doc, tiny
 		}
 	}
 
-	m_features.clear();
+	SetFeatures({});
 
 	const auto features = Serializer::DeserializeString(p_doc, p_node, "features");
 

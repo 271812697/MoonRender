@@ -189,7 +189,7 @@ void Core::Rendering::GbufferPass::Draw(::Rendering::Data::PipelineState p_pso)
 				drawable.stateMask.frontfaceCulling = false;
 				drawable.stateMask.backfaceCulling = false;
 				drawable.stateMask.depthTest = true;
-				drawable.material = gbufferMaterial;
+				drawable.material = gbufferMaterial.DefaultInstance();
 				m_renderer.DrawEntity(p_pso, drawable);
 			}
 
@@ -209,7 +209,7 @@ void Core::Rendering::GbufferPass::Draw(::Rendering::Data::PipelineState p_pso)
 		drawable.stateMask.frontfaceCulling = false;
 		drawable.stateMask.backfaceCulling = false;
 		drawable.stateMask.depthTest = false;
-		drawable.material = ssaoMaterial;
+		drawable.material = ssaoMaterial.DefaultInstance();
 
 		drawable.mesh = m_renderer.m_unitQuad;
 

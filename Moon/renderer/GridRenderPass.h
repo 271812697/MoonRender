@@ -5,7 +5,7 @@
 #include <Core/ECS/Actor.h>
 #include <Core/SceneSystem/SceneManager.h>
 #include <Core/ECS/Components/CModelRenderer.h>
-#include <Core/Resources/Material.h>
+#include <Core/Resources/MaterialAsset.h>
 #include <Core/ECS/Components/CAmbientBoxLight.h>
 #include <Core/ECS/Components/CAmbientSphereLight.h>
 #include <Core/Rendering/SceneRenderer.h>
@@ -40,8 +40,8 @@ namespace Editor::Rendering
 	private:
 		::Rendering::HAL::Framebuffer m_mirroFbo;
 		::Core::Rendering::PingPongFramebuffer  m_mirroShadowFbo;
-		::Core::Resources::Material m_gridMaterial;
-		::Core::Resources::Material m_ShadowMaterial;
-		::Core::Resources::Material m_BlurMaterial;
+		::Core::Resources::MaterialAsset m_gridMaterial;
+		::Core::Resources::MaterialAsset m_ShadowMaterial;
+		::Core::Resources::MaterialAsset m_BlurMaterial;
 	};
 }

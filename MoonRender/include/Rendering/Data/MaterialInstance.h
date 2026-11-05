@@ -2,15 +2,15 @@
 #include <cstdint>
 #include <map>
 #include <optional>
+#include <set>
 #include <string>
-#include <variant>
-#include <vector>
-#include <Maths/FMatrix3.h>
+#include <Rendering/Data/MaterialProperty.h>
+#include <Rendering/Data/DescriptorSet.h>
 #include <Rendering/Data/StateMask.h>
 #include <Rendering/Data/UniformBufferPool.h>
 #include <Rendering/Data/FeatureSet.h>
+#include <Rendering/HAL/ShaderProgram.h>
 #include <Rendering/HAL/TextureHandle.h>
-#include <Rendering/Resources/Shader.h>
 #include <Rendering/Resources/Texture.h>
 #include <Rendering/Settings/EBindingPoint.h>
 #include <Rendering/Settings/EProjectionMode.h>
@@ -18,29 +18,8 @@
 namespace Rendering::Data
 {
 	class Material;
+	class MaterialDefinition;
 	class MaterialInstance;
-
-	/** The value type a material parameter can carry. Shared by the definition (the defaults the
-	 * material file or the DSL declares) and the instances (the overrides). */
-	using MaterialPropertyType = std::variant<
-		std::monostate,
-		bool,
-		int,
-		float,
-		Maths::FVector2,
-		Maths::FVector3,
-		Maths::FVector4,
-		Maths::FMatrix3,
-		Maths::FMatrix4,
-		Rendering::HAL::TextureHandle*,	// Texture handle
-		Rendering::Resources::Texture*	// Texture asset (serializable)
-	>;
-
-	struct MaterialProperty
-	{
-		MaterialPropertyType value;
-		bool singleUse = false;
-	};
 
 	struct MaterialSignatureSet
 	{
@@ -57,34 +36,48 @@ namespace Rendering::Data
 	 * doing both, which meant every actor that needed a different `domainColorTex` or line width
 	 * had to own a full material (its own shader pointer, its own feature set, its own state).
 	 *
-	 * A Material is its own default instance (m_definition == nullptr means "I am the definition"),
-	 * which is Filament's getDefaultInstance() and what keeps the existing call sites - they all
-	 * hold a Material& - compiling and behaving exactly as before.
+	 * Filament splits the two: `Material` owns the immutable MaterialDefinition and the
+	 * default instance; a MaterialInstance holds only its own values and descriptor set.
 	 */
 	class MaterialInstance
 	{
 	public:
-		using PropertyMap = std::map<std::string, MaterialProperty>;
+		/** One material's set of parameter and state overrides. */
 
-		explicit MaterialInstance(Material& p_definition);
+		/** p_isDefault marks the instance a Material owns: it is seeded from the definition's
+		 * declared defaults and engine state, and is what a plain instance falls back to. */
+		explicit MaterialInstance(Material& p_definition, bool p_isDefault = false);
+		MaterialInstance();
 		virtual ~MaterialInstance();
+
+		/** Reparents this instance to another material (a .mat asset points at a package
+		 * material this way). */
+		void SetMaterial(Material& p_material);
+		/** Seeds the engine defaults and then the material's declared render state. */
+		void ResetStateToMaterial();
 
 		MaterialInstance(const MaterialInstance&) = delete;
 		MaterialInstance& operator=(const MaterialInstance&) = delete;
 
-		/** The definition this instance overrides. Null for a Material (it is its own definition). */
-		Material* Definition() const { return m_definition; }
+		/** The Material this instance overrides. Null for a Material (it is its own definition). */
+		Material* ParentMaterial() const { return m_definition; }
 
 		/** Bumped whenever this object's parameter values change. An instance compares it against
 		 * the value it last uploaded, which is how an edit on the definition reaches the instances
 		 * that inherit from it (they re-upload instead of using stale data). */
 		uint64_t Revision() const { return m_revision; }
+		/** True for the instance a Material owns (filament's default instance). */
+		bool IsDefaultInstance() const { return m_isDefaultInstance; }
 
 		/** The definition's shader and feature set: what a variant is selected from. A drawable
 		 * holds an instance now, so the renderer asks these two questions through this pair
 		 * instead of through Material. */
-		Rendering::Resources::Shader* Shader() const { return ShaderOf(); }
-		Rendering::Resources::Shader* GetShader() const { return ShaderOf(); }
+		Material* Shader() const { return ShaderOf(); }
+		Material* GetShader() const { return ShaderOf(); }
+
+		/** The immutable package data behind Shader(): block layout, sampler fields and state.
+		 * An instance reads offsets and units from here; the shader only owns the programs. */
+		const MaterialDefinition* Definition() const;
 
 		/** Re-reads a texture assigned by path (the designer saves a path, not a handle). */
 		void LateUpdateTexture(const std::string& p_name, const std::string& p_path);
@@ -94,6 +87,11 @@ namespace Rendering::Data
 		Tools::Utils::OptRef<Rendering::HAL::ShaderProgram> GetVariant(
 			std::optional<const std::string_view> p_pass = std::nullopt,
 			Tools::Utils::OptRef<const Data::FeatureSet> p_override = std::nullopt) const;
+
+		Rendering::HAL::ShaderProgram* BoundProgram() const
+		{
+			return m_programInUse ? &m_programInUse.value() : nullptr;
+		}
 
 		/** Binds the program for p_pass / the drawable's feature set and the instance's parameter
 		 * block. Returns the signatures the renderer uses to skip redundant uploads. */
@@ -125,12 +123,31 @@ namespace Rendering::Data
 		bool TrySetProperty(const std::string& p_name, const MaterialPropertyType& p_value, bool p_singleUse = false);
 		bool HasProperty(const std::string& p_name) const;
 		bool ResetPropertyToDefault(const std::string& p_name);
-		Tools::Utils::OptRef<const MaterialProperty> GetProperty(const std::string p_name) const;
-		PropertyMap& GetProperties() { return m_properties; }
-		const PropertyMap& Properties() const { return m_properties; }
+		std::optional<MaterialProperty> GetProperty(const std::string p_name) const;
+
+		/** Builds the name -> value view the material editor shows. This is a temporary view,
+		 * not an instance-owned map: each value is read back from the uniform block or the
+		 * descriptor set. */
+		std::map<std::string, MaterialProperty> SnapshotProperties() const;
+
+		/** Clears every parameter override, then re-seeds from the definition. */
+		void ResetProperties();
 
 		/** Binds a view-owned texture (DFG LUT, environment cubes) for the next draw. */
 		void BindGlobalTexture(const std::string& p_name, Rendering::HAL::Texture* p_texture);
+
+		/** The texture/asset currently in a descriptor slot (used to inherit a material's
+		 * defaults when a plain instance is created). */
+		Rendering::HAL::TextureHandle* GetTexture(uint32_t p_binding) const
+		{
+			return const_cast<DescriptorSet&>(m_descriptorSet).GetTexture(p_binding);
+		}
+		Rendering::Resources::Texture* GetTextureAsset(uint32_t p_binding) const
+		{
+			return const_cast<DescriptorSet&>(m_descriptorSet).GetTextureAsset(p_binding);
+		}
+		const std::vector<uint8_t>& BufferData() const { return m_uniformData; }
+		uint32_t BufferSize() const { return static_cast<uint32_t>(m_uniformData.size()); }
 
 		void SetBlendable(bool p_blendable);
 		void SetBlendMode(Rendering::Settings::EBlendMode p_blendMode);
@@ -198,21 +215,15 @@ namespace Rendering::Data
 		Rendering::HAL::Texture* TextureOf(const std::string& p_name) const;
 
 	protected:
-		/** A Material is its own default instance: it has no separate definition to forward to, and
-		 * the values it holds are what a plain instance falls back to. */
-		MaterialInstance();
-
-		/** The definition-side lookup. A Material overrides this with its own defaults; a plain
-		 * instance forwards to its definition. */
-		virtual const MaterialProperty* FindProperty(const std::string& p_name) const;
+		struct LooseUniform;
 		/** The definition's shader (the one the variant comes from). */
-		virtual Rendering::Resources::Shader* ShaderOf() const;
+		Material* ShaderOf() const;
 		/** The feature set this instance draws with: its own, seeded from the definition. */
 		const Data::FeatureSet& FeaturesOf() const { return m_features; }
 
 		void InvalidatePropertySignature();
 
-		void BindParameterBlock();
+		void BindParameterBlock(const Rendering::HAL::ShaderProgram& p_program);
 		void UploadParameterBlock(
 			bool p_uploadStableProperties,
 			bool p_uploadSingleUseProperties,
@@ -221,9 +232,15 @@ namespace Rendering::Data
 			Rendering::HAL::Texture* p_brdfLut,
 			Rendering::HAL::Texture* p_flatNormalTexture
 		);
-		void EnsureParameterSlice();
-		void ReleaseParameterSlice();
-		void WriteBlockValue(const std::string& p_type, const MaterialPropertyType& p_value, uint32_t p_offset);
+		void EnsureDescriptorSet() const;
+		void ReleaseDescriptorSet();
+		void ResetBlockToDefinition();
+		void MergeDefaults();
+		void InitializeDefaultState();
+		void ResetSingleUseProperties();
+		LooseUniform* FindLooseUniform(const std::string& p_name);
+		const LooseUniform* FindLooseUniform(const std::string& p_name) const;
+		void SetLooseUniform(const std::string& p_name, const MaterialPropertyType& p_value, bool p_singleUse);
 		MaterialSignatureSet CalculateSignature(
 			Rendering::HAL::ShaderProgram& p_selectedProgram,
 			Rendering::HAL::Texture* p_emptyTexture2D = nullptr,
@@ -232,17 +249,38 @@ namespace Rendering::Data
 
 	protected:
 		Material* m_definition = nullptr;
-		std::map<std::string, std::string> m_lateLoadTextures;
-		PropertyMap m_properties;
+		bool m_isDefaultInstance = false;
 		Data::FeatureSet m_features;
 		uint64_t m_revision = 0;
 		uint64_t m_seenDefinitionRevision = 0;
+		uint64_t m_seenDefaultsRevision = 0;
+		bool m_defaultsDirty = true;
 		size_t m_stablePropertySignatureVersion = 0ULL;
 		size_t m_singleUsePropertySignatureVersion = 0ULL;
 		Tools::Utils::OptRef<Rendering::HAL::ShaderProgram> m_programInUse = std::nullopt;
 
-		UniformBufferPool::Slice m_parameterSlice;
-		std::vector<uint8_t> m_parameterData;
+		/** The PerMaterial binding set: one uniform-block range plus a texture per sampler. The
+		 * definition's layout validates every insertion; Bind() binds the whole set. */
+		mutable DescriptorSet m_descriptorSet;
+		/** CPU side of the PerMaterial UBO: SetProperty writes here by std140 offset; upload
+		 * happens once per dirty commit into the descriptor's GL buffer range. */
+		mutable std::vector<uint8_t> m_uniformData;
+		mutable UniformBufferPool::Slice m_uniformSlice;
+		struct LooseUniform
+		{
+			std::string name;
+			MaterialPropertyType value;
+			bool singleUse = false;
+		};
+		/** Source-built shaders have no package block; these uniforms are uploaded through the
+		 * program's reflected uniform locations instead of a UBO range. */
+		std::vector<LooseUniform> m_looseUniforms;
+		/** Which parameters this instance actually overrides; everything else is merged from
+		 * the material's default instance on upload. */
+		std::set<std::string> m_overriddenUniforms;
+		std::set<uint32_t> m_overriddenSamplers;
+		std::set<std::string> m_singleUseUniforms;
+		std::set<uint32_t> m_singleUseSamplers;
 
 		// Render state, Filament's way: the definition holds the values its material block declared
 		// (and the engine defaults for the rest); a plain instance stores only the fields it

@@ -1,4 +1,6 @@
 #pragma once
+#include <Rendering/Data/DescriptorSetLayout.h>
+#include <Rendering/Resources/ChunkContainer.h>
 #include <cstdint>
 #include <map>
 #include <set>
@@ -6,17 +8,19 @@
 #include <string_view>
 #include <vector>
 
-namespace Rendering::Resources
+namespace Rendering::Data
 {
-	/** A shader package, as MoonMatc writes it (the counterpart of filament's .filamat).
+	/** A material package parser, the counterpart of filament's MaterialParser. It takes the
+	 * MoonMatc package bytes (the counterpart of .filamat) and decodes the chunk tree.
 	 *
 	 * It holds the work the runtime used to do on every launch: every (pass, variant, stage)
 	 * already resolved to the final GLSL, the variant list, and the material's parameters.
 	 * Loading a shader is then a lookup and a compile, not a parse.
 	 *
-	 * Layout, modelled on filabridge/include/filament/MaterialChunkType.h: an 8 byte magic,
-	 * then chunks of (8 byte tag, uint32 size, payload). */
-	class ShaderPackage
+	 * Layout is filament's chunk tree: a flat sequence of (uint64 chunk type, uint32 payload
+	 * size, payload), with no package header. MaterialVersion is the first chunk; the loader
+	 * recognises a package by it, exactly as filaflat's Rendering::Resources::ChunkContainer does. */
+	class MaterialParser
 	{
 	public:
 		struct Variant
@@ -91,37 +95,48 @@ namespace Rendering::Resources
 		 * is what a shader that has not been migrated yet still is. */
 		static bool IsPackage(const void* p_data, uint32_t p_size);
 
-		/** Walks the chunk table; the payloads are read on demand and never copied. */
-		ShaderPackage(const void* p_data, uint32_t p_size);
+		/** Parses the chunk tree (MAT_VERS first, MAT_CRC last) and decodes the payloads. */
+		MaterialParser(const void* p_data, uint32_t p_size);
 
 		bool IsValid() const { return m_valid; }
 		const std::string& Name() const { return m_name; }
-		const std::vector<Variant>& Variants() const { return m_variants; }
 
-		/** The features the material declared (material { features : [...] }), independent of
-		 * which ones this package was compiled with. The designer's feature toggles come from
-		 * here: a fixed-feature package's variant union only lists the enabled ones. */
-		const std::vector<std::string>& DeclaredFeatures() const { return m_declaredFeatures; }
+		/** One field of the PerMaterial uniform block (MAT_UIB) - filament's UboBlockInfo. */
+		struct UniformField
+		{
+			std::string name;
+			std::string type;
+			uint32_t offset = 0;
+			uint32_t stride = 0;
+			uint32_t count = 1;
+		};
 
-		/** The material's reflection, straight out of the package: name, types, sampler flag,
-		 * array size and declared default per parameter, plus the vertex attributes. This is
-		 * what a material panel reads instead of asking the driver for active uniforms. */
-		const std::vector<Parameter>& Parameters() const { return m_parameters; }
-		const std::vector<Attribute>& Attributes() const { return m_attributes; }
+		/** One descriptor of the PerMaterial sampler block (MAT_SIB). */
+		struct SamplerField
+		{
+			std::string name;
+			std::string type;
+			uint32_t binding = 0;
+			uint8_t fallback = 0;
+		};
 
-		/** The samplers that asked for a non-default 1x1 fallback texture, empty for a package
-		 * whose samplers all take the engine default. */
-		const std::vector<SamplerFallbackEntry>& SamplerFallbacks() const { return m_samplerFallbacks; }
+		/** Everything the package serialized. The parser keeps only the chunk/blob data needed
+		 * to rebuild stage source; MaterialDefinition takes ownership of this. */
+		struct ParsedData
+		{
+			std::vector<Variant> variants;
+			std::vector<Parameter> parameters;
+			std::vector<Attribute> attributes;
+			std::map<std::string, std::string> states;
+			std::vector<SamplerFallbackEntry> samplerFallbacks;
+			std::vector<UniformField> uniformFields;
+			std::vector<SamplerField> samplerFields;
+			std::vector<std::string> declaredFeatures;
+			uint32_t parameterBlockSize = 0;
+			uint32_t uniformBlockSize = 0;
+		};
 
-		/** The state the `material { }` block declared besides the name, domain and shading model:
-		 * `blending`, `culling`, `depthWrite`, ... as the text the material wrote. Filament bakes
-		 * the same fields into its own chunks (MAT_BLEN, MAT_CUMO, MAT_DWRIT); the runtime maps
-		 * them onto the material's render state. */
-		const std::map<std::string, std::string>& States() const { return m_states; }
-
-		/** The std140 size of the per-material parameter block, 0 when the material has none
-		 * (every parameter is a sampler, or the package predates the block). */
-		uint32_t ParameterBlockSize() const { return m_parameterBlockSize; }
+		ParsedData TakeData();
 
 		/** The final GLSL of one variant's stage, empty when the package holds no such
 		 * combination (i.e. one the build did not make, or no geometry stage at all).
@@ -141,29 +156,24 @@ namespace Rendering::Resources
 	private:
 		struct Blob
 		{
-			std::string_view name;
-			std::string_view source;
+			std::string name;
+			std::string source;
 		};
 
 		const Blob* FindBlob(const Variant& p_variant, Stage p_stage) const;
 
 		bool m_valid = false;
 		std::string m_name;
-		std::vector<Variant> m_variants;
-		std::vector<Parameter> m_parameters;
-		std::vector<Attribute> m_attributes;
-		std::map<std::string, std::string> m_states;
-		uint32_t m_parameterBlockSize = 0;
-		std::vector<SamplerFallbackEntry> m_samplerFallbacks;
 		std::vector<Blob> m_blobs;
+		/** The package's chunk list (filaflat's Rendering::Resources::ChunkContainer). */
+		Rendering::Resources::ChunkContainer m_container;
+		/** The package's line table (DIC_TEXT): the shared stage texts are stored as ids into
+		 * it, so the lines every stage repeats are stored once. */
+		std::vector<std::string> m_lines;
 		/** Stage name ("vertex" / "fragment" / "geometry") -> the stage's whole text, with the
-		 * placeholder where the variant's #define lines go. Empty for a package written before
-		 * the shared-stage chunk existed: then the blobs are whole stages, as they used to be. */
-		std::map<std::string, std::string_view> m_stageTexts;
-		std::vector<std::string> m_declaredFeatures;
+		 * placeholder where the variant's #define lines go. Owned rather than a view: a stage is
+		 * reconstructed from the line table when the package is read. Empty for a package
+		 * written before the shared-stage chunk existed. */
+		std::map<std::string, std::string> m_stageTexts;
 	};
-
-	/** Where the per-variant defines are spliced into a stage's shared text. Kept in one place
-	 * because MoonMatc writes it and this parser reads it. */
-	constexpr std::string_view kShaderDefinesPlaceholder = "//@MOON_VARIANT_DEFINES@";
 }

@@ -30,6 +30,23 @@
 
 #include "Matc.h"
 
+#include "FileUtils.h"
+#include "Flattener.h"
+#include "ChunkContainer.h"
+#include "MaterialChunks.h"
+#include "Includes.h"
+#include "MaterialBuilder.h"
+#include "MaterialJson.h"
+#include "LineDictionary.h"
+#include "MaterialParser.h"
+#include "MaterialVariants.h"
+#include "ShaderGenerator.h"
+#include "ParametersProcessor.h"
+#include "SibGenerator.h"
+#include "TextUtils.h"
+#include "UibGenerator.h"
+
+#include <Rendering/Resources/MaterialChunkType.h>
 #include <Rendering/Settings/EVariant.h>
 
 namespace Moon::Matc
@@ -39,17 +56,6 @@ namespace
 	// ---------------------------------------------------------------------------------
 	// Source handling
 	// ---------------------------------------------------------------------------------
-
-	std::string ReadFile(const std::filesystem::path& p_path, bool& p_ok)
-	{
-		std::ifstream stream(p_path, std::ios::binary);
-		p_ok = static_cast<bool>(stream);
-		if (!p_ok)
-		{
-			return {};
-		}
-		return std::string(std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>());
-	}
 
 	bool WriteFile(const std::filesystem::path& p_path, const std::string& p_text)
 	{
@@ -68,53 +74,8 @@ namespace
 		return static_cast<bool>(stream);
 	}
 
-	std::string Trim(std::string_view p_text)
-	{
-		size_t begin = 0;
-		size_t end = p_text.size();
-		while (begin < end && std::isspace(static_cast<unsigned char>(p_text[begin]))) { ++begin; }
-		while (end > begin && std::isspace(static_cast<unsigned char>(p_text[end - 1]))) { --end; }
-		return std::string(p_text.substr(begin, end - begin));
-	}
-
-	/** A quoted material value ("Base Color") without its quotes; an unquoted one is returned
-	 * as it is. Labels have spaces in them, so they are the fields that get quoted. */
-	std::string Unquote(const std::string& p_text)
-	{
-		if (p_text.size() >= 2 && p_text.front() == '"' && p_text.back() == '"')
-		{
-			return p_text.substr(1, p_text.size() - 2);
-		}
-		return p_text;
-	}
-
-	/** A numeric value out of the material file. False when the text is not a whole number, in
-	 * which case the designer field keeps its default. */
-	bool ParseFloatText(const std::string& p_text, float& p_value)
-	{
-		if (p_text.empty())
-		{
-			return false;
-		}
-		char* end = nullptr;
-		p_value = std::strtof(p_text.c_str(), &end);
-		return end != p_text.c_str() && *end == '\0';
-	}
-
-	std::string JsonEscape(const std::string& p_text)
-	{
-		std::string out;
-		out.reserve(p_text.size());
-		for (const char c : p_text)
-		{
-			if (c == '"' || c == '\\')
-			{
-				out += '\\';
-			}
-			out += c;
-		}
-		return out;
-	}
+	// Trim / Unquote / ParseFloatText moved to TextUtils.h (shared with the
+	// parameter processor).
 
 	std::string ToUpper(std::string p_text)
 	{
@@ -123,1667 +84,20 @@ namespace
 		return p_text;
 	}
 
-	/** Removes // and block comments, keeping line breaks so that the #line numbers the
-	 * diagnostics show still match the file. */
-	std::string StripComments(const std::string& p_text)
-	{
-		std::string out;
-		out.reserve(p_text.size());
-		bool inLine = false;
-		bool inBlock = false;
-		for (size_t i = 0; i < p_text.size(); ++i)
-		{
-			const char c = p_text[i];
-			const char next = (i + 1 < p_text.size()) ? p_text[i + 1] : '\0';
-			if (inLine)
-			{
-				if (c == '\n') { inLine = false; out += c; }
-				continue;
-			}
-			if (inBlock)
-			{
-				if (c == '*' && next == '/') { inBlock = false; ++i; }
-				else if (c == '\n') { out += c; }
-				continue;
-			}
-			if (c == '/' && next == '/') { inLine = true; ++i; continue; }
-			if (c == '/' && next == '*') { inBlock = true; ++i; continue; }
-			out += c;
-		}
-		return out;
-	}
-
 	// ---------------------------------------------------------------------------------
 	// The material file
 	// ---------------------------------------------------------------------------------
 
-	/** One entry of `parameters : [ { type : float3, name : u_Albedo }, ... ]`. `count` is the
-	 * array size when the parameter is one - `{ type : float3, name : samples, count : 64 }`
-	 * is the SSAO kernel, which used to have to declare its uniform by hand. `default` is the
-	 * GLSL initializer the old hand-written uniforms had (`uniform float x = 0.5;`): it is
-	 * emitted as it is, so GL seeds the property with that value and a material whose uniforms
-	 * are never set keeps the number it always had.
-	 *
-	 * The designer fields are optional: `label`, `group`, `min`/`max`/`step`, `color` and
-	 * `ui`. A material that declares none of them gets the runtime's fallbacks (a label from
-	 * the name, groups by kind, a range from the value), which is what the shaders that have
-	 * not been annotated yet do. Filament's material designer reads the same kind of schema;
-	 * here it lives in the material file itself, next to the parameter it describes. */
-	struct Parameter
-	{
-		std::string type;
-		std::string name;
-		std::string count;
-		std::string defaultValue;
-		std::string label;
-		std::string group;
-		/** Which 1x1 texture the runtime binds for a sampler nobody assigned, `fallback : ...`
-		 * in the material file. Empty means the engine's default (white for sampler2D, black for
-		 * samplerCube). "flatNormal" is the neutral tangent-space normal (0, 0, 1), which a
-		 * normal map samples as "no perturbation" - without it the white fallback would decode
-		 * to (1, 1, 1) and bend every normal. */
-		std::string fallback;
-		float min = 0.0f;
-		float max = 0.0f;
-		float step = 0.0f;
-		bool hasRange = false;
-		bool hasStep = false;
-		bool color = false;
-		bool ui = true;
+	// Parameter / Stage / StageName / PassVariant / MaterialBuilder live in
+	// MaterialBuilder.h: the parser and the parameter processor share them.
 
-		// Where the parameter lives once the material is a descriptor: a std140 offset/stride
-		// for the non-samplers (the per-material uniform block), a texture unit for the samplers.
-		// Filled by LayoutParameters.
-		uint32_t offset = 0;
-		uint32_t stride = 0;
-		uint32_t binding = 0;
-	};
 
-	/** The three stages a material can own. */
-	enum class Stage
-	{
-		Vertex,
-		Fragment,
-		/** GLSL's third stage, which this engine's line/edge expansion shaders use and
-		 * filament's material model has no room for. Always written by the material. */
-		Geometry
-	};
 
-	const char* StageName(Stage p_stage)
-	{
-		switch (p_stage)
-		{
-		case Stage::Vertex: return "vertex";
-		case Stage::Fragment: return "fragment";
-		default: return "geometry";
-		}
-	}
 
-	struct PassVariant
-	{
-		std::string pass;                  // empty for the default pass
-		std::set<std::string> features;    // the #define set this variant is compiled with
-	};
-
-	struct MaterialFile
-	{
-		std::string name;
-		std::string shadingModel = "unlit";
-		/** "surface" (shaded geometry, transformed by the model matrix) or "postProcess"
-		 * (a full-screen pass: the vertex stage is the quad, not the mesh). Filament splits
-		 * the same two cases with MaterialBuilder::materialDomain. */
-		std::string domain = "surface";
-		std::map<std::string, std::string> state; // blending, culling, depthWrite, ...
-		std::vector<Parameter> parameters;
-		/** The std140 size of the per-material uniform block: what the runtime allocates and
-		 * uploads, and what the generated GLSL's block must describe. 0 when every parameter is
-		 * a sampler (or there are none). */
-		uint32_t parameterBlockSize = 0;
-		std::vector<std::string> features;        // declared feature bits
-		std::vector<std::string> variantFilter;   // Filament-style engine variant bits (EVariantBits names)
-		/** The feature set the archive build compiles with when the material enumerates engine
-		 * variants (variantFilter). Empty means "no optional feature"; hasDefaultFeatures tells
-		 * an explicit empty list from "not declared". */
-		std::vector<std::string> defaultFeatures;
-		bool hasDefaultFeatures = false;
-		std::vector<std::string> vertexAttributes; // declared vertex layout, in location order
-		std::vector<std::string> passes;          // extra passes, default pass implied
-		/** The MaterialInputs fields this material's own fragment code writes. Filled right
-		 * after parsing; decides the MATERIAL_HAS_* defines and whether the generated stages
-		 * need a tangent frame. */
-		std::set<std::string> writtenFields;
-		/** filament's material flag `specularAntiAliasing`: compile the geometric specular AA
-		 * into the material (GEOMETRIC_SPECULAR_AA) instead of branching on a uniform. */
-		bool specularAntiAliasing = false;
-		/** filament's `clearCoatIorChange`, on by default there too: the layer under a clear
-		 * coat sees a 1.5 -> 1.5 interface instead of air -> 1.5. */
-		bool clearCoatIorChange = true;
-		std::string vertexBody;                   // the vertex { ... } block, verbatim
-		std::string fragmentBody;                 // the fragment { ... } block, verbatim
-		/** The geometry { } block, verbatim. Our own extension: GLSL has a third stage, and
-		 * the four shaders that expand lines and triangle edges into screen-space geometry
-		 * need it (filament's material model has no such stage). */
-		std::string geometryBody;
-		uint32_t vertexEntryLine = 1;             // where those blocks start, for #line
-		uint32_t fragmentEntryLine = 1;
-		uint32_t geometryEntryLine = 1;
-	};
-
-	/** The 1-based line a fragment of the source starts on: the #line directives handed to
-	 * the driver point back here, so an error names the .shader line the user wrote. */
-	uint32_t LineOf(const std::string& p_text, const std::string& p_fragment)
-	{
-		const size_t at = p_text.find(p_fragment);
-		if (at == std::string::npos)
-		{
-			return 1;
-		}
-		return 1u + static_cast<uint32_t>(std::count(p_text.begin(), p_text.begin() + static_cast<ptrdiff_t>(at), '\n'));
-	}
-
-	/** Finds the body of a `keyword { ... }` block, braces balanced, and returns the index
-	 * just past the closing brace. Comments have already been stripped by the caller. */
-	bool TakeBlock(const std::string& p_text, const std::string& p_keyword, size_t p_from,
-		std::string& p_body, size_t& p_next)
-	{
-		const size_t at = p_text.find(p_keyword, p_from);
-		if (at == std::string::npos)
-		{
-			return false;
-		}
-		const size_t open = p_text.find('{', at);
-		if (open == std::string::npos)
-		{
-			return false;
-		}
-		int depth = 0;
-		for (size_t i = open; i < p_text.size(); ++i)
-		{
-			if (p_text[i] == '{') { ++depth; }
-			else if (p_text[i] == '}')
-			{
-				if (--depth == 0)
-				{
-					p_body = p_text.substr(open + 1, i - open - 1);
-					p_next = i + 1;
-					return true;
-				}
-			}
-		}
-		return false;
-	}
-
-	/** Splits `a : b, c : d` style material state into key/value pairs, and the parameters
-	 * array into Parameter records. Only what the slice needs - a hand written scanner, in
-	 * the spirit of filament-matp's lexeme readers rather than a general parser. */
-	void ParseMaterialBlock(const std::string& p_body, MaterialFile& p_out)
-	{
-		size_t i = 0;
-		const auto skipSpace = [&]() { while (i < p_body.size() && std::isspace(static_cast<unsigned char>(p_body[i]))) { ++i; } };
-		const auto readName = [&]() {
-			skipSpace();
-			std::string name;
-			while (i < p_body.size() && (std::isalnum(static_cast<unsigned char>(p_body[i])) || p_body[i] == '_' || p_body[i] == '.'))
-			{
-				name += p_body[i++];
-			}
-			return name;
-		};
-
-		while (i < p_body.size())
-		{
-			const std::string key = readName();
-			skipSpace();
-			if (key.empty())
-			{
-				++i;
-				continue;
-			}
-			if (i >= p_body.size() || p_body[i] != ':')
-			{
-				continue;
-			}
-			++i; // ':'
-			skipSpace();
-
-			if (p_body[i] == '[')
-			{
-				// Array: parameters (objects) or a plain name list (features / passes).
-				const size_t close = p_body.find(']', i);
-				const std::string array = p_body.substr(i + 1, (close == std::string::npos ? p_body.size() : close) - i - 1);
-				i = (close == std::string::npos) ? p_body.size() : close + 1;
-
-				if (key == "defaultFeatures") { p_out.hasDefaultFeatures = true; }
-
-				if (key == "parameters")
-				{
-					// One field of a parameter object: `field : value`, the value ending at the
-					// comma that separates it from the next field. The key has to be a whole
-					// word, so that "count" does not match inside `name : u_Count`.
-					const auto valueOf = [&array](const std::string& p_object, const std::string& p_field) -> std::string {
-						size_t at = p_object.find(p_field);
-						while (at != std::string::npos)
-						{
-							const size_t after = at + p_field.size();
-							const size_t colon = p_object.find(':', after);
-							const bool wordStart = at == 0
-								|| !std::isalnum(static_cast<unsigned char>(p_object[at - 1]))
-								&& p_object[at - 1] != '_';
-							if (wordStart && colon != std::string::npos && Trim(p_object.substr(after, colon - after)).empty())
-							{
-								// The value ends at the comma that separates it from the next
-								// field - but a `default : vec4(1, 2, 3, 4)` has commas of its
-								// own, so the ones inside brackets do not count.
-								size_t end = colon + 1;
-								int depth = 0;
-								for (; end < p_object.size(); ++end)
-								{
-									const char c = p_object[end];
-									if (c == '(' || c == '[') { ++depth; }
-									else if (c == ')' || c == ']') { --depth; }
-									else if (c == ',' && depth == 0) { break; }
-								}
-								return Trim(p_object.substr(colon + 1, end - colon - 1));
-							}
-							at = p_object.find(p_field, at + 1);
-						}
-						return {};
-					};
-
-					size_t at = 0;
-					while ((at = array.find('{', at)) != std::string::npos)
-					{
-						const size_t end = array.find('}', at);
-						if (end == std::string::npos) { break; }
-						const std::string object = array.substr(at + 1, end - at - 1);
-						Parameter parameter;
-						parameter.type = valueOf(object, "type");
-						parameter.name = valueOf(object, "name");
-						parameter.count = valueOf(object, "count");
-						parameter.defaultValue = valueOf(object, "default");
-
-						// The designer fields. "min"/"max"/"step" are only ranges when both ends
-						// are numbers; "ui : false" hides engine-owned parameters (the shadow
-						// matrix, the environment map) from the material designer.
-						parameter.label = Unquote(valueOf(object, "label"));
-						parameter.group = Unquote(valueOf(object, "group"));
-						parameter.color = valueOf(object, "color") == "true";
-						parameter.ui = valueOf(object, "ui") != "false";
-						parameter.hasRange = ParseFloatText(valueOf(object, "min"), parameter.min)
-							&& ParseFloatText(valueOf(object, "max"), parameter.max);
-						parameter.hasStep = ParseFloatText(valueOf(object, "step"), parameter.step);
-						// `fallback : flatNormal` on a sampler says which 1x1 texture the runtime
-						// binds when the designer assigned no map - see FallbackKind.
-						parameter.fallback = valueOf(object, "fallback");
-
-						if (!parameter.name.empty())
-						{
-							p_out.parameters.push_back(parameter);
-						}
-						at = end + 1;
-					}
-				}
-				else
-				{
-					std::string item;
-					std::istringstream stream(array);
-					while (std::getline(stream, item, ','))
-					{
-						const std::string trimmed = Trim(item);
-						if (trimmed.empty()) { continue; }
-						if (key == "features") { p_out.features.push_back(Trim(trimmed)); }
-						else if (key == "defaultFeatures") { p_out.defaultFeatures.push_back(Trim(trimmed)); }
-						else if (key == "variantFilter") { p_out.variantFilter.push_back(Trim(trimmed)); }
-						else if (key == "vertexAttributes") { p_out.vertexAttributes.push_back(Trim(trimmed)); }
-						else if (key == "passes") { p_out.passes.push_back(Trim(trimmed)); }
-					}
-				}
-				continue;
-			}
-
-			// Scalar value: up to the next ',' at this level.
-			const size_t end = p_body.find(',', i);
-			const std::string value = Trim(p_body.substr(i, (end == std::string::npos ? p_body.size() : end) - i));
-			i = (end == std::string::npos) ? p_body.size() : end + 1;
-
-			if (key == "name") { p_out.name = value; }
-			else if (key == "shadingModel") { p_out.shadingModel = value; }
-			else if (key == "domain") { p_out.domain = value; }
-			// The two material-level switches filament puts in `material { }` as well. They
-			// are read here, not in the generic state map: they change the generated code.
-			else if (key == "specularAntiAliasing") { p_out.specularAntiAliasing = (value == "true"); }
-			else if (key == "clearCoatIorChange") { p_out.clearCoatIorChange = (value == "true"); }
-			else { p_out.state[key] = value; }
-		}
-	}
-
-	bool ParseMaterialFile(const std::string& p_text, MaterialFile& p_out, std::string& p_error)
-	{
-		const std::string text = StripComments(p_text);
-
-		std::string materialBody;
-		size_t next = 0;
-		if (!TakeBlock(text, "material", 0, materialBody, next))
-		{
-			p_error = "no material { } block";
-			return false;
-		}
-		ParseMaterialBlock(materialBody, p_out);
-
-		std::string vertexBody;
-		size_t vertexNext = 0;
-		size_t afterVertex = 0;
-		if (TakeBlock(text, "vertex", next, vertexBody, vertexNext))
-		{
-			p_out.vertexBody = Trim(vertexBody);
-			p_out.vertexEntryLine = LineOf(text, p_out.vertexBody);
-			next = vertexNext;
-			afterVertex = vertexNext;
-		}
-		std::string fragmentBody;
-		size_t fragmentNext = 0;
-		if (TakeBlock(text, "fragment", next, fragmentBody, fragmentNext))
-		{
-			p_out.fragmentBody = Trim(fragmentBody);
-			p_out.fragmentEntryLine = LineOf(text, p_out.fragmentBody);
-			next = fragmentNext;
-		}
-
-		// The geometry stage: our extension, and the old files put it between the vertex and
-		// the fragment sections - so it is searched from the end of the vertex block, not from
-		// wherever the fragment block ended. The legacy loader's marker is spelled
-		// "#shader geomerty", so the block keyword is accepted either way.
-		std::string geometryBody;
-		size_t geometryNext = 0;
-		if (TakeBlock(text, "geometry", afterVertex, geometryBody, geometryNext)
-			|| TakeBlock(text, "geomerty", afterVertex, geometryBody, geometryNext))
-		{
-			p_out.geometryBody = Trim(geometryBody);
-			p_out.geometryEntryLine = LineOf(text, p_out.geometryBody);
-		}
-
-		if (p_out.name.empty())
-		{
-			p_error = "material { name : ... } is required";
-			return false;
-		}
-		if (p_out.fragmentBody.empty())
-		{
-			p_error = "a fragment { } block is required";
-			return false;
-		}
-		return true;
-	}
 
 	// ---------------------------------------------------------------------------------
-	// #include
-	//
-	// The runtime used to expand these (ShaderLoader's AssembleSource, the engine's answer
-	// to filament's Includes.cpp). Once a shader is a package there is no runtime pass left
-	// to do it - the GLSL goes straight to the driver - so the expansion moves here, where
-	// it also gets the chance to drop the two headers the prelude already carries.
+	// The package: an integer-tagged chunk tree, like filabridge's MaterialChunkType.h
 	// ---------------------------------------------------------------------------------
-
-	/** The headers every generated stage already has: a material that includes one of them
-	 * would declare the same UBO or helper twice. */
-	bool IsPreludeHeader(const std::string& p_relative)
-	{
-		return p_relative == "Common/Buffers/EngineUBO.glsl"
-			|| p_relative == "Common/Utils.glsl";
-	}
-
-	struct ResolvedInclude
-	{
-		std::filesystem::path path;  // the file on disk
-		std::string relative;        // how #line should name it
-		std::string text;            // supplied by the resolver, when it handled the include
-		bool hasText = false;
-	};
-
-	/** Where one #include points, the way the engine's path parser resolves it: a leading
-	 * ':' marks an engine path, and the directories handed in with -I are the shader roots
-	 * the ":Shaders/" prefix stands for. A relative include is tried against them too, which
-	 * is what a file inside the tree gets for free.
-	 *
-	 * p_resolver runs first: a release build packs the headers into the executable and has no
-	 * directory to look in, while a development build simply leaves the resolver empty. */
-	bool ResolveInclude(
-		const std::string& p_target,
-		const std::vector<std::string>& p_dirs,
-		const IncludeResolver& p_resolver,
-		ResolvedInclude& p_out)
-	{
-		if (p_resolver)
-		{
-			std::string text;
-			std::string origin;
-			if (p_resolver(p_target, text, origin))
-			{
-				p_out.text = std::move(text);
-				p_out.relative = origin.empty() ? p_target : origin;
-				p_out.hasText = true;
-				return true;
-			}
-		}
-
-		std::string target = p_target;
-		if (!target.empty() && target.front() == ':')
-		{
-			target.erase(target.begin());
-		}
-		std::replace(target.begin(), target.end(), '\\', '/');
-
-		std::string withoutRoot = target;
-		constexpr std::string_view kRoot = "Shaders/";
-		if (withoutRoot.starts_with(kRoot))
-		{
-			withoutRoot.erase(0, kRoot.size());
-		}
-
-		for (const std::string& dir : p_dirs)
-		{
-			for (const std::string& candidate : { withoutRoot, target })
-			{
-				const std::filesystem::path path = std::filesystem::path(dir) / candidate;
-				std::error_code error;
-				if (std::filesystem::is_regular_file(path, error))
-				{
-					p_out.path = path;
-					p_out.relative = candidate;
-					return true;
-				}
-			}
-		}
-		return false;
-	}
-
-	/** Expands the #include lines of one stage and keeps the diagnostic anchors straight: an
-	 * included file opens with its own "#line 1", and the line after it goes back to the file
-	 * (and the line) the #include was written on.
-	 *
-	 * Each file is expanded once per stage - the headers have no include guards, and PBR.glsl
-	 * reaches Utils.glsl a second time - and the two the prelude already carries are dropped
-	 * instead of duplicated. */
-	bool ExpandIncludes(
-		const std::string& p_text,
-		const std::vector<std::string>& p_dirs,
-		const IncludeResolver& p_resolver,
-		const std::string& p_origin,
-		std::set<std::string>& p_visited,
-		std::string& p_out,
-		std::string& p_error)
-	{
-		std::string currentFile = p_origin;
-		uint32_t nextLine = 1;
-
-		std::istringstream stream(p_text);
-		std::string line;
-		while (std::getline(stream, line))
-		{
-			const std::string trimmed = Trim(line);
-			if (trimmed.starts_with("#line "))
-			{
-				// "#line N file": the line after it is line N of that file.
-				p_out += line;
-				p_out += '\n';
-				// The number after "#line " is the line the one after it will be.
-				size_t at = 6;
-				while (at < trimmed.size() && trimmed[at] == ' ') { ++at; }
-				uint32_t number = 0;
-				bool hasDigits = false;
-				while (at < trimmed.size() && std::isdigit(static_cast<unsigned char>(trimmed[at])))
-				{
-					number = number * 10 + static_cast<uint32_t>(trimmed[at] - '0');
-					++at;
-					hasDigits = true;
-				}
-				if (hasDigits)
-				{
-					nextLine = number;
-				}
-				const size_t first = trimmed.find('"');
-				const size_t last = trimmed.rfind('"');
-				if (first != std::string::npos && last != std::string::npos && last > first)
-				{
-					currentFile = trimmed.substr(first + 1, last - first - 1);
-				}
-				continue;
-			}
-
-			if (trimmed.starts_with("#include"))
-			{
-				const size_t first = trimmed.find('"');
-				const size_t last = trimmed.rfind('"');
-				if (first == std::string::npos || last == std::string::npos || last <= first)
-				{
-					p_error = "malformed #include in " + currentFile + " (line " + std::to_string(nextLine) + ")";
-					return false;
-				}
-
-				const std::string target = trimmed.substr(first + 1, last - first - 1);
-				ResolvedInclude resolved;
-				if (!ResolveInclude(target, p_dirs, p_resolver, resolved))
-				{
-					p_error = "cannot resolve #include \"" + target + "\" (" + currentFile
-						+ ", line " + std::to_string(nextLine) + ")";
-					return false;
-				}
-
-				// Consumed either way: the include line itself occupies a line of currentFile.
-				++nextLine;
-
-				if (IsPreludeHeader(resolved.relative) || p_visited.contains(resolved.relative))
-				{
-					// Already in this stage, as part of the prelude or from an earlier
-					// #include: dropping the line is what keeps the declarations single.
-					continue;
-				}
-				p_visited.insert(resolved.relative);
-
-				std::string content;
-				if (resolved.hasText)
-				{
-					content = std::move(resolved.text);
-				}
-				else
-				{
-					bool readOk = false;
-					content = ReadFile(resolved.path, readOk);
-					if (!readOk)
-					{
-						p_error = "cannot read \"" + resolved.path.string() + "\"";
-						return false;
-					}
-				}
-
-				std::string expanded;
-				if (!ExpandIncludes(content, p_dirs, p_resolver, resolved.relative, p_visited, expanded, p_error))
-				{
-					return false;
-				}
-
-				p_out += "#line 1 \"" + resolved.relative + "\"\n";
-				p_out += expanded;
-				if (!expanded.empty() && expanded.back() != '\n')
-				{
-					p_out += '\n';
-				}
-				p_out += "#line " + std::to_string(nextLine) + " \"" + currentFile + "\"\n";
-				continue;
-			}
-
-			p_out += line;
-			p_out += '\n';
-			++nextLine;
-		}
-		return true;
-	}
-
-	// ---------------------------------------------------------------------------------
-	// Code generation: prelude + entry points + main
-	// ---------------------------------------------------------------------------------
-
-	/** When a MaterialInputs field exists, and when initMaterial() gives it a default. Two
-	 * separate guards because filament's own header does that: `clearCoat` and `anisotropy`
-	 * are always declared but only initialized when the material uses them. */
-	enum class InputGuard
-	{
-		Always,
-		Lit,                 // !defined(SHADING_MODEL_UNLIT)
-		Has,                 // defined(MATERIAL_HAS_<this field>)
-		HasNormal,           // defined(MATERIAL_HAS_NORMAL)
-		HasBentNormal,       // defined(MATERIAL_HAS_BENT_NORMAL)
-		HasClearCoatNormal,  // defined(MATERIAL_HAS_CLEAR_COAT) && defined(MATERIAL_HAS_CLEAR_COAT_NORMAL)
-		HasPostLightingColor,// defined(MATERIAL_HAS_POST_LIGHTING_COLOR)
-	};
-
-	struct InputField
-	{
-		const char* name;
-		const char* define;      // the suffix: MATERIAL_HAS_<define>
-		const char* type;
-		const char* initializer;
-		InputGuard declaration;
-		InputGuard initialization;
-	};
-
-	/** filament's shaders/src/surface_material_inputs.fs, field for field and guard for guard,
-	 * minus the shading models this engine does not have (cloth / subsurface / specular
-	 * glossiness). Keeping the order and the defaults identical is what makes the generated
-	 * struct comparable with the reference file - the surface prelude reads these fields. */
-	constexpr InputField kInputFields[] = {
-		{ "baseColor",            "BASE_COLOR",            "vec4",  "vec4(1.0)",                  InputGuard::Always, InputGuard::Always },
-		{ "roughness",            "ROUGHNESS",             "float", "1.0",                        InputGuard::Lit,    InputGuard::Lit },
-		{ "metallic",             "METALLIC",              "float", "0.0",                        InputGuard::Lit,    InputGuard::Lit },
-		{ "reflectance",          "REFLECTANCE",           "float", "0.5",                        InputGuard::Lit,    InputGuard::Lit },
-		{ "ambientOcclusion",     "AMBIENT_OCCLUSION",     "float", "1.0",                        InputGuard::Lit,    InputGuard::Lit },
-		{ "emissive",             "EMISSIVE",              "vec4",  "vec4(vec3(0.0), 1.0)",       InputGuard::Always, InputGuard::Always },
-		{ "sheenColor",           "SHEEN_COLOR",           "vec3",  "vec3(0.0)",                  InputGuard::Has,    InputGuard::Has },
-		{ "sheenRoughness",       "SHEEN_ROUGHNESS",       "float", "0.0",                        InputGuard::Has,    InputGuard::Has },
-		{ "clearCoat",            "CLEAR_COAT",            "float", "1.0",                        InputGuard::Always, InputGuard::Has },
-		{ "clearCoatRoughness",   "CLEAR_COAT_ROUGHNESS",  "float", "0.0",                        InputGuard::Always, InputGuard::Has },
-		{ "anisotropy",           "ANISOTROPY",            "float", "0.0",                        InputGuard::Always, InputGuard::Has },
-		{ "anisotropyDirection",  "ANISOTROPY_DIRECTION",  "vec3",  "vec3(1.0, 0.0, 0.0)",        InputGuard::Always, InputGuard::Has },
-		{ "thickness",            "THICKNESS",             "float", "0.5",                        InputGuard::Lit,    InputGuard::Lit },
-		{ "subsurfacePower",      "SUBSURFACE_POWER",      "float", "12.234",                     InputGuard::Has,    InputGuard::Has },
-		{ "subsurfaceColor",      "SUBSURFACE_COLOR",      "vec3",  "vec3(1.0)",                  InputGuard::Has,    InputGuard::Has },
-		{ "absorption",           "ABSORPTION",            "vec3",  "vec3(0.0)",                  InputGuard::Lit,    InputGuard::Has },
-		{ "transmission",         "TRANSMISSION",          "float", "1.0",                        InputGuard::Lit,    InputGuard::Has },
-		{ "ior",                  "IOR",                   "float", "1.5",                        InputGuard::Lit,    InputGuard::Has },
-		{ "specularFactor",       "SPECULAR_FACTOR",       "float", "1.0",                        InputGuard::Has,    InputGuard::Has },
-		{ "specularColorFactor",  "SPECULAR_COLOR_FACTOR", "vec3",  "vec3(1.0)",                  InputGuard::Has,    InputGuard::Has },
-		{ "shadowStrength",       "SHADOW_STRENGTH",       "float", "0.0",                        InputGuard::Has,    InputGuard::Has },
-		{ "normal",               "NORMAL",                "vec3",  "vec3(0.0, 0.0, 1.0)",        InputGuard::HasNormal, InputGuard::HasNormal },
-		{ "bentNormal",           "BENT_NORMAL",           "vec3",  "vec3(0.0, 0.0, 1.0)",        InputGuard::HasBentNormal, InputGuard::HasBentNormal },
-		{ "clearCoatNormal",      "CLEAR_COAT_NORMAL",     "vec3",  "vec3(0.0, 0.0, 1.0)",        InputGuard::HasClearCoatNormal, InputGuard::HasClearCoatNormal },
-		{ "postLightingColor",    "POST_LIGHTING_COLOR",   "vec4",  "vec4(0.0)",                  InputGuard::HasPostLightingColor, InputGuard::HasPostLightingColor },
-		{ "postLightingMixFactor","POST_LIGHTING_MIX_FACTOR","float","1.0",                        InputGuard::HasPostLightingColor, InputGuard::HasPostLightingColor },
-	};
-
-	/** The fields a material's own code writes. filament runs a real AST pass for this
-	 * (libs/filamat/src/sca/ASTHelpers.cpp, PropertyFinder); anchoring the scan on the
-	 * variables that are declared as `MaterialInputs` gets the same answer for code that
-	 * names them, and cannot mistake another struct's fields (`FilamentMaterialInputs
-	 * material;` in the Filament port) for these. The scan only sees the material's own
-	 * block, not what an #include writes - those are the engine's, and they write their own
-	 * struct in the current code. */
-	std::set<std::string> WrittenInputFields(const std::string& p_body)
-	{
-		std::set<std::string> written;
-
-		static const std::regex kDeclaration(R"(\bMaterialInputs\s+([A-Za-z_][A-Za-z0-9_]*))");
-		std::vector<std::string> variables;
-		for (auto it = std::sregex_iterator(p_body.begin(), p_body.end(), kDeclaration);
-			it != std::sregex_iterator(); ++it)
-		{
-			const std::string name = (*it)[1].str();
-			if (std::ranges::find(variables, name) == variables.end())
-			{
-				variables.push_back(name);
-			}
-		}
-
-		for (const std::string& variable : variables)
-		{
-			// `m.roughness = ...`, `m.baseColor.rgb = ...`, `m.emissive += ...`: any component
-			// and any compound assignment counts as "the material writes this field". A
-			// comparison (`==`) is a read.
-			const std::regex write("\\b" + variable
-				+ R"(\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)(\s*\.\s*[A-Za-z_][A-Za-z0-9_]*)*\s*(\+|-|\*|/)?=(?!=))");
-			for (auto it = std::sregex_iterator(p_body.begin(), p_body.end(), write);
-				it != std::sregex_iterator(); ++it)
-			{
-				written.insert((*it)[1].str());
-			}
-		}
-		return written;
-	}
-
-	/** filament's synthetic MATERIAL_NEEDS_TBN: the four fields that read the tangent frame. */
-	bool NeedsTangentFrame(const std::set<std::string>& p_writtenFields)
-	{
-		return p_writtenFields.contains("normal")
-			|| p_writtenFields.contains("bentNormal")
-			|| p_writtenFields.contains("clearCoatNormal")
-			|| p_writtenFields.contains("anisotropy");
-	}
-
-	/** Open the `#if` for one guard, or nothing for Always. */
-	std::string InputGuardOpen(InputGuard p_guard, const InputField& p_field)
-	{
-		switch (p_guard)
-		{
-		case InputGuard::Always: return {};
-		case InputGuard::Lit: return "#if !defined(SHADING_MODEL_UNLIT)\n";
-		case InputGuard::Has: return std::string("#if defined(MATERIAL_HAS_") + p_field.define + ")\n";
-		case InputGuard::HasNormal: return "#if defined(MATERIAL_HAS_NORMAL)\n";
-		case InputGuard::HasBentNormal: return "#if defined(MATERIAL_HAS_BENT_NORMAL)\n";
-		case InputGuard::HasClearCoatNormal:
-			return "#if defined(MATERIAL_HAS_CLEAR_COAT) && defined(MATERIAL_HAS_CLEAR_COAT_NORMAL)\n";
-		case InputGuard::HasPostLightingColor: return "#if defined(MATERIAL_HAS_POST_LIGHTING_COLOR)\n";
-		}
-		return {};
-	}
-
-	/** The MaterialInputs the material() entry point writes, the function that fills them
-	 * with defaults, and the function that turns them into a colour.
-	 *
-	 * Names and shape follow filament: `MaterialInputs inputs; initMaterial(inputs);
-	 * material(inputs); fragColor = evaluateMaterial(inputs);` is exactly what its generated
-	 * surface_main.fs does (shaders/src/surface_main.fs:50-56); the fields, their order, their
-	 * defaults and their guards are surface_material_inputs.fs. The `MATERIAL_HAS_*` defines at
-	 * the top are the material-level half of filament's material system: they say which of
-	 * these fields this material actually writes, so the surface prelude can compile the
-	 * unused lobes out. */
-	std::string MaterialInputsPrelude(
-		const std::string& p_shadingModel,
-		const std::set<std::string>& p_writtenFields,
-		const MaterialFile& p_material)
-	{
-		const bool lit = (p_shadingModel != "unlit");
-		std::ostringstream out;
-
-		// --- the material's own defines -------------------------------------------------
-		out << "// material defines (filament's MATERIAL_HAS_*): derived from what the code below\n"
-			<< "// writes, so the surface prelude compiles the unused lobes out.\n"
-			<< (lit ? "#define SHADING_MODEL_LIT\n" : "#define SHADING_MODEL_UNLIT\n");
-		for (const InputField& field : kInputFields)
-		{
-			if (p_writtenFields.contains(field.name))
-			{
-				out << "#define MATERIAL_HAS_" << field.define << "\n";
-			}
-		}
-
-		// filament's synthetic define: the four fields that need a tangent frame.
-		const bool needsTbn = NeedsTangentFrame(p_writtenFields);
-		out << "#define MATERIAL_NEEDS_TBN " << (needsTbn ? 1 : 0) << "\n"
-			<< "#define GEOMETRIC_SPECULAR_AA " << (p_material.specularAntiAliasing && lit ? 1 : 0) << "\n"
-			<< "#define CLEAR_COAT_IOR_CHANGE " << (p_material.clearCoatIorChange ? 1 : 0) << "\n\n";
-
-		// --- the struct ------------------------------------------------------------------
-		out << "struct MaterialInputs {\n";
-		for (const InputField& field : kInputFields)
-		{
-			const std::string guard = InputGuardOpen(field.declaration, field);
-			if (!guard.empty())
-			{
-				out << "  " << guard;
-			}
-			out << "    " << field.type << " " << field.name << ";\n";
-			if (!guard.empty())
-			{
-				out << "#endif\n";
-			}
-		}
-		out << "};\n\n";
-
-		// --- the defaults ----------------------------------------------------------------
-		out << "void initMaterial(out MaterialInputs m) {\n";
-		for (const InputField& field : kInputFields)
-		{
-			const std::string guard = InputGuardOpen(field.initialization, field);
-			if (!guard.empty())
-			{
-				out << "  " << guard;
-			}
-			out << "    m." << field.name << " = " << field.initializer << ";\n";
-			if (!guard.empty())
-			{
-				out << "#endif\n";
-			}
-		}
-		out << "}\n\n"
-			// The .shader files call it prepareMaterial(); keeping the alias means a shader
-			// written either way compiles.
-			<< "void prepareMaterial(out MaterialInputs m) { initMaterial(m); }\n\n";
-
-		// --- the shading model's verdict --------------------------------------------------
-		// Unlit is the whole of what this engine can evaluate so far; a lit material's
-		// evaluateMaterial() comes from the surface prelude that matc splices in for the
-		// `lit` shading model, so it is only forward-declared here.
-		out << (lit
-			? "vec4 evaluateMaterial(inout MaterialInputs m);\n"
-			// filament's surface_shading_unlit.fs: the base colour plus the emissive's rgb;
-			// the emissive does not touch alpha.
-			: "vec4 evaluateMaterial(inout MaterialInputs m) {\n"
-			  "    vec4 color = m.baseColor;\n"
-			  "#if defined(MATERIAL_HAS_EMISSIVE)\n"
-			  "    color.rgb += m.emissive.rgb;\n"
-			  "#endif\n"
-			  "    return color;\n"
-			  "}\n");
-		return out.str();
-	}
-
-	/** The varyings both stages agree on. Part of the prelude - the material's entry point
-	 * may read them, so they have to be declared before it, which is what filament does in
-	 * surface_varyings.glsl (and what post_process_main.vs/.fs pass instead of them).
-	 *
-	 * `p_needsTbn` adds the world tangent frame, filament's `shading_tangentToWorld`: a material
-	 * that writes `material.normal` / `material.anisotropyDirection` reads it, and a material
-	 * that writes neither never pays for it. */
-	std::string VaryingsPrelude(bool p_vertex, const std::string& p_domain, bool p_needsTbn)
-	{
-		std::ostringstream out;
-		if (p_domain == "postProcess")
-		{
-			// A full-screen pass only carries texture coordinates between the stages.
-			out << (p_vertex ? "out vec2 TexCoords;\n\n" : "in vec2 TexCoords;\n\n");
-			return out.str();
-		}
-		out << (p_vertex ? "out VS_OUT {\n" : "in VS_OUT {\n")
-			<< "    vec3 FragPos;\n"
-			<< "    vec2 TexCoords;\n"
-			<< "    vec3 Normal;\n";
-		if (p_needsTbn)
-		{
-			out << "#if MATERIAL_NEEDS_TBN\n"
-				<< "    mat3 TBN; // world tangent frame: T, B, N (filament's shading_tangentToWorld)\n"
-				<< "#endif\n";
-		}
-		out << (p_vertex ? "} vs_out;\n\n" : "} fs_in;\n\n");
-		return out.str();
-	}
-
-	/** The feature a geometry body's leading guard is about, if it is a plain single-feature
-	 * test: `#ifdef F` / `#if defined(F)` / `#if F` are +1, the negations are -1, and anything
-	 * fancier (`||`, `&&`, comparisons) is 0 "do not try to be clever". */
-	int GeometryGuardFeature(const std::string& p_body, std::string& p_feature)
-	{
-		std::istringstream stream(p_body);
-		std::string line;
-		while (std::getline(stream, line))
-		{
-			const std::string trimmed = Trim(line);
-			if (trimmed.empty())
-			{
-				continue;
-			}
-			if (!trimmed.starts_with("#if"))
-			{
-				return 0;
-			}
-
-			bool negated = false;
-			std::string condition;
-			if (trimmed.starts_with("#ifdef ") || trimmed.starts_with("#ifndef "))
-			{
-				negated = trimmed.starts_with("#ifndef ");
-				condition = Trim(trimmed.substr(7));
-			}
-			else if (trimmed.starts_with("#if "))
-			{
-				condition = Trim(trimmed.substr(4));
-				if (condition.starts_with("!"))
-				{
-					negated = true;
-					condition = Trim(condition.substr(1));
-				}
-				if (condition.starts_with("defined"))
-				{
-					condition = Trim(condition.substr(7));
-					if (!condition.empty() && condition.front() == '(')
-					{
-						condition = Trim(condition.substr(1));
-					}
-				}
-			}
-			else
-			{
-				return 0;
-			}
-
-			// A guard this helper understands is exactly one identifier, nothing after it.
-			std::string name;
-			for (const char c : condition)
-			{
-				if (std::isalnum(static_cast<unsigned char>(c)) || c == '_') { name += c; }
-				else { break; }
-			}
-			if (name.empty() || Trim(condition.substr(name.size())) != ")" && !Trim(condition.substr(name.size())).empty())
-			{
-				return 0;
-			}
-			if (name.starts_with("defined") || name.starts_with("GL_") || name.starts_with("MOON_"))
-			{
-				// Not one of the material's own features.
-				return 0;
-			}
-
-			p_feature = name;
-			return negated ? -1 : 1;
-		}
-		return 0;
-	}
-
-	/** True when the block's first `#if` is closed by an `#endif` with nothing but whitespace
-	 * after it - i.e. the guard covers the whole stage body rather than one helper in it. */
-	bool GuardWrapsBlock(const std::string& p_body)
-	{
-		std::istringstream stream(p_body);
-		std::string line;
-		int depth = 0;
-		bool opened = false;
-		std::string rest;
-		while (std::getline(stream, line))
-		{
-			const std::string trimmed = Trim(line);
-			if (!opened)
-			{
-				if (trimmed.starts_with("#if")) { opened = true; depth = 1; }
-				else if (!trimmed.empty()) { return false; }
-				continue;
-			}
-			if (trimmed.starts_with("#if")) { ++depth; }
-			else if (trimmed.starts_with("#endif"))
-			{
-				if (--depth == 0)
-				{
-					// Everything after the closing #endif must be whitespace.
-					std::string tail;
-					std::getline(stream, tail, '\0');
-					return Trim(tail).empty();
-				}
-			}
-		}
-		return false;
-	}
-
-	/** Whether this variant carries the geometry stage.
-	 *
-	 * A material declares one geometry block, but the shaders that use one open it with the
-	 * feature that needs it (`#if defined(WITH_EDGE)`), and the old pipeline skipped the whole
-	 * stage for the variants where that feature was off (ShaderLoader's stage-skip hack). The
-	 * same rule here: a variant that would only run a pass-through geometry shader does not
-	 * get one - no blob, nothing to compile, nothing to run per draw.
-	 *
-	 * Only a guard that wraps the WHOLE block counts (first line `#if`, matching `#endif` at the
-	 * end of the block): a guard around part of it says nothing about whether the stage is
-	 * needed, and those keep their geometry stage. */
-	bool WantsGeometryStage(const std::string& p_body, const PassVariant& p_variant)
-	{
-		std::string feature;
-		const int sense = GeometryGuardFeature(p_body, feature);
-		if (sense == 0 || !GuardWrapsBlock(p_body))
-		{
-			return true;
-		}
-		const bool present = p_variant.features.contains(feature);
-		return sense > 0 ? present : !present;
-	}
-
-	/** True when a block defines its own `void main()`. That is the escape hatch for the few
-	 * shaders whose stage is not "adjust the attributes, then the fixed transform" - a
-	 * billboard that rebuilds the model-view matrix, a skybox that writes w = z. Filament
-	 * keeps the transform out of the material too, so a material that owns its stage is our
-	 * deviation, documented in docs/ShaderPipeline.md (section 10, differences from Filament). */
-	bool DefinesMain(const std::string& p_body)
-	{
-		size_t at = 0;
-		while ((at = p_body.find("void", at)) != std::string::npos)
-		{
-			size_t i = at + 4;
-			while (i < p_body.size() && std::isspace(static_cast<unsigned char>(p_body[i]))) { ++i; }
-			if (p_body.compare(i, 4, "main") == 0)
-			{
-				i += 4;
-				while (i < p_body.size() && std::isspace(static_cast<unsigned char>(p_body[i]))) { ++i; }
-				if (i < p_body.size() && p_body[i] == '(')
-				{
-					return true;
-				}
-			}
-			at += 4;
-		}
-		return false;
-	}
-
-	/** The vertex main: the transform the entry point is not allowed to touch. Copied from
-	 * what Unlit/Standard.shader do by hand today, and from filament's post_process_main.vs for
-	 * the full-screen case.
-	 *
-	 * Only generated for a stage that does not own its main() - see BuildStage. */
-	std::string VertexSkeleton(bool p_hasUserVertex, const std::string& p_domain, bool p_needsTbn)
-	{
-		std::ostringstream out;
-		if (p_domain == "postProcess")
-		{
-			// The quad comes in in clip space; there is no model matrix and no normal.
-			out << "layout (location = 0) in vec2 geo_Pos;\n"
-				<< "layout (location = 1) in vec2 geo_TexCoords;\n\n"
-				<< "void main() {\n"
-					<< "    TexCoords = geo_TexCoords;\n"
-					<< "    gl_Position = vec4(geo_Pos, 0.0, 1.0);\n"
-					<< "}\n";
-			return out.str();
-		}
-		out << "layout (location = 0) in vec3 geo_Pos;\n"
-			<< "layout (location = 1) in vec2 geo_TexCoords;\n"
-			<< "layout (location = 2) in vec3 geo_Normal;\n";
-		if (p_needsTbn)
-		{
-			// Geometry::Vertex: position, texCoords, normal, tangent, bitangent.
-			out << "#if MATERIAL_NEEDS_TBN\n"
-				<< "layout (location = 3) in vec3 geo_Tangent;\n"
-				<< "layout (location = 4) in vec3 geo_Bitangent;\n"
-				<< "#endif\n";
-		}
-		// The stub is only for a material that has no vertex block of its own; a material
-		// that has one would otherwise get two definitions of the same function.
-		if (!p_hasUserVertex)
-		{
-			out << "void materialVertex(inout vec3 position, inout vec2 texCoords, inout vec3 normal) { }\n\n";
-		}
-		out << "void main() {\n"
-			<< "    vec3 position = geo_Pos;\n"
-			<< "    vec2 texCoords = geo_TexCoords;\n"
-			<< "    vec3 normal = geo_Normal;\n"
-			<< "    materialVertex(position, texCoords, normal);\n"
-			<< "    vs_out.FragPos = vec3(ubo_Model * vec4(position, 1.0));\n"
-			<< "    vs_out.TexCoords = texCoords;\n"
-			// The normal matrix, not the model matrix: a non-uniform scale shears the normal off
-			// the surface otherwise. Every hand-written vertex stage in the engine already does
-			// this (filament keeps a per-object normal matrix in ObjectUniforms instead).
-			<< "    vs_out.Normal = normalize(mat3(transpose(inverse(ubo_Model))) * normal);\n";
-		if (p_needsTbn)
-		{
-			out << "#if MATERIAL_NEEDS_TBN\n"
-				<< "    vs_out.TBN = ConstructTBN(ubo_Model, normal, geo_Tangent, geo_Bitangent);\n"
-				<< "#endif\n";
-		}
-		out << "    gl_Position = ubo_Projection * ubo_View * vec4(vs_out.FragPos, 1.0);\n"
-			<< "}\n";
-		return out.str();
-	}
-
-	/** The fragment main, copied in shape from filament's surface_main.fs:50-56: fill the
-	 * inputs with defaults, run the material's entry point, then let the shading model turn
-	 * them into a colour. Only generated for a stage that does not own its main(). */
-	std::string FragmentSkeleton()
-	{
-		std::ostringstream out;
-		out << "out vec4 FRAGMENT_COLOR;\n\n"
-			<< "void main() {\n"
-			<< "    MaterialInputs inputs;\n"
-			<< "    initMaterial(inputs);\n\n"
-			<< "    // Invoke user code\n"
-			<< "    material(inputs);\n\n"
-			<< "    FRAGMENT_COLOR = evaluateMaterial(inputs);\n"
-			<< "}\n";
-		return out.str();
-	}
-
-	/** The `lit` shading model's half of the generated fragment stage: the surface stack plus
-	 * the two entry points into it.
-	 *
-	 * filament's ShaderGenerator splices the same files in for Shading::LIT
-	 * (libs/filamat/src/shaders/ShaderGenerator.cpp:1151-1197): surface_lighting,
-	 * surface_shadowing, surface_brdf, surface_shading_model_standard, ambient occlusion,
-	 * surface_light_indirect, surface_light_directional/punctual and surface_shading_lit. Here
-	 * they are the ported Lighting/Filament/* files, #included rather than embedded so there is
-	 * exactly one copy of the reference code.
-	 *
-	 * Two entry points, because a material can be either kind of fragment stage:
-	 *  - `evaluateSurface(m, fragPos, geometricNormal, shadingNormal, clearCoatNormal, v)` is
-	 *    varying-agnostic and what a **raw** stage (one that writes its own `main()`, like the
-	 *    CAD one with its geometry-stage edge equations) calls after it filled the inputs;
-	 *  - `evaluateMaterial(m)` is the skeleton's version: it derives position, normals and the
-	 *    view vector from the generated varyings and forwards to `evaluateSurface`.
-	 *
-	 * `MaterialInputs` -> `FilamentMaterialInputs` is the debt this slice leaves: the surface
-	 * stack still takes its own struct, so the copy happens here. It goes away when the ported
-	 * files take `MaterialInputs` directly. */
-	std::string LitSurfacePrelude(bool p_skeletonStage)
-	{
-		std::ostringstream out;
-		out << "\n#line 1 \"<lit surface>\"\n"
-			<< "// The surface prelude is emitted after the material's parameters, so it can read\n"
-			<< "// them plus the injected engine globals.\n"
-			<< "#include \":Shaders/Lighting/Filament/surface_lighting.glsl\"\n\n"
-			// filament's getWorldNormalVector(): the material writes a tangent-space normal and
-			// the framework puts it in world space through the interpolated tangent frame. A
-			// mesh without usable tangents (nothing generates them for the imported models yet)
-			// would turn that into garbage, so a degenerate frame falls back to the geometric
-			// normal instead of shading with NaNs.
-			<< "vec3 tangentSpaceToWorld(mat3 tbn, vec3 tangentNormal, vec3 geometricNormal)\n"
-			<< "{\n"
-			<< "    const bool hasFrame = length(tbn[0]) > 1.0e-5 && length(tbn[1]) > 1.0e-5;\n"
-			<< "    return hasFrame ? normalize(tbn * tangentNormal) : geometricNormal;\n"
-			<< "}\n\n"
-			<< "vec4 evaluateSurface(MaterialInputs m, vec3 fragPos, vec3 geometricNormal,\n"
-			<< "    vec3 shadingNormal, vec3 clearCoatNormal, vec3 v)\n"
-			<< "{\n"
-			<< "    FilamentMaterialInputs inputs;\n"
-			<< "    inputs.baseColor = m.baseColor.rgb;\n"
-			<< "#if !defined(SHADING_MODEL_UNLIT)\n"
-			<< "    inputs.roughness = m.roughness;\n"
-			<< "    inputs.metallic = saturate(m.metallic);\n"
-			<< "    inputs.reflectance = m.reflectance;\n"
-			<< "    inputs.ambientOcclusion = saturate(m.ambientOcclusion);\n"
-			<< "#endif\n"
-			<< "#if defined(MATERIAL_HAS_CLEAR_COAT)\n"
-			<< "    inputs.clearCoat = m.clearCoat;\n"
-			<< "    inputs.clearCoatRoughness = m.clearCoatRoughness;\n"
-			<< "#else\n"
-			<< "    inputs.clearCoat = 0.0;\n"
-			<< "    inputs.clearCoatRoughness = 0.0;\n"
-			<< "#endif\n"
-			<< "#if defined(MATERIAL_HAS_THICKNESS)\n"
-			<< "    inputs.thickness = m.thickness;\n"
-			<< "#else\n"
-			<< "    inputs.thickness = 0.0;\n"
-			<< "#endif\n"
-			<< "#if defined(MATERIAL_HAS_TRANSMISSION)\n"
-			<< "    inputs.transmission = m.transmission;\n"
-			<< "#else\n"
-			<< "    inputs.transmission = 0.0;\n"
-			<< "#endif\n"
-			<< "#if defined(MATERIAL_HAS_ABSORPTION)\n"
-			<< "    inputs.absorption = m.absorption;\n"
-			<< "#else\n"
-			<< "    inputs.absorption = vec3(0.0);\n"
-			<< "#endif\n"
-			<< "#if defined(MATERIAL_HAS_IOR)\n"
-			<< "    inputs.refractionIndex = m.ior;\n"
-			<< "#else\n"
-			<< "    inputs.refractionIndex = 1.5;\n"
-			<< "#endif\n"
-			<< "#if defined(MATERIAL_HAS_SPECULAR_FACTOR)\n"
-			<< "    inputs.specularFactor = m.specularFactor;\n"
-			<< "#else\n"
-			<< "    inputs.specularFactor = 1.0;\n"
-			<< "#endif\n"
-			<< "#if defined(MATERIAL_HAS_SPECULAR_COLOR_FACTOR)\n"
-			<< "    inputs.specularColorFactor = m.specularColorFactor;\n"
-			<< "#else\n"
-			<< "    inputs.specularColorFactor = vec3(1.0);\n"
-			<< "#endif\n"
-			<< "#if defined(MATERIAL_HAS_EMISSIVE)\n"
-			<< "    inputs.emissive = m.emissive.rgb;\n"
-			<< "#else\n"
-			<< "    inputs.emissive = vec3(0.0);\n"
-			<< "#endif\n\n"
-			<< "    FilamentMaterialInputs filtered = inputs;\n"
-			<< "#if GEOMETRIC_SPECULAR_AA\n"
-			<< "    filtered.roughness = normalFiltering(inputs.roughness, geometricNormal);\n"
-			<< "    filtered.clearCoatRoughness = normalFiltering(inputs.clearCoatRoughness, geometricNormal);\n"
-			<< "#endif\n\n"
-			<< "    const PixelParams pixel = preparePixelParams(filtered, shadingNormal, v, _BRDFLut, clearCoatNormal);\n"
-			<< "    vec3 color = evaluateFilamentSurface(inputs, pixel, fragPos, shadingNormal, v,\n"
-			<< "        _IrradianceCube, _PrefilterCube, _ShadowMap, _LightSpaceMatrix, _BRDFLut);\n"
-			<< "    color += inputs.emissive;\n"
-			<< "    return vec4(color, m.baseColor.a);\n"
-			<< "}\n";
-
-		if (p_skeletonStage)
-		{
-			out << "\n"
-				<< "vec4 evaluateMaterial(inout MaterialInputs m)\n"
-				<< "{\n"
-				<< "    const vec3 v = normalize(ubo_ViewPos - fs_in.FragPos);\n"
-				<< "    const vec3 geometricNormal = normalize(fs_in.Normal);\n"
-				<< "#if defined(MATERIAL_HAS_NORMAL)\n"
-				<< "#if MATERIAL_NEEDS_TBN\n"
-				<< "    const vec3 n = tangentSpaceToWorld(fs_in.TBN, m.normal, geometricNormal);\n"
-				<< "#else\n"
-				<< "    const vec3 n = geometricNormal;\n"
-				<< "#endif\n"
-				<< "#else\n"
-				<< "    const vec3 n = geometricNormal;\n"
-				<< "#endif\n"
-				<< "#if defined(MATERIAL_HAS_CLEAR_COAT_NORMAL)\n"
-				<< "#if MATERIAL_NEEDS_TBN\n"
-				<< "    const vec3 clearCoatNormal = tangentSpaceToWorld(fs_in.TBN, m.clearCoatNormal, geometricNormal);\n"
-				<< "#else\n"
-				<< "    const vec3 clearCoatNormal = geometricNormal;\n"
-				<< "#endif\n"
-				<< "#else\n"
-				<< "    const vec3 clearCoatNormal = geometricNormal;\n"
-				<< "#endif\n"
-				<< "    return evaluateSurface(m, fs_in.FragPos, geometricNormal, n, clearCoatNormal, v);\n"
-				<< "}\n";
-		}
-		return out.str();
-	}
-
-	/** Whether a parameter type is one of the sampler types: the slot a texture goes into,
-	 * as opposed to a plain uniform. */
-	bool IsSamplerType(const std::string& p_dslType)
-	{
-		return p_dslType.starts_with("sampler")
-			|| p_dslType.starts_with("isampler")
-			|| p_dslType.starts_with("usampler");
-	}
-
-	/** The 1x1 fallback a sampler gets when the designer assigned no map. Filament binds a
-	 * default texture for an unassigned sampler as well; the kinds below are the ones the
-	 * engine ships, and the material picks one per slot with `fallback : <name>`. */
-	enum class SamplerFallback : uint8_t
-	{
-		/** sampler2D: (1,1,1,1) - the neutral multiplier for albedo / metal / roughness / AO.
-		 * samplerCube: black, which is what the engine always used. */
-		Default = 0,
-		/** (0.5, 0.5, 1.0): a normal map decodes it to the neutral tangent-space normal
-		 * (0, 0, 1), i.e. "no perturbation". The white default would decode to (1, 1, 1). */
-		FlatNormal = 1,
-	};
-
-	uint8_t SamplerFallbackKind(const std::string& p_name)
-	{
-		if (p_name == "flatNormal") { return static_cast<uint8_t>(SamplerFallback::FlatNormal); }
-		return static_cast<uint8_t>(SamplerFallback::Default);
-	}
-
-	/** One vertex attribute a generated stage declares: `layout (location = N) in T name;`.
-	 * Read back out of the stage text rather than tracked while emitting, so a raw stage that
-	 * declares its own inputs (GizmoLine's aPositionSize/aColor, the instanced ones) shows up
-	 * exactly like the generated skeleton does. filament records the same pairs in its
-	 * MaterialAttributeInfo chunk. */
-	struct VertexAttribute
-	{
-		uint32_t location = 0;
-		std::string glslType;
-		std::string name;
-	};
-
-	std::vector<VertexAttribute> CollectVertexAttributes(const std::string& p_stageText)
-	{
-		static const std::regex kAttribute(
-			R"(layout\s*\(\s*location\s*=\s*([0-9]+)\s*\)\s*in\s+([A-Za-z0-9_]+)\s+([A-Za-z0-9_]+))");
-
-		std::vector<VertexAttribute> attributes;
-		for (std::sregex_iterator it(p_stageText.begin(), p_stageText.end(), kAttribute), end; it != end; ++it)
-		{
-			VertexAttribute attribute;
-			attribute.location = static_cast<uint32_t>(std::stoul((*it)[1].str()));
-			attribute.glslType = (*it)[2].str();
-			attribute.name = (*it)[3].str();
-			const bool known = std::ranges::any_of(attributes, [&attribute](const VertexAttribute& p_existing) {
-				return p_existing.location == attribute.location;
-			});
-			if (!known)
-			{
-				attributes.push_back(std::move(attribute));
-			}
-		}
-		std::ranges::sort(attributes, {}, &VertexAttribute::location);
-		return attributes;
-	}
-
-	/** The GLSL name of a parameter type. The material files spell them the way filament's
-	 * DSL does (float4, int3, ...); GLSL calls the same things vec4, ivec3, and sampling one
-	 * a name wrong is a compile error rather than a silent default. */
-	std::string GlslType(const std::string& p_type)
-	{
-		static const std::map<std::string, std::string> kTypes = {
-			{ "bool", "bool" }, { "bool2", "bvec2" }, { "bool3", "bvec3" }, { "bool4", "bvec4" },
-			{ "int", "int" }, { "int2", "ivec2" }, { "int3", "ivec3" }, { "int4", "ivec4" },
-			{ "uint", "uint" }, { "uint2", "uvec2" }, { "uint3", "uvec3" }, { "uint4", "uvec4" },
-			{ "float", "float" }, { "float2", "vec2" }, { "float3", "vec3" }, { "float4", "vec4" },
-			{ "mat2", "mat2" }, { "mat3", "mat3" }, { "mat4", "mat4" },
-			{ "sampler2D", "sampler2D" }, { "sampler2DArray", "sampler2DArray" },
-			{ "samplerCube", "samplerCube" }, { "sampler3D", "sampler3D" },
-		};
-		const auto it = kTypes.find(p_type);
-		return it != kTypes.end() ? it->second : p_type;
-	}
-
-	/** The std140 size and base alignment of a parameter type. Samplers never reach this:
-	 * they are not allowed inside a uniform block and stay separate uniforms. */
-	struct TypeLayout
-	{
-		uint32_t size;
-		uint32_t alignment;
-	};
-
-	TypeLayout ParameterTypeLayout(const std::string& p_type)
-	{
-		static const std::map<std::string, TypeLayout> kTypes = {
-			{ "bool", { 4, 4 } }, { "bool2", { 8, 8 } }, { "bool3", { 12, 16 } }, { "bool4", { 16, 16 } },
-			{ "int", { 4, 4 } }, { "int2", { 8, 8 } }, { "int3", { 12, 16 } }, { "int4", { 16, 16 } },
-			{ "uint", { 4, 4 } }, { "uint2", { 8, 8 } }, { "uint3", { 12, 16 } }, { "uint4", { 16, 16 } },
-			{ "float", { 4, 4 } }, { "float2", { 8, 8 } }, { "float3", { 12, 16 } }, { "float4", { 16, 16 } },
-			{ "mat2", { 32, 8 } }, { "mat3", { 48, 16 } }, { "mat4", { 64, 16 } },
-		};
-		const auto it = kTypes.find(p_type);
-		return it != kTypes.end() ? it->second : TypeLayout{ 4, 4 };
-	}
-
-	uint32_t RoundUp(uint32_t p_value, uint32_t p_alignment)
-	{
-		return (p_value + p_alignment - 1) / p_alignment * p_alignment;
-	}
-
-	/** Assigns the std140 offsets of the parameter block and the texture units of the samplers.
-	 *
-	 * The block holds every non-sampler parameter in declaration order (engine-owned `ui:false`
-	 * ones included: they are still uniforms). The generated GLSL declares the same block with
-	 * `binding = 2`, so the driver's std140 layout has to agree with this computation; the
-	 * runtime validates the offsets once when it links a program (see ShaderLoader). */
-	void LayoutParameters(MaterialFile& p_material)
-	{
-		uint32_t offset = 0;
-		uint32_t samplerBinding = 0;
-
-		for (Parameter& parameter : p_material.parameters)
-		{
-			if (IsSamplerType(parameter.type))
-			{
-				parameter.binding = samplerBinding++;
-				continue;
-			}
-
-			const TypeLayout layout = ParameterTypeLayout(parameter.type);
-			const uint32_t count = parameter.count.empty()
-				? 1u : static_cast<uint32_t>(std::stoul(parameter.count));
-
-			if (count > 1)
-			{
-				// std140 arrays round the element size (and therefore the stride) up to 16.
-				offset = RoundUp(offset, 16);
-				parameter.offset = offset;
-				parameter.stride = RoundUp(layout.size, 16);
-				offset += parameter.stride * count;
-			}
-			else
-			{
-				offset = RoundUp(offset, layout.alignment);
-				parameter.offset = offset;
-				parameter.stride = layout.size;
-				offset += layout.size;
-			}
-		}
-
-		p_material.parameterBlockSize = RoundUp(offset, 16);
-	}
-
-	/** The resources the lit surface prelude reads, added to the material's parameter table.
-	 *
-	 * filament keeps these outside the material: they are frame/per-view data, declared in the
-	 * surface prelude from the engine's own interface blocks. Here the uniform machinery is the
-	 * material parameter block plus one texture unit per sampler, so the cheapest way to give a
-	 * lit material working declarations (and a runtime that uploads them by name) is to put them
-	 * in the same table, marked `ui : false` so the designer never shows them.
-	 *
-	 * Names are the ones the renderer already sets: the sky pass's IBL cubes, the DFG LUT, the
-	 * shadow pass's map and matrix. A material that declares one of them itself keeps its own
-	 * declaration - the injection only fills the gap. */
-	void InjectEngineGlobals(MaterialFile& p_material)
-	{
-		if (p_material.shadingModel == "unlit" || p_material.domain != "surface")
-		{
-			return;
-		}
-
-		struct Entry
-		{
-			const char* name;
-			const char* type;
-		};
-		static constexpr Entry kEntries[] = {
-			{ "_IrradianceCube",   "samplerCube" },
-			{ "_PrefilterCube",    "samplerCube" },
-			{ "_BRDFLut",          "sampler2D" },
-			{ "_ShadowMap",        "sampler2D" },
-			{ "_LightSpaceMatrix", "mat4" },
-		};
-
-		for (const Entry& entry : kEntries)
-		{
-			const bool declared = std::ranges::any_of(p_material.parameters,
-				[&entry](const Parameter& p_parameter) { return p_parameter.name == entry.name; });
-			if (declared)
-			{
-				continue;
-			}
-
-			Parameter parameter;
-			parameter.name = entry.name;
-			parameter.type = entry.type;
-			parameter.ui = false;
-			p_material.parameters.push_back(std::move(parameter));
-		}
-	}
-
-	/** The material's parameters, as the descriptors the entry point reads.
-	 *
-	 * The non-sampler parameters are one std140 uniform block - the engine's per-material
-	 * descriptor: a single UBO at binding point 2, which a material instance fills by offset.
-	 * Samplers cannot be block members, so they stay separate uniforms with a fixed texture unit
-	 * each (`layout(binding = N)`), the same idea applied to the sampler descriptors. Declared
-	 * for both stages - a parameter only one of them reads is dropped by the compiler.
-	 *
-	 * The declared initialisers move to the runtime: a block member cannot have one, and the
-	 * material's property defaults (parsed from the same declarations, see SHDRPROP) are what
-	 * fills the buffer. */
-	std::string ParametersPrelude(const std::vector<Parameter>& p_parameters, uint32_t p_blockSize)
-	{
-		std::ostringstream out;
-
-		if (p_blockSize > 0)
-		{
-			out << "layout(std140, binding = 2) uniform MaterialParams\n{\n";
-			for (const Parameter& parameter : p_parameters)
-			{
-				if (IsSamplerType(parameter.type))
-				{
-					continue;
-				}
-				out << "    " << GlslType(parameter.type) << " " << parameter.name;
-				if (!parameter.count.empty())
-				{
-					out << "[" << parameter.count << "]";
-				}
-				out << ";\n";
-			}
-			out << "};\n";
-		}
-
-		for (const Parameter& parameter : p_parameters)
-		{
-			if (!IsSamplerType(parameter.type))
-			{
-				continue;
-			}
-			out << "layout(binding = " << parameter.binding << ") uniform "
-				<< GlslType(parameter.type) << " " << parameter.name << ";\n";
-		}
-
-		out << "\n";
-		return out.str();
-	}
-
-	/** The `#define`s one variant is compiled with: the stage, then the pass, then the
-	 * features. The stage one is what lets Common/Utils.glsl keep its derivative helper out
-	 * of the stages that cannot call it (see ComputeTBN there). */
-	/** Vertex attributes the material declares (material { vertexAttributes : [...] }) become
-	 * layout qualifiers and HAS_ATTRIBUTE_* defines, the way filament's material builder turns
-	 * its required attributes into shader defines. The declaration order is the attribute
-	 * order of the mesh, so the same material cannot serve two different vertex layouts; that
-	 * is exactly filament's model (a material owns its vertex layout). */
-	std::string AttributeDeclarations(const MaterialFile& p_material, Stage p_stage)
-	{
-		struct Entry
-		{
-			const char* name;
-			const char* glslType;
-			const char* variable;
-		};
-		static constexpr Entry kEntries[] = {
-			{ "POSITION", "vec3", "geo_Pos" },
-			{ "UV0", "vec2", "geo_TexCoords" },
-			{ "NORMAL", "vec3", "geo_Normal" },
-			{ "TANGENT", "vec3", "geo_Tangent" },
-			{ "BITANGENT", "vec3", "geo_Bitangent" },
-			{ "DOMAIN_ID", "vec2", "geo_DomainId" },
-		};
-
-		std::ostringstream out;
-		uint32_t location = 0;
-		for (const std::string& name : p_material.vertexAttributes)
-		{
-			for (const Entry& entry : kEntries)
-			{
-				if (name == entry.name)
-				{
-					if (p_stage == Stage::Vertex)
-					{
-						out << "layout(location = " << location << ") in " << entry.glslType
-							<< " " << entry.variable << ";\n";
-					}
-					out << "#define HAS_ATTRIBUTE_" << entry.name << "\n";
-					++location;
-					break;
-				}
-			}
-		}
-		return out.str();
-	}
-
-	std::string VariantDefines(const PassVariant& p_variant, Stage p_stage, const std::string& p_stageText = {})
-	{
-		std::ostringstream out;
-		out << (p_stage == Stage::Vertex ? "#define MOON_STAGE_VERTEX\n"
-			: p_stage == Stage::Fragment ? "#define MOON_STAGE_FRAGMENT\n"
-			: "#define MOON_STAGE_GEOMETRY\n");
-		if (!p_variant.pass.empty())
-		{
-			out << "#define " << p_variant.pass << "\n";
-		}
-		for (const std::string& feature : p_variant.features)
-		{
-			// A define the stage never mentions cannot change its code. Dropping it lets
-			// variants that differ only in unused bits share one compiled stage text, which
-			// is what keeps 128 keyed variants down to the handful with different code.
-			if (!p_stageText.empty() && p_stageText.find(feature) == std::string::npos)
-			{
-				continue;
-			}
-			out << "#define " << feature << "\n";
-		}
-		return out.str();
-	}
-
-	/** Where the per-variant #defines go in a stage's shared text.
-	 *
-	 * Every variant of a material compiles the same stage text except for the `#define` lines
-	 * at the top, so the package stores that text once per stage and the runtime splices the
-	 * defines in - filament's DictionaryChunk idea. Without it `Standard` is 192 copies of the
-	 * same 64 KB and the archive is 20 MB instead of two. */
-	constexpr char kDefinesPlaceholder[] = "//@MOON_VARIANT_DEFINES@";
-
-	/** One complete stage source: version, defines, prelude, the entry point, main.
-	 *
-	 * The #line directives point back into the .shader the user wrote, so a compile error names
-	 * the file and the line it came from rather than a line of this concatenation - the same
-	 * job filament's Includes.cpp does for #include.
-	 *
-	 * A stage that defines `void main()` of its own is taken as it is: it keeps the prelude and
-	 * its parameters, and nothing else is generated - no attribute declarations, no varyings,
-	 * no output, no main. That is the escape hatch for the shaders whose stage is not "adjust
-	 * the attributes, then the fixed transform": a billboard that rebuilds the model-view
-	 * matrix, a skybox that sets w = z, a picking pass with a second colour attachment. A
-	 * geometry stage is always like this - there is no skeleton for it at all.
-	 *
-	 * With p_shared the defines are replaced by kDefinesPlaceholder: that is the one copy of
-	 * this stage the package keeps, and every variant contributes just its define lines. */
-	std::string BuildStage(
-		Stage p_stage,
-		const MaterialFile& p_material,
-		const PassVariant& p_variant,
-		const std::string& p_prelude,
-		const std::string& p_fileName,
-		const std::vector<std::string>& p_includeDirs,
-		const IncludeResolver& p_includeResolver,
-		std::string& p_error,
-		bool p_shared = false)
-	{
-		const std::string& body = p_stage == Stage::Vertex ? p_material.vertexBody
-			: p_stage == Stage::Fragment ? p_material.fragmentBody
-			: p_material.geometryBody;
-		const uint32_t entryLine = p_stage == Stage::Vertex ? p_material.vertexEntryLine
-			: p_stage == Stage::Fragment ? p_material.fragmentEntryLine
-			: p_material.geometryEntryLine;
-		const bool rawStage = p_stage == Stage::Geometry || DefinesMain(body);
-		const bool needsTbn = NeedsTangentFrame(p_material.writtenFields);
-
-		std::ostringstream out;
-		out << "#version 450 core\n"
-			// The #line directives below carry a file name, which is an extension (filament
-			// enables it the same way, see its CodeGenerator.cpp). Without it glslang rejects
-			// the directive outright, so the build-time validation could not read what we
-			// generate; drivers accept the form either way.
-			<< "#extension GL_GOOGLE_cpp_style_line_directive : enable\n"
-			<< "// generated by MoonMatc from " << p_fileName << ", stage " << StageName(p_stage) << '\n';
-		if (p_shared)
-		{
-			out << kDefinesPlaceholder << '\n';
-		}
-		else
-		{
-			out << "// pass '" << p_variant.pass << "', " << p_variant.features.size()
-				<< " feature(s)\n"
-				<< VariantDefines(p_variant, p_stage);
-		}
-		out << p_prelude;
-		if (!rawStage)
-		{
-			out << VaryingsPrelude(p_stage == Stage::Vertex, p_material.domain, needsTbn);
-		}
-		out << AttributeDeclarations(p_material, p_stage);
-		out << ParametersPrelude(p_material.parameters, p_material.parameterBlockSize);
-
-		// A lit surface's fragment stage carries the shading model's code. Where it goes matters:
-		//
-		//  - a skeleton stage gets the whole prelude (surface stack + `evaluateMaterial`) here,
-		//    before its `material()` block. Nothing in a material block may change what the
-		//    prelude compiles to - `#define`s there are the material's own business;
-		//  - a raw stage *is* `main()`, so it needs `evaluateSurface` declared before it. But the
-		//    material block may start with `#define VARIANT_HAS_DIRECTIONAL_LIGHTING` (the CAD
-		//    material did exactly that), and the surface stack tests those with `#if` at include
-		//    time. Emitting the stack before the body therefore compiled both light cases out and
-		//    the surface came out black. So for a raw stage: a prototype before the body, the
-		//    prelude itself after it.
-		const bool litSurface = p_stage == Stage::Fragment
-			&& p_material.shadingModel != "unlit" && p_material.domain == "surface";
-		if (litSurface)
-		{
-			if (rawStage)
-			{
-				out << "\n#line 1 \"<lit surface>\"\n"
-					<< "vec4 evaluateSurface(MaterialInputs m, vec3 fragPos, vec3 geometricNormal,\n"
-					<< "    vec3 shadingNormal, vec3 clearCoatNormal, vec3 v);\n";
-			}
-			else
-			{
-				out << LitSurfacePrelude(true);
-			}
-		}
-
-		out << "\n#line " << entryLine << " \"" << p_fileName << "\"\n"
-			<< body
-			<< "\n#line 1 \"<generated>\"\n";
-		if (litSurface && rawStage)
-		{
-			out << LitSurfacePrelude(false);
-		}
-		if (!rawStage)
-		{
-			if (p_stage == Stage::Vertex)
-			{
-				out << VertexSkeleton(!p_material.vertexBody.empty(), p_material.domain, needsTbn);
-			}
-			else
-			{
-				out << FragmentSkeleton();
-			}
-		}
-
-		// The material's own #includes are expanded here, into the stage that is about to be
-		// compiled - there is no runtime pass left to do it once it is a package.
-		std::set<std::string> visited;
-		std::string expanded;
-		if (!ExpandIncludes(out.str(), p_includeDirs, p_includeResolver, p_fileName, visited, expanded, p_error))
-		{
-			return {};
-		}
-		return expanded;
-	}
-
-	// ---------------------------------------------------------------------------------
-	// The package: 8 byte tags, like filabridge/include/filament/MaterialChunkType.h
-	// ---------------------------------------------------------------------------------
-
-	constexpr char kMagic[8] = { 'M', 'O', 'O', 'N', 'S', 'D', 'R', '1' };
-
-	void AppendChunk(std::string& p_out, const char* p_tag, const std::string& p_payload)
-	{
-		p_out.append(p_tag, 8);
-		const uint32_t size = static_cast<uint32_t>(p_payload.size());
-		p_out.append(reinterpret_cast<const char*>(&size), sizeof(size));
-		p_out.append(p_payload);
-	}
 
 	uint64_t HashOf(const std::string& p_text)
 	{
@@ -1794,6 +108,21 @@ namespace
 			hash *= 1099511628211ull;
 		}
 		return hash;
+	}
+
+	/** The CRC32 Filament appends as its last chunk. */
+	uint32_t Crc32(const uint8_t* p_data, size_t p_size)
+	{
+		uint32_t crc = 0xFFFFFFFFu;
+		for (size_t i = 0; i < p_size; ++i)
+		{
+			crc ^= p_data[i];
+			for (int bit = 0; bit < 8; ++bit)
+			{
+				crc = (crc >> 1) ^ (0xEDB88320u & (0u - (crc & 1u)));
+			}
+		}
+		return ~crc;
 	}
 } // anonymous namespace
 
@@ -1889,19 +218,29 @@ namespace
 
 	MaterialFile material;
 	std::string error;
-	if (!ParseMaterialFile(text, material, error))
+	MaterialParser parser;
+	if (!parser.Parse(text, material, error))
 	{
-		// Not a material file yet (the shaders are migrated one at a time): copy it through
-		// byte for byte, which is exactly what the pipeline did before MoonMatc existed.
-		result.passthrough = true;
-		result.package = text;
-		result.success = true;
-		if (!outputPath.empty() && !WriteFile(outputPath, text))
+		// A file with no material block is not a material yet (the shaders are migrated one at
+		// a time): copy it through byte for byte, which is exactly what the pipeline did before
+		// MoonMatc existed. A material block that failed to parse is a real error and must not
+		// be passed through as if the file were a legacy shader.
+		if (error == "no material { } block")
 		{
-			result.success = false;
-			result.error = "cannot write " + outputPath;
+			result.passthrough = true;
+			result.package = text;
+			result.success = true;
+			if (!outputPath.empty() && !WriteFile(outputPath, text))
+			{
+				result.success = false;
+				result.error = "cannot write " + outputPath;
+				return result;
+			}
 			return result;
 		}
+
+		result.success = false;
+		result.error = error;
 		return result;
 	}
 
@@ -1917,123 +256,15 @@ namespace
 		WriteVariantDump(material, p_options.dumpVariantsPath);
 	}
 
-	// Variants. A material with a variantFilter (the Filament model) enumerates the engine
-	// variant keys instead of feature combinations; each entry's #define set is VARIANT_* (plus
-	// the material's fixed features). A material without one keeps the feature power set, so
-	// the materials that still rely on per-instance features are unchanged while the keyed path
-	// is brought up.
-	std::vector<PassVariant> variants;
-	std::vector<std::string> passes;
-	passes.emplace_back();
-	for (const std::string& pass : material.passes) { passes.push_back(pass); }
-
-	const auto variantDefine = [](const std::string& p_name) {
-		return p_name == "DEPTH" ? std::string("VARIANT_DEPTH") : ("VARIANT_HAS_" + p_name);
-	};
-
-	const auto appendVariants = [&](const std::vector<std::string>& p_baseFeatures) {
-		std::vector<std::string> variantDefines;
-		for (const std::string& name : material.variantFilter)
-		{
-			variantDefines.push_back(variantDefine(name));
-		}
-
-		for (const std::string& pass : passes)
-		{
-			if (variantDefines.empty())
-			{
-				PassVariant variant;
-				variant.pass = pass;
-				for (const std::string& feature : p_baseFeatures) { variant.features.insert(feature); }
-				variants.push_back(std::move(variant));
-				continue;
-			}
-
-			for (size_t mask = 0; mask < (size_t{ 1 } << variantDefines.size()); ++mask)
-			{
-				PassVariant variant;
-				variant.pass = pass;
-				for (const std::string& feature : p_baseFeatures) { variant.features.insert(feature); }
-				for (size_t bit = 0; bit < variantDefines.size(); ++bit)
-				{
-					if (mask & (size_t{ 1 } << bit)) { variant.features.insert(variantDefines[bit]); }
-				}
-				variants.push_back(std::move(variant));
-			}
-		}
-	};
-
-	if (!p_options.enabledFeatures.empty())
-	{
-		// The designer chose a feature set: compile exactly that set, plus the engine variants
-		// when the material enumerates them.
-		appendVariants(p_options.enabledFeatures);
-	}
-	else if (!material.variantFilter.empty())
-	{
-		// The archive build: the material's fixed default features plus the engine variants.
-		// A material with optional features declares defaultFeatures (possibly empty).
-		appendVariants(material.hasDefaultFeatures ? material.defaultFeatures : std::vector<std::string>{});
-	}
-	else
-	{
-		const size_t featureCount = material.features.size();
-		for (const std::string& pass : passes)
-		{
-			for (size_t mask = 0; mask < (size_t{ 1 } << featureCount); ++mask)
-			{
-				PassVariant variant;
-				variant.pass = pass;
-				for (size_t bit = 0; bit < featureCount; ++bit)
-				{
-					if (mask & (size_t{ 1 } << bit)) { variant.features.insert(material.features[bit]); }
-				}
-				variants.push_back(std::move(variant));
-			}
-		}
-	}
+	std::vector<PassVariant> variants = EnumerateVariants(material, p_options);
 
 	const std::filesystem::path fileName = std::filesystem::path(inputPath).filename();
 	const std::string nameForLines = fileName.string();
 
-	// Prelude: the buffer and utility headers the engine already has, then the generated
-	// MaterialInputs. Everything the shader used to #include by hand.
-	std::string commonPrelude;
-	for (const std::string& relative : { "Common/Buffers/EngineUBO.glsl", "Common/Utils.glsl" })
-	{
-		std::string content;
-		bool found = false;
-		if (includeResolver)
-		{
-			std::string origin;
-			found = includeResolver(relative, content, origin);
-		}
-		if (!found)
-		{
-			for (const std::string& dir : includeDirs)
-			{
-				const std::string candidate = (std::filesystem::path(dir) / relative).string();
-				content = ReadFile(candidate, found);
-				if (found)
-				{
-					break;
-				}
-			}
-		}
-		if (found)
-		{
-			commonPrelude += "\n#line 1 \"" + relative + "\"\n" + content + "\n";
-		}
-	}
-	// Which MaterialInputs fields the material's own fragment code writes. This is the input of
-	// the MATERIAL_HAS_* defines, and it has to be known before the prelude is built because the
-	// struct and its defaults are guarded by them (surface_material_inputs.fs does the same).
-	// Kept on the material as well: the generated stages ask whether they need a tangent frame.
-	material.writtenFields = WrittenInputFields(material.fragmentBody);
-	const std::set<std::string>& writtenInputFields = material.writtenFields;
-
-	commonPrelude += "\n#line 1 \"<material inputs>\"\n"
-		+ MaterialInputsPrelude(material.shadingModel, writtenInputFields, material);
+	// Which MaterialInputs fields the material's own fragment code writes. The generator
+	// turns that into the MATERIAL_HAS_* defines and the MaterialInputs struct.
+	material.writtenFields = ShaderGenerator::WrittenInputFields(material.fragmentBody);
+	ShaderGenerator generator(material, material.writtenFields, nameForLines, includeDirs, includeResolver);
 
 	// The shared stage texts, one per stage the material has, with the variant defines left as
 	// a placeholder. Everything else in a stage is the same for every variant, so this is the
@@ -2043,24 +274,20 @@ namespace
 		const PassVariant none;
 		for (const Stage stage : { Stage::Vertex, Stage::Fragment })
 		{
-			std::string text = BuildStage(
-				stage, material, none, commonPrelude, nameForLines, includeDirs,
-				includeResolver, error, true);
+			std::string text = generator.Build(stage, none, true);
 			if (text.empty())
 			{
-				result.error = error;
+				result.error = generator.Error();
 				return result;
 			}
 			sharedStages[StageName(stage)] = std::move(text);
 		}
 		if (!material.geometryBody.empty())
 		{
-			std::string text = BuildStage(
-				Stage::Geometry, material, none, commonPrelude, nameForLines, includeDirs,
-				includeResolver, error, true);
+			std::string text = generator.Build(Stage::Geometry, none, true);
 			if (text.empty())
 			{
-				result.error = error;
+				result.error = generator.Error();
 				return result;
 			}
 			sharedStages[StageName(Stage::Geometry)] = std::move(text);
@@ -2080,8 +307,8 @@ namespace
 		}
 		const std::string prefix = variant.pass + "/" + featureKey + "/";
 
-		blobs[prefix + "vertex"] = VariantDefines(variant, Stage::Vertex, sharedStages.at("vertex"));
-		blobs[prefix + "fragment"] = VariantDefines(variant, Stage::Fragment, sharedStages.at("fragment"));
+		blobs[prefix + "vertex"] = generator.VariantDefines(variant, Stage::Vertex, sharedStages.at("vertex"));
+		blobs[prefix + "fragment"] = generator.VariantDefines(variant, Stage::Fragment, sharedStages.at("fragment"));
 		blobOrder.push_back(prefix + "vertex");
 		blobOrder.push_back(prefix + "fragment");
 
@@ -2090,9 +317,9 @@ namespace
 		// It is also left out for the variants whose guard feature is off: the shaders that
 		// use one open it with `#if defined(WITH_EDGE)`, and the old pipeline skipped the
 		// stage there rather than running a pass-through.
-		if (!material.geometryBody.empty() && WantsGeometryStage(material.geometryBody, variant))
+		if (!material.geometryBody.empty() && generator.WantsGeometryStage(variant))
 		{
-			blobs[prefix + "geometry"] = VariantDefines(variant, Stage::Geometry, sharedStages.at("geometry"));
+			blobs[prefix + "geometry"] = generator.VariantDefines(variant, Stage::Geometry, sharedStages.at("geometry"));
 			blobOrder.push_back(prefix + "geometry");
 		}
 	}
@@ -2101,112 +328,9 @@ namespace
 	// read, in the shape a panel (or a material editor) can read straight away. This is the
 	// whole point of doing it offline: no glGetActiveUniform at run time, and the defaults the
 	// material file declared come along with it.
-	const std::vector<VertexAttribute> attributes = CollectVertexAttributes(sharedStages.at("vertex"));
+	const std::vector<VertexAttribute> attributes = ShaderGenerator::CollectVertexAttributes(sharedStages.at("vertex"));
 
-	std::ostringstream json;
-	json << "{\n  \"name\": \"" << material.name << "\",\n"
-		<< "  \"shadingModel\": \"" << material.shadingModel << "\",\n"
-		<< "  \"domain\": \"" << material.domain << "\",\n"
-		<< "  \"source\": \"" << nameForLines << "\",\n"
-		// The material-level defines, i.e. the MATERIAL_HAS_* set the code below produced.
-		// Same information the generated GLSL carries, for the editor and for A/B work.
-		<< "  \"defines\": [";
-	{
-		size_t d = 0;
-		const auto emitDefine = [&json, &d](const std::string& p_name, int p_value) {
-			json << (d++ == 0 ? "\n" : ",\n")
-				<< "    { \"name\": \"" << p_name << "\", \"value\": " << p_value << " }";
-		};
-		for (const InputField& field : kInputFields)
-		{
-			if (writtenInputFields.contains(field.name))
-			{
-				emitDefine(std::string("MATERIAL_HAS_") + field.define, 1);
-			}
-		}
-		const bool lit = (material.shadingModel != "unlit");
-		const bool needsTbn = NeedsTangentFrame(writtenInputFields);
-		emitDefine("MATERIAL_NEEDS_TBN", needsTbn ? 1 : 0);
-		emitDefine("GEOMETRIC_SPECULAR_AA", (material.specularAntiAliasing && lit) ? 1 : 0);
-		emitDefine("CLEAR_COAT_IOR_CHANGE", material.clearCoatIorChange ? 1 : 0);
-		json << "\n  ],\n";
-	}
-	json << "  \"variants\": [\n";
-	for (size_t i = 0; i < variants.size(); ++i)
-	{
-		json << "    { \"pass\": \"" << variants[i].pass << "\", \"features\": [";
-		size_t f = 0;
-		for (const std::string& feature : variants[i].features)
-		{
-			json << (f++ == 0 ? "\"" : ", \"") << feature << "\"";
-		}
-		json << "] }" << (i + 1 < variants.size() ? "," : "") << "\n";
-	}
-	json << "  ],\n  \"parameters\": [\n";
-	for (size_t i = 0; i < material.parameters.size(); ++i)
-	{
-		const Parameter& parameter = material.parameters[i];
-		json << "    { \"name\": \"" << parameter.name
-			<< "\", \"type\": \"" << parameter.type
-			<< "\", \"glslType\": \"" << GlslType(parameter.type) << "\""
-			<< ", \"sampler\": " << (IsSamplerType(parameter.type) ? "true" : "false");
-		if (!parameter.count.empty())
-		{
-			json << ", \"count\": " << parameter.count;
-		}
-		if (!parameter.defaultValue.empty())
-		{
-			json << ", \"default\": \"" << parameter.defaultValue << "\"";
-		}
-		if (!parameter.label.empty())
-		{
-			json << ", \"label\": \"" << JsonEscape(parameter.label) << "\"";
-		}
-		if (!parameter.group.empty())
-		{
-			json << ", \"group\": \"" << JsonEscape(parameter.group) << "\"";
-		}
-		if (parameter.hasRange)
-		{
-			json << ", \"min\": " << parameter.min << ", \"max\": " << parameter.max;
-		}
-		if (parameter.hasStep)
-		{
-			json << ", \"step\": " << parameter.step;
-		}
-		if (parameter.color)
-		{
-			json << ", \"color\": true";
-		}
-		if (!parameter.ui)
-		{
-			json << ", \"ui\": false";
-		}
-		if (IsSamplerType(parameter.type))
-		{
-			json << ", \"binding\": " << parameter.binding;
-			if (!parameter.fallback.empty())
-			{
-				json << ", \"fallback\": \"" << JsonEscape(parameter.fallback) << "\"";
-			}
-		}
-		else
-		{
-			json << ", \"offset\": " << parameter.offset << ", \"stride\": " << parameter.stride;
-		}
-		json << " }" << (i + 1 < material.parameters.size() ? "," : "") << "\n";
-	}
-	json << "  ],\n  \"parameterBlockSize\": " << material.parameterBlockSize << ",\n  \"attributes\": [\n";
-	for (size_t i = 0; i < attributes.size(); ++i)
-	{
-		json << "    { \"location\": " << attributes[i].location
-			<< ", \"name\": \"" << attributes[i].name
-			<< "\", \"glslType\": \"" << attributes[i].glslType << "\" }"
-			<< (i + 1 < attributes.size() ? "," : "") << "\n";
-	}
-	json << "  ]\n}\n";
-
-	result.json = json.str();
+	result.json = BuildMaterialJson(material, variants, attributes, material.writtenFields, nameForLines);
 	if (!dumpJsonPath.empty() && !WriteFile(dumpJsonPath, result.json))
 	{
 		result.error = "cannot write " + dumpJsonPath;
@@ -2253,244 +377,69 @@ namespace
 		return result;
 	}
 
-	// The package itself.
-	std::string package;
-	package.append(kMagic, sizeof(kMagic));
+	// The package itself: a chunk tree. CompileSource only decides which chunks to push; each
+	// chunk class in MaterialChunks.h owns its payload's field order.
+	std::vector<uint8_t> package;
+	Flattener flattener(package);
+	ChunkContainer container;
 
-	// SHDRSTAG: the shared stage texts (one per stage), each with kDefinesPlaceholder where the
-	// variant's #define lines belong. This is what keeps a 192-variant material from carrying
-	// 192 copies of the same source.
+	container.Push<SimpleFieldChunk<uint32_t>>(Moon::Material::ChunkType::MaterialVersion, 3);
+	container.Push<SimpleFieldChunk<std::string>>(Moon::Material::ChunkType::MaterialName, material.name);
+	container.Push<SimpleFieldChunk<uint64_t>>(Moon::Material::ChunkType::MaterialCacheId, HashOf(text));
+
+	// DIC_TEXT / MON_STAG: the line table and the shared stage texts encoded against it. Each
+	// stage keeps kDefinesPlaceholder where the variant's #define lines belong, so a 192-variant
+	// material does not carry 192 copies of the same source; the table then collapses the lines
+	// every stage shares (the prelude). Decoding is exact: a stage is the join of its lines.
+	LineDictionary dictionary;
+	std::vector<std::pair<std::string, std::vector<uint32_t>>> stageLines;
+	for (const auto& [stage, stageText] : sharedStages)
 	{
-		std::string payload;
-		const uint32_t count = static_cast<uint32_t>(sharedStages.size());
-		payload.append(reinterpret_cast<const char*>(&count), sizeof(count));
-		for (const auto& [stage, text] : sharedStages)
-		{
-			const uint32_t nameSize = static_cast<uint32_t>(stage.size());
-			const uint32_t size = static_cast<uint32_t>(text.size());
-			payload.append(reinterpret_cast<const char*>(&nameSize), sizeof(nameSize));
-			payload.append(stage);
-			payload.append(reinterpret_cast<const char*>(&size), sizeof(size));
-			payload.append(text);
-		}
-		AppendChunk(package, "SHDRSTAG", payload);
+		stageLines.emplace_back(stage, dictionary.Encode(stageText));
 	}
+	container.Push<DictionaryTextChunk>(dictionary.Lines());
+	container.Push<MaterialStageTextChunk>(std::move(stageLines));
 
-	// SHDRGLSL: the per-variant defines - a count, then (key length, key, size, bytes) per entry.
+	// MAT_GLSL: the per-variant defines - one string key and one string payload per entry.
 	{
-		std::string payload;
-		const uint32_t count = static_cast<uint32_t>(blobOrder.size());
-		payload.append(reinterpret_cast<const char*>(&count), sizeof(count));
+		std::vector<MaterialGlslChunk::Entry> entries;
+		entries.reserve(blobOrder.size());
 		for (const std::string& key : blobOrder)
 		{
-			const uint32_t keySize = static_cast<uint32_t>(key.size());
-			const std::string& source = blobs[key];
-			const uint32_t size = static_cast<uint32_t>(source.size());
-			payload.append(reinterpret_cast<const char*>(&keySize), sizeof(keySize));
-			payload.append(key);
-			payload.append(reinterpret_cast<const char*>(&size), sizeof(size));
-			payload.append(source);
+			entries.emplace_back(key, blobs.at(key));
 		}
-		AppendChunk(package, "SHDRGLSL", payload);
+		container.Push<MaterialGlslChunk>(std::move(entries));
 	}
 
-	// SHDRVARI: the variant list, so the runtime can reject a combination the build never made.
-	{
-		std::string payload;
-		const uint32_t count = static_cast<uint32_t>(variants.size());
-		payload.append(reinterpret_cast<const char*>(&count), sizeof(count));
-		for (const PassVariant& variant : variants)
-		{
-			const uint32_t passSize = static_cast<uint32_t>(variant.pass.size());
-			payload.append(reinterpret_cast<const char*>(&passSize), sizeof(passSize));
-			payload.append(variant.pass);
-			const uint32_t featureCountOut = static_cast<uint32_t>(variant.features.size());
-			payload.append(reinterpret_cast<const char*>(&featureCountOut), sizeof(featureCountOut));
-			for (const std::string& feature : variant.features)
-			{
-				const uint32_t size = static_cast<uint32_t>(feature.size());
-				payload.append(reinterpret_cast<const char*>(&size), sizeof(size));
-				payload.append(feature);
-			}
-		}
-		AppendChunk(package, "SHDRVARI", payload);
-	}
+	// MON_VARI: the variant list, so the runtime can reject a combination the build never made.
+	container.Push<MaterialVariantTableChunk>(variants);
 
-	// SHDRFEAT: the features the material declared, so the designer's toggles do not depend on
+	// MON_FEAT: the features the material declared, so the designer's toggles do not depend on
 	// which subset this package happened to compile.
-	{
-		std::string payload;
-		const uint32_t count = static_cast<uint32_t>(material.features.size());
-		payload.append(reinterpret_cast<const char*>(&count), sizeof(count));
-		for (const std::string& feature : material.features)
-		{
-			const uint32_t size = static_cast<uint32_t>(feature.size());
-			payload.append(reinterpret_cast<const char*>(&size), sizeof(size));
-			payload.append(feature);
-		}
-		AppendChunk(package, "SHDRFEAT", payload);
-	}
+	container.Push<MaterialFeatureSetChunk>(material.features);
 
-	// SHDRPARM: name/type pairs of the material parameters (the binary form of the JSON). Kept as
-	// it was for the first readers; SHDRPROP below is the full reflection.
-	{
-		std::string payload;
-		const uint32_t count = static_cast<uint32_t>(material.parameters.size());
-		payload.append(reinterpret_cast<const char*>(&count), sizeof(count));
-		for (const Parameter& parameter : material.parameters)
-		{
-			const uint32_t nameSize = static_cast<uint32_t>(parameter.name.size());
-			const uint32_t typeSize = static_cast<uint32_t>(parameter.type.size());
-			payload.append(reinterpret_cast<const char*>(&nameSize), sizeof(nameSize));
-			payload.append(parameter.name);
-			payload.append(reinterpret_cast<const char*>(&typeSize), sizeof(typeSize));
-			payload.append(parameter.type);
-		}
-		AppendChunk(package, "SHDRPARM", payload);
-	}
+	// MAT_PROP: the material's properties as a panel needs them.
+	container.Push<MaterialPropertiesChunk>(material.parameters);
 
-	// SHDRPROP: the material's properties as a panel needs them - name, the DSL type it was
-	// declared with, the GLSL type it becomes, whether it is a sampler (texture slot) or a plain
-	// uniform, its array size, the GLSL initialiser it declared, and the optional designer fields
-	// (label, group, range, step, colour, hidden).
-	//
-	// filament splits this into a UIB (uniform interface block: name, size, type, precision) and
-	// a SIB (sampler interface block: name, binding, type, format); we keep plain uniforms and
-	// bind textures by name, so there is nothing to lay out and no descriptor set to index - one
-	// list with a flag carries the same information.
-	{
-		std::string payload;
-		const uint32_t count = static_cast<uint32_t>(material.parameters.size());
-		payload.append(reinterpret_cast<const char*>(&count), sizeof(count));
-		for (const Parameter& parameter : material.parameters)
-		{
-			const std::string glslType = GlslType(parameter.type);
-			const uint32_t arrayCount = parameter.count.empty()
-				? 0u : static_cast<uint32_t>(std::stoul(parameter.count));
-			const uint8_t sampler = IsSamplerType(parameter.type) ? 1 : 0;
-			const uint32_t nameSize = static_cast<uint32_t>(parameter.name.size());
-			const uint32_t dslSize = static_cast<uint32_t>(parameter.type.size());
-			const uint32_t glslSize = static_cast<uint32_t>(glslType.size());
-			const uint32_t defaultSize = static_cast<uint32_t>(parameter.defaultValue.size());
-			const uint32_t labelSize = static_cast<uint32_t>(parameter.label.size());
-			const uint32_t groupSize = static_cast<uint32_t>(parameter.group.size());
-			const uint8_t flags =
-				(parameter.hasRange ? 0x01 : 0x00) |
-				(parameter.hasStep ? 0x02 : 0x00) |
-				(parameter.color ? 0x04 : 0x00) |
-				(parameter.ui ? 0x00 : 0x08);
+	// MAT_ATTR: the vertex attributes the material reads - location, GLSL type, name.
+	container.Push<MaterialAttributeInfoChunk>(attributes);
 
-			payload.append(reinterpret_cast<const char*>(&nameSize), sizeof(nameSize));
-			payload.append(parameter.name);
-			payload.append(reinterpret_cast<const char*>(&dslSize), sizeof(dslSize));
-			payload.append(parameter.type);
-			payload.append(reinterpret_cast<const char*>(&glslSize), sizeof(glslSize));
-			payload.append(glslType);
-			payload.append(reinterpret_cast<const char*>(&arrayCount), sizeof(arrayCount));
-			payload.append(reinterpret_cast<const char*>(&sampler), sizeof(sampler));
-			payload.append(reinterpret_cast<const char*>(&defaultSize), sizeof(defaultSize));
-			payload.append(parameter.defaultValue);
-			payload.append(reinterpret_cast<const char*>(&labelSize), sizeof(labelSize));
-			payload.append(parameter.label);
-			payload.append(reinterpret_cast<const char*>(&groupSize), sizeof(groupSize));
-			payload.append(parameter.group);
-			payload.append(reinterpret_cast<const char*>(&parameter.min), sizeof(parameter.min));
-			payload.append(reinterpret_cast<const char*>(&parameter.max), sizeof(parameter.max));
-			payload.append(reinterpret_cast<const char*>(&parameter.step), sizeof(parameter.step));
-			payload.append(reinterpret_cast<const char*>(&flags), sizeof(flags));
+	// MAT_UIB / MAT_SIB: the PerMaterial descriptor halves.
+	container.Push<MaterialUniformInterfaceBlockChunk>(BuildUniformBlock(material));
+	container.Push<MaterialSamplerInterfaceBlockChunk>(CollectSamplerBlock(material));
 
-			// The descriptor layout: std140 offset/stride for the parameter block, the texture
-			// unit for a sampler.
-			payload.append(reinterpret_cast<const char*>(&parameter.offset), sizeof(parameter.offset));
-			payload.append(reinterpret_cast<const char*>(&parameter.stride), sizeof(parameter.stride));
-			payload.append(reinterpret_cast<const char*>(&parameter.binding), sizeof(parameter.binding));
-		}
-		payload.append(reinterpret_cast<const char*>(&material.parameterBlockSize), sizeof(material.parameterBlockSize));
-		AppendChunk(package, "SHDRPROP", payload);
-	}
+	// MON_STAT: the material state (blending, culling, ...) the material block declared.
+	container.Push<MaterialStateChunk>(material.state);
 
-	// SHDRFALL: the sampler fallbacks (`fallback : flatNormal`). One entry per sampler that
-	// declares a non-default one. A separate chunk rather than another field inside SHDRPROP,
-	// so a package written before this existed still parses: the reader skips unknown chunks.
-	// Nothing is written when no sampler asked for one, which keeps every other package
-	// byte-identical to before.
-	{
-		std::vector<const Parameter*> fallbacks;
-		for (const Parameter& parameter : material.parameters)
-		{
-			if (IsSamplerType(parameter.type) && SamplerFallbackKind(parameter.fallback) != 0)
-			{
-				fallbacks.push_back(&parameter);
-			}
-		}
+	container.Flatten(flattener);
 
-		if (!fallbacks.empty())
-		{
-			std::string payload;
-			const uint32_t count = static_cast<uint32_t>(fallbacks.size());
-			payload.append(reinterpret_cast<const char*>(&count), sizeof(count));
-			for (const Parameter* parameter : fallbacks)
-			{
-				const uint32_t nameSize = static_cast<uint32_t>(parameter->name.size());
-				const uint8_t kind = SamplerFallbackKind(parameter->fallback);
-				payload.append(reinterpret_cast<const char*>(&nameSize), sizeof(nameSize));
-				payload.append(parameter->name);
-				payload.append(reinterpret_cast<const char*>(&kind), sizeof(kind));
-			}
-			AppendChunk(package, "SHDRFALL", payload);
-		}
-	}
+	// MAT_CRC: filament appends the CRC32 of everything before this chunk as the last chunk.
+	const uint32_t crc = Crc32(package.data(), package.size());
+	flattener.WriteUint64(static_cast<uint64_t>(Moon::Material::ChunkType::MaterialCrc32));
+	flattener.WriteUint32(static_cast<uint32_t>(sizeof(crc)));
+	flattener.WriteUint32(crc);
 
-	// SHDRATTR: the vertex attributes the material reads - location, GLSL type, name. Same idea
-	// as filament's MaterialAttributeInfo chunk, so a VAO can be checked against a material
-	// without compiling it.
-	{
-		std::string payload;
-		const uint32_t count = static_cast<uint32_t>(attributes.size());
-		payload.append(reinterpret_cast<const char*>(&count), sizeof(count));
-		for (const VertexAttribute& attribute : attributes)
-		{
-			const uint32_t nameSize = static_cast<uint32_t>(attribute.name.size());
-			const uint32_t typeSize = static_cast<uint32_t>(attribute.glslType.size());
-			payload.append(reinterpret_cast<const char*>(&attribute.location), sizeof(attribute.location));
-			payload.append(reinterpret_cast<const char*>(&typeSize), sizeof(typeSize));
-			payload.append(attribute.glslType);
-			payload.append(reinterpret_cast<const char*>(&nameSize), sizeof(nameSize));
-			payload.append(attribute.name);
-		}
-		AppendChunk(package, "SHDRATTR", payload);
-	}
-
-	// SHDRSTAT: the material state (blending, culling, ...) the material block declared.
-	{
-		std::string payload;
-		const uint32_t count = static_cast<uint32_t>(material.state.size());
-		payload.append(reinterpret_cast<const char*>(&count), sizeof(count));
-		for (const auto& [key, value] : material.state)
-		{
-			const uint32_t keySize = static_cast<uint32_t>(key.size());
-			const uint32_t valueSize = static_cast<uint32_t>(value.size());
-			payload.append(reinterpret_cast<const char*>(&keySize), sizeof(keySize));
-			payload.append(key);
-			payload.append(reinterpret_cast<const char*>(&valueSize), sizeof(valueSize));
-			payload.append(value);
-		}
-		AppendChunk(package, "SHDRSTAT", payload);
-	}
-
-	// SHDRNAME / SHDRUUID: what this package is, and whether it still matches its sources.
-	AppendChunk(package, "SHDRNAME", material.name);
-	{
-		const uint64_t hash = HashOf(text);
-		std::string payload(reinterpret_cast<const char*>(&hash), sizeof(hash));
-		AppendChunk(package, "SHDRUUID", payload);
-	}
-	{
-		const char version[] = "1";
-		AppendChunk(package, "SHDRVERS", version);
-	}
-
-	result.package = std::move(package);
+	result.package.assign(reinterpret_cast<const char*>(package.data()), package.size());
 	result.materialName = material.name;
 	result.variantCount = static_cast<uint32_t>(variants.size());
 	result.success = true;

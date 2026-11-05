@@ -45,8 +45,8 @@ namespace Editor::Panels
 
 		/** The material to show on the mesh. Null means "nothing to preview": the material slot
 		 * is cleared and no mesh is drawn. The view does not own the material. */
-		void SetMaterial(::Core::Resources::Material* p_material);
-		::Core::Resources::Material* GetMaterial() const;
+		void SetMaterial(::Core::Resources::MaterialAsset* p_material);
+		::Core::Resources::MaterialAsset* GetMaterial() const;
 
 		/** Swaps the mesh the material is shown on, keeping the material and the camera. */
 		void SetPreviewMesh(EPreviewMesh p_mesh);
@@ -90,7 +90,7 @@ namespace Editor::Panels
 		::Core::ECS::Actor* m_rimLightRight = nullptr;
 		::Core::ECS::Actor* m_rimLightLeft = nullptr;
 		::Core::ECS::Actor* m_headLight = nullptr;
-		::Core::Resources::Material* m_material = nullptr;
+		::Core::Resources::MaterialAsset* m_material = nullptr;
 		/** The instance the preview draws with. An instance, not the asset: the CAD mesh needs a
 		 * domain colour table on the material, and that must not be written into the asset the
 		 * resource browser and the shapes share. */

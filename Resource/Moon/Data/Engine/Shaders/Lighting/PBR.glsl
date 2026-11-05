@@ -145,7 +145,6 @@ vec3 PBRLighting(
 
         switch (light.type)
         {
-#if defined(VARIANT_HAS_DYNAMIC_LIGHTING)
             case 0: // Point Light
             {
                 const PointLight pointLight = ExtractPointLight(light);
@@ -153,16 +152,14 @@ vec3 PBRLighting(
                 Lo += CalculateBRDF(contrib, V, N, diffuseColor, f0, energyCompensation, perceptualRoughness);
                 break;
             }
-#endif
 
-#if defined(VARIANT_HAS_DIRECTIONAL_LIGHTING)
             case 1: // Directional Light
             {
                 const DirectionalLight dirLight = ExtractDirectionalLight(light);
 #if defined(VARIANT_HAS_SHADOWING)
                 const LightContribution contrib = CalculateDirectionalLightContribution(GateShadowOnReceiver(dirLight), fragPos, N, shadowMap, lightSpaceMatrix);
 #else
-                // The variant has no shadow lookup: make sure the light cannot trigger one.
+                // No shadow variant: make sure the light cannot trigger a lookup.
                 DirectionalLight unshadowed = dirLight;
                 unshadowed.hasShadow = false;
                 const LightContribution contrib = CalculateDirectionalLightContribution(unshadowed, fragPos, N, shadowMap, lightSpaceMatrix);
@@ -170,9 +167,7 @@ vec3 PBRLighting(
                 Lo += CalculateBRDF(contrib, V, N, diffuseColor, f0, energyCompensation, perceptualRoughness);
                 break;
             }
-#endif
 
-#if defined(VARIANT_HAS_DYNAMIC_LIGHTING)
             case 2: // Spot Light
             {
                 const SpotLight spotLight = ExtractSpotLight(light);
@@ -180,7 +175,6 @@ vec3 PBRLighting(
                 Lo += CalculateBRDF(contrib, V, N, diffuseColor, f0, energyCompensation, perceptualRoughness);
                 break;
             }
-#endif
 
             case 3: // Ambient Box Light
             {

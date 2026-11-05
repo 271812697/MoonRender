@@ -107,7 +107,7 @@ void Core::Rendering::SkyboxRenderPass::Draw(::Rendering::Data::PipelineState p_
 		// Draw skybox
 		::Rendering::Entities::Drawable skyboxDrawable;
 		skyboxDrawable.mesh = m_renderer.m_unitCube;
-		skyboxDrawable.material = m_skyboxMaterial;
+		skyboxDrawable.material = m_skyboxMaterial.DefaultInstance();
 		skyboxDrawable.stateMask.depthWriting = false;
 		skyboxDrawable.stateMask.colorWriting = true;
 		skyboxDrawable.stateMask.blendable = false;
@@ -413,7 +413,7 @@ void Core::Rendering::SkyboxRenderPass::computeSkyTexture()
 				// Draw skybox
 				::Rendering::Entities::Drawable skyboxDrawable;
 				skyboxDrawable.mesh = m_renderer.m_unitCube;
-				skyboxDrawable.material = m_skyboxMaterial;
+				skyboxDrawable.material = m_skyboxMaterial.DefaultInstance();
 				auto stateMask = m_skyboxMaterial.GenerateStateMask();
 				skyboxDrawable.stateMask = stateMask;
 				skyboxDrawable.material.value().SetProperty("u_SkyBoxTexture", skyTexture);
@@ -446,7 +446,7 @@ void Core::Rendering::SkyboxRenderPass::computeSkyTexture()
 				// Draw skybox
 				::Rendering::Entities::Drawable skyboxDrawable;
 				skyboxDrawable.mesh = m_renderer.m_unitCube;
-				skyboxDrawable.material = m_skyboxIrrandianceMaterial;
+				skyboxDrawable.material = m_skyboxIrrandianceMaterial.DefaultInstance();
 				auto stateMask = m_skyboxIrrandianceMaterial.GenerateStateMask();
 				skyboxDrawable.stateMask = stateMask;
 				skyboxDrawable.material.value().SetProperty("SkyboxCube", skyBoxCube.get());
@@ -540,7 +540,7 @@ void Core::Rendering::SkyboxRenderPass::computeSkyTexture()
 					// Draw skybox
 					::Rendering::Entities::Drawable skyboxDrawable;
 					skyboxDrawable.mesh = m_renderer.m_unitCube;
-					skyboxDrawable.material = m_skyboxPrefilterMaterial;
+					skyboxDrawable.material = m_skyboxPrefilterMaterial.DefaultInstance();
 					auto stateMask = m_skyboxPrefilterMaterial.GenerateStateMask();
 					skyboxDrawable.stateMask = stateMask;
 					skyboxDrawable.material.value().SetProperty("SkyboxCube", skyBoxCube.get());
@@ -569,7 +569,7 @@ void Core::Rendering::SkyboxRenderPass::computeSkyTexture()
 
 			::Rendering::Entities::Drawable blit;
 			blit.mesh = m_renderer.m_unitQuad;
-			blit.material = m_brdfMaterial;
+			blit.material = m_brdfMaterial.DefaultInstance();
 			blit.stateMask.depthWriting = false;
 			blit.stateMask.colorWriting = true;
 			blit.stateMask.blendable = false;

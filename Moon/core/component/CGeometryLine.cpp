@@ -126,14 +126,14 @@ namespace Core::ECS::Components
         owner.GetComponent<Core::ECS::Components::CModelRenderer>()->SetModel(lineModel);
         auto& lineRener = *owner.GetComponent<Core::ECS::Components::CMaterialRenderer>();
 
-        auto lineMat = new Core::Resources::Material();
+        auto lineMat = new Core::Resources::MaterialAsset();
         Core::Global::ServiceLocator::Get<Core::ResourceManagement::MaterialManager>().RegisterResource(owner.GetName() + std::string("_lineMat"), lineMat);
         lineMat->SetShader(Core::Global::ServiceLocator::Get<Editor::Core::Context>().shaderManager[":Shaders\\Line.shader"]);
         lineMat->SetBackfaceCulling(false);
         lineMat->SetCastShadows(false);
         lineMat->SetReceiveShadows(false);
         lineMat->SetLineWidth(2.0);
-        lineRener.SetMaterialAtIndex(0, *lineMat);
+        lineRener.SetMaterialAtIndex(0, lineMat->DefaultInstance());
         lineRener.UpdateMaterialList();
 	}
 }

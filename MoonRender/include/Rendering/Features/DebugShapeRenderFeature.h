@@ -1,5 +1,7 @@
-﻿#pragma once
+#pragma once
 #include "Rendering/Features/ARenderFeature.h"
+
+namespace Rendering::Data { class Material; }
 
 namespace Rendering::Features
 {
@@ -104,7 +106,7 @@ namespace Rendering::Features
 		virtual void OnBeginFrame(const Data::FrameDescriptor& p_frameDescriptor) override;
 
 	private:
-		Rendering::Resources::Shader* m_lineShader = nullptr;
+		Rendering::Data::Material* m_lineShader = nullptr;
 
 		std::unique_ptr<Rendering::Resources::Mesh> m_lineMesh;
 		std::unique_ptr<Rendering::Data::Material> m_lineMaterial;

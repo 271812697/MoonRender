@@ -4,8 +4,12 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Two targets: the library the editor links (it compiles a material the user is editing, and
 # hands the package bytes straight to the runtime), and the command line tool the build drives
-# once per .shader.
-add_library(MoonMatcLib STATIC ${CMAKE_CURRENT_SOURCE_DIR}/src/Matc.cpp)
+# once per .shader. The library is a glob so that splitting Matc.cpp into its modules
+# (MaterialParser / ParametersProcessor / ShaderGenerator / ... - see docs/MaterialPipeline.md)
+# does not need a CMake edit per file; main.cpp is the tool's, not the library's.
+file(GLOB_RECURSE MOONMATC_LIB_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp)
+list(REMOVE_ITEM MOONMATC_LIB_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp)
+add_library(MoonMatcLib STATIC ${MOONMATC_LIB_SOURCES})
 target_include_directories(MoonMatcLib PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/src
   ${CMAKE_SOURCE_DIR}/MoonRender/include

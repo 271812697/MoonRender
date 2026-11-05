@@ -3,6 +3,8 @@
 #include "Interactive/MathUtil/MathUtil.h"
 #include "renderer/SceneView.h"
 #include <Rendering/Overlay/Im2DRender.h>
+#include <Rendering/Overlay/Im2D.h>
+#include <Rendering/Overlay/Im2DFont.h>
 #include <Core/Rendering/EngineBufferRenderFeature.h>
 #include "Interactive/Interactive/ExecuteCommand.h"
 #include "Interactive/Interactive/RenderWindowInteractor.h"

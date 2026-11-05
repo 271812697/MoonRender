@@ -161,7 +161,7 @@ namespace MOON {
 			auto&parent=scene->CreateActor();
 			GetViewerWidget.addActorToTreeView(&parent);
 			if (domains.size() > 0) {
-				auto tempMat = new Core::Resources::Material();
+				auto tempMat = new Core::Resources::MaterialAsset();
 
 
 				tempMat->SetShader(GetShaderService[":Shaders\\Standard.shader"]);
@@ -220,7 +220,7 @@ namespace MOON {
 					modelRender.GetModel()->computeBoxAndShpere();
 
 					auto& matRender = actor.AddComponent<::Core::ECS::Components::CMaterialRenderer>();
-					matRender.SetMaterialAtIndex(0, *tempMat);
+					matRender.SetMaterialAtIndex(0, tempMat->DefaultInstance());
 					matRender.UpdateMaterialList();
 					GetViewerWidget.addActorToTreeView(&actor);
 

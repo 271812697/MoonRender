@@ -14,6 +14,8 @@
 #include "editor/Toolbar/sketchToolbar.h"
 #include "renderer/SceneView.h"
 #include <Rendering/Overlay/Im2DRender.h>
+#include <Rendering/Overlay/Im2D.h>
+#include <Rendering/Overlay/Im2DFont.h>
 #include <ThirdParty/imgui/imgui/imgui.h>
 
 #include <QDialog>

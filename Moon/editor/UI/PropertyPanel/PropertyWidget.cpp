@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include "PropertyWidget.h"
 #include "core/ECS/Actor.h"
 #include "core/ECS/Components/CMaterialRenderer.h"
@@ -7,7 +7,8 @@
 #include "Core/ECS/Components/CPointLight.h"
 #include "core/ECS/Components/CDirectionalLight.h"
 #include "core/component/CTopoShape.h"
-#include "core/Resources/Material.h"
+#include "Core/Resources/MaterialAsset.h"
+#include <Rendering/Data/Material.h>
 #include <Core/ResourceManagement/MaterialManager.h>
 #include "editor/UI/ContentBrowser/MaterialThumbnailRenderer.h"
 #include "renderer/SceneView.h"
@@ -469,25 +470,48 @@ namespace MOON {
 		return {};
 	}
 
-	/** The material assets the resource manager holds, as the ":Materials/<file>" keys its paths
-	 * use. What the slot's drop-down lists. */
+	/** The engine's Materials folder: the root that every ":Materials/..." key is relative to. */
+	const std::filesystem::path& EngineMaterialsFolder()
+	{
+		static const std::filesystem::path folder =
+			std::filesystem::path(Tools::Utils::PathParser::GetExeDirectory()) / "Moon" / "Data" / "Engine" / "Materials";
+		return folder;
+	}
+
+	/** The resource key of a .mat on disk: its path relative to the Materials root, slashes
+	 * normalized (":Materials/CAD/Metal/Steel.mat"). Building it from the file name alone only
+	 * resolves for materials that sit in the root itself - an asset dragged out of a folder was
+	 * looked up as ":Materials/Steel.mat", the load failed, and the drop did nothing. */
+	std::string MaterialKeyForPath(const std::filesystem::path& p_path)
+	{
+		std::error_code error;
+		const std::filesystem::path relative = std::filesystem::relative(p_path, EngineMaterialsFolder(), error);
+		const std::string tail = relative.generic_string();
+		// Outside the engine folder (a project material, say): keep the old flat behaviour rather
+		// than produce a "../../.." key no resource manager can resolve.
+		const std::string key = (!error && !tail.empty() && tail.rfind("..", 0) != 0)
+			? tail
+			: p_path.filename().string();
+		return ":Materials/" + key;
+	}
+
+	/** The material assets the resource manager holds, as the keys its paths use. What the slot's
+	 * drop-down lists. */
 	std::vector<std::string> MaterialAssetKeys()
 	{
 		std::vector<std::string> keys;
 
 		// Listed from the folder the browser shows, not from the manager: building the panel must
-		// not pull on a service (the panel is built while the viewport is drawing).
-		const std::filesystem::path folder =
-			std::filesystem::path(Tools::Utils::PathParser::GetExeDirectory()) / "Moon" / "Data" / "Engine" / "Materials";
-
+		// not pull on a service (the panel is built while the viewport is drawing). Recursive, so
+		// the categorised library under Materials/CAD is in the list too.
 		std::error_code error;
-		for (const auto& entry : std::filesystem::directory_iterator(folder, error))
+		for (const auto& entry : std::filesystem::recursive_directory_iterator(EngineMaterialsFolder(), error))
 		{
 			if (!entry.is_regular_file() || entry.path().extension() != ".mat")
 			{
 				continue;
 			}
-			keys.push_back(":Materials/" + entry.path().filename().string());
+			keys.push_back(MaterialKeyForPath(entry.path()));
 		}
 		std::ranges::sort(keys);
 		return keys;
@@ -500,10 +524,13 @@ namespace MOON {
 	/** ":Materials/Foo.mat" as the file on disk: what the thumbnail cache is keyed by. */
 	QString MaterialFilePath(const QString& p_key)
 	{
-		const QString file = QFileInfo(p_key).fileName();
-		const std::filesystem::path folder =
-			std::filesystem::path(Tools::Utils::PathParser::GetExeDirectory()) / "Moon" / "Data" / "Engine" / "Materials";
-		return QString::fromStdString((folder / file.toStdString()).string());
+		std::string relative = p_key.toStdString();
+		const std::string prefix = ":Materials/";
+		if (relative.rfind(prefix, 0) == 0)
+		{
+			relative = relative.substr(prefix.size());
+		}
+		return QString::fromStdString((EngineMaterialsFolder() / relative).string());
 	}
 	QPixmap MaterialSphereIcon(const QColor& p_color, int p_size)
 	{
@@ -930,13 +957,13 @@ namespace MOON {
 			{
 				return QStringLiteral("<none>");
 			}
-			if (auto* asset = dynamic_cast<::Core::Resources::Material*>(instance))
+			if (auto* asset = dynamic_cast<::Core::Resources::MaterialAsset*>(instance))
 			{
 				return QFileInfo(QString::fromStdString(asset->path)).fileName();
 			}
-			if (auto* definition = dynamic_cast<::Core::Resources::Material*>(instance->Definition()))
+			if (auto* parent = instance->ParentMaterial())
 			{
-				return QStringLiteral("instance of ") + QFileInfo(QString::fromStdString(definition->path)).fileName();
+				return QStringLiteral("instance of ") + QFileInfo(QString::fromStdString(parent->path)).fileName();
 			}
 			return QStringLiteral("<instance>");
 		}
@@ -957,13 +984,13 @@ namespace MOON {
 			{
 				return {};
 			}
-			if (auto* asset = dynamic_cast<::Core::Resources::Material*>(instance))
+			if (auto* asset = dynamic_cast<::Core::Resources::MaterialAsset*>(instance))
 			{
 				return QString::fromStdString(asset->path);
 			}
-			if (auto* definition = dynamic_cast<::Core::Resources::Material*>(instance->Definition()))
+			if (auto* parent = instance->ParentMaterial())
 			{
-				return QString::fromStdString(definition->path);
+				return QString::fromStdString(parent->path);
 			}
 			return {};
 		}
@@ -1000,6 +1027,8 @@ namespace MOON {
 			m_renderer->RemoveMaterialAtIndex(static_cast<uint8_t>(p_index));
 			GetService(::Editor::Panels::SceneView).GetRenderer().InvalidateParsedDrawables();
 		}
+		/** p_path is either a resource key (what the slot's drop-down hands over) or a file path
+		 * (what a drag from the content browser hands over); both have to end up as the same key. */
 		void AssignMaterialAt(int p_index, const QString& p_path)
 		{
 			if (m_renderer == nullptr)
@@ -1007,7 +1036,10 @@ namespace MOON {
 				return;
 			}
 
-			const std::string key = (":Materials/" + QFileInfo(p_path).fileName()).toStdString();
+			const std::string requested = p_path.toStdString();
+			const std::string key = requested.rfind(":Materials/", 0) == 0
+				? requested
+				: MaterialKeyForPath(std::filesystem::path(requested));
 			auto* material = Core::Global::ServiceLocator::Get<Core::ResourceManagement::MaterialManager>()
 				.GetResource(key, true);
 			if (material == nullptr)
