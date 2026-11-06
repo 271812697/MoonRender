@@ -114,7 +114,7 @@ namespace MOON
 
 		/** Points the material at another shader (the .mat stores which .shader it instances)
 		 * and rebuilds the form from that shader's parameters. Marked dirty; Save writes it. */
-		void SetShader(const std::string& p_key);
+		void SetMaterial(const std::string& p_key);
 		void PopulateShaderPicker();
 		/** The current material's shader as the picker/asset key (":Shaders\\Name.shader"). */
 		std::string CurrentShaderKey() const;

@@ -173,7 +173,7 @@ void MOON::MaterialPreviewWidget::RefreshShader()
 		return;
 	}
 
-	m_material->SetShader(shader);
+	m_material->SetMaterial(shader);
 	m_loadedGeneration = m_packageGeneration;
 	m_error.clear();
 }

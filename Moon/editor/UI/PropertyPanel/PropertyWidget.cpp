@@ -1066,7 +1066,7 @@ namespace MOON {
 			layout->setContentsMargins(0, 0, 0, 0);
 			layout->setSpacing(0);
 
-			if (mat == nullptr || mat->GetShader() == nullptr) {
+			if (mat == nullptr || mat->MaterialOf() == nullptr) {
 				auto* hint = new QLabel(QStringLiteral("This material has no shader."), m_form);
 				hint->setMargin(8);
 				layout->addWidget(hint);
@@ -1080,7 +1080,7 @@ namespace MOON {
 			QObject::connect(resetButton, &QPushButton::clicked, resetButton,
 				[this] { ResetToDefaults(); });
 
-			auto* shader = mat->GetShader();
+			auto* shader = mat->MaterialOf();
 			const auto& parameters = shader->GetParameters();
 
 			// First pass: labels and the label -> uniform map. The widgets are keyed by the
@@ -1223,7 +1223,7 @@ namespace MOON {
 		}
 
 		void ResetToDefaults() {
-			if (mat == nullptr || mat->GetShader() == nullptr) {
+			if (mat == nullptr || mat->MaterialOf() == nullptr) {
 				return;
 			}
 			// Reset only the parameters the panel edits. Clearing the whole property map and
@@ -1231,7 +1231,7 @@ namespace MOON {
 			// (_IrradianceCube, _PrefilterCube, _BRDFLut, _ShadowMap, the CAD domain colour
 			// buffer and the depth-peel textures) as null textures: the next draw then bound
 			// the empty 2D fallback to their units, which crashed on the CAD material.
-			for (const auto& parameter : mat->GetShader()->GetParameters()) {
+			for (const auto& parameter : mat->MaterialOf()->GetParameters()) {
 				if (parameter.isUi) {
 					mat->ResetPropertyToDefault(parameter.name);
 				}

@@ -90,7 +90,7 @@ void Core::Resources::MaterialAsset::OnSerialize(tinyxml2::XMLDocument& p_doc, t
 	using namespace Maths;
 
 	// The .mat records the package material it instances, not a shader object.
-	Serializer::SerializeShader(p_doc, p_node, "material", GetShader());
+	Serializer::SerializeShader(p_doc, p_node, "material", MaterialOf());
 
 	tinyxml2::XMLNode* settingsNode = p_doc.NewElement("settings");
 	p_node->InsertEndChild(settingsNode);
@@ -123,7 +123,7 @@ void Core::Resources::MaterialAsset::OnSerialize(tinyxml2::XMLDocument& p_doc, t
 	tinyxml2::XMLNode* uniformsNode = p_doc.NewElement("uniforms");
 	p_node->InsertEndChild(uniformsNode);
 
-	if (GetShader() == nullptr || GetShader()->GetParameters().empty())
+	if (MaterialOf() == nullptr || MaterialOf()->GetParameters().empty())
 	{
 		return;
 	}
@@ -133,11 +133,11 @@ void Core::Resources::MaterialAsset::OnSerialize(tinyxml2::XMLDocument& p_doc, t
 	// Block members are not in the program's reflected uniform map (they have no individual
 	// location); the material's parameter table is what says the material has them.
 	const auto isDeclaredParameter = [this](const std::string& p_name) {
-		if (GetShader() == nullptr)
+		if (MaterialOf() == nullptr)
 		{
 			return false;
 		}
-		for (const Rendering::Data::Material::Parameter& parameter : GetShader()->GetParameters())
+		for (const Rendering::Data::Material::Parameter& parameter : MaterialOf()->GetParameters())
 		{
 			if (parameter.name == p_name || p_name.starts_with(parameter.name + "["))
 			{
@@ -238,7 +238,7 @@ void Core::Resources::MaterialAsset::OnDeserialize(tinyxml2::XMLDocument& p_doc,
 	/* We verify that the material package is valid (Not null) */
 	if (material)
 	{
-		SetShader(material);
+		SetMaterial(material);
 	}
 
 	tinyxml2::XMLNode* settingsNode = p_node->FirstChildElement("settings");

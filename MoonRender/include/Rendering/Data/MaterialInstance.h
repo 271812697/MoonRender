@@ -60,7 +60,9 @@ namespace Rendering::Data
 		MaterialInstance& operator=(const MaterialInstance&) = delete;
 
 		/** The Material this instance overrides. Null for a Material (it is its own definition). */
-		Material* ParentMaterial() const { return m_definition; }
+		Material* ParentMaterial() const { return m_material; }
+		/** The package Material whose definition and variants this instance uses. */
+		Material* MaterialOf() const;
 
 		/** Bumped whenever this object's parameter values change. An instance compares it against
 		 * the value it last uploaded, which is how an edit on the definition reaches the instances
@@ -69,11 +71,7 @@ namespace Rendering::Data
 		/** True for the instance a Material owns (filament's default instance). */
 		bool IsDefaultInstance() const { return m_isDefaultInstance; }
 
-		/** The definition's shader and feature set: what a variant is selected from. A drawable
-		 * holds an instance now, so the renderer asks these two questions through this pair
-		 * instead of through Material. */
-		Material* Shader() const { return ShaderOf(); }
-		Material* GetShader() const { return ShaderOf(); }
+		/** The definition's material and feature set: what a variant is selected from. */
 
 		/** The immutable package data behind Shader(): block layout, sampler fields and state.
 		 * An instance reads offsets and units from here; the shader only owns the programs. */
@@ -112,7 +110,6 @@ namespace Rendering::Data
 			bool uploadSingleUseProperties,
 			Rendering::HAL::Texture* p_emptyTexture2D = nullptr,
 			Rendering::HAL::Texture* p_emptyTextureCube = nullptr,
-			Rendering::HAL::Texture* p_brdfLut = nullptr,
 			Rendering::HAL::Texture* p_flatNormalTexture = nullptr
 		);
 
@@ -216,8 +213,6 @@ namespace Rendering::Data
 
 	protected:
 		struct LooseUniform;
-		/** The definition's shader (the one the variant comes from). */
-		Material* ShaderOf() const;
 		/** The feature set this instance draws with: its own, seeded from the definition. */
 		const Data::FeatureSet& FeaturesOf() const { return m_features; }
 
@@ -229,7 +224,6 @@ namespace Rendering::Data
 			bool p_uploadSingleUseProperties,
 			Rendering::HAL::Texture* p_emptyTexture2D,
 			Rendering::HAL::Texture* p_emptyTextureCube,
-			Rendering::HAL::Texture* p_brdfLut,
 			Rendering::HAL::Texture* p_flatNormalTexture
 		);
 		void EnsureDescriptorSet() const;
@@ -248,7 +242,7 @@ namespace Rendering::Data
 		);
 
 	protected:
-		Material* m_definition = nullptr;
+		Material* m_material = nullptr;
 		bool m_isDefaultInstance = false;
 		Data::FeatureSet m_features;
 		uint64_t m_revision = 0;

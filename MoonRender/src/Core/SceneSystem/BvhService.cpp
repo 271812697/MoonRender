@@ -144,26 +144,40 @@ namespace Core::SceneSystem
 			};
 			auto it = propertyOf("u_Albedo");
 			if (it.has_value()) {
-				tempMat.baseColor=std::get<Maths::FVector4>(it->value).ToFVector3();
-				tempMat.opacity = std::get<Maths::FVector4>(it->value).w;
-			
+				if (const auto* value = std::get_if<Maths::FVector4>(&it->value))
+				{
+					tempMat.baseColor = value->ToFVector3();
+					tempMat.opacity = value->w;
+				}
 			}
 			it = propertyOf("u_EmissiveColor");
 			if (it.has_value()) {
-				tempMat.emission = std::get<Maths::FVector3>(it->value);
+				if (const auto* value = std::get_if<Maths::FVector3>(&it->value))
+				{
+					tempMat.emission = *value;
+				}
 			}
 			it = propertyOf("u_Metallic");
 			if (it.has_value()) {
-				tempMat.metallic= std::get<float>(it->value);
+				if (const auto* value = std::get_if<float>(&it->value))
+				{
+					tempMat.metallic = *value;
+				}
 			}
 			it = propertyOf("u_Roughness");
 			if (it.has_value()) {
-				tempMat.roughness = std::get<float>(it->value);
+				if (const auto* value = std::get_if<float>(&it->value))
+				{
+					tempMat.roughness = *value;
+				}
 			}
 			//u_RefractionIndex
 			it = propertyOf("u_RefractionIndex");
 			if (it.has_value()) {
-				tempMat.ior = std::get<float>(it->value);
+				if (const auto* value = std::get_if<float>(&it->value))
+				{
+					tempMat.ior = *value;
+				}
 			}
 
 			//Albedo Texture
@@ -756,9 +770,9 @@ namespace Core::SceneSystem
 										v->GetTexture().Allocate(desc);
 									}
 								}
-								else
+								else if (auto* handle = std::get_if<::Rendering::HAL::TextureHandle*>(&prop.value))
 								{
-									auto v = std::get<::Rendering::HAL::TextureHandle*>(prop.value);
+									auto v = *handle;
 									::Rendering::HAL::GLTexture* ttex = static_cast<::Rendering::HAL::GLTexture*>(v);
 									ttex->Allocate(desc);
 								}

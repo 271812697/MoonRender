@@ -50,9 +50,9 @@ namespace Rendering::Data
 
 		/** Shares another material's definition and variant program cache. A .mat override
 		 * points at the package material this way. */
-		void SetShader(Material* p_shader);
-		bool HasShader() const;
-		Material* GetShader() const;
+		void SetMaterial(Material* p_shader);
+		bool HasMaterial() const;
+		Material* MaterialOf() const;
 
 		const MaterialDefinition* Definition() const;
 		void SetDefinition(std::shared_ptr<const MaterialDefinition> p_definition);
@@ -83,7 +83,7 @@ namespace Rendering::Data
 		std::unique_ptr<MaterialInstance> CreateInstance();
 
 		/** Applies the shader's material block to the default instance. */
-		void ResetStateToShader();
+		void ResetStateToMaterial();
 
 		// ---- parameter / texture API, forwarded to the default instance -------------------
 		void SetProperty(const std::string p_name, const MaterialPropertyType& p_value, bool p_singleUse = false)
@@ -120,7 +120,6 @@ namespace Rendering::Data
 
 		// ---- variant / draw API ---------------------------------------------------------
 		uint64_t Revision() const { return m_defaultInstance->Revision(); }
-		Material* Shader() const { return GetShader(); }
 		MaterialSignatureSet Bind(
 			Rendering::HAL::Texture* p_emptyTexture2D = nullptr,
 			Rendering::HAL::Texture* p_emptyTextureCube = nullptr,
@@ -137,11 +136,10 @@ namespace Rendering::Data
 			bool uploadSingleUseProperties,
 			Rendering::HAL::Texture* p_emptyTexture2D = nullptr,
 			Rendering::HAL::Texture* p_emptyTextureCube = nullptr,
-			Rendering::HAL::Texture* p_brdfLut = nullptr,
 			Rendering::HAL::Texture* p_flatNormalTexture = nullptr)
 		{
 			m_defaultInstance->UploadProperties(uploadStableProperties, uploadSingleUseProperties,
-				p_emptyTexture2D, p_emptyTextureCube, p_brdfLut, p_flatNormalTexture);
+				p_emptyTexture2D, p_emptyTextureCube, p_flatNormalTexture);
 		}
 
 		// ---- features -------------------------------------------------------------------

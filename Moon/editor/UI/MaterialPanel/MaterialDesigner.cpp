@@ -754,7 +754,7 @@ namespace MOON
 			[this](int p_index) {
 				if (m_material != nullptr)
 				{
-					SetShader(m_shaderPicker->itemText(p_index).toStdString());
+					SetMaterial(m_shaderPicker->itemText(p_index).toStdString());
 				}
 			});
 
@@ -952,12 +952,12 @@ namespace MOON
 
 	std::string MaterialDesigner::CurrentShaderKey() const
 	{
-		if (m_material == nullptr || m_material->GetShader() == nullptr)
+		if (m_material == nullptr || m_material->MaterialOf() == nullptr)
 		{
 			return {};
 		}
 
-		std::string key = m_material->GetShader()->path;
+		std::string key = m_material->MaterialOf()->path;
 		std::replace(key.begin(), key.end(), '/', '\\');
 
 		const std::string prefix = ":Shaders\\";
@@ -1029,7 +1029,7 @@ namespace MOON
 		m_shaderPicker->blockSignals(false);
 	}
 
-	void MaterialDesigner::SetShader(const std::string& p_key)
+	void MaterialDesigner::SetMaterial(const std::string& p_key)
 	{
 		if (m_material == nullptr)
 		{
@@ -1055,7 +1055,7 @@ namespace MOON
 
 		// Re-link the instance and regenerate its parameters from the new shader. The .mat is
 		// only written on Save, so this is an edit like any other (and Undo can take it back).
-		m_material->SetShader(shader);
+		m_material->SetMaterial(shader);
 		m_material->ResetProperties();
 		MarkDirty();
 		RebuildForm();
@@ -1102,7 +1102,7 @@ namespace MOON
 			return;
 		}
 
-		auto* shader = m_material->GetShader();
+		auto* shader = m_material->MaterialOf();
 		if (shader == nullptr)
 		{
 			makeHint(QStringLiteral("This material has no shader."));
@@ -1505,7 +1505,7 @@ namespace MOON
 	{
 		if (m_material == nullptr) { return; }
 
-		Rendering::Resources::Shader* currentShader = m_material->GetShader();
+		Rendering::Resources::Shader* currentShader = m_material->MaterialOf();
 		if (currentShader == nullptr) { return; }
 
 		// Resolve what the package's key points at: the deployed engine shaders first, then the
@@ -1626,7 +1626,7 @@ namespace MOON
 			s_cache.emplace(cacheKey, compiled);
 		}
 
-		if (compiled == m_material->GetShader())
+		if (compiled == m_material->MaterialOf())
 		{
 			return; // already using the program for this feature set
 		}
@@ -1634,7 +1634,7 @@ namespace MOON
 		// SetShader rebuilds the property list and the state from the new definition; the
 		// instance's values are the designer's, so put them back.
 		const Snapshot snapshot = Capture();
-		m_material->SetShader(compiled);
+		m_material->SetMaterial(compiled);
 		ApplySnapshot(snapshot);
 		MarkDirty();
 		SetStatus(QStringLiteral("Recompiled ") + QString::fromStdString(sourceName) + QStringLiteral(" for the enabled features."));

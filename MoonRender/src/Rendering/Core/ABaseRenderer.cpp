@@ -142,7 +142,7 @@ void main()
 )";
 	//not free the m_presentShader shader?
 	m_presentShader = Rendering::Resources::Loaders::ShaderLoader::CreateFromSource(v, f);
-	m_presentMaterial.SetShader(m_presentShader);
+	m_presentMaterial.SetMaterial(m_presentShader);
 }
 
 void Rendering::Core::ABaseRenderer::BeginFrame(const Data::FrameDescriptor& p_frameDescriptor)
@@ -485,7 +485,6 @@ void Rendering::Core::ABaseRenderer::DrawEntity(
 			uploadSingleUseProperties,
 			&m_emptyTexture2D,
 			&m_emptyTextureCube,
-			m_brdfLut,
 			&m_flatNormalTexture
 		);
 	}

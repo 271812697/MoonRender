@@ -1231,7 +1231,7 @@ QTreeView::branch:open:has-children:has-siblings {
 					// Scaffold the instance, write it, then let the manager load it back: that
 					// is what gives the material its (const) resource path.
 					Core::Resources::MaterialAsset scaffold;
-					scaffold.SetShader(shader);
+					scaffold.SetMaterial(shader);
 					Core::Resources::Loaders::MaterialAssetLoader::Save(scaffold, target.toStdString());
 					created = Core::Global::ServiceLocator::Get<Core::ResourceManagement::MaterialManager>()
 						.GetResource(key, true);

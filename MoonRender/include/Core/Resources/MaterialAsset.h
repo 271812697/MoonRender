@@ -24,12 +24,8 @@ namespace Core::Resources
 
 		/** Points the asset at a package Material and recreates its instance. */
 		void SetMaterial(::Rendering::Data::Material* p_material);
-		::Rendering::Data::Material* GetMaterial() const { return m_material; }
-
-		/** Compatibility names for the scene/editor code that used to talk about a shader. */
-		void SetShader(::Rendering::Data::Material* p_material) { SetMaterial(p_material); }
-		bool HasShader() const { return m_material != nullptr; }
-		::Rendering::Data::Material* GetShader() const { return m_material; }
+		bool HasMaterial() const { return m_material != nullptr; }
+		::Rendering::Data::Material* MaterialOf() const { return m_material; }
 
 		::Rendering::Data::MaterialInstance& Instance() const { return *m_instance; }
 		::Rendering::Data::MaterialInstance* InstancePtr() const { return m_instance.get(); }

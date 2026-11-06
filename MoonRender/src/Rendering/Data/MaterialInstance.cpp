@@ -509,7 +509,7 @@ namespace
 
 
 Rendering::Data::MaterialInstance::MaterialInstance(Material& p_definition, bool p_isDefault)
-	: m_definition(&p_definition)
+	: m_material(&p_definition)
 	, m_isDefaultInstance(p_isDefault)
 {
 	// A plain instance starts empty and inherits; the default instance is the definition's
@@ -550,26 +550,21 @@ void Rendering::Data::MaterialInstance::InitializeDefaultState()
 
 void Rendering::Data::MaterialInstance::SetMaterial(Material& p_material)
 {
-	m_definition = &p_material;
+	m_material = &p_material;
 	m_isDefaultInstance = false;
-	m_overriddenUniforms.clear();
-	m_overriddenSamplers.clear();
-	m_singleUseUniforms.clear();
-	m_singleUseSamplers.clear();
-	m_looseUniforms.clear();
-	ReleaseDescriptorSet();
 	ResetStateToMaterial();
+	// Clears every override, releases and rebuilds the descriptor set against the new
+	// material's definition, and bumps the revision.
 	ResetProperties();
-	++m_revision;
 }
 
 void Rendering::Data::MaterialInstance::ResetStateToMaterial()
 {
 	InitializeDefaultState();
 
-	if (m_definition != nullptr && m_definition->HasState())
+	if (m_material != nullptr && m_material->HasState())
 	{
-		const Material::State& state = m_definition->GetState();
+		const Material::State& state = m_material->GetState();
 		if (state.blendable.has_value()) { m_blendable = state.blendable.value(); }
 		if (state.blendMode.has_value())
 		{
@@ -682,7 +677,7 @@ Rendering::Data::MaterialInstance::GetProperty(const std::string p_key) const
 			return MaterialProperty{ static_cast<Rendering::Resources::Texture*>(nullptr), false };
 		}
 
-		EnsureDescriptorSet();
+		//EnsureDescriptorSet();
 		const MaterialDefinition::UniformField* field = definition->FindUniform(parameter->name);
 		if (field != nullptr && m_uniformData.size() == definition->ParameterBlockSize())
 		{
@@ -701,15 +696,15 @@ Rendering::Data::MaterialInstance::GetProperty(const std::string p_key) const
 	return std::nullopt;
 }
 
-Rendering::Data::Material* Rendering::Data::MaterialInstance::ShaderOf() const
+Rendering::Data::Material* Rendering::Data::MaterialInstance::MaterialOf() const
 {
-	return m_definition != nullptr ? m_definition->GetShader() : nullptr;
+	return m_material != nullptr ? m_material->MaterialOf() : nullptr;
 }
 
 
 const Rendering::Data::MaterialDefinition* Rendering::Data::MaterialInstance::Definition() const
 {
-	return m_definition != nullptr ? m_definition->Definition() : nullptr;
+	return m_material != nullptr ? m_material->Definition() : nullptr;
 }
 
 
@@ -718,9 +713,9 @@ Tools::Utils::OptRef<Rendering::HAL::ShaderProgram> Rendering::Data::MaterialIns
 	Tools::Utils::OptRef<const Data::FeatureSet> p_override
 ) const
 {
-	if (ShaderOf() != nullptr)
+	if (MaterialOf() != nullptr)
 	{
-		auto& program = ShaderOf()->GetVariant(
+		auto& program = MaterialOf()->GetVariant(
 			p_pass,
 			p_override.value_or(FeaturesOf())
 		);
@@ -735,15 +730,15 @@ Tools::Utils::OptRef<Rendering::HAL::ShaderProgram> Rendering::Data::MaterialIns
 }
 
 
-void Rendering::Data::MaterialInstance::UploadProperties(bool uploadStableProperties, bool uploadSingleUseProperties, Rendering::HAL::Texture* p_emptyTexture2D, Rendering::HAL::Texture* p_emptyTextureCube, Rendering::HAL::Texture* p_brdfLut, Rendering::HAL::Texture* p_flatNormalTexture)
+void Rendering::Data::MaterialInstance::UploadProperties(bool uploadStableProperties, bool uploadSingleUseProperties, Rendering::HAL::Texture* p_emptyTexture2D, Rendering::HAL::Texture* p_emptyTextureCube, Rendering::HAL::Texture* p_flatNormalTexture)
 {
 	ZoneScoped;
 
 	// Inherited values: when the definition changed since the last upload, this instance's cached
 	// signature describes stale data (the block would keep the old numbers), so invalidate it.
-	if (m_definition != nullptr && m_definition->Revision() != m_seenDefinitionRevision)
+	if (m_material != nullptr && m_material->Revision() != m_seenDefinitionRevision)
 	{
-		m_seenDefinitionRevision = m_definition->Revision();
+		m_seenDefinitionRevision = m_material->Revision();
 		InvalidatePropertySignature();
 	}
 
@@ -754,7 +749,7 @@ void Rendering::Data::MaterialInstance::UploadProperties(bool uploadStableProper
 	const bool hasDefinitionParameters = definition != nullptr && definition->HasParameterTable();
 	if (hasDefinitionParameters)
 	{
-		UploadParameterBlock(uploadStableProperties, uploadSingleUseProperties, p_emptyTexture2D, p_emptyTextureCube, p_brdfLut, p_flatNormalTexture);
+		UploadParameterBlock(uploadStableProperties, uploadSingleUseProperties, p_emptyTexture2D, p_emptyTextureCube, p_flatNormalTexture);
 	}
 
 	/** The 1x1 texture a sampler gets when the material instance has none: the material's own
@@ -926,7 +921,6 @@ void Rendering::Data::MaterialInstance::EnsureDescriptorSet() const
 	{
 		if (m_uniformData.size() != blockSize)
 		{
-			m_uniformData.assign(blockSize, 0);
 			self.ResetBlockToDefinition();
 		}
 		if (!m_uniformSlice.IsValid() || m_uniformSlice.size != blockSize)
@@ -1028,7 +1022,7 @@ void Rendering::Data::MaterialInstance::ResetBlockToDefinition()
 
 void Rendering::Data::MaterialInstance::MergeDefaults()
 {
-	if (m_isDefaultInstance || m_definition == nullptr)
+	if (m_isDefaultInstance || m_material == nullptr)
 	{
 		return;
 	}
@@ -1039,7 +1033,7 @@ void Rendering::Data::MaterialInstance::MergeDefaults()
 		return;
 	}
 
-	const MaterialInstance& defaults = m_definition->DefaultInstance();
+	const MaterialInstance& defaults = m_material->DefaultInstance();
 	const uint64_t defaultsRevision = defaults.Revision();
 	if (!m_defaultsDirty && defaultsRevision == m_seenDefaultsRevision)
 	{
@@ -1140,10 +1134,10 @@ void Rendering::Data::MaterialInstance::ResetSingleUseProperties()
 	{
 		Rendering::HAL::TextureHandle* handle = nullptr;
 		Rendering::Resources::Texture* asset = nullptr;
-		if (!m_isDefaultInstance && m_definition != nullptr)
+		if (!m_isDefaultInstance && m_material != nullptr)
 		{
-			handle = m_definition->DefaultInstance().GetTexture(binding);
-			asset = m_definition->DefaultInstance().GetTextureAsset(binding);
+			handle = m_material->DefaultInstance().GetTexture(binding);
+			asset = m_material->DefaultInstance().GetTextureAsset(binding);
 		}
 		m_descriptorSet.SetTexture(binding, handle, asset);
 		m_overriddenSamplers.erase(binding);
@@ -1160,7 +1154,6 @@ void Rendering::Data::MaterialInstance::UploadParameterBlock(
 	bool p_uploadSingleUseProperties,
 	Rendering::HAL::Texture* p_emptyTexture2D,
 	Rendering::HAL::Texture* p_emptyTextureCube,
-	Rendering::HAL::Texture* p_brdfLut,
 	Rendering::HAL::Texture* p_flatNormalTexture)
 {
 	const MaterialDefinition* definition = Definition();
@@ -1186,30 +1179,22 @@ void Rendering::Data::MaterialInstance::UploadParameterBlock(
 		UniformBufferPool::Get().StoreCPU(m_uniformSlice, m_uniformData.data());
 	}
 
-	// Samplers: one fixed texture unit per declaration, written into the package by MoonMatc
-	// next to the block. The definition's sampler fields carry both the unit and the fallback.
+	// Samplers: only fill the slots that have no material texture/default yet. Textures set
+	// through SetProperty or MergeDefaults are already in the descriptor set and persist
+	// across uploads; rewriting them here on every upload was redundant.
 	for (const MaterialDefinition::SamplerField& field : definition->SamplerFields())
 	{
 		Rendering::HAL::TextureHandle* handle = m_descriptorSet.GetTexture(field.binding);
 		Rendering::Resources::Texture* asset = m_descriptorSet.GetTextureAsset(field.binding);
-		if (handle == nullptr && asset != nullptr)
+		if (handle != nullptr || asset != nullptr)
 		{
-			handle = &asset->GetTexture();
-		}
-
-		// The split-sum DFG LUT is global to the view, like Filament's frame uniform. Binding it
-		// through the material property was fragile: an instance without the parameter (the
-		// material preview) sampled the white empty 2D, giving DFG=(1,1), E~=1 and no diffuse.
-		if (field.name == "_BRDFLut" && p_brdfLut != nullptr && p_brdfLut->IsValid())
-		{
-			m_descriptorSet.SetTexture(field.binding, p_brdfLut);
 			continue;
 		}
 
 		// A buffer texture has no 1x1 stand-in in the engine; binding the 2D fallback to a
 		// samplerBuffer slot is a type error at draw time. An unassigned one is simply left
 		// unbound (the shader that declares it does not read it without a buffer).
-		if (handle == nullptr && field.type != "sampler2D" && field.type != "samplerCube")
+		if (field.type != "sampler2D" && field.type != "samplerCube")
 		{
 			m_descriptorSet.SetTexture(field.binding, nullptr);
 			continue;
@@ -1224,9 +1209,12 @@ void Rendering::Data::MaterialInstance::UploadParameterBlock(
 			fallback = p_flatNormalTexture;
 			fallbackName = "flat normal (0.5,0.5,1)";
 		}
+		if (fallback == nullptr)
+		{
+			continue;
+		}
 
-		m_descriptorSet.SetTexture(field.binding, handle != nullptr ? handle : fallback,
-			handle != nullptr ? asset : nullptr);
+		m_descriptorSet.SetTexture(field.binding, fallback);
 
 		// MOON_DEBUG_SAMPLERS: what each sampler slot actually got, once per shader and slot.
 		// The "why is my texture ignored" question has two very different answers (the material
@@ -1234,11 +1222,11 @@ void Rendering::Data::MaterialInstance::UploadParameterBlock(
 		if (std::getenv("MOON_DEBUG_SAMPLERS") != nullptr)
 		{
 			static std::set<std::string> reported;
-			const std::string key = (ShaderOf() != nullptr ? ShaderOf()->path : std::string("?")) + "|" + field.name;
+			const std::string key = (MaterialOf() != nullptr ? MaterialOf()->path : std::string("?")) + "|" + field.name;
 			if (reported.insert(key).second)
 			{
-				std::cout << "[Sampler] " << (ShaderOf() != nullptr ? ShaderOf()->path : "?") << " "
-					<< field.name << " unit " << field.binding << " <- "
+				std::cout << "[Sampler] " << (MaterialOf() != nullptr ? MaterialOf()->path : "?") << " "
+					<< field.name << " binding " << field.binding << " <- "
 					<< (handle != nullptr ? "material texture" : fallbackName) << std::endl;
 			}
 		}
@@ -1277,10 +1265,10 @@ void Rendering::Data::MaterialInstance::BindGlobalTexture(const std::string& p_n
 		if (std::getenv("MOON_DEBUG_SAMPLERS") != nullptr)
 		{
 			static std::set<std::string> reported;
-			const std::string key = ShaderOf()->path + "|draw|" + field->name;
+			const std::string key = MaterialOf()->path + "|draw|" + field->name;
 			if (reported.insert(key).second)
 			{
-				std::cout << "[Sampler] " << ShaderOf()->path << " " << field->name << " unit "
+				std::cout << "[Sampler] " << MaterialOf()->path << " " << field->name << " unit "
 					<< field->binding << " <- view texture (per draw)" << std::endl;
 			}
 		}
@@ -1343,10 +1331,10 @@ bool Rendering::Data::MaterialInstance::ResetPropertyToDefault(const std::string
 	{
 		Rendering::HAL::TextureHandle* handle = nullptr;
 		Rendering::Resources::Texture* asset = nullptr;
-		if (!m_isDefaultInstance && m_definition != nullptr)
+		if (!m_isDefaultInstance && m_material != nullptr)
 		{
-			handle = m_definition->DefaultInstance().GetTexture(parameter->binding);
-			asset = m_definition->DefaultInstance().GetTextureAsset(parameter->binding);
+			handle = m_material->DefaultInstance().GetTexture(parameter->binding);
+			asset = m_material->DefaultInstance().GetTextureAsset(parameter->binding);
 		}
 		m_descriptorSet.SetTexture(parameter->binding, handle, asset);
 		m_overriddenSamplers.erase(parameter->binding);
@@ -1408,7 +1396,7 @@ Rendering::Data::MaterialSignatureSet Rendering::Data::MaterialInstance::Bind(
 )
 {
 	ZoneScoped;
-	auto& program = ShaderOf()->GetVariant(
+	auto& program = MaterialOf()->GetVariant(
 		p_pass,
 		p_featureSetOverride.value_or(FeaturesOf())
 	);
@@ -1547,7 +1535,7 @@ bool Rendering::Data::MaterialInstance::TrySetProperty(const std::string& p_name
 
 bool Rendering::Data::MaterialInstance::IsValid() const
 {
-	return ShaderOf() != nullptr;
+	return MaterialOf() != nullptr;
 }
 
 
@@ -1670,115 +1658,115 @@ void Rendering::Data::MaterialInstance::SetGPUInstances(int p_instances)
 
 bool Rendering::Data::MaterialInstance::IsBlendable() const
 {
-	return m_blendable ? *m_blendable : (m_definition ? m_definition->IsBlendable() : false);
+	return m_blendable ? *m_blendable : (m_material ? m_material->IsBlendable() : false);
 }
 
 
 bool Rendering::Data::MaterialInstance::IsTransparent() const
 {
-	return m_transparent ? *m_transparent : (m_definition ? m_definition->IsTransparent() : false);
+	return m_transparent ? *m_transparent : (m_material ? m_material->IsTransparent() : false);
 }
 
 
 bool Rendering::Data::MaterialInstance::IsUserInterface() const
 {
-	return m_userInterface ? *m_userInterface : (m_definition ? m_definition->IsUserInterface() : false);
+	return m_userInterface ? *m_userInterface : (m_material ? m_material->IsUserInterface() : false);
 }
 
 
 bool Rendering::Data::MaterialInstance::HasBackfaceCulling() const
 {
-	return m_backfaceCulling ? *m_backfaceCulling : (m_definition ? m_definition->HasBackfaceCulling() : true);
+	return m_backfaceCulling ? *m_backfaceCulling : (m_material ? m_material->HasBackfaceCulling() : true);
 }
 
 
 bool Rendering::Data::MaterialInstance::HasFrontfaceCulling() const
 {
-	return m_frontfaceCulling ? *m_frontfaceCulling : (m_definition ? m_definition->HasFrontfaceCulling() : false);
+	return m_frontfaceCulling ? *m_frontfaceCulling : (m_material ? m_material->HasFrontfaceCulling() : false);
 }
 
 
 bool Rendering::Data::MaterialInstance::HasDepthTest() const
 {
-	return m_depthTest ? *m_depthTest : (m_definition ? m_definition->HasDepthTest() : true);
+	return m_depthTest ? *m_depthTest : (m_material ? m_material->HasDepthTest() : true);
 }
 
 
 bool Rendering::Data::MaterialInstance::HasDepthWriting() const
 {
-	return m_depthWriting ? *m_depthWriting : (m_definition ? m_definition->HasDepthWriting() : true);
+	return m_depthWriting ? *m_depthWriting : (m_material ? m_material->HasDepthWriting() : true);
 }
 
 
 bool Rendering::Data::MaterialInstance::HasColorWriting() const
 {
-	return m_colorWriting ? *m_colorWriting : (m_definition ? m_definition->HasColorWriting() : true);
+	return m_colorWriting ? *m_colorWriting : (m_material ? m_material->HasColorWriting() : true);
 }
 
 
 bool Rendering::Data::MaterialInstance::IsShadowCaster() const
 {
-	return m_castShadows ? *m_castShadows : (m_definition ? m_definition->IsShadowCaster() : true);
+	return m_castShadows ? *m_castShadows : (m_material ? m_material->IsShadowCaster() : true);
 }
 
 
 bool Rendering::Data::MaterialInstance::IsShadowReceiver() const
 {
-	return m_receiveShadows ? *m_receiveShadows : (m_definition ? m_definition->IsShadowReceiver() : true);
+	return m_receiveShadows ? *m_receiveShadows : (m_material ? m_material->IsShadowReceiver() : true);
 }
 
 
 bool Rendering::Data::MaterialInstance::IsCapturedByReflectionProbes() const
 {
-	return m_capturedByReflectionProbes ? *m_capturedByReflectionProbes : (m_definition ? m_definition->IsCapturedByReflectionProbes() : true);
+	return m_capturedByReflectionProbes ? *m_capturedByReflectionProbes : (m_material ? m_material->IsCapturedByReflectionProbes() : true);
 }
 
 
 bool Rendering::Data::MaterialInstance::IsReflectionReceiver() const
 {
-	return m_receiveReflections ? *m_receiveReflections : (m_definition ? m_definition->IsReflectionReceiver() : true);
+	return m_receiveReflections ? *m_receiveReflections : (m_material ? m_material->IsReflectionReceiver() : true);
 }
 
 
 int Rendering::Data::MaterialInstance::GetDrawOrder() const
 {
-	return m_drawOrder ? *m_drawOrder : (m_definition ? m_definition->GetDrawOrder() : 1000);
+	return m_drawOrder ? *m_drawOrder : (m_material ? m_material->GetDrawOrder() : 1000);
 }
 
 
 int Rendering::Data::MaterialInstance::GetGPUInstances() const
 {
-	return m_gpuInstances ? *m_gpuInstances : (m_definition ? m_definition->GetGPUInstances() : 1);
+	return m_gpuInstances ? *m_gpuInstances : (m_material ? m_material->GetGPUInstances() : 1);
 }
 
 
 float Rendering::Data::MaterialInstance::GetLineWidth() const
 {
-	return m_lineWidth ? *m_lineWidth : (m_definition ? m_definition->GetLineWidth() : 1.0f);
+	return m_lineWidth ? *m_lineWidth : (m_material ? m_material->GetLineWidth() : 1.0f);
 }
 
 
 Rendering::Settings::EBlendMode Rendering::Data::MaterialInstance::GetBlendMode() const
 {
 	if (m_blendMode) { return *m_blendMode; }
-	return m_definition ? m_definition->GetBlendMode() : Rendering::Settings::EBlendMode::BLEND_OPAQUE;
+	return m_material ? m_material->GetBlendMode() : Rendering::Settings::EBlendMode::BLEND_OPAQUE;
 }
 
 
 bool Rendering::Data::MaterialInstance::SupportsOrthographic() const
 {
-	return m_supportOrthographic ? *m_supportOrthographic : (m_definition ? m_definition->SupportsOrthographic() : true);
+	return m_supportOrthographic ? *m_supportOrthographic : (m_material ? m_material->SupportsOrthographic() : true);
 }
 
 
 bool Rendering::Data::MaterialInstance::SupportsPerspective() const
 {
-	return m_supportPerspective ? *m_supportPerspective : (m_definition ? m_definition->SupportsPerspective() : true);
+	return m_supportPerspective ? *m_supportPerspective : (m_material ? m_material->SupportsPerspective() : true);
 }
 
 bool Rendering::Data::MaterialInstance::HasPolygonOffsetFill() const
 {
-	return m_polygonOffsetFill ? *m_polygonOffsetFill : (m_definition ? m_definition->HasPolygonOffsetFill() : false);
+	return m_polygonOffsetFill ? *m_polygonOffsetFill : (m_material ? m_material->HasPolygonOffsetFill() : false);
 }
 
 
@@ -1835,13 +1823,13 @@ bool Rendering::Data::MaterialInstance::HasFeature(const std::string& p_feature)
 
 bool Rendering::Data::MaterialInstance::SupportsFeature(const std::string& p_feature) const
 {
-	return ShaderOf()->GetFeatures().contains(p_feature);
+	return MaterialOf()->GetFeatures().contains(p_feature);
 }
 
 
 bool Rendering::Data::MaterialInstance::HasPass(const std::string& p_pass) const
 {
-	return ShaderOf()->GetPasses().contains(p_pass);
+	return MaterialOf()->GetPasses().contains(p_pass);
 }
 
 
@@ -1898,9 +1886,9 @@ Rendering::Data::MaterialSignatureSet Rendering::Data::MaterialInstance::Calcula
 	// signature - a texture assigned in the material editor therefore never reached an instance
 	// that already existed (the preview, or a shape drawing with the asset), and the map looked
 	// like it did nothing until the material was reopened.
-	if (m_definition != nullptr)
+	if (m_material != nullptr)
 	{
-		HashCombine(signature.stablePropertySignature, m_definition->Revision());
+		HashCombine(signature.stablePropertySignature, m_material->Revision());
 	}
 	HashCombine(signature.stablePropertySignature, p_emptyTexture2D);
 	HashCombine(signature.stablePropertySignature, p_emptyTextureCube);
