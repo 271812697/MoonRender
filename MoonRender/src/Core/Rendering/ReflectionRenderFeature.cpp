@@ -181,9 +181,7 @@ void Core::Rendering::ReflectionRenderFeature::SendProbeData(
 {
 	p_material.SetProperty(
 		"_EnvironmentMap",
-		p_reflectionProbe.has_value() ? p_reflectionProbe->GetCubemap().get() : static_cast<::Rendering::HAL::TextureHandle*>(nullptr),
-		true
-	);
+		p_reflectionProbe.has_value() ? p_reflectionProbe->GetCubemap().get() : static_cast<::Rendering::HAL::TextureHandle*>(nullptr));
 }
 
 void Core::Rendering::ReflectionRenderFeature::BindProbe(const Core::ECS::Components::CReflectionProbe& p_reflectionProbe)
@@ -242,7 +240,7 @@ void Core::Rendering::ReflectionRenderFeature::OnBeforeDraw(::Rendering::Data::P
 		// No reflection probe in the scene: fall back to the skybox prefilter
 		// cube with a neutral probe UBO, so image-based lighting keeps working
 		// for materials like Standard.shader.
-		material.SetProperty("_EnvironmentMap", m_renderer.GetPrefilterCube(), true);
+		material.SetProperty("_EnvironmentMap", m_renderer.GetPrefilterCube());
 		m_defaultReflectionUbo->Bind(1);
 	}
 }

@@ -21,8 +21,8 @@ void Core::Rendering::PostProcess::TonemappingEffect::Draw(
 	const auto& tonemappingSettings = static_cast<const TonemappingSettings&>(p_settings);
 
 	// Tonemapping
-	m_tonemappingMaterial.SetProperty("_Exposure", tonemappingSettings.exposure, true);
-	m_tonemappingMaterial.SetProperty("_Mode", static_cast<int>(tonemappingSettings.mode), true);
-	m_tonemappingMaterial.SetProperty("_GammaCorrection", static_cast<int>(tonemappingSettings.gammaCorrection), true);
+	m_tonemappingMaterial.SetProperty("_Exposure", tonemappingSettings.exposure);
+	m_tonemappingMaterial.SetProperty("_Mode", static_cast<int>(tonemappingSettings.mode));
+	m_tonemappingMaterial.SetProperty("_GammaCorrection", static_cast<int>(tonemappingSettings.gammaCorrection));
 	m_renderer.Blit(p_pso, p_src, p_dst, m_tonemappingMaterial);
 }

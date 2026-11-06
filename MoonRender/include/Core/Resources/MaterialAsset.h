@@ -37,13 +37,13 @@ namespace Core::Resources
 		std::unique_ptr<::Rendering::Data::MaterialInstance> CreateInstance() const;
 
 		// ---- parameter API -------------------------------------------------------------
-		void SetProperty(const std::string p_name, const ::Rendering::Data::MaterialPropertyType& p_value, bool p_singleUse = false)
+		void SetProperty(const std::string p_name, const ::Rendering::Data::MaterialPropertyType& p_value)
 		{
-			Instance().SetProperty(p_name, p_value, p_singleUse);
+			Instance().SetProperty(p_name, p_value);
 		}
-		bool TrySetProperty(const std::string& p_name, const ::Rendering::Data::MaterialPropertyType& p_value, bool p_singleUse = false)
+		bool TrySetProperty(const std::string& p_name, const ::Rendering::Data::MaterialPropertyType& p_value)
 		{
-			return Instance().TrySetProperty(p_name, p_value, p_singleUse);
+			return Instance().TrySetProperty(p_name, p_value);
 		}
 		bool HasProperty(const std::string& p_name) const { return Instance().HasProperty(p_name); }
 		std::optional<::Rendering::Data::MaterialProperty> GetProperty(const std::string p_name) const

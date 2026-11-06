@@ -117,7 +117,7 @@ void Rendering::Overlay::Im3DGLRenderer::Draw(
 	p_material.Bind();
 	// Bind() only selects the program; this path bypasses ABaseRenderer::DrawEntity, so the
 	// uniforms have to be pushed here.
-	p_material.UploadProperties(true, true);
+	p_material.UploadProperties(true);
 
 	glDrawArrays(p_glPrimitive, 0, (GLsizei)p_vertexCount);
 }

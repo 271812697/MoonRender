@@ -116,6 +116,19 @@ void Rendering::Data::Material::SetDefinition(
 	std::shared_ptr<const MaterialDefinition> p_definition)
 {
 	m_definition = std::move(p_definition);
+	if (m_definition != nullptr)
+	{
+		for (const auto& featureVariants : m_variants | std::views::values)
+		{
+			for (const auto& program : featureVariants | std::views::values)
+			{
+				if (program != nullptr)
+				{
+					program->SetDescriptorBindings(m_definition->ProgramBindings());
+				}
+			}
+		}
+	}
 	m_defaultInstance->ResetProperties();
 	ResetStateToMaterial();
 }
@@ -199,7 +212,7 @@ Rendering::HAL::ShaderProgram& Rendering::Data::Material::GetVariant(
 		{
 			std::string error;
 			auto program = Rendering::Resources::Loaders::ShaderLoader::CompileVariant(
-				*parser, *chosen, &error);
+				*parser, *chosen, m_definition->ProgramBindings(), &error);
 			if (program == nullptr)
 			{
 				std::cerr << "[Material] " << path << ": " << error << std::endl;
@@ -254,6 +267,20 @@ void Rendering::Data::Material::SetVariants(Variants&& p_variants)
 	m_features.clear();
 	m_usesVariantKeys = false;
 	m_variantKeys.clear();
+
+	if (m_definition != nullptr)
+	{
+		for (const auto& featureVariants : m_variants | std::views::values)
+		{
+			for (const auto& program : featureVariants | std::views::values)
+			{
+				if (program != nullptr)
+				{
+					program->SetDescriptorBindings(m_definition->ProgramBindings());
+				}
+			}
+		}
+	}
 
 	for (const auto& [pass, featureVariants] : m_variants)
 	{

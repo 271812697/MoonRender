@@ -145,7 +145,7 @@ void Core::Rendering::PostProcess::BloomEffect::Draw(
 		::Rendering::HAL::Framebuffer& p_dst,
 		const Maths::FVector2& p_srcRes 
 	) {
-		m_downsamplingMaterial.SetProperty("_InputResolution", p_srcRes, true);
+		m_downsamplingMaterial.SetProperty("_InputResolution", p_srcRes);
 		m_renderer.Blit(p_pso, p_src, p_dst, m_downsamplingMaterial, DEFAULT & ~RESIZE_DST_TO_MATCH_SRC);
 	};
 
@@ -177,7 +177,7 @@ void Core::Rendering::PostProcess::BloomEffect::Draw(
 	upsamplingPSO.blendingDestFactor = ::Rendering::Settings::EBlendingFactor::ONE;
 	upsamplingPSO.blendingEquation = ::Rendering::Settings::EBlendingEquation::FUNC_ADD;
 
-	m_upsamplingMaterial.SetProperty("_FilterRadius", BloomConstants::kFilterRadius, true);
+	m_upsamplingMaterial.SetProperty("_FilterRadius", BloomConstants::kFilterRadius);
 
 	auto upsamplingPass = [&](
 		::Rendering::HAL::Framebuffer& p_src,

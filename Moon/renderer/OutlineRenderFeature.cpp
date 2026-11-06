@@ -232,7 +232,7 @@ void Editor::Rendering::OutlineRenderFeature::DrawModelOutline(
 		// Set the outline color property if it exists
 		if (targetMaterial.GetProperty("_OutlineColor"))
 		{
-			targetMaterial.SetProperty("_OutlineColor", p_color, true);
+			targetMaterial.SetProperty("_OutlineColor", p_color);
 		}
 
 		auto stateMask = targetMaterial.GenerateStateMask();

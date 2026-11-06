@@ -130,12 +130,6 @@ void Core::Resources::MaterialAsset::OnSerialize(tinyxml2::XMLDocument& p_doc, t
 
 	for (const auto& [name, prop] : SnapshotProperties())
 	{
-		// Skip serialization of this property if it is marked as single-use
-		if (prop.singleUse)
-		{
-			continue;
-		}
-
 		auto& value = prop.value;
 		tinyxml2::XMLNode* uniform = p_doc.NewElement("uniform");
 		uniformsNode->InsertEndChild(uniform);

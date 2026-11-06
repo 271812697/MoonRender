@@ -22,6 +22,13 @@ Rendering::HAL::GLShaderProgram::TShaderProgram() : m_context{ .id = glCreatePro
 
 }
 
+Rendering::HAL::GLShaderProgram::TShaderProgram(
+	const Rendering::Data::DescriptorSetInfo& p_bindings)
+	: TShaderProgram()
+{
+	m_context.SetDescriptorBindings(p_bindings);
+}
+
 template<>
 Rendering::HAL::GLShaderProgram::~TShaderProgram()
 {
@@ -29,8 +36,14 @@ Rendering::HAL::GLShaderProgram::~TShaderProgram()
 }
 
 template<>
-void Rendering::HAL::GLShaderProgram::Bind() const
+void Rendering::HAL::GLShaderProgram::Bind()
 {
+	// Filament's token idea: the program resolves its descriptor slots on first use, inside
+	// the program. Materials only select and bind it.
+	if (!m_context.descriptorSlotsInitialized && m_context.descriptorBindingsConfigured)
+	{
+		m_context.InitializeDescriptorBindings(m_context.id, m_context.descriptorBindings);
+	}
 	glUseProgram(m_context.id);
 }
 
@@ -44,6 +57,15 @@ template<>
 uint32_t Rendering::HAL::GLShaderProgram::GetID() const
 {
 	return m_context.id;
+}
+
+void Rendering::HAL::GLShaderProgramContext::SetDescriptorBindings(
+	const Rendering::Data::DescriptorSetInfo& p_bindings)
+{
+	descriptorBindings = p_bindings;
+	descriptorBindingsConfigured = true;
+	descriptorSlots.clear();
+	descriptorSlotsInitialized = false;
 }
 
 void Rendering::HAL::GLShaderProgramContext::InitializeDescriptorBindings(

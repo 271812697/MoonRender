@@ -26,7 +26,6 @@ namespace Rendering::Data
 	{
 		std::size_t bindSignature = 0;
 		std::size_t stablePropertySignature = 0;
-		std::size_t singleUsePropertySignature = 0;
 	};
 
 	/** A bindable set of parameter and state overrides for one Material definition.
@@ -58,9 +57,8 @@ namespace Rendering::Data
 		/** The package Material whose definition and variants this instance uses. */
 		Material* MaterialOf() const;
 
-		/** Bumped whenever this object's parameter values change. An instance compares it against
-		 * the value it last uploaded, which is how an edit on the definition reaches the instances
-		 * that inherit from it (they re-upload instead of using stale data). */
+		/** Bumped whenever this instance's parameter values change; the renderer hashes it to
+		 * decide whether the instance's own uniform block needs uploading. */
 		uint64_t Revision() const { return m_revision; }
 		/** True for the instance a Material owns (filament's default instance). */
 		bool IsDefaultInstance() const { return m_isDefaultInstance; }
@@ -84,7 +82,7 @@ namespace Rendering::Data
 			Rendering::HAL::Texture* p_emptyTextureCube = nullptr,
 			std::optional<const std::string_view> p_pass = std::nullopt,
 			Tools::Utils::OptRef<const Data::FeatureSet> p_featureSetOverride = std::nullopt,
-			std::optional<MaterialSignatureSet> p_previousMaterialSignature = std::nullopt
+			const std::optional<MaterialSignatureSet>& p_previousMaterialSignature = std::nullopt
 		);
 
 		void Unbind(bool p_resetBoundProgram = false);
@@ -93,7 +91,6 @@ namespace Rendering::Data
 		 * units here; the engine-global ones are bound per draw by the renderer instead. */
 		void UploadProperties(
 			bool uploadStableProperties,
-			bool uploadSingleUseProperties,
 			Rendering::HAL::Texture* p_emptyTexture2D = nullptr,
 			Rendering::HAL::Texture* p_emptyTextureCube = nullptr,
 			Rendering::HAL::Texture* p_flatNormalTexture = nullptr
@@ -102,8 +99,8 @@ namespace Rendering::Data
 		/** Re-reads the property values of textures that were assigned by path. */
 		void UpdateProperties();
 
-		void SetProperty(const std::string p_name, const MaterialPropertyType& p_value, bool p_singleUse = false);
-		bool TrySetProperty(const std::string& p_name, const MaterialPropertyType& p_value, bool p_singleUse = false);
+		void SetProperty(const std::string p_name, const MaterialPropertyType& p_value);
+		bool TrySetProperty(const std::string& p_name, const MaterialPropertyType& p_value);
 		bool HasProperty(const std::string& p_name) const;
 		bool ResetPropertyToDefault(const std::string& p_name);
 		std::optional<MaterialProperty> GetProperty(const std::string p_name) const;
@@ -207,7 +204,6 @@ namespace Rendering::Data
 		void BindParameterBlock(const Rendering::HAL::ShaderProgram& p_program);
 		void UploadParameterBlock(
 			bool p_uploadStableProperties,
-			bool p_uploadSingleUseProperties,
 			Rendering::HAL::Texture* p_emptyTexture2D,
 			Rendering::HAL::Texture* p_emptyTextureCube,
 			Rendering::HAL::Texture* p_flatNormalTexture
@@ -215,12 +211,10 @@ namespace Rendering::Data
 		void EnsureDescriptorSet() const;
 		void ReleaseDescriptorSet();
 		void ResetBlockToDefinition();
-		void MergeDefaults();
 		void InitializeDefaultState();
-		void ResetSingleUseProperties();
 		LooseUniform* FindLooseUniform(const std::string& p_name);
 		const LooseUniform* FindLooseUniform(const std::string& p_name) const;
-		void SetLooseUniform(const std::string& p_name, const MaterialPropertyType& p_value, bool p_singleUse);
+		void SetLooseUniform(const std::string& p_name, const MaterialPropertyType& p_value);
 		MaterialSignatureSet CalculateSignature(
 			Rendering::HAL::ShaderProgram& p_selectedProgram,
 			Rendering::HAL::Texture* p_emptyTexture2D = nullptr,
@@ -232,11 +226,7 @@ namespace Rendering::Data
 		bool m_isDefaultInstance = false;
 		Data::FeatureSet m_features;
 		uint64_t m_revision = 0;
-		uint64_t m_seenDefinitionRevision = 0;
-		uint64_t m_seenDefaultsRevision = 0;
-		bool m_defaultsDirty = true;
 		size_t m_stablePropertySignatureVersion = 0ULL;
-		size_t m_singleUsePropertySignatureVersion = 0ULL;
 		Tools::Utils::OptRef<Rendering::HAL::ShaderProgram> m_programInUse = std::nullopt;
 
 		/** The PerMaterial binding set: one uniform-block range plus a texture per sampler. The
@@ -250,17 +240,10 @@ namespace Rendering::Data
 		{
 			std::string name;
 			MaterialPropertyType value;
-			bool singleUse = false;
 		};
 		/** Source-built shaders have no package block; these uniforms are uploaded through the
 		 * program's reflected uniform locations instead of a UBO range. */
 		std::vector<LooseUniform> m_looseUniforms;
-		/** Which parameters this instance actually overrides; everything else is merged from
-		 * the material's default instance on upload. */
-		std::unordered_set<std::string> m_overriddenUniforms;
-		std::unordered_set<uint32_t> m_overriddenSamplers;
-		std::unordered_set<std::string> m_singleUseUniforms;
-		std::unordered_set<uint32_t> m_singleUseSamplers;
 
 		// Render state, Filament's way: the definition holds the values its material block declared
 		// (and the engine defaults for the rest); a plain instance stores only the fields it

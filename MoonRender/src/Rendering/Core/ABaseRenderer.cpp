@@ -374,7 +374,7 @@ void Rendering::Core::ABaseRenderer::Present(Rendering::Data::MaterialInstance& 
 		// Bind() only selects the program now; callers that do not go through
 		// DrawEntity have to push the uniforms themselves, otherwise the
 		// samplers keep their default value and the blit samples garbage.
-		material->UploadProperties(true, true);
+		material->UploadProperties(true);
 		m_driver.Draw(pso, mesh.value(), blit.primitiveMode, gpuInstances);
 		material->Unbind();
 	}
@@ -482,13 +482,11 @@ void Rendering::Core::ABaseRenderer::DrawEntity(
 		}
 	}
 	const bool uploadStableProperties = !m_previousMaterialSignature.has_value() || signature.stablePropertySignature != m_previousMaterialSignature->stablePropertySignature;
-	const bool uploadSingleUseProperties = !m_previousMaterialSignature.has_value() || signature.singleUsePropertySignature != m_previousMaterialSignature->singleUsePropertySignature;
 
-	if (uploadStableProperties || uploadSingleUseProperties)
+	if (uploadStableProperties)
 	{
 		p_drawable.material->UploadProperties(
-			uploadStableProperties,
-			uploadSingleUseProperties,
+			true,
 			&m_emptyTexture2D,
 			&m_emptyTextureCube,
 			&m_flatNormalTexture

@@ -32,7 +32,7 @@ namespace
 		// Set the picking color property if it exists
 		if (p_material.GetProperty(p_uniformName))
 		{
-			p_material.SetProperty(p_uniformName, color, true);
+			p_material.SetProperty(p_uniformName, color);
 		}
 	}
 }

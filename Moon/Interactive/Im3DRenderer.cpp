@@ -744,7 +744,7 @@ namespace MOON
 				}
 				mTextMaterial->SetProperty("uAtlas", texture);
 				mTextMaterial->Bind(&mEmptyTexture2D, &mEmptyTextureCube);
-				mTextMaterial->UploadProperties(true, true, &mEmptyTexture2D, &mEmptyTextureCube);
+				mTextMaterial->UploadProperties(true, &mEmptyTexture2D, &mEmptyTextureCube);
 				m_overlayGl.Draw(*mTextMaterial, GL_TRIANGLES, false,
 					textVertexArray.data() + run.first, run.count, sizeof(VertexFormat),
 					viewProjT.data(), cameraParam.viewportWidth, cameraParam.viewportHeight);
@@ -4523,7 +4523,7 @@ namespace MOON
 			mCellMaterial->SetProperty("uViewPortSize", Maths::FVector2(viewCube.screenPos.viewportSizeX, viewCube.screenPos.viewportSizeY));
 			mCellMaterial->SetProperty("uViewPortStart", Maths::FVector2(viewCube.screenPos.startX, viewCube.screenPos.startY));
 			mCellMaterial->Bind(&mEmptyTexture2D, &mEmptyTextureCube);
-			mCellMaterial->UploadProperties(true, true, &mEmptyTexture2D, &mEmptyTextureCube);
+			mCellMaterial->UploadProperties(true, &mEmptyTexture2D, &mEmptyTextureCube);
 			viewCube.bind();
 			m_overlayGl.DrawBoundTriangles(viewCube.numVertex,
 				viewPortX, viewPortY, viewCube.screenPos.viewportSizeX, viewCube.screenPos.viewportSizeY);
@@ -4531,7 +4531,7 @@ namespace MOON
 			mCellMaterial->SetProperty("uModelMatrix", ToFMatrix4(viewAxis.model));
 			mCellMaterial->SetProperty("edgeTexture", viewAxis.edgeTexture);
 			mCellMaterial->Bind(&mEmptyTexture2D, &mEmptyTextureCube);
-			mCellMaterial->UploadProperties(true, true, &mEmptyTexture2D, &mEmptyTextureCube);
+			mCellMaterial->UploadProperties(true, &mEmptyTexture2D, &mEmptyTextureCube);
 			viewAxis.bind();
 			m_overlayGl.DrawBoundTriangles(viewAxis.numVertex);
 			{
@@ -4553,7 +4553,7 @@ namespace MOON
 			mCellMaterial->SetProperty("u_AlbedoMap",polygon->texture);
 				mCellMaterial->SetProperty("blockTexture", polygon->blockTexture);
 				mCellMaterial->Bind(&mEmptyTexture2D, &mEmptyTextureCube);
-				mCellMaterial->UploadProperties(true, true, &mEmptyTexture2D, &mEmptyTextureCube);
+				mCellMaterial->UploadProperties(true, &mEmptyTexture2D, &mEmptyTextureCube);
 				polygon->bind();
 			m_overlayGl.DrawBoundTriangles(polygon->numVertex);
 		}
@@ -4575,7 +4575,7 @@ namespace MOON
 			mCellMaterial->SetProperty("blockTexture", polygon->blockTexture);
 			mCellMaterial->SetProperty("polygonId", polygon->getId());
 			mCellMaterial->Bind(&mEmptyTexture2D, &mEmptyTextureCube, "PICKING_PASS");
-			mCellMaterial->UploadProperties(true, true, &mEmptyTexture2D, &mEmptyTextureCube);
+			mCellMaterial->UploadProperties(true, &mEmptyTexture2D, &mEmptyTextureCube);
 			
 			polygon->bind();
 			m_overlayGl.DrawBoundTriangles(polygon->numVertex);

@@ -59,6 +59,7 @@ namespace Rendering::Resources::Loaders
 		static std::shared_ptr<Rendering::HAL::ShaderProgram> CompileVariant(
 			const Rendering::Data::MaterialParser& p_package,
 			const Rendering::Data::MaterialParser::Variant& p_variant,
+			const Rendering::Data::DescriptorSetInfo& p_bindings,
 			std::string* p_error = nullptr);
 	};
 }

@@ -39,6 +39,8 @@ namespace Rendering::HAL
 		*/
 		TShaderProgram();
 
+		explicit TShaderProgram(const Rendering::Data::DescriptorSetInfo& p_bindings);
+
 		/**
 		* Destroys a shader program.
 		*/
@@ -70,7 +72,7 @@ namespace Rendering::HAL
 		/**
 		* Binds the program.
 		*/
-		void Bind() const;
+		void Bind();
 
 		/**
 		* Unbinds the program.
@@ -109,11 +111,10 @@ namespace Rendering::HAL
 		*/
 		void QueryUniforms();
 
-		/** Lazily assigns descriptor slots and tells the shader which slot each block/sampler
-		 * uses. Called the first time a variant is bound with its material layout. */
-		void InitializeDescriptorBindings(const Rendering::Data::DescriptorSetInfo& p_bindings)
+		/** Stores the descriptor layout; Bind() resolves it lazily on first use. */
+		void SetDescriptorBindings(const Rendering::Data::DescriptorSetInfo& p_bindings)
 		{
-			m_context.InitializeDescriptorBindings(m_context.id, p_bindings);
+			m_context.SetDescriptorBindings(p_bindings);
 		}
 
 		bool HasDescriptorBindings() const { return m_context.descriptorSlotsInitialized; }

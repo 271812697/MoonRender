@@ -86,13 +86,13 @@ namespace Rendering::Data
 		void ResetStateToMaterial();
 
 		// ---- parameter / texture API, forwarded to the default instance -------------------
-		void SetProperty(const std::string p_name, const MaterialPropertyType& p_value, bool p_singleUse = false)
+		void SetProperty(const std::string p_name, const MaterialPropertyType& p_value)
 		{
-			m_defaultInstance->SetProperty(p_name, p_value, p_singleUse);
+			m_defaultInstance->SetProperty(p_name, p_value);
 		}
-		bool TrySetProperty(const std::string& p_name, const MaterialPropertyType& p_value, bool p_singleUse = false)
+		bool TrySetProperty(const std::string& p_name, const MaterialPropertyType& p_value)
 		{
-			return m_defaultInstance->TrySetProperty(p_name, p_value, p_singleUse);
+			return m_defaultInstance->TrySetProperty(p_name, p_value);
 		}
 		bool HasProperty(const std::string& p_name) const { return m_defaultInstance->HasProperty(p_name); }
 		bool ResetPropertyToDefault(const std::string& p_name)
@@ -125,7 +125,7 @@ namespace Rendering::Data
 			Rendering::HAL::Texture* p_emptyTextureCube = nullptr,
 			std::optional<const std::string_view> p_pass = std::nullopt,
 			Tools::Utils::OptRef<const Data::FeatureSet> p_featureSetOverride = std::nullopt,
-			std::optional<MaterialSignatureSet> p_previousMaterialSignature = std::nullopt)
+			const std::optional<MaterialSignatureSet>& p_previousMaterialSignature = std::nullopt)
 		{
 			return m_defaultInstance->Bind(p_emptyTexture2D, p_emptyTextureCube, p_pass,
 				p_featureSetOverride, p_previousMaterialSignature);
@@ -133,12 +133,11 @@ namespace Rendering::Data
 		void Unbind(bool p_resetBoundProgram = false) { m_defaultInstance->Unbind(p_resetBoundProgram); }
 		void UploadProperties(
 			bool uploadStableProperties,
-			bool uploadSingleUseProperties,
 			Rendering::HAL::Texture* p_emptyTexture2D = nullptr,
 			Rendering::HAL::Texture* p_emptyTextureCube = nullptr,
 			Rendering::HAL::Texture* p_flatNormalTexture = nullptr)
 		{
-			m_defaultInstance->UploadProperties(uploadStableProperties, uploadSingleUseProperties,
+			m_defaultInstance->UploadProperties(uploadStableProperties,
 				p_emptyTexture2D, p_emptyTextureCube, p_flatNormalTexture);
 		}
 

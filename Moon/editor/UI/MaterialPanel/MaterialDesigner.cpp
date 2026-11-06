@@ -1671,7 +1671,7 @@ namespace MOON
 		// the restored values on the next frame.
 		for (const auto& [name, property] : p_snapshot.properties)
 		{
-			m_material->SetProperty(name, property.value, property.singleUse);
+			m_material->SetProperty(name, property.value);
 		}
 		m_material->SetFeatures(p_snapshot.features);
 		m_material->SetBlendable(p_snapshot.blendable);

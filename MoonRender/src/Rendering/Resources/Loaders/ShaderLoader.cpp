@@ -1217,6 +1217,7 @@ namespace Rendering::Resources::Loaders
 	std::shared_ptr<Rendering::HAL::ShaderProgram> ShaderLoader::CompileVariant(
 		const Rendering::Data::MaterialParser& p_parser,
 		const Rendering::Data::MaterialParser::Variant& p_variant,
+		const Rendering::Data::DescriptorSetInfo& p_bindings,
 		std::string* p_error)
 	{
 		using Stage = Rendering::Data::MaterialParser::Stage;
@@ -1263,7 +1264,7 @@ namespace Rendering::Resources::Loaders
 			stages.push_back(std::move(stage));
 		}
 
-		auto program = std::make_shared<Rendering::HAL::ShaderProgram>();
+		auto program = std::make_shared<Rendering::HAL::ShaderProgram>(p_bindings);
 		for (const auto& stage : stages) { program->Attach(*stage); }
 		const auto linkResult = program->Link();
 		for (const auto& stage : stages) { program->Detach(*stage); }
