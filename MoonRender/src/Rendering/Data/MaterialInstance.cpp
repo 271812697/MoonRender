@@ -455,56 +455,6 @@ namespace
 		if (p_type == "mat4") { return 64; }
 		return 0;
 	}
-
-	/** Splits "samples[17]" into its base name and element index; no brackets means index 0. */
-	bool ParseParameterName(const std::string& p_name, std::string& p_base, uint32_t& p_index)
-	{
-		p_base = p_name;
-		p_index = 0;
-		const size_t open = p_name.rfind('[');
-		if (open == std::string::npos || p_name.back() != ']')
-		{
-			return true;
-		}
-		const std::string_view indexText(p_name.data() + open + 1,
-			p_name.size() - open - 2);
-		if (indexText.empty())
-		{
-			return false;
-		}
-		uint32_t index = 0;
-		for (const char c : indexText)
-		{
-			if (!std::isdigit(static_cast<unsigned char>(c)))
-			{
-				return false;
-			}
-			index = index * 10 + static_cast<uint32_t>(c - '0');
-		}
-		p_base = p_name.substr(0, open);
-		p_index = index;
-		return true;
-	}
-
-	const Rendering::Data::MaterialDefinition::Parameter* FindParameter(
-		const Rendering::Data::MaterialDefinition* p_definition,
-		const std::string& p_name,
-		uint32_t& p_index)
-	{
-		std::string base;
-		if (p_definition == nullptr || !ParseParameterName(p_name, base, p_index))
-		{
-			return nullptr;
-		}
-		for (const Rendering::Data::MaterialDefinition::Parameter& parameter : p_definition->Parameters())
-		{
-			if (parameter.name == base)
-			{
-				return &parameter;
-			}
-		}
-		return nullptr;
-	}
 }
 
 
@@ -656,7 +606,7 @@ Rendering::Data::MaterialInstance::GetProperty(const std::string p_key) const
 	const MaterialDefinition* definition = Definition();
 	uint32_t index = 0;
 	const MaterialDefinition::Parameter* parameter =
-		definition != nullptr ? FindParameter(definition, p_key, index) : nullptr;
+		definition != nullptr ? definition->FindParameter(p_key, index) : nullptr;
 
 	if (parameter != nullptr)
 	{
@@ -708,26 +658,7 @@ const Rendering::Data::MaterialDefinition* Rendering::Data::MaterialInstance::De
 }
 
 
-Tools::Utils::OptRef<Rendering::HAL::ShaderProgram> Rendering::Data::MaterialInstance::GetVariant(
-	std::optional<const std::string_view> p_pass,
-	Tools::Utils::OptRef<const Data::FeatureSet> p_override
-) const
-{
-	if (MaterialOf() != nullptr)
-	{
-		auto& program = MaterialOf()->GetVariant(
-			p_pass,
-			p_override.value_or(FeaturesOf())
-		);
-		if (Definition() != nullptr)
-		{
-			program.InitializeDescriptorBindings(Definition()->ProgramBindings());
-		}
-		return program;
-	}
 
-	return std::nullopt;
-}
 
 
 void Rendering::Data::MaterialInstance::UploadProperties(bool uploadStableProperties, bool uploadSingleUseProperties, Rendering::HAL::Texture* p_emptyTexture2D, Rendering::HAL::Texture* p_emptyTextureCube, Rendering::HAL::Texture* p_flatNormalTexture)
@@ -759,14 +690,12 @@ void Rendering::Data::MaterialInstance::UploadProperties(bool uploadStableProper
 	{
 		if (definition != nullptr)
 		{
-			for (const MaterialDefinition::Parameter& parameter : definition->Parameters())
+			const MaterialDefinition::SamplerField* sampler = definition->FindSampler(p_name);
+			if (sampler != nullptr
+				&& sampler->fallback == static_cast<uint8_t>(Rendering::Data::MaterialParser::SamplerFallback::FlatNormal)
+				&& p_flatNormalTexture != nullptr)
 			{
-				if (parameter.isSampler && parameter.name == p_name
-					&& parameter.fallback == static_cast<uint8_t>(Rendering::Data::MaterialParser::SamplerFallback::FlatNormal)
-					&& p_flatNormalTexture != nullptr)
-				{
-					return p_flatNormalTexture;
-				}
+				return p_flatNormalTexture;
 			}
 		}
 		return p_isCube ? p_emptyTextureCube : p_emptyTexture2D;
@@ -776,18 +705,8 @@ void Rendering::Data::MaterialInstance::UploadProperties(bool uploadStableProper
 	// u_ReceiveShadows) are not in the block: they still go through the per-name path below,
 	// while the declared ones were written by UploadParameterBlock.
 	const auto isDeclaredParameter = [definition](const std::string& p_name) {
-		if (definition == nullptr)
-		{
-			return false;
-		}
-		for (const MaterialDefinition::Parameter& parameter : definition->Parameters())
-		{
-			if (parameter.name == p_name || p_name.starts_with(parameter.name + "["))
-			{
-				return true;
-			}
-		}
-		return false;
+		uint32_t index = 0;
+		return definition != nullptr && definition->FindParameter(p_name, index) != nullptr;
 	};
 
 	using namespace Maths;
@@ -795,19 +714,15 @@ void Rendering::Data::MaterialInstance::UploadProperties(bool uploadStableProper
 	auto& program = m_programInUse.value();
 
 	// Loose uniforms of a source-built shader; the program's reflected uniform locations decide
-	// how each typed value is uploaded.
-	std::map<std::string, MaterialProperty> looseProperties;
-	for (const LooseUniform& uniform : m_looseUniforms)
-	{
-		looseProperties.emplace(uniform.name,
-			MaterialProperty{ uniform.value, uniform.singleUse });
-	}
-
+	// how each typed value is uploaded. SetLooseUniform keeps one entry per name, so the vector
+	// is walked directly instead of rebuilding a map on every upload.
 	int textureSlot = 0;
-	for (auto& [name, prop] : looseProperties)
+	for (LooseUniform& uniform : m_looseUniforms)
 	{
-		if (!uploadStableProperties && !prop.singleUse) continue;
-		if (!uploadSingleUseProperties && prop.singleUse) continue;
+		const std::string& name = uniform.name;
+		MaterialPropertyType& value = uniform.value;
+		if (!uploadStableProperties && !uniform.singleUse) continue;
+		if (!uploadSingleUseProperties && uniform.singleUse) continue;
 		if (hasDefinitionParameters && isDeclaredParameter(name)) continue;
 
 		const auto uniformData = program.GetUniformInfo(name);
@@ -818,7 +733,6 @@ void Rendering::Data::MaterialInstance::UploadProperties(bool uploadStableProper
 			continue;
 		}
 
-		auto& value = prop.value;
 		auto uniformType = uniformData.value().type;
 
 		// Iterating over the properties to set them in the shader.
@@ -884,13 +798,10 @@ void Rendering::Data::MaterialInstance::UploadProperties(bool uploadStableProper
 				textureSlot);
 		}
 
-		if (prop.singleUse)
+		if (uniform.singleUse)
 		{
 			value = UniformToPropertyValue(uniformData->defaultValue);
-			if (LooseUniform* stored = FindLooseUniform(name))
-			{
-				stored->value = value;
-			}
+			uniform.singleUse = false;
 		}
 	}
 }
@@ -990,11 +901,10 @@ void Rendering::Data::MaterialInstance::ResetBlockToDefinition()
 
 	for (const MaterialDefinition::UniformField& field : definition->UniformFields())
 	{
-		const auto parameter = std::ranges::find_if(definition->Parameters(),
-			[&field](const MaterialDefinition::Parameter& p_parameter) {
-				return p_parameter.name == field.name;
-			});
-		if (parameter == definition->Parameters().end())
+		uint32_t arrayIndex = 0;
+		const MaterialDefinition::Parameter* parameter =
+			definition->FindParameter(field.name, arrayIndex);
+		if (parameter == nullptr)
 		{
 			continue;
 		}
@@ -1111,7 +1021,7 @@ void Rendering::Data::MaterialInstance::ResetSingleUseProperties()
 		for (const std::string& name : m_singleUseUniforms)
 		{
 			uint32_t index = 0;
-			const MaterialDefinition::Parameter* parameter = FindParameter(definition, name, index);
+			const MaterialDefinition::Parameter* parameter = definition->FindParameter(name, index);
 			if (parameter == nullptr || parameter->isSampler)
 			{
 				continue;
@@ -1248,16 +1158,31 @@ void Rendering::Data::MaterialInstance::BindGlobalTexture(const std::string& p_n
 		return;
 	}
 
+	// On the first draw the set may not exist yet; initialize it before writing the view
+	// texture, otherwise EnsureDescriptorSet would reset the layout and drop it.
+	if (m_descriptorSet.Layout() != &Definition()->Layout())
+	{
+		EnsureDescriptorSet();
+	}
+
 	if (const MaterialDefinition::SamplerField* field = Definition()->FindSampler(p_name))
 	{
+		// The same view texture is bound every draw; only touch the set when the pointer
+		// actually changed or the slot was rebuilt.
+		if (m_descriptorSet.GetTexture(field->binding) == p_texture
+			&& m_overriddenSamplers.contains(field->binding))
+		{
+			return;
+		}
+
 		// Remember it in the set as well: the next Bind() must not put back whatever the
 		// material's own upload recorded for this slot.
 		m_descriptorSet.SetTexture(field->binding, p_texture);
 		m_overriddenSamplers.insert(field->binding);
-		if (m_programInUse)
-		{
-			m_descriptorSet.Bind(m_programInUse.value(), kPerMaterialDescriptorSet);
-		}
+
+		// The descriptor set is bound once by BindParameterBlock after the per-view textures
+		// have been filled; binding it here for every global texture meant 3 extra full-set
+		// binds per draw.
 
 		// MOON_DEBUG_SAMPLERS also reports the per-draw bindings: the ones in UploadParameterBlock
 		// happen once (and may have run before the sky pass baked the environment), while these
@@ -1265,10 +1190,11 @@ void Rendering::Data::MaterialInstance::BindGlobalTexture(const std::string& p_n
 		if (std::getenv("MOON_DEBUG_SAMPLERS") != nullptr)
 		{
 			static std::set<std::string> reported;
-			const std::string key = MaterialOf()->path + "|draw|" + field->name;
+			const std::string materialPath = MaterialOf() != nullptr ? MaterialOf()->path : std::string("?");
+			const std::string key = materialPath + "|draw|" + field->name;
 			if (reported.insert(key).second)
 			{
-				std::cout << "[Sampler] " << MaterialOf()->path << " " << field->name << " unit "
+				std::cout << "[Sampler] " << materialPath << " " << field->name << " unit "
 					<< field->binding << " <- view texture (per draw)" << std::endl;
 			}
 		}
@@ -1311,7 +1237,7 @@ bool Rendering::Data::MaterialInstance::ResetPropertyToDefault(const std::string
 	}
 
 	uint32_t index = 0;
-	const MaterialDefinition::Parameter* parameter = FindParameter(definition, p_name, index);
+	const MaterialDefinition::Parameter* parameter = definition->FindParameter(p_name, index);
 	if (parameter == nullptr)
 	{
 		if (FindLooseUniform(p_name) != nullptr)
@@ -1396,13 +1322,19 @@ Rendering::Data::MaterialSignatureSet Rendering::Data::MaterialInstance::Bind(
 )
 {
 	ZoneScoped;
-	auto& program = MaterialOf()->GetVariant(
+	Material* material = MaterialOf();
+	if (material == nullptr)
+	{
+		return {};
+	}
+	auto& program = material->GetVariant(
 		p_pass,
 		p_featureSetOverride.value_or(FeaturesOf())
 	);
-	if (Definition() != nullptr)
+	const MaterialDefinition* definition = Definition();
+	if (definition != nullptr)
 	{
-		program.InitializeDescriptorBindings(Definition()->ProgramBindings());
+		program.InitializeDescriptorBindings(definition->ProgramBindings());
 	}
 
 	const auto signature = CalculateSignature(
@@ -1431,7 +1363,7 @@ Rendering::Data::MaterialSignatureSet Rendering::Data::MaterialInstance::Bind(
 
 void Rendering::Data::MaterialInstance::Unbind(bool p_resetBoundProgram)
 {
-	if (p_resetBoundProgram)
+	if (p_resetBoundProgram && m_programInUse)
 	{
 		m_programInUse->Unbind();
 	}
@@ -1444,7 +1376,7 @@ bool Rendering::Data::MaterialInstance::HasProperty(const std::string& p_name) c
 {
 	const MaterialDefinition* definition = Definition();
 	uint32_t index = 0;
-	return (definition != nullptr && FindParameter(definition, p_name, index) != nullptr)
+	return (definition != nullptr && definition->FindParameter(p_name, index) != nullptr)
 		|| FindLooseUniform(p_name) != nullptr;
 }
 
@@ -1454,7 +1386,7 @@ void Rendering::Data::MaterialInstance::SetProperty(const std::string p_name, co
 	const MaterialDefinition* definition = Definition();
 	uint32_t index = 0;
 	const MaterialDefinition::Parameter* parameter =
-		definition != nullptr ? FindParameter(definition, p_name, index) : nullptr;
+		definition != nullptr ? definition->FindParameter(p_name, index) : nullptr;
 
 	if (parameter != nullptr)
 	{
@@ -1823,13 +1755,15 @@ bool Rendering::Data::MaterialInstance::HasFeature(const std::string& p_feature)
 
 bool Rendering::Data::MaterialInstance::SupportsFeature(const std::string& p_feature) const
 {
-	return MaterialOf()->GetFeatures().contains(p_feature);
+	const Material* material = MaterialOf();
+	return material != nullptr && material->GetFeatures().contains(p_feature);
 }
 
 
 bool Rendering::Data::MaterialInstance::HasPass(const std::string& p_pass) const
 {
-	return MaterialOf()->GetPasses().contains(p_pass);
+	const Material* material = MaterialOf();
+	return material != nullptr && material->GetPasses().contains(p_pass);
 }
 
 

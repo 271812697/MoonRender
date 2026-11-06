@@ -4,6 +4,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <unordered_set>
 #include <Rendering/Data/MaterialProperty.h>
 #include <Rendering/Data/DescriptorSet.h>
 #include <Rendering/Data/StateMask.h>
@@ -30,15 +31,8 @@ namespace Rendering::Data
 
 	/** A bindable set of parameter and state overrides for one Material definition.
 	 *
-	 * Filament splits the two: `Material` is the compiled program plus its defaults, and
-	 * `MaterialInstance` is what a drawable actually draws with - it can override every parameter
-	 * and a handful of render states (culling, depth write, polygon offset, ...). We had one class
-	 * doing both, which meant every actor that needed a different `domainColorTex` or line width
-	 * had to own a full material (its own shader pointer, its own feature set, its own state).
-	 *
-	 * Filament splits the two: `Material` owns the immutable MaterialDefinition and the
-	 * default instance; a MaterialInstance holds only its own values and descriptor set.
-	 */
+	 * Filament's split: Material owns the immutable MaterialDefinition, its default instance
+	 * and the variants; MaterialInstance owns only its values and its descriptor set. */
 	class MaterialInstance
 	{
 	public:
@@ -71,20 +65,12 @@ namespace Rendering::Data
 		/** True for the instance a Material owns (filament's default instance). */
 		bool IsDefaultInstance() const { return m_isDefaultInstance; }
 
-		/** The definition's material and feature set: what a variant is selected from. */
-
-		/** The immutable package data behind Shader(): block layout, sampler fields and state.
-		 * An instance reads offsets and units from here; the shader only owns the programs. */
+		/** The immutable package data: block layout, sampler fields, state and variants. */
 		const MaterialDefinition* Definition() const;
 
 		/** Re-reads a texture assigned by path (the designer saves a path, not a handle). */
 		void LateUpdateTexture(const std::string& p_name, const std::string& p_path);
 		const Data::FeatureSet& Features() const { return FeaturesOf(); }
-
-		/** The program for a pass and a feature set, resolved through the definition's shader. */
-		Tools::Utils::OptRef<Rendering::HAL::ShaderProgram> GetVariant(
-			std::optional<const std::string_view> p_pass = std::nullopt,
-			Tools::Utils::OptRef<const Data::FeatureSet> p_override = std::nullopt) const;
 
 		Rendering::HAL::ShaderProgram* BoundProgram() const
 		{
@@ -137,11 +123,11 @@ namespace Rendering::Data
 		 * defaults when a plain instance is created). */
 		Rendering::HAL::TextureHandle* GetTexture(uint32_t p_binding) const
 		{
-			return const_cast<DescriptorSet&>(m_descriptorSet).GetTexture(p_binding);
+			return m_descriptorSet.GetTexture(p_binding);
 		}
 		Rendering::Resources::Texture* GetTextureAsset(uint32_t p_binding) const
 		{
-			return const_cast<DescriptorSet&>(m_descriptorSet).GetTextureAsset(p_binding);
+			return m_descriptorSet.GetTextureAsset(p_binding);
 		}
 		const std::vector<uint8_t>& BufferData() const { return m_uniformData; }
 		uint32_t BufferSize() const { return static_cast<uint32_t>(m_uniformData.size()); }
@@ -271,10 +257,10 @@ namespace Rendering::Data
 		std::vector<LooseUniform> m_looseUniforms;
 		/** Which parameters this instance actually overrides; everything else is merged from
 		 * the material's default instance on upload. */
-		std::set<std::string> m_overriddenUniforms;
-		std::set<uint32_t> m_overriddenSamplers;
-		std::set<std::string> m_singleUseUniforms;
-		std::set<uint32_t> m_singleUseSamplers;
+		std::unordered_set<std::string> m_overriddenUniforms;
+		std::unordered_set<uint32_t> m_overriddenSamplers;
+		std::unordered_set<std::string> m_singleUseUniforms;
+		std::unordered_set<uint32_t> m_singleUseSamplers;
 
 		// Render state, Filament's way: the definition holds the values its material block declared
 		// (and the engine defaults for the rest); a plain instance stores only the fields it

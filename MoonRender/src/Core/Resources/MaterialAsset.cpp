@@ -128,34 +128,8 @@ void Core::Resources::MaterialAsset::OnSerialize(tinyxml2::XMLDocument& p_doc, t
 		return;
 	}
 
-	const auto program = GetVariant();
-
-	// Block members are not in the program's reflected uniform map (they have no individual
-	// location); the material's parameter table is what says the material has them.
-	const auto isDeclaredParameter = [this](const std::string& p_name) {
-		if (MaterialOf() == nullptr)
-		{
-			return false;
-		}
-		for (const Rendering::Data::Material::Parameter& parameter : MaterialOf()->GetParameters())
-		{
-			if (parameter.name == p_name || p_name.starts_with(parameter.name + "["))
-			{
-				return true;
-			}
-		}
-		return false;
-	};
-
 	for (const auto& [name, prop] : SnapshotProperties())
 	{
-		// Skip serialization of this property if neither the parameter table nor the current
-		// program knows it.
-		if (!isDeclaredParameter(name) && (!program || !program->GetUniformInfo(name)))
-		{
-			continue;
-		}
-
 		// Skip serialization of this property if it is marked as single-use
 		if (prop.singleUse)
 		{

@@ -3,6 +3,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <Rendering/Data/DescriptorSetLayout.h>
@@ -118,17 +119,24 @@ namespace Rendering::Data
 		const SamplerField* FindSampler(const std::string& p_name) const;
 		/** The uniform field with that name, or nullptr. */
 		const UniformField* FindUniform(const std::string& p_name) const;
+		/** The reflected parameter for a name ("u_Color" or "u_Colors[2]"); p_index receives
+		 * the array element index. */
+		const Parameter* FindParameter(const std::string& p_name, uint32_t& p_index) const;
 
 	private:
 		MaterialDefinition() = default;
 		static std::shared_ptr<const MaterialDefinition> BuildFromParser(
 			MaterialParser& p_parser);
+		void BuildLookupTables();
 
 		std::string m_name;
 		std::shared_ptr<const MaterialParser> m_parser;
 		std::vector<Parameter> m_parameters;
 		std::vector<UniformField> m_uniformFields;
 		std::vector<SamplerField> m_samplerFields;
+		std::unordered_map<std::string, uint32_t> m_parameterIndex;
+		std::unordered_map<std::string, uint32_t> m_uniformIndex;
+		std::unordered_map<std::string, uint32_t> m_samplerIndex;
 		DescriptorSetLayout m_layout;
 		DescriptorSetInfo m_programBindings;
 		State m_state;

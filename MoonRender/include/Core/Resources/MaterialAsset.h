@@ -61,13 +61,6 @@ namespace Core::Resources
 		void ResetProperties() { Instance().ResetProperties(); }
 		const ::Rendering::Data::MaterialDefinition* Definition() const { return Instance().Definition(); }
 
-		Tools::Utils::OptRef<::Rendering::HAL::ShaderProgram> GetVariant(
-			std::optional<const std::string_view> p_pass = std::nullopt,
-			Tools::Utils::OptRef<const ::Rendering::Data::FeatureSet> p_override = std::nullopt) const
-		{
-			return Instance().GetVariant(p_pass, p_override);
-		}
-
 		// ---- state --------------------------------------------------------------------
 		bool IsValid() const { return Instance().IsValid(); }
 		void SetBlendable(bool v) { Instance().SetBlendable(v); }
