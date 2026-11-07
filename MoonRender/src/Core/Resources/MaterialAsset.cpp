@@ -65,21 +65,14 @@ Core::Resources::MaterialAsset::CreateInstance() const
 		instance = std::make_unique<Rendering::Data::MaterialInstance>();
 	}
 
-	// A drawable using this .mat must see the asset's overrides, not just the package defaults.
+	// A drawable using this .mat must see the asset's overrides, not just the package defaults:
+	// parameters and textures first, then the whole render state the <settings> block carries
+	// (polygon offset, culling, depth writes, draw order, line width, ...).
 	for (const auto& [name, property] : SnapshotProperties())
 	{
 		instance->SetProperty(name, property.value);
 	}
-	instance->SetBlendable(IsBlendable());
-	instance->SetBlendMode(GetBlendMode());
-	instance->SetTransparent(IsTransparent());
-	instance->SetBackfaceCulling(HasBackfaceCulling());
-	instance->SetFrontfaceCulling(HasFrontfaceCulling());
-	instance->SetDepthTest(HasDepthTest());
-	instance->SetDepthWriting(HasDepthWriting());
-	instance->SetColorWriting(HasColorWriting());
-	instance->SetLineWidth(GetLineWidth());
-	instance->SetDrawOrder(GetDrawOrder());
+	instance->CopyStateFrom(*m_instance);
 	return instance;
 }
 

@@ -1568,6 +1568,35 @@ const Rendering::Data::StateMask Rendering::Data::MaterialInstance::GenerateStat
 }
 
 
+void Rendering::Data::MaterialInstance::CopyStateFrom(const MaterialInstance& p_other)
+{
+	// Every render-state field, in one place: the .mat's per-drawable instance is built from
+	// this, and a hand-written copy list is exactly how the face polygon offset once went
+	// missing - the faces were no longer pushed back, so a coplanar edge z-fought with them and
+	// disappeared at concave intersections (picking kept working because its pass sets the
+	// offset itself).
+	m_supportOrthographic = p_other.m_supportOrthographic;
+	m_supportPerspective = p_other.m_supportPerspective;
+	m_userInterface = p_other.m_userInterface;
+	m_blendable = p_other.m_blendable;
+	m_blendMode = p_other.m_blendMode;
+	m_transparent = p_other.m_transparent;
+	m_backfaceCulling = p_other.m_backfaceCulling;
+	m_frontfaceCulling = p_other.m_frontfaceCulling;
+	m_polygonOffsetFill = p_other.m_polygonOffsetFill;
+	m_depthTest = p_other.m_depthTest;
+	m_depthWriting = p_other.m_depthWriting;
+	m_colorWriting = p_other.m_colorWriting;
+	m_castShadows = p_other.m_castShadows;
+	m_receiveShadows = p_other.m_receiveShadows;
+	m_capturedByReflectionProbes = p_other.m_capturedByReflectionProbes;
+	m_receiveReflections = p_other.m_receiveReflections;
+	m_gpuInstances = p_other.m_gpuInstances;
+	m_drawOrder = p_other.m_drawOrder;
+	m_lineWidth = p_other.m_lineWidth;
+}
+
+
 void Rendering::Data::MaterialInstance::SetFeatures(const Data::FeatureSet& p_features)
 {
 	m_features = p_features;

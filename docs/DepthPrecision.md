@@ -276,7 +276,19 @@ Z = 10 000 的窗口深度都是 1.0，深度缓冲再也分不出前后）。�
 拾取 pass 的 face fallback 材质与线共用同一套偏移和深度比较（`GREATER_EQUAL` +
 不写深度），所以**画面上线在面上、拾取也点线得线**，不会出现“画面正常、拾取错位”。
 
-### 5.4 残余边界
+### 5.4 状态继承：每个 drawable 的实例必须继承 .mat 的渲染状态
+
+“面开 polygon offset”写在 `CADFace.mat` 的 `<settings>` 里，而场景里每个 `TopoShapeActor`
+画的是这个资产的一个**独立实例**（`MaterialAsset::CreateInstance()`）。实例的默认状态来自
+材质（shader 的 material block），`polygon_offset` 只存在于 `.mat` 资产上——所以复制实例时
+必须把整份渲染状态一起复制，少复制一项就会表现为：面不再后退，共面边线与面 z-fight，
+凹交线处的边被面吃掉；而拾取仍然正常，因为拾取 pass 自己 `SetPolygonOffsetFill(true)`。
+
+现在由 `MaterialInstance::CopyStateFrom()` 逐字段复制全部 19 个状态字段，
+`MaterialAsset::CreateInstance()` 不再维护手写清单——手写清单漏掉字段正是 2026-11 这次
+回归的原因（`polygon_offset` 从未出现在那张清单里）。
+
+### 5.5 残余边界
 
 - 极端掠射角（线几乎平行且紧贴面）下分离余量仍可能不够，可调大
   `Driver::SetPipelineState` 里 `PolygonOffset` 的 factor/units（如 `(-2, -1)`）；

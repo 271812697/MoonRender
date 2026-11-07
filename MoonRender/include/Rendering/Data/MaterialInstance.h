@@ -149,6 +149,11 @@ namespace Rendering::Data
 		void SetOrthographicSupport(bool p_support);
 		void SetPerspectiveSupport(bool p_support);
 
+		/** Copies the whole render state (every state field, not the parameters or textures)
+		 * from p_other. A .mat's per-drawable instance is created this way, so a state the asset
+		 * configured cannot be dropped by a hand-maintained copy list. */
+		void CopyStateFrom(const MaterialInstance& p_other);
+
 		bool IsValid() const;
 		bool IsBlendable() const;
 		bool IsTransparent() const;
