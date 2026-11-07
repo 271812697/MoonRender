@@ -120,9 +120,16 @@ widget 的绘制并不局限于一种方式：**同一个 widget 里可以自由
 | --- | --- | --- | --- |
 | 网格路径 | `drawOneMesh(...)` / `drawOneFixScaleMesh(...)` | `drawMeshList`（预构建 `PolygonMesh`） | `endFrame → drawMesh()` |
 | 立即模式路径 | `drawLine / drawPoint / drawTriangleList` | 顶点列表 `vertexData[0] / [1]`（按图层 + 图元类型） | `endFrame → drawSort() / drawUnsort()` |
+| 光照三角形 | `drawTriangleList(faces, normals, ...)`（`enableLit` 打开时） | `litVertexArray` | `endFrame → drawLit()` |
 | 2D / 覆盖层 | ImGui 等 | 独立 UI 上下文 | 独立提交 |
 
-`endFrame()` 的提交顺序为 `runDrawTask → drawWidgets → drawMesh → drawSort → drawUnsort`：gizmo 网格先画，立即模式图元后画（排序 / 未排序两层，支持透明度与深度测试）。
+`endFrame()` 的提交顺序为 `runDrawTask → drawWidgets → drawMesh → drawSort → drawLit → drawUnsort → drawText`：gizmo 网格先画，立即模式图元后画（排序 / 未排序两层，支持透明度与深度测试）；光照三角形夹在两层之间，所以它们像场景几何一样被深度遮挡，而随后画的手柄线/点仍然压在它们上面。
+
+**光照三角形（WidgetViewData 那类 widget）**：法线在**构造几何时**算好 —— `TriangleFace` 的构造 / `setTriangleFace` / `setTriangleFaceScale` 都会调 `RebuildNormals()`，为每个三角形算一条面法线并复制到它的三个顶点（`normals` 与 `faces` 一一对应）。绘制时 `drawTriangleList(faces, normals, size, color)` 只做矩阵变换和上传，**不在每帧求叉积**；打开 `pushEnableLit(true)` 时写进 `litVertexArray`，由 `drawLit()` 用 `GizmoLit.shader` 绘制（平面着色、两面可见、深度测试 + 混合）。线段和点永远不带光照，仍走原顶点桶。三角形汤的绕序不保证，着色器用 `gl_FrontFacing` 翻转背面法线。
+
+**职责边界**：`ImRenderer` 只做绘制框架与低层接口（顶点桶、材质与提交通道、状态栈、`FrameParam`、id 栈与 hot/active 仲裁、按键状态）。具体操纵器的"画什么手柄、怎么判命中、拖拽时怎么改值"都在 `Moon/Interactive/Gizmo/` 里，每个操纵器一个类、各自持有拖拽记忆；它们通过 `ImRenderer` 的公开接口画图并读写 hot/active。手写操纵器时照这个分工来，不要再把交互算法塞回渲染器。
+
+**灯架跟着相机走**：`GizmoLit.shader` 的光源定义在**屏幕空间**（主光从左上方、补光从右下方，都偏向相机一侧），`drawLit()` 每帧把相机位置和屏幕基向量（`u_ViewPos` / `u_CameraRight` / `u_CameraUp`）传进去。所以手柄的明暗只取决于"面相对屏幕转开多少"，绕到任何视角亮度都稳定；世界空间固定光源会让同一块面转个角度就从很亮跌到很暗。法线用 `gl_FrontFacing` 翻转成朝向相机的一侧，再配合 Half-Lambert，把亮度压在顶点色的 0.75~1.0 这条窄带里：既不黑，也不糊成一片白。要调外观只改片元里的五个常量（`kAmbient` / `kKeyLight` / `kFillLight` / `kRimLight` / `kMaxShade`）。
 
 以 ClipPlane 为例，同一个 `onUpdate()` 里就同时用到了三种方式：
 
@@ -634,7 +641,13 @@ void OnDrag(const ImVec2& cursor) override;          // 移动手柄 + MarkGeome
 | --- | --- |
 | `Moon/Interactive/EventWidget.*` | widget 基类：事件回调映射、生命周期、帧节流 |
 | `Moon/Interactive/Interactive/RenderWindowInteractor.*` | Qt 事件 → 内部事件分发中心 |
-| `Moon/Interactive/Im3DRenderer.*` | 立即模式绘制、gizmo 网格提交、拾取查询 |
+| `Moon/Interactive/Im3DRenderer.*` | 绘制框架与低层接口：顶点桶、材质与提交通道、状态栈、`FrameParam`、id 栈与 hot/active 仲裁、按键状态 |
+| `Moon/Interactive/Im3DPalette.h` | 3D 覆盖层调色板（ABGR 字节序，`c[0]` 是 alpha） |
+| `Moon/Interactive/Gizmo/GizmoCommon.*` | 无状态的手柄绘制助手（轴箭头、平移轴/面块、旋转环、射线落点）与手柄像素尺寸常量 |
+| `Moon/Interactive/Gizmo/GizmoDrag.*` | 一次拖拽的记忆 + 拖拽原语（射线求交 + hot/active 转移），每个操纵器各持一份 |
+| `Moon/Interactive/Gizmo/TransformGizmo.*` | 三轴平移 / 平面块 / 绕轴旋转的组合操纵器（原 `translation` / `rotation` / `drawManpulate`） |
+| `Moon/Interactive/Gizmo/PointHandleGizmo.*` | 点/线手柄：`lineEdit` / `scaleEdit` / `planeEdit` / `axisRotateEdit` / `dragPoint*` / 2D 手柄 |
+| `Moon/Interactive/Gizmo/*EditGizmo.*` | 形状编辑手柄：`Box` / `Sphere` / `Cylinder` / `Prism` / `Curve` / `PlaneClip` |
 | `Moon/Interactive/Im3DType.*` | `PolygonMesh` 块结构、`TransformAxis()` 等 gizmo 构建 |
 | `Moon/Interactive/GizmoBehaviour.*` | 轴/平面/旋转几何算法 |
 | `Moon/Interactive/Widgets/ClipPlane.*` | 剖切控件：状态机、手柄表、截面联动（示例） |

@@ -1,4 +1,4 @@
-﻿#include "Interactive/Widgets/PrimitiveSphere.h"
+#include "Interactive/Widgets/PrimitiveSphere.h"
 #include "Interactive/Im3DRenderer.h"
 
 #include "Interactive/MathUtil/MathUtil.h"
@@ -11,7 +11,7 @@
 
 namespace MOON {
 	
-	PrimitiveSphere::PrimitiveSphere(const std::string& name) :PrimitiveShape(name)
+	PrimitiveSphere::PrimitiveSphere(const std::string& name) :PrimitiveShape(name), m_edit(*renderer)
 	{
 		translation = { 0,0,0 };
 		radius = 1.0f;
@@ -21,7 +21,7 @@ namespace MOON {
 	}
 	void PrimitiveSphere::onUpdate()
 	{
-		renderer->sphereEdit(renderer->makeId("Sphere"), translation, radius);
+		m_edit.edit(renderer->makeId("Sphere"), translation, radius);
 	}
 
 	void PrimitiveSphere::createTopoShape()

@@ -125,7 +125,7 @@ Im2DRender             GL 提交：自己的 program/VAO/VBO/EBO + 1x1 白纹理
 | `Moon/Interactive/Widgets/DrawSketchHandler.cpp` | 坐标/数值预览文字 | 已迁移 |
 | `Moon/Interactive/Widgets/DrawSketchHandlerLine.cpp` | 预览双箭头、角度弧 | 已迁移 |
 | `Moon/Interactive/Widgets/SmartDimensionWidget.cpp` | 智能尺寸预览（箭头/弧/旋转文字） | 已迁移 |
-| `Moon/Interactive/Im3DRenderer.cpp` 的 `drawLineSplit` | gizmo 手柄圆点与连线 | 已迁移 |
+| `Moon/Interactive/Gizmo/PointHandleGizmo.cpp` 的 `lineSplit` | gizmo 手柄圆点与连线 | 已迁移 |
 | `Moon/Interactive/Widgets/RotateCenter.cpp` | `if (drawRect && false)` 死分支 | 已删除 |
 | `Moon/editor/View/sceneview/viewerwidget.cpp` 的 FPS 文字 | 调试覆盖层 | **保留 ImGui** |
 

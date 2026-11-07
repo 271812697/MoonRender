@@ -18,7 +18,7 @@
 
 namespace MOON {
 	
-	PrimitiveCone::PrimitiveCone(const std::string& name) :PrimitiveShape(name)
+	PrimitiveCone::PrimitiveCone(const std::string& name) :PrimitiveShape(name), m_edit(*renderer)
 	{
 		translation = { 0,0,0 };
 		normal = { 0,0,1 };
@@ -31,7 +31,7 @@ namespace MOON {
 	}
 	void PrimitiveCone::onUpdate()
 	{
-		renderer->clydinerEdit(renderer->makeId("cone"), translation, normal, height, radiusTop, radiusBottom,false);
+		m_edit.edit(renderer->makeId("cone"), translation, normal, height, radiusTop, radiusBottom, false);
 	}
 
 	void PrimitiveCone::createTopoShape()

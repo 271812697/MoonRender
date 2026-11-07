@@ -192,7 +192,7 @@ paintGL()
 
 - Dear ImGui 作为**最后一层覆盖**渲染在默认帧缓冲上（`mSceneView->Present()` 之后）；
 - `ImGui::Render()` 由应用调用，`QtImGui::render()` 只负责把 `ImDrawData` 画出来；
-- 3D 覆盖层的拾取/交互（`Im3DRenderer` 的 `makeHot/makeActive` 体系）与 ImGui 控件互不干扰，但共用 `GetForegroundDrawList()` 绘制圆点/线段等（如 `drawLineSplit`）。
+- 3D 覆盖层的拾取/交互（`Im3DRenderer` 的 `makeHot/makeActive` 体系）与 ImGui 控件互不干扰，但共用 `GetForegroundDrawList()` 绘制圆点/线段等（如 `PointHandleGizmo::lineSplit`）。
 
 ### 5.2 调试窗口（debugOpenGlWidget）
 

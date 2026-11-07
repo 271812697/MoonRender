@@ -1,4 +1,4 @@
-﻿#include "Interactive/Widgets/AxisTranslationWidget.h"
+#include "Interactive/Widgets/AxisTranslationWidget.h"
 #include "Interactive/Im3DRenderer.h"
 #include "Interactive/MathUtil/MathUtil.h"
 #include "Core/Global/ServiceLocator.h"
@@ -95,11 +95,14 @@ class AxisTranslationWidget::Internal {
 		scaleMat(0, 0) = scaleMat(1, 1) = scaleMat(2, 2) = scale;
 
 		const auto& faces = mInternal->viewData.getFaces();
+		// 法线在 WidgetViewData 构造三角形时就算好了（TriangleFace::RebuildNormals）。
+		renderer->pushEnableLit(true);
 		for (int i = 0; i < faces.size(); i++) {
 			renderer->pushMatrix(faces[i].model * scaleMat);
-			renderer->drawTriangleList(faces[i].faces, 1.0, faces[i].color);
+			renderer->drawTriangleList(faces[i].faces, faces[i].normals, 1.0, faces[i].color);
 			renderer->popMatrix();
 		}
+		renderer->popEnableLit();
 	}
 	void AxisTranslationWidget::setUpOrigin(float x, float y, float z)
 	{

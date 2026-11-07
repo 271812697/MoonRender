@@ -5,13 +5,20 @@ namespace MOON {
 	{
 		TriangleFace(std::vector<Eigen::Vector3f>f,
 			Eigen::Vector4<uint8_t> c) :faces(f), color(c) {
-
+			RebuildNormals();
 		}
 		TriangleFace(std::vector<Eigen::Vector3f>f,
 			Eigen::Vector4<uint8_t> c, const Eigen::Matrix4f& m) :model(m), faces(f), color(c) {
-
+			RebuildNormals();
 		}
+
+		/** 按 faces 重算 normals：同一个三角形的三个顶点共用一条面法线（平面着色）。
+		 * 几何是构造时定下来的，所以法线也只在这里算一次，绘制时直接取用，不在每帧求叉积。 */
+		void RebuildNormals();
+
 		std::vector<Eigen::Vector3f>faces;
+		/** 与 faces 一一对应的顶点法线；退化三角形给一条稳定法线。 */
+		std::vector<Eigen::Vector3f> normals;
 		Eigen::Vector4<uint8_t> color;
 		Eigen::Matrix4f model = Eigen::Matrix4f::Identity();
 	};

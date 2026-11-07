@@ -1,4 +1,4 @@
-﻿#include "Interactive/Widgets/PrimitiveCylinder.h"
+#include "Interactive/Widgets/PrimitiveCylinder.h"
 #include "Interactive/Im3DRenderer.h"
 
 #include "Interactive/MathUtil/MathUtil.h"
@@ -13,7 +13,7 @@
 
 namespace MOON {
 	
-	PrimitiveCylinder::PrimitiveCylinder(const std::string& name) :PrimitiveShape(name)
+	PrimitiveCylinder::PrimitiveCylinder(const std::string& name) :PrimitiveShape(name), m_edit(*renderer)
 	{
 		translation = { 0,0,0 };
 		normal = { 0,0,1 };
@@ -26,7 +26,7 @@ namespace MOON {
 	}
 	void PrimitiveCylinder::onUpdate()
 	{
-		renderer->clydinerEdit(renderer->makeId("cylinder"),translation,normal,height,radiusTop,radiusBottom);
+		m_edit.edit(renderer->makeId("cylinder"), translation, normal, height, radiusTop, radiusBottom);
 		
 
 	}

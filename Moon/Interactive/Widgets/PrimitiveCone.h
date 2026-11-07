@@ -1,5 +1,6 @@
-﻿#pragma once
+#pragma once
 #include "Interactive/Widgets/PrimitiveShape.h"
+#include "Interactive/Gizmo/CylinderEditGizmo.h"
 #include <Eigen/Core>
 
 namespace MOON
@@ -17,5 +18,7 @@ namespace MOON
 		float height;
 		float radiusTop;
 		float radiusBottom;
+		/** 圆台/圆锥手柄：与圆柱共用同一套操纵器（上下半径不联动）。 */
+		CylinderEditGizmo m_edit;
 	};
 }

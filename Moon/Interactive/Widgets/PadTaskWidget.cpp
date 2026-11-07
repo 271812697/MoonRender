@@ -1,4 +1,4 @@
-﻿#include "Interactive/Widgets/PadTaskWidget.h"
+#include "Interactive/Widgets/PadTaskWidget.h"
 #include "Interactive/Im3DRenderer.h"
 #include "Interactive/MathUtil/MathUtil.h"
 #include "Core/Global/ServiceLocator.h"
@@ -109,11 +109,14 @@ class PadTaskWidget::Internal {
 		Eigen::Matrix4f scaleMat = Eigen::Matrix4f::Identity();
 		scaleMat(0, 0) = scaleMat(1, 1) = scaleMat(2, 2) = scale;
 
+		// 法线在 WidgetViewData 构造三角形时就算好了（TriangleFace::RebuildNormals）。
+		renderer->pushEnableLit(true);
 		for (int i = 0; i < faces.size(); i++) {
 			renderer->pushMatrix(faces[i].model * scaleMat);
-			renderer->drawTriangleList(faces[i].faces, 1.0, faces[i].color);
+			renderer->drawTriangleList(faces[i].faces, faces[i].normals, 1.0, faces[i].color);
 			renderer->popMatrix();
 		}
+		renderer->popEnableLit();
 		int segCount = 30;
 		std::vector<Eigen::Vector3f>seg(segCount+1);
 		float step = 2*3.14159265358979323846f / static_cast<float>(segCount);

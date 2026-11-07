@@ -2,6 +2,7 @@
 
 #include <glad/glad.h>
 
+#include <algorithm>
 #include <cstddef>
 
 #include <Maths/FVector2.h>
@@ -158,4 +159,9 @@ void Rendering::Overlay::Im3DGLRenderer::DrawBoundTriangles(
 	}
 
 	glDrawArrays(GL_TRIANGLES, 0, (GLsizei)p_vertexCount);
+}
+
+void Rendering::Overlay::Im3DGLRenderer::SetViewport(int p_x, int p_y, int p_width, int p_height)
+{
+	glViewport(p_x, p_y, std::max(0, p_width), std::max(0, p_height));
 }

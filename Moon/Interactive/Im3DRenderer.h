@@ -18,6 +18,8 @@ namespace Rendering::Data
 namespace MOON
 {
 	using Vec2 = Eigen::Vector2f;
+	/** 无效的交互 id：没有手柄处于 hot / active 时用它重置。 */
+	inline constexpr unsigned int IdInvalid = 0;
 	class EventWidget;
 	
 	class ImRenderer
@@ -138,6 +140,12 @@ namespace MOON
 		void drawDashedPolyline(const std::vector<Eigen::Vector3f>& p_points,
 			float p_dashPx, float p_gapPx, float p_phase = 0.0f);
 		void drawTriangleList(const std::vector<Eigen::Vector3f>& position, float _size, Eigen::Vector4<uint8_t> _color);
+		/** 带法线的三角形列表：normals 与 position 一一对应（通常同一个三角形的三个顶点共用
+		 * 一条面法线）。法线由调用方在构造几何时算好（WidgetViewData 的 TriangleFace 在
+		 * setTriangleFace 里算），绘制期不再求叉积。光照打开时写进 litVertexArray，
+		 * 由 drawLit() 用 GizmoLit.shader 绘制；否则退回普通三角形通道。 */
+		void drawTriangleList(const std::vector<Eigen::Vector3f>& position,
+			const std::vector<Eigen::Vector3f>& normals, float _size, Eigen::Vector4<uint8_t> _color);
 		void drawLine(const Eigen::Vector3f& _a, const Eigen::Vector3f& _b, float _size, Eigen::Vector4<uint8_t> _color);
 		void drawLine(const Eigen::Vector3f& _a, const Eigen::Vector3f& _b, float _size);
 		void drawLine(const Eigen::Vector3f& _a, const Eigen::Vector3f& _b);
@@ -156,8 +164,6 @@ namespace MOON
 			float _headThickness);
 		void drawArrow(const Eigen::Vector3f& _start, const Eigen::Vector3f& _end, float _headLength = -1.0f,
 			float _headThickness = -1.0f);
-		void drawArrow(unsigned int _id, const Eigen::Vector3f& _origin, const Eigen::Vector3f& _axis, float _worldHeight,
-			Eigen::Vector4<uint8_t> _color);
 		void drawCircleFilled(
 			const Eigen::Vector3f& _origin, const Eigen::Vector3f& _normal, float _radius, int _detail = -1);
 		void drawTransparencyCircle(
@@ -174,53 +180,7 @@ namespace MOON
 		void drawAlignedBoxFilled(
 			const Eigen::Vector3f& _min, const Eigen::Vector3f& _max, const std::vector<Eigen::Vector4<uint8_t>>& color);
 		void drawPlaneGrid(const Eigen::Vector3f& origin, const Eigen::Vector3f& normal, float scale, float size);
-		bool drawManpulate(unsigned _id, Eigen::Matrix4f& model);
-		bool drawManpulate(const char* _id, Eigen::Matrix4f& model);
-
-		void drawRayHitScreenPoint();
-		bool lineEdit(unsigned int id, std::vector<Eigen::Vector3f>& line, Eigen::Vector4<uint8_t> _color);
-		bool scaleEdit(unsigned int id, std::vector<Eigen::Vector3f>& line, Eigen::Vector4<uint8_t> _color, int& index);
-		bool planeEdit(unsigned int id, Eigen::Vector3f& origin, Eigen::Vector3f& normal);
-		bool planeEdit(unsigned int id, std::vector<Eigen::Vector3f>& threePoints, int& index);
-		bool axisRotateEdit(unsigned int id, std::vector<Eigen::Vector3f>& line, float& angle);
-		bool translation(unsigned int _id, Eigen::Vector3f& _translation_, bool _local = false);
-		bool gizmoPlaneTranslationBehavior(const Eigen::Vector3f& _origin, const Eigen::Vector3f& _normal, float _snap,
-			float _worldSize, Eigen::Vector3f* _out_);
-		void gizmoAxisTranslationDraw(unsigned int _id, const Eigen::Vector3f& _origin, const Eigen::Vector3f& _axis,
-			float _worldHeight, float _worldSize, Eigen::Vector4<uint8_t> _color);
-		bool gizmoAxisTranslationBehavior(unsigned int _id, const Eigen::Vector3f& _origin, const Eigen::Vector3f& _axis,
-			float _snap, float _worldHeight, float _worldSize, Eigen::Vector3f* _out_);
-		void gizmoPlaneTranslationDraw(unsigned int _id, const Eigen::Vector3f& _origin, const Eigen::Vector3f& _normal,
-			float _worldSize, Eigen::Vector4<uint8_t> _color);
-		bool gizmoPlaneTranslationBehavior(unsigned int _id, const Eigen::Vector3f& _origin, const Eigen::Vector3f& _normal,
-			float _snap, float _worldSize, Eigen::Vector3f* _out_);
-		bool rotation(unsigned int _id, Eigen::Matrix3f& _rotation_, bool _local = false);
-		bool gizmoAxislAngleBehavior(unsigned int _id, const Eigen::Vector3f& _origin, const Eigen::Vector3f& _axis, float _snap, float _worldRadius, float _worldSize, float* _out_);
-		void axisRotateDraw(unsigned int _id, const Eigen::Vector3f& _origin, const Eigen::Vector3f& _axis, float _worldRadius, Eigen::Vector4<uint8_t> _color);
-		void gizmoAxislAngleDraw(unsigned int _id, const Eigen::Vector3f& _origin, const Eigen::Vector3f& _axis, float _worldRadius, float _angle, Eigen::Vector4<uint8_t> _color, float _minAlpha);
 		int  estimateLevelOfDetail(const Eigen::Vector3f& _position, float _worldSize, int _min = 4, int _max = 256);
-		bool gizmoSpherePlaneTranslationBehavior(unsigned _id, const Eigen::Vector3 < float >& _origin, float _radius, const Eigen::Vector3f& _normal, float _snap, Eigen::Vector3f* _out_);
-		bool gizmoCircleAxisTranslationBehavior(unsigned int _id, const Eigen::Vector3f& _origin, float _radius, const Eigen::Vector3f& _normal, float _snap, Eigen::Vector3f* _out_);
-		bool gizmoSphereRotateInCircleBehavior(unsigned int _id, const Eigen::Vector3f& _origin, float _radius, const Eigen::Vector3f& _normal, Eigen::Vector3f* _out_,bool inPlane=true);
-		bool gizmoSphereAxisTranslationBehavior(unsigned int _id, const Eigen::Vector3f& _origin, float _radius, const Eigen::Vector3f& _normal, float _snap, Eigen::Vector3f* _out_);
-		bool gizmoOperateNormalBehavior(unsigned int _id, const Eigen::Vector3f& _origin, const Eigen::Vector3f& _end, float _worldSize, Eigen::Vector3f* _out_);
-		bool planeClip(unsigned int _id, Eigen::Vector3f& _translation_, Eigen::Vector3f& _normal, float& _scale, const Eigen::Vector3f& minBox, const Eigen::Vector3f& maxBox, bool opeartorNormal, bool drawCircle);
-		bool boxEdit(unsigned int _id, Eigen::Vector3f& _translation_, Eigen::Matrix3f& _rotation_, Eigen::Vector3f& _scale_);
-		bool boxEdit(unsigned int _id, Eigen::Vector3f& _translation_, Eigen::Matrix3f& _rotation_, Eigen::Vector3f& _scale_, bool translationFlag, bool rotateFlag, bool faceMoveFlag, int& mode);
-		bool sphereEdit(unsigned int _id, Eigen::Vector3f& _translation_, float& r);
-		bool dragPointInPlane(unsigned int id, Eigen::Vector3f& translation, const Eigen::Vector3f& normal);
-		bool dragPointByAxis(unsigned int id, Eigen::Vector3f& translation, const Eigen::Vector3f& axis);
-		bool clydinerEdit(unsigned int _id, Eigen::Vector3f& _translation_, Eigen::Vector3f& _normal, float& height,
-			float& _tr, float& _br, bool same = true);
-		bool PrismEdit(unsigned int _id, Eigen::Vector3f& _normal, Eigen::Vector3f& _origin, float* _height,
-			std::vector<Eigen::Vector3f>& polygon, std::vector<Eigen::Vector2f>& polygon2D, bool flip = false);
-		bool CurveEdit(
-			unsigned int _id, Eigen::Vector3f& _normal, Eigen::Vector3f& _origin, std::vector<Eigen::Vector3f>& polygon);
-		bool CurveEdit(unsigned int _id, Eigen::Vector3f& _normal, Eigen::Vector3f& _origin,
-			std::vector<std::pair<Eigen::Vector3f, Eigen::Vector3f>>& polygon);
-		//methods drawing in screenspace!
-		bool drawTranslate2D(unsigned int id, Eigen::Vector2f& pos);
-		bool drawLineSplit(unsigned int id, Eigen::Vector2f& a, Eigen::Vector2f& b);
 		Eigen::Vector2f worldToScreen(const Eigen::Vector3f& pos);
 		FrameParam& getFrameParam();
 		void test();
@@ -228,6 +188,10 @@ namespace MOON
 		void drawSort();
 		/** Uploads the text vertices and draws them, one pass per atlas. */
 		void drawText();
+		/** Uploads and draws the shaded triangles (litVertexArray) with the lit material.
+		 * 搬进来的那批三角形顶点不带法线：法线在 drawTriangleList 里按三角形现算成面法线，
+		 * 所以 widget 不需要自己构造法线。 */
+		void drawLit();
 		void drawMesh();
 		void drawMeshPick();
 		void newFrame(Editor::Panels::SceneView* view);
@@ -245,6 +209,17 @@ namespace MOON
 		void makeActive2D(unsigned int _id);
 		void resetId();
 		void resetId2D();
+		/** hot / active 仲裁的只读面：操纵器（Interactive/Gizmo）靠这几个接口判断
+		 * "这个手柄是不是我"和"能不能抢焦点"。 */
+		unsigned int getActiveId() const { return activeId; }
+		unsigned int getHotId() const { return hotId; }
+		unsigned int getActiveId2D() const { return activeId2D; }
+		unsigned int getHotId2D() const { return hotId2D; }
+		unsigned int getAppHotId() const { return appHotId; }
+		/** 设置本帧正在绘制/交互的 app id（makeHot 用它记录 hot 属于哪个 app）。 */
+		void setAppId(unsigned int _id) { appId = _id; }
+		/** 当前 hot 的手柄是否属于本 app —— 即交互是否还停在本次拖拽上。 */
+		bool isAppHot() const { return appHotId == appId; }
 		unsigned int makeId(const char* _str);
 		void setId(unsigned int id)
 		{
@@ -266,7 +241,15 @@ namespace MOON
 		void pushEnableSorting(bool enable);
 		void popEnableSorting();
 		void setEnableSorting(bool enable);
+		/** 打开后，drawTriangleList 的三角形改走光照通道（litVertexArray + drawLit）。
+		 * 线段与点永远不带光照：它们走的是原来的顶点桶。 */
 		void setEnableLit(bool enable);
+		void pushEnableLit(bool enable);
+		void popEnableLit();
+		bool getEnableLit() const
+		{
+			return enableLit;
+		}
 		bool getEnableSorting() const
 		{
 			return enableSortingStack.back();
@@ -317,6 +300,12 @@ namespace MOON
 		void popSize();
 		void pushMatrix(const Eigen::Matrix4f& mat);
 		void popMatrix();
+		/** 状态栈的只读面：操纵器要在自己压入的局部坐标系里画图/读当前透明度。 */
+		const Eigen::Matrix4f& getMatrix() const { return matrixStack.back(); }
+		float getAlpha() const { return alphaStack.back(); }
+		/** 本帧当前顶点桶里最后写入的顶点，供操纵器就地改 alpha（例如旋转环被
+		 * 球体挡住的部分）。桶为空或不在图元中间时返回 nullptr。 */
+		VertexFormat* lastVertex();
 	private:
 		Editor::Panels::SceneView* renderView = nullptr;
 		/** Cell currently highlighted by the navigation cube (-1 = none). */
@@ -342,6 +331,8 @@ namespace MOON
 		std::vector<float> sizeStack;
 		std::vector<unsigned int> idStack;
 		std::vector<bool> enableSortingStack;
+		/** 光照开关的作用域栈：drawTriangleList 按栈顶决定走 litVertexArray 还是普通顶点桶。 */
+		std::vector<bool> enableLitStack;
 		std::vector<unsigned int> layerIdStack;
 
 		std::vector<Eigen::Matrix4f> matrixStack;
@@ -357,17 +348,6 @@ namespace MOON
 		unsigned int appId;
 		unsigned int appActiveId;
 		unsigned int appHotId;
-		Eigen::Vector3f gizmoStateVec3;
-		Eigen::Vector3f gizmoStateStartAngle;
-		Eigen::Matrix3f gizmoStateMat3;
-		Eigen::Vector2f gizmoCursor;
-		Eigen::Vector2f gizmoVec2;
-		Eigen::Vector3f gizmoNormal;
-		GizmoMode gizmoMode;
-		bool gizmoLocal = false;
-		float gizmoHeightPixels = 64.0f;
-		float gizmoSizePixels = 5.0f;
-		float gizmoStateFloat = 0.0f;
 
 		// Primitive state.
 		PrimitiveMode primMode;
@@ -400,11 +380,13 @@ namespace MOON
 		int selectPolygonId = -1;
 		int selectBlockId= -1;
 		
-		bool enableLit;
+		bool enableLit = false;
 		bool sortCalled;
 		bool endFrameCalled;
 		int findLayerIndex(unsigned int id) const;
 		VertexList* getCurrentVertexList();
+		/** 带法线的顶点写进 litVertexArray 前，统一套上矩阵栈与全局 alpha。 */
+		void appendLitVertex(VertexFormat& vertex, const Eigen::Vector3f& position, const Eigen::Vector3f& normal);
 		const DrawList* getDrawLists() const
 		{
 			return drawLists.data();
