@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- PostProcessStack: the stack of effects, drawn as three stacked plates with the front
+     plate carrying the "effect" sparkle. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <defs>
+    <linearGradient id="fxFront" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#a9d6ff"/>
+      <stop offset="1" stop-color="#4f86d6"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="7" y="4" width="18" height="11" rx="2" fill="#2a5da6" stroke="#1b4a86" stroke-width="1.2"/>
+  <rect x="5" y="8" width="22" height="11" rx="2" fill="#4f86d6" stroke="#1b4a86" stroke-width="1.2"/>
+  <rect x="3" y="12" width="26" height="15" rx="2.5" fill="url(#fxFront)" stroke="#1b4a86" stroke-width="1.2"/>
+
+  <path d="M22.4 16.2 L23.4 19 L26.2 20 L23.4 21 L22.4 23.8 L21.4 21 L18.6 20 L21.4 19 Z"
+        fill="#ffffff" opacity="0.95"/>
+</svg>

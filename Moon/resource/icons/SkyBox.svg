@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SkyBox: an isometric cube whose top face is the sky the pass draws. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <defs>
+    <linearGradient id="skyTop" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#a9d6ff"/>
+      <stop offset="1" stop-color="#4a84d4"/>
+    </linearGradient>
+    <linearGradient id="skyLeft" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#74aae8"/>
+      <stop offset="1" stop-color="#3a6cb4"/>
+    </linearGradient>
+  </defs>
+
+  <path d="M16 3 L27 9 L16 15 L5 9 Z" fill="url(#skyTop)" stroke="#1b4a86"
+        stroke-width="1.2" stroke-linejoin="round"/>
+  <path d="M5 9 L16 15 L16 28 L5 22 Z" fill="url(#skyLeft)" stroke="#1b4a86"
+        stroke-width="1.2" stroke-linejoin="round"/>
+  <path d="M27 9 L16 15 L16 28 L27 22 Z" fill="#2a5da6" stroke="#1b4a86"
+        stroke-width="1.2" stroke-linejoin="round"/>
+
+  <!-- sun and cloud on the sky face -->
+  <circle cx="10.6" cy="8.0" r="2.0" fill="#ffd45e" stroke="#c99a1e" stroke-width="0.7"/>
+  <ellipse cx="21.2" cy="9.2" rx="3.4" ry="1.7" fill="#ffffff" opacity="0.92"/>
+</svg>

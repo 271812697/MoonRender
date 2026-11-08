@@ -79,6 +79,10 @@ int main(int argc, char* argv[])
 	MOON::System::JobSystem::OnInit(2);
 	
 	QApplication::setFont(font);
+	// The window/taskbar icon: a crescent moon, after the project's name. Every top-level
+	// window without an icon of its own picks this up - the editor, the dialogs, and the
+	// floating dock panels.
+	QApplication::setWindowIcon(MOON::Theme::Icon(":/icons/app/moon.svg"));
 	// The editor is scoped on purpose. Its destructor is what takes the viewport, the
 	// renderer, the GL context and every panel down, and all of that has to happen while
 	// the logger and the job system are still up: a widget that logs on the way out, or

@@ -31,6 +31,9 @@ namespace
 		MOON::ThemeTokens t;
 		t.window = QColor(30, 35, 41);
 		t.surface = QColor(38, 44, 51);
+		// Inviwo's title bar sits one clear step above the panel body (#424245 over #323235);
+		// the same step here keeps the header readable without breaking the scheme.
+		t.header = QColor(54, 60, 67);
 		t.well = QColor(25, 30, 36);
 		t.border = QColor(47, 53, 61);
 		t.text = QColor(207, 214, 223);
@@ -58,6 +61,8 @@ namespace
 		MOON::ThemeTokens t;
 		t.window = QColor(242, 244, 247);
 		t.surface = QColor(255, 255, 255);
+		// One clear step below the white body, the light counterpart of the dark header.
+		t.header = QColor(234, 238, 243);
 		t.well = QColor(233, 236, 241);
 		t.border = QColor(211, 217, 224);
 		t.text = QColor(31, 41, 51);
@@ -129,6 +134,7 @@ QString MOON::Theme::Style(QString p_css)
 		{ "@separator", t.separator.name(QColor::HexRgb) },
 		{ "@window", t.window.name(QColor::HexRgb) },
 		{ "@surface", t.surface.name(QColor::HexRgb) },
+		{ "@header", t.header.name(QColor::HexRgb) },
 		{ "@well", t.well.name(QColor::HexRgb) },
 		{ "@border", t.border.name(QColor::HexRgb) },
 		{ "@barTop", t.barTop },
@@ -167,6 +173,12 @@ QIcon MOON::Theme::Icon(const QString& p_path)
 	{
 		svg.replace("#EDGE#", t.iconEdge.name(QColor::HexRgb).toUtf8());
 	}
+	// Secondary stroke: the soft grey small chrome glyphs use (dock title bar buttons), so they
+	// read like Inviwo's #999999 icons instead of the bright ribbon stroke.
+	if (svg.contains("#MUTED#"))
+	{
+		svg.replace("#MUTED#", t.textDim.name(QColor::HexRgb).toUtf8());
+	}
 
 	QSvgRenderer renderer(svg);
 	if (!renderer.isValid())
@@ -177,7 +189,7 @@ QIcon MOON::Theme::Icon(const QString& p_path)
 	// One pixmap per size the ribbon asks for; Qt picks the closest and does not have to scale
 	// a single large image down.
 	QIcon icon;
-	for (int size : { 16, 24, 32, 48, 64 })
+	for (int size : { 16, 20, 24, 32, 48, 64 })
 	{
 		QPixmap pixmap(size, size);
 		pixmap.fill(Qt::transparent);

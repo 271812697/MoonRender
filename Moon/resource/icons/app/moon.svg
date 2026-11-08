@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The MOON window icon: a crescent, the outer disc cut by a smaller disc offset up-right.
+     Two arcs in one path (no mask: Qt's SVG renderer does not support masks). The crescent
+     fills the 64x64 canvas on purpose - Windows draws the title bar icon at the system small
+     icon size, so the artwork has to use all of it to read at 16 px. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <path d="M59.07 42.40 A29 29 0 1 1 21.60 4.93 A27 27 0 0 0 59.07 42.40 Z"
+        fill="#4fa3ff"/>
+</svg>

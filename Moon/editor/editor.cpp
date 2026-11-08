@@ -47,9 +47,9 @@ namespace MOON {
 
 		}
 		void initPanels() {
-			QIcon icon;
-			icon.addFile(QString::fromUtf8(":/widgets/icons/awesomeface.png"), QSize(), QIcon::Normal, QIcon::Off);
-			self->setWindowIcon(icon);
+			// The window icon is the crescent moon, the same one the application icon uses
+			// (set in main). It replaces the awesome-face placeholder that used to be here.
+			self->setWindowIcon(MOON::Theme::Icon(":/icons/app/moon.svg"));
 			// The window is two pages: the start page the application opens on (make or
 			// open a project, and the ones that were open last) and the workspace - the
 			// viewport with the panels around it. Choosing a project is what brings the

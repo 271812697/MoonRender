@@ -26,6 +26,15 @@
         <file>darkstyle/icon_radiobutton_checked_disabled.png</file>
         <file>darkstyle/icon_radiobutton_unchecked_disabled.png</file>
         <file>icons/pqIsometricView.svg</file>
+        <!-- The application/window icon: a crescent, the project's name. -->
+        <file>icons/app/moon.svg</file>
+        <!-- Dock title bar glyphs, redrawn from Inviwo's resources/svgicons (13x13); #MUTED# is
+             resolved per theme by Theme::Icon. -->
+        <file>icons/dock/dock-sticky.svg</file>
+        <file>icons/dock/dock-unsticky.svg</file>
+        <file>icons/dock/dock-docked.svg</file>
+        <file>icons/dock/dock-floating.svg</file>
+        <file>icons/dock/close.svg</file>
         <file>widgets/icons/viewcube32/ViewCube_RotateUp.svg</file>
     <file>widgets/icons/viewcube32/ViewCube_RotateRight.svg</file>
     <file>widgets/icons/viewcube32/ViewCube_RotateDown.svg</file>
@@ -39,6 +48,9 @@
 		    <file>icons/PointLight.png</file>
 		    <file>icons/DirectionalLight.png</file>
 		    <file>icons/Model.png</file>
+        <!-- Scene nodes that used to wear the awesome-face placeholder. -->
+        <file>icons/SkyBox.svg</file>
+        <file>icons/PostProcessStack.svg</file>
         <file>icons/pqOpen.svg</file>
         <file>icons/pqGroupFiles.svg</file>
         <file>icons/pqReset.svg</file>
