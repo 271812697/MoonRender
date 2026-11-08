@@ -261,6 +261,9 @@ namespace MOON
 		scaleMat(0, 0) = scaleMat(1, 1) = scaleMat(2, 2) = scale;
 
 		const bool dragging = mState == AxisT || mState == PlaneT || mState == AxisR;
+		// The handles are WidgetViewData triangle soups; the face carries the per-vertex normals
+		// it computed when the geometry was built, so lighting needs no per-frame work here.
+		renderer->pushEnableLit(true);
 		for (int handle = 0; handle < 9; ++handle)
 		{
 			TriangleFace* face = nullptr;
@@ -277,9 +280,10 @@ namespace MOON
 			}
 
 			renderer->pushMatrix(face->model * scaleMat);
-			renderer->drawTriangleList(face->faces, 1.0f, color);
+			renderer->drawTriangleList(face->faces, face->normals, 1.0f, color);
 			renderer->popMatrix();
 		}
+		renderer->popEnableLit();
 
 		// While a ring is being dragged: the swept arc and the angle, like ClipPlane's.
 		if (mState == AxisR)

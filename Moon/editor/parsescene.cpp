@@ -166,7 +166,7 @@ namespace MOON {
 					tempMat = new Core::Resources::MaterialAsset();
 					GetService(Core::ResourceManagement::MaterialManager).RegisterResource(sceneName, tempMat);
 
-					tempMat->SetShader(Core::Global::ServiceLocator::Get<Editor::Core::Context>().shaderManager[":Shaders\\Standard.shader"]);
+					tempMat->SetMaterial(Core::Global::ServiceLocator::Get<Editor::Core::Context>().shaderManager[":Shaders\\Standard.shader"]);
 					// The shader's material block is the default state now, so the instance's
 					// overrides have to come after it.
 					tempMat->SetBackfaceCulling(false);
@@ -366,7 +366,7 @@ namespace MOON {
 	//			}
 	//			Core::Resources::MaterialAsset* tempMat = new Core::Resources::MaterialAsset();
 	//			Core::Global::ServiceLocator::Get<Core::ResourceManagement::MaterialManager>().RegisterResource(name, tempMat);
-	//			tempMat->SetShader(Core::Global::ServiceLocator::Get<Editor::Core::Context>().shaderManager[":Shaders\\Standard.shader"]);
+	//			tempMat->SetMaterial(Core::Global::ServiceLocator::Get<Editor::Core::Context>().shaderManager[":Shaders\\Standard.shader"]);
 	//			tempMat->SetProperty("u_Albedo", Maths::FVector4{ material.baseColorR, material.baseColorG, material.baseColorB, material.opacity });
 	//			tempMat->SetProperty("u_EmissiveColor", Maths::FVector3{ material.emissionR, material.emissionG, material.emissionB });
 	//			tempMat->SetProperty("u_Metallic", material.metallic);
@@ -775,7 +775,7 @@ namespace MOON {
 				Core::Global::ServiceLocator::Get<Core::ResourceManagement::MaterialManager>().RegisterResource(materilaMap[i], tempMat);
 				tempMat->AddFeature("NORMAL_MAPPING");
 				tempMat->AddFeature("CLIP_PLANE");
-				tempMat->SetShader(Core::Global::ServiceLocator::Get<Editor::Core::Context>().shaderManager[":Shaders\\Standard.shader"]);
+				tempMat->SetMaterial(Core::Global::ServiceLocator::Get<Editor::Core::Context>().shaderManager[":Shaders\\Standard.shader"]);
 				// Overrides after the shader: SetShader now takes the state from the material block.
 				tempMat->SetBackfaceCulling(false);
 				tempMat->SetCastShadows(false);

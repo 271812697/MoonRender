@@ -184,14 +184,14 @@ namespace
 		SectionCapRenderPass(Rendering::Core::CompositeRenderer& p_renderer) :
 			SceneRenderPass(p_renderer)
 		{
-			m_capMaterial.SetShader(GetShaderService[":Shaders\\SectionCap.shader"]);
+			m_capMaterial.SetMaterial(GetShaderService[":Shaders\\SectionCap.shader"]);
 			m_capMaterial.SetBackfaceCulling(false);
 			m_capMaterial.SetFrontfaceCulling(false);
 			m_capMaterial.SetDepthWriting(true);
 			m_capMaterial.SetDepthTest(true);
 
 
-			m_parityMaterial.SetShader(GetShaderService[":Shaders\\SectionParity.shader"]);
+			m_parityMaterial.SetMaterial(GetShaderService[":Shaders\\SectionParity.shader"]);
 			m_parityMaterial.SetBackfaceCulling(false);
 			m_parityMaterial.SetFrontfaceCulling(false);
 			m_parityMaterial.SetDepthWriting(false);
@@ -373,7 +373,7 @@ namespace
 		SectionContourRenderPass(Rendering::Core::CompositeRenderer& p_renderer) :
 			SceneRenderPass(p_renderer)
 		{
-			m_contourMaterial.SetShader(GetShaderService[":Shaders\\SectionContour.shader"]);
+			m_contourMaterial.SetMaterial(GetShaderService[":Shaders\\SectionContour.shader"]);
 			m_contourMaterial.SetBackfaceCulling(false);
 			m_contourMaterial.SetFrontfaceCulling(false);
 			m_contourMaterial.SetDepthWriting(false);
@@ -519,7 +519,7 @@ void main()
 
 )";
 			mBlendColorShader = ::Rendering::Resources::Loaders::ShaderLoader::CreateFromSource(v, f);
-			mBlendColorMat.SetShader(mBlendColorShader);
+			mBlendColorMat.SetMaterial(mBlendColorShader);
 		}
 
 	protected:
@@ -961,7 +961,7 @@ void Core::Rendering::SceneRenderer::UpdateParsedDrawables(Core::SceneSystem::Sc
 			// the variant key of a keyed shader is part of the drawable's feature override.
 			// Both have to re-run ParseScene, otherwise the cached drawables keep the old
 			// (feature-only) override and the draw falls back to a variant without the key.
-			HashCombine(signature, HashPointer(material->Shader()));
+			HashCombine(signature, HashPointer(material->MaterialOf()));
 			for (const std::string& feature : material->GetFeatures())
 			{
 				for (const char c : feature)

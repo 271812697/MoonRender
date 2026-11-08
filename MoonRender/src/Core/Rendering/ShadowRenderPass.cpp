@@ -16,7 +16,7 @@ Core::Rendering::ShadowRenderPass::ShadowRenderPass(::Rendering::Core::Composite
 	const auto shadowShader = GetService(Core::ResourceManagement::ShaderManager).GetResource(":Shaders\\ShadowFallback.shader");
 	assert(shadowShader&& "Cannot find the shadow shader");
 
-	m_shadowMaterial.SetShader(shadowShader);
+	m_shadowMaterial.SetMaterial(shadowShader);
 	// No need to update the material settings, as its generated state mask will be erridden anyway.
 }
 

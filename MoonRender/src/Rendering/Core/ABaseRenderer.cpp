@@ -142,7 +142,7 @@ void main()
 )";
 	//not free the m_presentShader shader?
 	m_presentShader = Rendering::Resources::Loaders::ShaderLoader::CreateFromSource(v, f);
-	m_presentMaterial.SetShader(m_presentShader);
+	m_presentMaterial.SetMaterial(m_presentShader);
 }
 
 void Rendering::Core::ABaseRenderer::BeginFrame(const Data::FrameDescriptor& p_frameDescriptor)
@@ -374,7 +374,7 @@ void Rendering::Core::ABaseRenderer::Present(Rendering::Data::MaterialInstance& 
 		// Bind() only selects the program now; callers that do not go through
 		// DrawEntity have to push the uniforms themselves, otherwise the
 		// samplers keep their default value and the blit samples garbage.
-		material->UploadProperties(true, true);
+		material->UploadProperties(true);
 		m_driver.Draw(pso, mesh.value(), blit.primitiveMode, gpuInstances);
 		material->Unbind();
 	}
@@ -454,6 +454,12 @@ void Rendering::Core::ABaseRenderer::DrawEntity(
 		}
 	}
 
+	// View-owned textures must be in the per-material set before BindParameterBlock binds it;
+	// setting them there used to force a full descriptor-set bind per global texture.
+	p_drawable.material->BindGlobalTexture("_BRDFLut", m_brdfLut);
+	p_drawable.material->BindGlobalTexture("_IrradianceCube", m_irradianceCube);
+	p_drawable.material->BindGlobalTexture("_PrefilterCube", m_prefilterCube);
+
 	const auto signature=p_drawable.material->Bind(
 		&m_emptyTexture2D,
 		&m_emptyTextureCube,
@@ -476,34 +482,18 @@ void Rendering::Core::ABaseRenderer::DrawEntity(
 		}
 	}
 	const bool uploadStableProperties = !m_previousMaterialSignature.has_value() || signature.stablePropertySignature != m_previousMaterialSignature->stablePropertySignature;
-	const bool uploadSingleUseProperties = !m_previousMaterialSignature.has_value() || signature.singleUsePropertySignature != m_previousMaterialSignature->singleUsePropertySignature;
 
-	if (uploadStableProperties || uploadSingleUseProperties)
+	if (uploadStableProperties)
 	{
 		p_drawable.material->UploadProperties(
-			uploadStableProperties,
-			uploadSingleUseProperties,
+			true,
 			&m_emptyTexture2D,
 			&m_emptyTextureCube,
-			m_brdfLut,
 			&m_flatNormalTexture
 		);
 	}
 
 	m_previousMaterialSignature = signature;
-
-	// The DFG LUT is owned by the view, not by the material: the sky pass bakes it after the
-	// material's first upload has already run, and uploads only happen when the material's
-	// signature changes. Without this per-draw bind the material keeps the white empty 2D that
-	// was bound on the first frame (DFG=(1,1), E~=1, diffuse multiplied by zero and the
-	// dielectric looking like a full mirror).
-	p_drawable.material->BindGlobalTexture("_BRDFLut", m_brdfLut);
-	// Same reasoning for the environment: the sky pass bakes these on the first frame, and a
-	// material instance that was created (and uploaded) before that kept the empty black cube -
-	// a metal then reads as black except where the sun happens to reflect, which is what "turning
-	// the view shows black" looked like.
-	p_drawable.material->BindGlobalTexture("_IrradianceCube", m_irradianceCube);
-	p_drawable.material->BindGlobalTexture("_PrefilterCube", m_prefilterCube);
 
 	m_driver.Draw(
 		p_pso,

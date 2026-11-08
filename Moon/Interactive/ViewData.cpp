@@ -1,5 +1,29 @@
 #include "Interactive/ViewData.h"
 namespace MOON {
+	void TriangleFace::RebuildNormals()
+	{
+		// 位置由 gizmo 的几何构造器一次写定，法线跟着也只算这一次：绘制期不再求叉积。
+		normals.clear();
+		normals.reserve(faces.size());
+		for (size_t i = 0; i + 2 < faces.size(); i += 3)
+		{
+			const Eigen::Vector3f& a = faces[i];
+			const Eigen::Vector3f& b = faces[i + 1];
+			const Eigen::Vector3f& c = faces[i + 2];
+			Eigen::Vector3f normal = (b - a).cross(c - a);
+			const float length = normal.norm();
+			// 退化三角形没有朝向，也就画不出像素：给一条稳定法线，别让 0 向量传进着色器。
+			normal = length > 1.0e-12f ? Eigen::Vector3f(normal / length) : Eigen::Vector3f(0.0f, 1.0f, 0.0f);
+			normals.push_back(normal);
+			normals.push_back(normal);
+			normals.push_back(normal);
+		}
+		// 末尾不足一个三角形的顶点也补上，保证 normals 与 faces 一一对应。
+		while (normals.size() < faces.size())
+		{
+			normals.push_back(normals.empty() ? Eigen::Vector3f(0.0f, 1.0f, 0.0f) : normals.back());
+		}
+	}
 	int WidgetViewData::addPoint(const Eigen::Vector3f& pos, float size, const Eigen::Vector4<uint8_t>& color) {
 		points.emplace_back(pos, size, color);
 		return points.size();
@@ -75,6 +99,7 @@ namespace MOON {
 		if (it != facesIdMap.end()) {
 			int id = it->second;
 			faces[id].faces = f;
+			faces[id].RebuildNormals();
 			faces[id].color = c;
 			faces[id].model = m;
 			return;
@@ -95,6 +120,7 @@ namespace MOON {
 		if (it != facesIdMap.end()) {
 			int id = it->second;
 			faces[id].faces = f;
+			faces[id].RebuildNormals();
 		}
 	}
 	void WidgetViewData::setTriangleFace(const std::string& name, const Eigen::Vector4<uint8_t>& c) {
@@ -112,6 +138,8 @@ namespace MOON {
 			for (auto& it : faces[id].faces) {
 				it *= scale;
 			}
+			// 等比缩放不改变法线方向，但负缩放会翻转朝向，重建一次最省心。
+			faces[id].RebuildNormals();
 		}
 	}
 	std::vector<Edge>& WidgetViewData::getEdge() {

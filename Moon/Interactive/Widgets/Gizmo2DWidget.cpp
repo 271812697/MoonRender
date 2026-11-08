@@ -1,4 +1,4 @@
-#include "Interactive/Widgets/Gizmo2DWidget.h"
+﻿#include "Interactive/Widgets/Gizmo2DWidget.h"
 #include "Interactive/Widgets/GizmoGeometry.h"
 #include "Interactive/Im3DRenderer.h"
 #include "Interactive/MathUtil/MathUtil.h"
@@ -23,7 +23,7 @@ namespace MOON
 		using namespace MOON::GizmoGeometry;
 
 		// Local gizmo units, sized like Gizmo3DWidget's so the two read the same on screen.
-		constexpr float kScreenScale = 0.6f;
+		constexpr float kScreenScale = 1.0f;
 		constexpr float kShaftEnd = 0.62f;
 		constexpr float kArrowTip = 0.80f;
 		constexpr float kShaftRadius = 0.016f;
@@ -268,6 +268,8 @@ namespace MOON
 		scaleMat(0, 0) = scaleMat(1, 1) = scaleMat(2, 2) = scale;
 
 		const bool dragging = mState == AxisT || mState == PlaneT || mState == AxisR;
+		// WidgetViewData 的三角形在构造时就算好了法线（TriangleFace::RebuildNormals）。
+		renderer->pushEnableLit(true);
 		for (int handle = 0; handle < 4; ++handle)
 		{
 			TriangleFace* face = nullptr;
@@ -284,9 +286,10 @@ namespace MOON
 			}
 
 			renderer->pushMatrix(face->model * scaleMat);
-			renderer->drawTriangleList(face->faces, 1.0f, color);
+			renderer->drawTriangleList(face->faces, face->normals, 1.0f, color);
 			renderer->popMatrix();
 		}
+		renderer->popEnableLit();
 
 		if (mState == AxisR)
 		{

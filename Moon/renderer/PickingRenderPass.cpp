@@ -32,7 +32,7 @@ namespace
 		// Set the picking color property if it exists
 		if (p_material.GetProperty(p_uniformName))
 		{
-			p_material.SetProperty(p_uniformName, color, true);
+			p_material.SetProperty(p_uniformName, color);
 		}
 	}
 }
@@ -80,8 +80,8 @@ Editor::Rendering::PickingRenderPass::PickingRenderPass(::Rendering::Core::Compo
 
 	SetupPickReadbacks();
 	/* Picking Material */
-	m_actorPickingFallbackMaterial.SetShader(GetShaderService[":Shaders/PickingFallback.shader"]);
-	m_TopoShapePickingFallbackMaterial.SetShader(GetShaderService[":Shaders\\GeomertySurfacePick.shader"]);
+	m_actorPickingFallbackMaterial.SetMaterial(GetShaderService[":Shaders/PickingFallback.shader"]);
+	m_TopoShapePickingFallbackMaterial.SetMaterial(GetShaderService[":Shaders\\GeomertySurfacePick.shader"]);
 	m_TopoShapePickingFallbackMaterial.SetBackfaceCulling(false);
 	// Lines and faces are coplanar in the picking buffer too: push the faces
 	// back in depth so the line IDs win over their own faces.

@@ -31,9 +31,9 @@ Core::Rendering::PostProcess::AutoExposureEffect::AutoExposureEffect(
 		true // <-- use mipmaps
 	);
 
-	m_luminanceMaterial.SetShader(GetService(Core::ResourceManagement::ShaderManager)[":Shaders\\PostProcess\\Luminance.shader"]);
-	m_exposureMaterial.SetShader(GetService(Core::ResourceManagement::ShaderManager)[":Shaders\\PostProcess\\AutoExposure.shader"]);
-	m_compensationMaterial.SetShader(GetService(Core::ResourceManagement::ShaderManager)[":Shaders\\PostProcess\\ApplyExposure.shader"]);
+	m_luminanceMaterial.SetMaterial(GetService(Core::ResourceManagement::ShaderManager)[":Shaders\\PostProcess\\Luminance.shader"]);
+	m_exposureMaterial.SetMaterial(GetService(Core::ResourceManagement::ShaderManager)[":Shaders\\PostProcess\\AutoExposure.shader"]);
+	m_compensationMaterial.SetMaterial(GetService(Core::ResourceManagement::ShaderManager)[":Shaders\\PostProcess\\ApplyExposure.shader"]);
 }
 
 void Core::Rendering::PostProcess::AutoExposureEffect::Draw(
@@ -50,7 +50,7 @@ void Core::Rendering::PostProcess::AutoExposureEffect::Draw(
 
 	// Luminance calculation
 	m_luminanceBuffer.Resize(kLuminanceBufferResolution, kLuminanceBufferResolution);
-	m_luminanceMaterial.SetProperty("_CenterWeightBias", autoExposureSettings.centerWeightBias, true);
+	m_luminanceMaterial.SetProperty("_CenterWeightBias", autoExposureSettings.centerWeightBias);
 	m_renderer.Blit(p_pso, p_src, m_luminanceBuffer, m_luminanceMaterial,
 		::Rendering::Settings::EBlitFlags::DEFAULT & ~::Rendering::Settings::EBlitFlags::RESIZE_DST_TO_MATCH_SRC);
 	const auto luminanceTex = m_luminanceBuffer.GetAttachment<::Rendering::HAL::Texture>(::Rendering::Settings::EFramebufferAttachment::COLOR);
@@ -71,19 +71,19 @@ void Core::Rendering::PostProcess::AutoExposureEffect::Draw(
 	++m_exposurePingPongBuffer;
 
 	// Exposure adaptation
-	m_exposureMaterial.SetProperty("_LuminanceTexture", &luminanceTex.value(), true);
-	m_exposureMaterial.SetProperty("_MinLuminanceEV", autoExposureSettings.minLuminanceEV, true);
-	m_exposureMaterial.SetProperty("_MaxLuminanceEV", autoExposureSettings.maxLuminanceEV, true);
-	m_exposureMaterial.SetProperty("_ExposureCompensationEV", autoExposureSettings.exposureCompensationEV, true);
-	m_exposureMaterial.SetProperty("_ElapsedTime", elapsedTime, true);
-	m_exposureMaterial.SetProperty("_Progressive", static_cast<int>(autoExposureSettings.progressive && !m_firstFrame), true);
-	m_exposureMaterial.SetProperty("_SpeedUp", autoExposureSettings.speedUp, true);
-	m_exposureMaterial.SetProperty("_SpeedDown", autoExposureSettings.speedDown, true);
+	m_exposureMaterial.SetProperty("_LuminanceTexture", &luminanceTex.value());
+	m_exposureMaterial.SetProperty("_MinLuminanceEV", autoExposureSettings.minLuminanceEV);
+	m_exposureMaterial.SetProperty("_MaxLuminanceEV", autoExposureSettings.maxLuminanceEV);
+	m_exposureMaterial.SetProperty("_ExposureCompensationEV", autoExposureSettings.exposureCompensationEV);
+	m_exposureMaterial.SetProperty("_ElapsedTime", elapsedTime);
+	m_exposureMaterial.SetProperty("_Progressive", static_cast<int>(autoExposureSettings.progressive && !m_firstFrame));
+	m_exposureMaterial.SetProperty("_SpeedUp", autoExposureSettings.speedUp);
+	m_exposureMaterial.SetProperty("_SpeedDown", autoExposureSettings.speedDown);
 	m_renderer.Blit(p_pso, previousExposure, currentExposure, m_exposureMaterial);
 
 	// Apply the exposure to the final image
 	const auto exposureTex = currentExposure.GetAttachment<::Rendering::HAL::Texture>(::Rendering::Settings::EFramebufferAttachment::COLOR);
-	m_compensationMaterial.SetProperty("_ExposureTexture", &exposureTex.value(), true);
+	m_compensationMaterial.SetProperty("_ExposureTexture", &exposureTex.value());
 	m_renderer.Blit(p_pso, p_src, p_dst, m_compensationMaterial);
 
 	m_firstFrame = false;

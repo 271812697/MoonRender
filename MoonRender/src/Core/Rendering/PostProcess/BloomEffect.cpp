@@ -65,10 +65,10 @@ Core::Rendering::PostProcess::BloomEffect::BloomEffect(::Rendering::Core::Compos
 
 	auto& shaderManager = GetService(Core::ResourceManagement::ShaderManager);
 
-	m_downsamplingMaterial.SetShader(shaderManager[":Shaders\\PostProcess\\BloomDownsampling.shader"]);
-	m_upsamplingMaterial.SetShader(shaderManager[":Shaders\\PostProcess\\BloomUpsampling.shader"]);
-	m_bloomMaterial.SetShader(shaderManager[":Shaders\\PostProcess\\Bloom.shader"]);
-	m_blitMaterial.SetShader(shaderManager[":Shaders\\PostProcess\\Blit.shader"]);
+	m_downsamplingMaterial.SetMaterial(shaderManager[":Shaders\\PostProcess\\BloomDownsampling.shader"]);
+	m_upsamplingMaterial.SetMaterial(shaderManager[":Shaders\\PostProcess\\BloomUpsampling.shader"]);
+	m_bloomMaterial.SetMaterial(shaderManager[":Shaders\\PostProcess\\Bloom.shader"]);
+	m_blitMaterial.SetMaterial(shaderManager[":Shaders\\PostProcess\\Blit.shader"]);
 
 	// Since we want to use blending during the upsampling pass, we need to set up the material
 	// manually. The EBlitFlag::USE_MATERIAL_STATE_MASK will be used to enforce these settings.
@@ -145,7 +145,7 @@ void Core::Rendering::PostProcess::BloomEffect::Draw(
 		::Rendering::HAL::Framebuffer& p_dst,
 		const Maths::FVector2& p_srcRes 
 	) {
-		m_downsamplingMaterial.SetProperty("_InputResolution", p_srcRes, true);
+		m_downsamplingMaterial.SetProperty("_InputResolution", p_srcRes);
 		m_renderer.Blit(p_pso, p_src, p_dst, m_downsamplingMaterial, DEFAULT & ~RESIZE_DST_TO_MATCH_SRC);
 	};
 
@@ -177,7 +177,7 @@ void Core::Rendering::PostProcess::BloomEffect::Draw(
 	upsamplingPSO.blendingDestFactor = ::Rendering::Settings::EBlendingFactor::ONE;
 	upsamplingPSO.blendingEquation = ::Rendering::Settings::EBlendingEquation::FUNC_ADD;
 
-	m_upsamplingMaterial.SetProperty("_FilterRadius", BloomConstants::kFilterRadius, true);
+	m_upsamplingMaterial.SetProperty("_FilterRadius", BloomConstants::kFilterRadius);
 
 	auto upsamplingPass = [&](
 		::Rendering::HAL::Framebuffer& p_src,

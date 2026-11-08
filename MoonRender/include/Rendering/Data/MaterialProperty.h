@@ -35,6 +35,5 @@ namespace Rendering::Data
 	struct MaterialProperty
 	{
 		MaterialPropertyType value;
-		bool singleUse = false;
 	};
 }

@@ -111,7 +111,7 @@ namespace MOON
 
 		m_view->Resize(p_size, p_size);
 		const bool isCadMaterial = [material] {
-			auto* shader = material->GetShader();
+			auto* shader = material->MaterialOf();
 			if (shader == nullptr) { return false; }
 			for (const auto& parameter : shader->GetParameters())
 			{

@@ -24,12 +24,8 @@ namespace Core::Resources
 
 		/** Points the asset at a package Material and recreates its instance. */
 		void SetMaterial(::Rendering::Data::Material* p_material);
-		::Rendering::Data::Material* GetMaterial() const { return m_material; }
-
-		/** Compatibility names for the scene/editor code that used to talk about a shader. */
-		void SetShader(::Rendering::Data::Material* p_material) { SetMaterial(p_material); }
-		bool HasShader() const { return m_material != nullptr; }
-		::Rendering::Data::Material* GetShader() const { return m_material; }
+		bool HasMaterial() const { return m_material != nullptr; }
+		::Rendering::Data::Material* MaterialOf() const { return m_material; }
 
 		::Rendering::Data::MaterialInstance& Instance() const { return *m_instance; }
 		::Rendering::Data::MaterialInstance* InstancePtr() const { return m_instance.get(); }
@@ -41,13 +37,13 @@ namespace Core::Resources
 		std::unique_ptr<::Rendering::Data::MaterialInstance> CreateInstance() const;
 
 		// ---- parameter API -------------------------------------------------------------
-		void SetProperty(const std::string p_name, const ::Rendering::Data::MaterialPropertyType& p_value, bool p_singleUse = false)
+		void SetProperty(const std::string p_name, const ::Rendering::Data::MaterialPropertyType& p_value)
 		{
-			Instance().SetProperty(p_name, p_value, p_singleUse);
+			Instance().SetProperty(p_name, p_value);
 		}
-		bool TrySetProperty(const std::string& p_name, const ::Rendering::Data::MaterialPropertyType& p_value, bool p_singleUse = false)
+		bool TrySetProperty(const std::string& p_name, const ::Rendering::Data::MaterialPropertyType& p_value)
 		{
-			return Instance().TrySetProperty(p_name, p_value, p_singleUse);
+			return Instance().TrySetProperty(p_name, p_value);
 		}
 		bool HasProperty(const std::string& p_name) const { return Instance().HasProperty(p_name); }
 		std::optional<::Rendering::Data::MaterialProperty> GetProperty(const std::string p_name) const
@@ -64,13 +60,6 @@ namespace Core::Resources
 		}
 		void ResetProperties() { Instance().ResetProperties(); }
 		const ::Rendering::Data::MaterialDefinition* Definition() const { return Instance().Definition(); }
-
-		Tools::Utils::OptRef<::Rendering::HAL::ShaderProgram> GetVariant(
-			std::optional<const std::string_view> p_pass = std::nullopt,
-			Tools::Utils::OptRef<const ::Rendering::Data::FeatureSet> p_override = std::nullopt) const
-		{
-			return Instance().GetVariant(p_pass, p_override);
-		}
 
 		// ---- state --------------------------------------------------------------------
 		bool IsValid() const { return Instance().IsValid(); }

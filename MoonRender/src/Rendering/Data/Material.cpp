@@ -21,7 +21,7 @@ Rendering::Data::Material::Material()
 Rendering::Data::Material::Material(Material* p_source)
 	: Material()
 {
-	SetShader(p_source);
+	SetMaterial(p_source);
 }
 
 Rendering::Data::Material::Material(
@@ -64,17 +64,17 @@ std::unique_ptr<Rendering::Data::MaterialInstance> Rendering::Data::Material::Cr
 	return std::make_unique<MaterialInstance>(*this, false);
 }
 
-bool Rendering::Data::Material::HasShader() const
+bool Rendering::Data::Material::HasMaterial() const
 {
 	return m_source != nullptr || m_definition != nullptr;
 }
 
-Rendering::Data::Material* Rendering::Data::Material::GetShader() const
+Rendering::Data::Material* Rendering::Data::Material::MaterialOf() const
 {
 	return m_source != nullptr ? m_source : const_cast<Material*>(this);
 }
 
-void Rendering::Data::Material::SetShader(Material* p_shader)
+void Rendering::Data::Material::SetMaterial(Material* p_shader)
 {
 	if (p_shader == this)
 	{
@@ -104,7 +104,7 @@ void Rendering::Data::Material::SetShader(Material* p_shader)
 	}
 
 	m_defaultInstance->ResetProperties();
-	ResetStateToShader();
+	ResetStateToMaterial();
 }
 
 const Rendering::Data::MaterialDefinition* Rendering::Data::Material::Definition() const
@@ -116,8 +116,21 @@ void Rendering::Data::Material::SetDefinition(
 	std::shared_ptr<const MaterialDefinition> p_definition)
 {
 	m_definition = std::move(p_definition);
+	if (m_definition != nullptr)
+	{
+		for (const auto& featureVariants : m_variants | std::views::values)
+		{
+			for (const auto& program : featureVariants | std::views::values)
+			{
+				if (program != nullptr)
+				{
+					program->SetDescriptorBindings(m_definition->ProgramBindings());
+				}
+			}
+		}
+	}
 	m_defaultInstance->ResetProperties();
-	ResetStateToShader();
+	ResetStateToMaterial();
 }
 
 Rendering::HAL::ShaderProgram& Rendering::Data::Material::GetVariant(
@@ -199,7 +212,7 @@ Rendering::HAL::ShaderProgram& Rendering::Data::Material::GetVariant(
 		{
 			std::string error;
 			auto program = Rendering::Resources::Loaders::ShaderLoader::CompileVariant(
-				*parser, *chosen, &error);
+				*parser, *chosen, m_definition->ProgramBindings(), &error);
 			if (program == nullptr)
 			{
 				std::cerr << "[Material] " << path << ": " << error << std::endl;
@@ -254,6 +267,20 @@ void Rendering::Data::Material::SetVariants(Variants&& p_variants)
 	m_features.clear();
 	m_usesVariantKeys = false;
 	m_variantKeys.clear();
+
+	if (m_definition != nullptr)
+	{
+		for (const auto& featureVariants : m_variants | std::views::values)
+		{
+			for (const auto& program : featureVariants | std::views::values)
+			{
+				if (program != nullptr)
+				{
+					program->SetDescriptorBindings(m_definition->ProgramBindings());
+				}
+			}
+		}
+	}
 
 	for (const auto& [pass, featureVariants] : m_variants)
 	{
@@ -314,7 +341,7 @@ void Rendering::Data::Material::SetDeclaredFeatures(std::vector<std::string>&& p
 	m_declaredFeatures = std::move(p_features);
 }
 
-void Rendering::Data::Material::ResetStateToShader()
+void Rendering::Data::Material::ResetStateToMaterial()
 {
 	m_defaultInstance->SetBlendable(false);
 	m_defaultInstance->SetBlendMode(Rendering::Settings::EBlendMode::BLEND_OPAQUE);

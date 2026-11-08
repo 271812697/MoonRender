@@ -17,8 +17,13 @@ namespace Rendering::HAL
 		 * program, exactly like filament's OpenGLProgram binding map. */
 		std::unordered_map<uint64_t, uint32_t> descriptorSlots;
 		bool descriptorSlotsInitialized = false;
+		/** The layout the program will resolve on first use, like filament's lazy program
+		 * token data. Configured once at program creation, never by the material. */
+		Rendering::Data::DescriptorSetInfo descriptorBindings;
+		bool descriptorBindingsConfigured = false;
 
 		uint32_t GetUniformLocation(std::string_view p_name);
+		void SetDescriptorBindings(const Rendering::Data::DescriptorSetInfo& p_bindings);
 		void InitializeDescriptorBindings(
 			uint32_t p_programId,
 			const Rendering::Data::DescriptorSetInfo& p_bindings);

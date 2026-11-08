@@ -19,10 +19,10 @@ Editor::Rendering::OutlineRenderFeature::OutlineRenderFeature(
 	::Rendering::Features::ARenderFeature(p_renderer, p_executionPolicy)
 {
 	/* Stencil Fill Material */
-	m_stencilFillMaterial.SetShader(GetShaderService[":Shaders/OutlineFallback.shader"]);
+	m_stencilFillMaterial.SetMaterial(GetShaderService[":Shaders/OutlineFallback.shader"]);
 
 	/* Outline Material */
-	m_outlineMaterial.SetShader(GetShaderService[":Shaders/OutlineFallback.shader"]);
+	m_outlineMaterial.SetMaterial(GetShaderService[":Shaders/OutlineFallback.shader"]);
 }
 
 void Editor::Rendering::OutlineRenderFeature::DrawOutline(
@@ -232,7 +232,7 @@ void Editor::Rendering::OutlineRenderFeature::DrawModelOutline(
 		// Set the outline color property if it exists
 		if (targetMaterial.GetProperty("_OutlineColor"))
 		{
-			targetMaterial.SetProperty("_OutlineColor", p_color, true);
+			targetMaterial.SetProperty("_OutlineColor", p_color);
 		}
 
 		auto stateMask = targetMaterial.GenerateStateMask();

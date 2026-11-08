@@ -65,21 +65,14 @@ Core::Resources::MaterialAsset::CreateInstance() const
 		instance = std::make_unique<Rendering::Data::MaterialInstance>();
 	}
 
-	// A drawable using this .mat must see the asset's overrides, not just the package defaults.
+	// A drawable using this .mat must see the asset's overrides, not just the package defaults:
+	// parameters and textures first, then the whole render state the <settings> block carries
+	// (polygon offset, culling, depth writes, draw order, line width, ...).
 	for (const auto& [name, property] : SnapshotProperties())
 	{
 		instance->SetProperty(name, property.value);
 	}
-	instance->SetBlendable(IsBlendable());
-	instance->SetBlendMode(GetBlendMode());
-	instance->SetTransparent(IsTransparent());
-	instance->SetBackfaceCulling(HasBackfaceCulling());
-	instance->SetFrontfaceCulling(HasFrontfaceCulling());
-	instance->SetDepthTest(HasDepthTest());
-	instance->SetDepthWriting(HasDepthWriting());
-	instance->SetColorWriting(HasColorWriting());
-	instance->SetLineWidth(GetLineWidth());
-	instance->SetDrawOrder(GetDrawOrder());
+	instance->CopyStateFrom(*m_instance);
 	return instance;
 }
 
@@ -90,7 +83,7 @@ void Core::Resources::MaterialAsset::OnSerialize(tinyxml2::XMLDocument& p_doc, t
 	using namespace Maths;
 
 	// The .mat records the package material it instances, not a shader object.
-	Serializer::SerializeShader(p_doc, p_node, "material", GetShader());
+	Serializer::SerializeShader(p_doc, p_node, "material", MaterialOf());
 
 	tinyxml2::XMLNode* settingsNode = p_doc.NewElement("settings");
 	p_node->InsertEndChild(settingsNode);
@@ -123,45 +116,13 @@ void Core::Resources::MaterialAsset::OnSerialize(tinyxml2::XMLDocument& p_doc, t
 	tinyxml2::XMLNode* uniformsNode = p_doc.NewElement("uniforms");
 	p_node->InsertEndChild(uniformsNode);
 
-	if (GetShader() == nullptr || GetShader()->GetParameters().empty())
+	if (MaterialOf() == nullptr || MaterialOf()->GetParameters().empty())
 	{
 		return;
 	}
 
-	const auto program = GetVariant();
-
-	// Block members are not in the program's reflected uniform map (they have no individual
-	// location); the material's parameter table is what says the material has them.
-	const auto isDeclaredParameter = [this](const std::string& p_name) {
-		if (GetShader() == nullptr)
-		{
-			return false;
-		}
-		for (const Rendering::Data::Material::Parameter& parameter : GetShader()->GetParameters())
-		{
-			if (parameter.name == p_name || p_name.starts_with(parameter.name + "["))
-			{
-				return true;
-			}
-		}
-		return false;
-	};
-
 	for (const auto& [name, prop] : SnapshotProperties())
 	{
-		// Skip serialization of this property if neither the parameter table nor the current
-		// program knows it.
-		if (!isDeclaredParameter(name) && (!program || !program->GetUniformInfo(name)))
-		{
-			continue;
-		}
-
-		// Skip serialization of this property if it is marked as single-use
-		if (prop.singleUse)
-		{
-			continue;
-		}
-
 		auto& value = prop.value;
 		tinyxml2::XMLNode* uniform = p_doc.NewElement("uniform");
 		uniformsNode->InsertEndChild(uniform);
@@ -238,7 +199,7 @@ void Core::Resources::MaterialAsset::OnDeserialize(tinyxml2::XMLDocument& p_doc,
 	/* We verify that the material package is valid (Not null) */
 	if (material)
 	{
-		SetShader(material);
+		SetMaterial(material);
 	}
 
 	tinyxml2::XMLNode* settingsNode = p_node->FirstChildElement("settings");

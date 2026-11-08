@@ -325,7 +325,7 @@ void main()
 )";
 		
 		lineOutputShader = ::Rendering::Resources::Loaders::ShaderLoader::CreateFromSource(v, f);
-		lineOutputMat.SetShader(lineOutputShader);
+		lineOutputMat.SetMaterial(lineOutputShader);
 		
 	}
 	PathTraceRenderPass::~PathTraceRenderPass()
@@ -705,39 +705,39 @@ void main()
 		}
 
 		if (pathTraceShaderMap.find(pathtraceDefines) != pathTraceShaderMap.end()) {
-			pathTraceShader.SetShader(pathTraceShaderMap[pathtraceDefines].get());
+			pathTraceShader.SetMaterial(pathTraceShaderMap[pathtraceDefines].get());
 		}
 		else {
 			auto shader = ::Core::Global::ServiceLocator::Get<Editor::Core::Context>().shaderManager.CreateFromSource(tempPathTraceShaderSrcObj);
 			pathTraceShaderMap[pathtraceDefines] = std::unique_ptr<::Rendering::Resources::Shader>(shader);
-			pathTraceShader.SetShader(pathTraceShaderMap[pathtraceDefines].get());
+			pathTraceShader.SetMaterial(pathTraceShaderMap[pathtraceDefines].get());
 		}
 
 		if (pathTraceShaderLowResMap.find(pathtraceDefines) != pathTraceShaderLowResMap.end()) {
-			pathTraceShaderLowRes.SetShader(pathTraceShaderLowResMap[pathtraceDefines].get());
+			pathTraceShaderLowRes.SetMaterial(pathTraceShaderLowResMap[pathtraceDefines].get());
 		}
 		else {
 			auto shader = ::Core::Global::ServiceLocator::Get<Editor::Core::Context>().shaderManager.CreateFromSource(tempPathTraceShaderLowResSrcObj);
 			pathTraceShaderLowResMap[pathtraceDefines] = std::unique_ptr<::Rendering::Resources::Shader>(shader);
-			pathTraceShaderLowRes.SetShader(pathTraceShaderLowResMap[pathtraceDefines].get());
+			pathTraceShaderLowRes.SetMaterial(pathTraceShaderLowResMap[pathtraceDefines].get());
 		}
 
 		if (tonemapShaderMap.find(tonemapDefines) != tonemapShaderMap.end()) {
-			tonemapShader.SetShader(tonemapShaderMap[tonemapDefines].get());
+			tonemapShader.SetMaterial(tonemapShaderMap[tonemapDefines].get());
 		}
 		else {
 			auto shader = ::Core::Global::ServiceLocator::Get<Editor::Core::Context>().shaderManager.CreateFromSource(tempTonemapShaderSrcObj);
 			tonemapShaderMap[tonemapDefines] = std::unique_ptr<::Rendering::Resources::Shader>(shader);
-			tonemapShader.SetShader(tonemapShaderMap[tonemapDefines].get());
+			tonemapShader.SetMaterial(tonemapShaderMap[tonemapDefines].get());
 		}
 
 		if (outputShaderMap.find(outputDefines) != outputShaderMap.end()) {
-			outputShader.SetShader(outputShaderMap[outputDefines].get());
+			outputShader.SetMaterial(outputShaderMap[outputDefines].get());
 		}
 		else {
 			auto shader = ::Core::Global::ServiceLocator::Get<Editor::Core::Context>().shaderManager.CreateFromSource(tempOutputShaderSrcObj);
 			outputShaderMap[outputDefines] = std::unique_ptr<::Rendering::Resources::Shader>(shader);
-			outputShader.SetShader(outputShaderMap[outputDefines].get());
+			outputShader.SetMaterial(outputShaderMap[outputDefines].get());
 		}
 	}
 	void PathTraceRenderPass::ResizeRenderer(int width, int height)

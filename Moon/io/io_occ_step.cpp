@@ -164,7 +164,7 @@ namespace MOON {
 				auto tempMat = new Core::Resources::MaterialAsset();
 
 
-				tempMat->SetShader(GetShaderService[":Shaders\\Standard.shader"]);
+				tempMat->SetMaterial(GetShaderService[":Shaders\\Standard.shader"]);
 				// Overrides after SetShader: the state now starts from the material block.
 				tempMat->SetBackfaceCulling(false);
 				tempMat->SetCastShadows(false);

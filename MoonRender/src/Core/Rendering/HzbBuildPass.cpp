@@ -58,7 +58,7 @@ namespace
 Core::Rendering::HzbBuildPass::HzbBuildPass(::Rendering::Core::CompositeRenderer& p_renderer)
 	: ::Rendering::Core::ARenderPass(p_renderer)
 {
-	m_reduceMaterial.SetShader(GetShaderService[":Shaders\\PostProcess\\HzbReduce.shader"]);
+	m_reduceMaterial.SetMaterial(GetShaderService[":Shaders\\PostProcess\\HzbReduce.shader"]);
 	m_reduceMaterial.SetDepthTest(false);
 	m_reduceMaterial.SetDepthWriting(false);
 	m_reduceMaterial.SetColorWriting(true);
@@ -340,9 +340,7 @@ void Core::Rendering::HzbBuildPass::Draw(::Rendering::Data::PipelineState p_pso)
 			Maths::FVector2{
 				static_cast<float>(m_width),
 				static_cast<float>(m_height)
-			},
-			true
-		);
+			});
 
 		m_levels[0]->Bind();
 		m_renderer.SetViewport(0, 0, levelWidth, levelHeight);
@@ -353,7 +351,7 @@ void Core::Rendering::HzbBuildPass::Draw(::Rendering::Data::PipelineState p_pso)
 	// 3) Remaining levels: R32F color -> half resolution R32F color.
 	for (size_t i = 1; i < m_levels.size(); ++i)
 	{
-		m_reduceMaterial.SetProperty("_InputResolution", m_levelResolutions[i - 1], true);
+		m_reduceMaterial.SetProperty("_InputResolution", m_levelResolutions[i - 1]);
 		m_renderer.Blit(
 			p_pso,
 			*m_levels[i - 1],

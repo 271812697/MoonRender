@@ -52,6 +52,11 @@ namespace Rendering::Overlay
 		void DrawBoundTriangles(size_t p_vertexCount,
 			int p_viewportX = 0, int p_viewportY = 0, int p_viewportWidth = 0, int p_viewportHeight = 0);
 
+		/** Sets the GL viewport. The mesh passes leave their own sub-viewport behind when they
+		 * draw the navigation cube into a corner, so a pass that draws over the whole frame has
+		 * to restore it explicitly. */
+		void SetViewport(int p_x, int p_y, int p_width, int p_height);
+
 	private:
 		unsigned int m_vao = 0;
 		unsigned int m_vbo = 0;

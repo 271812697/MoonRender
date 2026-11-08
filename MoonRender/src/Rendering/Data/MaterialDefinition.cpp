@@ -210,6 +210,7 @@ namespace Rendering::Data
 				Rendering::Settings::kObjectUBOBinding },
 		};
 		definition->m_programBindings[2] = definition->m_layout.Bindings();
+		definition->BuildLookupTables();
 
 		return definition;
 	}
@@ -267,31 +268,72 @@ namespace Rendering::Data
 				Rendering::Settings::kObjectUBOBinding },
 		};
 		definition->m_programBindings[2] = definition->m_layout.Bindings();
+		definition->BuildLookupTables();
 
 		return definition;
 	}
 
 	const MaterialDefinition::SamplerField* MaterialDefinition::FindSampler(const std::string& p_name) const
 	{
-		for (const SamplerField& field : m_samplerFields)
-		{
-			if (field.name == p_name)
-			{
-				return &field;
-			}
-		}
-		return nullptr;
+		const auto it = m_samplerIndex.find(p_name);
+		return it != m_samplerIndex.end() ? &m_samplerFields[it->second] : nullptr;
 	}
 
 	const MaterialDefinition::UniformField* MaterialDefinition::FindUniform(const std::string& p_name) const
 	{
-		for (const UniformField& field : m_uniformFields)
+		const auto it = m_uniformIndex.find(p_name);
+		return it != m_uniformIndex.end() ? &m_uniformFields[it->second] : nullptr;
+	}
+
+	const MaterialDefinition::Parameter* MaterialDefinition::FindParameter(
+		const std::string& p_name, uint32_t& p_index) const
+	{
+		p_index = 0;
+		std::string_view base = p_name;
+		const size_t open = p_name.rfind('[');
+		if (open != std::string::npos && p_name.back() == ']' && open + 2 <= p_name.size())
 		{
-			if (field.name == p_name)
+			if (open + 2 == p_name.size())
 			{
-				return &field;
+				return nullptr;
 			}
+			uint32_t index = 0;
+			for (size_t i = open + 1; i + 1 < p_name.size(); ++i)
+			{
+				const char c = p_name[i];
+				if (c < '0' || c > '9')
+				{
+					return nullptr;
+				}
+				index = index * 10 + static_cast<uint32_t>(c - '0');
+			}
+			base = std::string_view(p_name).substr(0, open);
+			p_index = index;
 		}
-		return nullptr;
+
+		const auto it = m_parameterIndex.find(std::string(base));
+		return it != m_parameterIndex.end() ? &m_parameters[it->second] : nullptr;
+	}
+
+	void MaterialDefinition::BuildLookupTables()
+	{
+		m_parameterIndex.clear();
+		m_uniformIndex.clear();
+		m_samplerIndex.clear();
+		m_parameterIndex.reserve(m_parameters.size());
+		m_uniformIndex.reserve(m_uniformFields.size());
+		m_samplerIndex.reserve(m_samplerFields.size());
+		for (uint32_t i = 0; i < m_parameters.size(); ++i)
+		{
+			m_parameterIndex.emplace(m_parameters[i].name, i);
+		}
+		for (uint32_t i = 0; i < m_uniformFields.size(); ++i)
+		{
+			m_uniformIndex.emplace(m_uniformFields[i].name, i);
+		}
+		for (uint32_t i = 0; i < m_samplerFields.size(); ++i)
+		{
+			m_samplerIndex.emplace(m_samplerFields[i].name, i);
+		}
 	}
 }
