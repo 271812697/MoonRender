@@ -49,6 +49,8 @@ namespace Rendering::Data
 
 		/** Binds every descriptor at the slot the program's binding map assigns. */
 		void Bind(const Rendering::HAL::ShaderProgram& p_program, uint32_t p_set) const;
+		/** Binds a set whose (binding -> GL slot) mapping is fixed by the engine. */
+		void BindFixed(uint32_t p_set) const;
 		void Release();
 
 		const std::vector<Descriptor>& Descriptors() const { return m_descriptors; }

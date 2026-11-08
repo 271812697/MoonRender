@@ -133,11 +133,8 @@ namespace Rendering::Core
 		/** The view's split-sum DFG LUT: global, bound for every material that declares
 		 * _BRDFLut (see Material::UploadParameterBlock). Set by CompositeRenderer each frame. */
 		void SetBrdfLut(Rendering::HAL::Texture* p_lut) { m_brdfLut = p_lut; }
-		void SetEngineDescriptorSets(
-			Rendering::Data::DescriptorSet* p_perView,
-			Rendering::Data::DescriptorSet* p_perRenderable)
+		void SetEngineDescriptorSet(Rendering::Data::DescriptorSet* p_perRenderable)
 		{
-			m_perViewSet = p_perView;
 			m_perRenderableSet = p_perRenderable;
 		}
 		/** The view's environment (filament's IndirectLight): the irradiance cube (diffuse) and
@@ -166,7 +163,6 @@ namespace Rendering::Core
 		std::optional<Rendering::Data::MaterialSignatureSet> m_previousMaterialSignature = std::nullopt;
 		Rendering::Data::Material* m_presentShader;
 		Rendering::Data::Material m_presentMaterial;
-		Rendering::Data::DescriptorSet* m_perViewSet = nullptr;
 		Rendering::Data::DescriptorSet* m_perRenderableSet = nullptr;
 	private:
 		static std::atomic_bool s_isDrawing;

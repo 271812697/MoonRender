@@ -70,11 +70,6 @@ namespace Rendering::Data
 		void LateUpdateTexture(const std::string& p_name, const std::string& p_path);
 		const Data::FeatureSet& Features() const { return FeaturesOf(); }
 
-		Rendering::HAL::ShaderProgram* BoundProgram() const
-		{
-			return m_programInUse ? &m_programInUse.value() : nullptr;
-		}
-
 		/** Binds the program for p_pass / the drawable's feature set and the instance's parameter
 		 * block. Returns the signatures the renderer uses to skip redundant uploads. */
 		MaterialSignatureSet Bind(

@@ -470,16 +470,11 @@ void Rendering::Core::ABaseRenderer::DrawEntity(
 		m_previousMaterialSignature
 	);
 
-	if (Rendering::HAL::ShaderProgram* program = p_drawable.material->BoundProgram())
+	if (m_perRenderableSet != nullptr)
 	{
-		if (m_perViewSet != nullptr)
-		{
-			m_perViewSet->Bind(*program, Rendering::Data::kPerViewDescriptorSet);
-		}
-		if (m_perRenderableSet != nullptr)
-		{
-			m_perRenderableSet->Bind(*program, Rendering::Data::kPerRenderableDescriptorSet);
-		}
+		// The per-view set is bound once per frame; only the per-drawable ObjectUBO range
+		// changes between draws, and its slots are fixed.
+		m_perRenderableSet->BindFixed(Rendering::Data::kPerRenderableDescriptorSet);
 	}
 	const bool uploadStableProperties = !m_previousMaterialSignature.has_value() || signature.stablePropertySignature != m_previousMaterialSignature->stablePropertySignature;
 

@@ -4,6 +4,7 @@
 #include <Core/Rendering/EngineDrawableDescriptor.h>
 #include <Core/Rendering/EngineUBO.h>
 #include <Rendering/Core/CompositeRenderer.h>
+#include <Rendering/Data/EngineDescriptorSets.h>
 
 namespace Core::Rendering
 {
@@ -56,7 +57,7 @@ Core::Rendering::EngineBufferRenderFeature::EngineBufferRenderFeature(
 	m_perViewSet.SetLayout(&m_perViewLayout);
 	m_perRenderableSet.SetLayout(&m_perRenderableLayout);
 
-	p_renderer.SetEngineDescriptorSets(&m_perViewSet, &m_perRenderableSet);
+	p_renderer.SetEngineDescriptorSet(&m_perRenderableSet);
 
 	m_startTime = std::chrono::high_resolution_clock::now();
 	m_LateUboData = new LateUboData();
@@ -71,7 +72,7 @@ Core::Rendering::EngineBufferRenderFeature::~EngineBufferRenderFeature()
 		m_objectSlice = {};
 	}
 
-	m_renderer.SetEngineDescriptorSets(nullptr, nullptr);
+	m_renderer.SetEngineDescriptorSet(nullptr);
 
 	if (m_LateUboData) {
 		delete m_LateUboData;
@@ -191,6 +192,9 @@ void Core::Rendering::EngineBufferRenderFeature::OnBeginFrame(const ::Rendering:
 	m_perViewSet.SetBuffer(::Rendering::Settings::kReflectionUBOBinding,
 		::Rendering::Data::Descriptor::BufferType::Uniform,
 		m_reflectionBuffer->GetID(), 0, static_cast<uint32_t>(m_reflectionBuffer->GetSize()));
+
+	// The per-view set is identical for every drawable: bind its fixed slots once per frame.
+	m_perViewSet.BindFixed(::Rendering::Data::kPerViewDescriptorSet);
 
 }
 

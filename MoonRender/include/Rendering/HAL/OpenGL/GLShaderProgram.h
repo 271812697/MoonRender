@@ -13,8 +13,8 @@ namespace Rendering::HAL
 		std::unordered_map<std::string, Settings::UniformInfo> uniforms;
 		std::unordered_map<std::string, uint32_t> uniformsLocationCache;
 		std::vector<std::reference_wrapper<const GLShaderStage>> attachedShaders;
-		/** (set << 32 | binding) -> descriptor slot. Built lazily on the first use of the
-		 * program, exactly like filament's OpenGLProgram binding map. */
+		/** Per-material (set 2) binding -> descriptor slot. Sets 0/1 use the engine's fixed
+		 * slots and do not enter this map. */
 		std::unordered_map<uint64_t, uint32_t> descriptorSlots;
 		bool descriptorSlotsInitialized = false;
 		/** The layout the program will resolve on first use, like filament's lazy program

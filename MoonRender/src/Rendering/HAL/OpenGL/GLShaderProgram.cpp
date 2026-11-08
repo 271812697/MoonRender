@@ -4,6 +4,7 @@
 #include <glad/glad.h>
 
 #include <Rendering/HAL/OpenGL/GLShaderProgram.h>
+#include <Rendering/Data/EngineDescriptorSets.h>
 #include <Rendering/HAL/OpenGL/GLTexture.h>
 #include <Rendering/HAL/OpenGL/GLTypes.h>
 #include <Rendering/Resources/Texture.h>
@@ -79,47 +80,63 @@ void Rendering::HAL::GLShaderProgramContext::InitializeDescriptorBindings(
 
 	glUseProgram(p_programId);
 
-	// Filament's rule: walk the sets and assign sequential GL slots per resource namespace.
-	// The shader block bindings / sampler units are set now, so later DescriptorSet::Bind only
-	// has to look the slot up in this map.
-	GLuint bufferSlot = 0;
-	GLuint textureSlot = 0;
-
-	for (uint32_t set = 0; set < p_bindings.size(); ++set)
+	// Per-view / per-renderable sets use the engine's fixed slot table. No map is needed for
+	// them, and no material can move their slots.
+	const auto setFixedBlock = [p_programId](const char* p_name, uint32_t p_slot)
 	{
-		for (const Rendering::Data::DescriptorSetLayout::Binding& binding : p_bindings[set])
+		const GLuint index = glGetUniformBlockIndex(p_programId, p_name);
+		if (index != GL_INVALID_INDEX)
 		{
-			const bool textureKind =
-				binding.kind == Rendering::Data::DescriptorSetLayout::Kind::Texture;
-			const uint32_t slot = textureKind ? textureSlot++ : bufferSlot++;
-			const uint64_t key = (static_cast<uint64_t>(set) << 32) | binding.binding;
-			if (std::getenv("MOON_DEBUG_BINDINGS") != nullptr)
-			{
-				std::cout << "[BindingMap] set " << set << " " << binding.name << " kind "
-					<< static_cast<int>(binding.kind) << " binding " << binding.binding
-					<< " -> slot " << slot << std::endl;
-			}
+			glUniformBlockBinding(p_programId, index, p_slot);
+		}
+	};
+	for (const auto& binding : Rendering::Data::EngineDescriptorSets::kPerViewBindings)
+	{
+		setFixedBlock(binding.name, binding.slot);
+	}
+	for (const auto& binding : Rendering::Data::EngineDescriptorSets::kPerRenderableBindings)
+	{
+		setFixedBlock(binding.name, binding.slot);
+	}
 
-			if (textureKind)
+	// Only the per-material set is material-specific. Its buffer slots start after the engine's
+	// fixed blocks so it can never alias EngineUBO/ReflectionUBO/ObjectUBO.
+	GLuint bufferSlot = Rendering::Data::EngineDescriptorSets::kFirstMaterialBufferSlot;
+	GLuint textureSlot = 0;
+	for (const Rendering::Data::DescriptorSetLayout::Binding& binding
+		: p_bindings[Rendering::Data::kPerMaterialDescriptorSet])
+	{
+		const bool textureKind =
+			binding.kind == Rendering::Data::DescriptorSetLayout::Kind::Texture;
+		const uint32_t slot = textureKind ? textureSlot++ : bufferSlot++;
+		const uint64_t key =
+			(static_cast<uint64_t>(Rendering::Data::kPerMaterialDescriptorSet) << 32) | binding.binding;
+		if (std::getenv("MOON_DEBUG_BINDINGS") != nullptr)
+		{
+			std::cout << "[BindingMap] set " << Rendering::Data::kPerMaterialDescriptorSet
+				<< " " << binding.name << " kind " << static_cast<int>(binding.kind)
+				<< " binding " << binding.binding << " -> slot " << slot << std::endl;
+		}
+
+		if (textureKind)
+		{
+			const GLint location = glGetUniformLocation(p_programId, binding.name.c_str());
+			if (location >= 0)
 			{
-				const GLint location = glGetUniformLocation(p_programId, binding.name.c_str());
-				if (location >= 0)
-				{
-					glUniform1i(location, static_cast<GLint>(slot));
-					descriptorSlots[key] = slot;
-				}
+				glUniform1i(location, static_cast<GLint>(slot));
+				descriptorSlots[key] = slot;
 			}
-			else
+		}
+		else
+		{
+			const GLuint index = glGetUniformBlockIndex(p_programId, binding.name.c_str());
+			const GLuint resolvedIndex = index != GL_INVALID_INDEX
+				? index
+				: glGetUniformBlockIndex(p_programId, "MaterialParams");
+			if (resolvedIndex != GL_INVALID_INDEX)
 			{
-				const GLuint index = glGetUniformBlockIndex(p_programId, binding.name.c_str());
-				const GLuint resolvedIndex = index != GL_INVALID_INDEX
-					? index
-					: glGetUniformBlockIndex(p_programId, "MaterialParams");
-				if (resolvedIndex != GL_INVALID_INDEX)
-				{
-					glUniformBlockBinding(p_programId, resolvedIndex, slot);
-					descriptorSlots[key] = slot;
-				}
+				glUniformBlockBinding(p_programId, resolvedIndex, slot);
+				descriptorSlots[key] = slot;
 			}
 		}
 	}
@@ -131,6 +148,12 @@ uint32_t Rendering::HAL::GLShaderProgramContext::GetDescriptorSlot(
 	uint32_t p_set,
 	uint32_t p_binding) const
 {
+	if (p_set == Rendering::Data::kPerViewDescriptorSet
+		|| p_set == Rendering::Data::kPerRenderableDescriptorSet)
+	{
+		return Rendering::Data::EngineDescriptorSets::SlotOf(p_set, p_binding);
+	}
+
 	const uint64_t key = (static_cast<uint64_t>(p_set) << 32) | p_binding;
 	const auto it = descriptorSlots.find(key);
 	return it != descriptorSlots.end() ? it->second : UINT32_MAX;

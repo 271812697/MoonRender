@@ -1,4 +1,5 @@
 #include <Rendering/Data/DescriptorSet.h>
+#include <Rendering/Data/EngineDescriptorSets.h>
 
 #include <cstdlib>
 #include <iostream>
@@ -135,6 +136,23 @@ namespace Rendering::Data
 						<< " -> slot " << slot << " ("
 						<< (descriptor.IsBuffer() ? "buffer" : "texture") << ")" << std::endl;
 				}
+				descriptor.Bind(slot);
+			}
+		}
+	}
+
+	void DescriptorSet::BindFixed(uint32_t p_set) const
+	{
+		for (uint32_t binding = 0; binding < m_descriptors.size(); ++binding)
+		{
+			const Descriptor& descriptor = m_descriptors[binding];
+			if (!descriptor.IsValid())
+			{
+				continue;
+			}
+			const uint32_t slot = EngineDescriptorSets::SlotOf(p_set, binding);
+			if (slot != ~uint32_t{ 0 })
+			{
 				descriptor.Bind(slot);
 			}
 		}

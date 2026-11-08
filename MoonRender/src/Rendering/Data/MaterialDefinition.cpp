@@ -196,19 +196,8 @@ namespace Rendering::Data
 			}
 		}
 
-		// The complete shader-side binding table (filament's Program::DescriptorSetInfo). Sets
-		// 0 and 1 are the engine's fixed per-view / per-renderable blocks; set 2 is the material
-		// reflection built above.
-		definition->m_programBindings[0] = {
-			{ "EngineUBO", DescriptorSetLayout::Kind::UniformBuffer,
-				Rendering::Settings::kEngineUBOBinding },
-			{ "ReflectionUBO", DescriptorSetLayout::Kind::UniformBuffer,
-				Rendering::Settings::kReflectionUBOBinding },
-		};
-		definition->m_programBindings[1] = {
-			{ "ObjectUBO", DescriptorSetLayout::Kind::UniformBuffer,
-				Rendering::Settings::kObjectUBOBinding },
-		};
+		// Only the per-material set is material-specific. Per-view / per-renderable bindings are
+		// fixed by EngineDescriptorSets.h and never enter the program's material binding map.
 		definition->m_programBindings[2] = definition->m_layout.Bindings();
 		definition->BuildLookupTables();
 
@@ -257,16 +246,6 @@ namespace Rendering::Data
 				Rendering::Settings::kMaterialParameterBinding);
 		}
 
-		definition->m_programBindings[0] = {
-			{ "EngineUBO", DescriptorSetLayout::Kind::UniformBuffer,
-				Rendering::Settings::kEngineUBOBinding },
-			{ "ReflectionUBO", DescriptorSetLayout::Kind::UniformBuffer,
-				Rendering::Settings::kReflectionUBOBinding },
-		};
-		definition->m_programBindings[1] = {
-			{ "ObjectUBO", DescriptorSetLayout::Kind::UniformBuffer,
-				Rendering::Settings::kObjectUBOBinding },
-		};
 		definition->m_programBindings[2] = definition->m_layout.Bindings();
 		definition->BuildLookupTables();
 

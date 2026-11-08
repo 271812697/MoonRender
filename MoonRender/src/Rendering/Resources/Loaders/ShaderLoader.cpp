@@ -15,6 +15,7 @@
 #include <Rendering/HAL/ShaderProgram.h>
 #include <Rendering/HAL/ShaderStage.h>
 #include <Rendering/Data/MaterialBuilder.h>
+#include <Rendering/Data/EngineDescriptorSets.h>
 #include <Rendering/Data/MaterialDefinition.h>
 #include <Rendering/Data/MaterialParser.h>
 #include <Rendering/Resources/Loaders/ShaderLoader.h>
@@ -805,6 +806,8 @@ void main()
 		const Rendering::Data::MaterialParser& p_parser,
 		Rendering::HAL::ShaderProgram& p_program)
 	{
+		// Resolve the program's fixed slots and material map before inspecting them.
+		p_program.Bind();
 		const GLuint program = static_cast<GLuint>(p_program.GetID());
 
 		const auto checkBlock = [&](const char* p_name, GLint p_expected) -> GLuint
@@ -825,10 +828,11 @@ void main()
 			return index;
 		};
 
-		checkBlock("EngineUBO", Rendering::Settings::kEngineUBOBinding);
-		checkBlock("ObjectUBO", Rendering::Settings::kObjectUBOBinding);
+		checkBlock("EngineUBO", 0);
+		checkBlock("ReflectionUBO", 1);
+		checkBlock("ObjectUBO", 2);
 		const GLuint materialBlock =
-			checkBlock("MaterialParams", Rendering::Settings::kMaterialParameterBinding);
+			checkBlock("MaterialParams", Rendering::Data::EngineDescriptorSets::kFirstMaterialBufferSlot);
 
 		if (materialBlock != GL_INVALID_INDEX && p_definition.ParameterBlockSize() > 0)
 		{
@@ -995,7 +999,8 @@ void main()
 			auto& program = programCache[programKey];
 			if (program == nullptr)
 			{
-				auto candidate = std::make_shared<Rendering::HAL::ShaderProgram>();
+				auto candidate = std::make_shared<Rendering::HAL::ShaderProgram>(
+					p_definition.ProgramBindings());
 				for (const auto& stage : stages)
 				{
 					candidate->Attach(*stage);
