@@ -13,6 +13,7 @@
 
 #include <tracy/Tracy.hpp>
 #include <Rendering/Data/Material.h>
+#include <Rendering/Data/EngineDescriptorSets.h>
 #include <Rendering/Data/MaterialBuilder.h>
 #include <Rendering/HAL/UniformBuffer.h>
 #include <Rendering/HAL/TextureHandle.h>
@@ -578,6 +579,10 @@ Rendering::Data::MaterialInstance::SnapshotProperties() const
 
 	for (const MaterialDefinition::Parameter& parameter : definition->Parameters())
 	{
+		if (parameter.isSampler && EngineDescriptorSets::IsGlobalSampler(parameter.name))
+		{
+			continue;
+		}
 		if (parameter.count > 1 && !parameter.isSampler)
 		{
 			for (uint32_t i = 0; i < parameter.count; ++i)
@@ -997,56 +1002,6 @@ void Rendering::Data::MaterialInstance::UploadParameterBlock(
 }
 
 
-void Rendering::Data::MaterialInstance::BindGlobalTexture(const std::string& p_name, Rendering::HAL::Texture* p_texture)
-{
-	// A view-owned texture (the DFG LUT, the environment cubes) is allocated by an earlier
-	// pass; on the first frames it may not exist yet, and binding an unallocated name is a GL
-	// error rather than a no-op.
-	if (Definition() == nullptr || p_texture == nullptr || !p_texture->IsValid())
-	{
-		return;
-	}
-
-	// On the first draw the set may not exist yet; initialize it before writing the view
-	// texture, otherwise EnsureDescriptorSet would reset the layout and drop it.
-	if (m_descriptorSet.Layout() != &Definition()->Layout())
-	{
-		EnsureDescriptorSet();
-	}
-
-	if (const MaterialDefinition::SamplerField* field = Definition()->FindSampler(p_name))
-	{
-		// The same view texture is bound every draw; only touch the set when the pointer
-		// actually changed or the slot was rebuilt.
-		if (m_descriptorSet.GetTexture(field->binding) == p_texture)
-		{
-			return;
-		}
-
-		m_descriptorSet.SetTexture(field->binding, p_texture);
-
-		// The descriptor set is bound once by BindParameterBlock after the per-view textures
-		// have been filled; binding it here for every global texture meant 3 extra full-set
-		// binds per draw.
-
-		// MOON_DEBUG_SAMPLERS also reports the per-draw bindings: the ones in UploadParameterBlock
-		// happen once (and may have run before the sky pass baked the environment), while these
-		// happen on every draw and are what the shader really samples.
-		if (std::getenv("MOON_DEBUG_SAMPLERS") != nullptr)
-		{
-			static std::set<std::string> reported;
-			const std::string materialPath = MaterialOf() != nullptr ? MaterialOf()->path : std::string("?");
-			const std::string key = materialPath + "|draw|" + field->name;
-			if (reported.insert(key).second)
-			{
-				std::cout << "[Sampler] " << materialPath << " " << field->name << " unit "
-					<< field->binding << " <- view texture (per draw)" << std::endl;
-			}
-		}
-	}
-}
-
-
 void Rendering::Data::MaterialInstance::SetLooseUniform(
 	const std::string& p_name,
 	const MaterialPropertyType& p_value)
@@ -1252,6 +1207,11 @@ void Rendering::Data::MaterialInstance::SetProperty(const std::string p_name, co
 
 	if (parameter != nullptr)
 	{
+		if (parameter->isSampler && EngineDescriptorSets::IsGlobalSampler(parameter->name))
+		{
+			// View-owned IBL textures are bound through the per-view set, not by materials.
+			return;
+		}
 		EnsureDescriptorSet();
 		if (parameter->isSampler)
 		{

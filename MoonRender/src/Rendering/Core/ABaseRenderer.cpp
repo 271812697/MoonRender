@@ -2,6 +2,7 @@
 #include <tracy/Tracy.hpp>
 #include <Rendering/Core/ABaseRenderer.h>
 #include <Rendering/Data/DescriptorSet.h>
+#include <Rendering/Data/EngineDescriptorSets.h>
 #include <Rendering/Data/ProgramDescriptorBindings.h>
 #include <Rendering/HAL/TextureHandle.h>
 #include <Rendering/Resources/Loaders/TextureLoader.h>
@@ -143,6 +144,46 @@ void main()
 	//not free the m_presentShader shader?
 	m_presentShader = Rendering::Resources::Loaders::ShaderLoader::CreateFromSource(v, f);
 	m_presentMaterial.SetMaterial(m_presentShader);
+}
+
+void Rendering::Core::ABaseRenderer::SetBrdfLut(Rendering::HAL::Texture* p_lut)
+{
+	m_brdfLut = p_lut;
+	if (m_perViewSet != nullptr && p_lut != nullptr && p_lut->IsValid())
+	{
+		m_perViewSet->SetTexture(
+			Rendering::Data::EngineDescriptorSets::kBrdfLutBinding, p_lut);
+	}
+}
+
+void Rendering::Core::ABaseRenderer::SetEnvironmentTextures(
+	Rendering::HAL::Texture* p_irradianceCube,
+	Rendering::HAL::Texture* p_prefilterCube)
+{
+	m_irradianceCube = p_irradianceCube;
+	m_prefilterCube = p_prefilterCube;
+	if (m_perViewSet == nullptr)
+	{
+		return;
+	}
+	if (p_irradianceCube != nullptr && p_irradianceCube->IsValid())
+	{
+		m_perViewSet->SetTexture(
+			Rendering::Data::EngineDescriptorSets::kIrradianceCubeBinding, p_irradianceCube);
+	}
+	if (p_prefilterCube != nullptr && p_prefilterCube->IsValid())
+	{
+		m_perViewSet->SetTexture(
+			Rendering::Data::EngineDescriptorSets::kPrefilterCubeBinding, p_prefilterCube);
+	}
+}
+
+void Rendering::Core::ABaseRenderer::BindPerViewDescriptorSet() const
+{
+	if (m_perViewSet != nullptr)
+	{
+		m_perViewSet->BindFixed(Rendering::Data::kPerViewDescriptorSet);
+	}
 }
 
 void Rendering::Core::ABaseRenderer::BeginFrame(const Data::FrameDescriptor& p_frameDescriptor)
@@ -453,12 +494,6 @@ void Rendering::Core::ABaseRenderer::DrawEntity(
 				Settings::ECullFace::FRONT;
 		}
 	}
-
-	// View-owned textures must be in the per-material set before BindParameterBlock binds it;
-	// setting them there used to force a full descriptor-set bind per global texture.
-	p_drawable.material->BindGlobalTexture("_BRDFLut", m_brdfLut);
-	p_drawable.material->BindGlobalTexture("_IrradianceCube", m_irradianceCube);
-	p_drawable.material->BindGlobalTexture("_PrefilterCube", m_prefilterCube);
 
 	const auto signature=p_drawable.material->Bind(
 		&m_emptyTexture2D,

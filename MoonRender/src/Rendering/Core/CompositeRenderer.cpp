@@ -54,11 +54,12 @@ void Rendering::Core::CompositeRenderer::DrawFrame()
 	// its whole diffuse term).
 	SetBrdfLut(GetBrdfTexture());
 	// Filament's IndirectLight: the sky pass bakes the irradiance and prefiltered cubes, and every
-	// lit material reads them. They are view state, not material parameters, so they are bound
-	// per draw here (DrawEntity) instead of relying on whoever created the material instance to
-	// hand them over - a face material built before the first sky bake used to keep the empty
-	// black cube forever, which reads as "black except where the sun reflects" as the view turns.
+	// lit material reads them. They are view state, not material parameters, so they live in the
+	// per-view set owned by the engine rather than in each material instance.
 	SetEnvironmentTextures(GetIrradianceCube(), GetPrefilterCube());
+	// The per-view set now owns EngineUBO, ReflectionUBO and the three IBL textures; bind its
+	// fixed slots once for the whole frame.
+	BindPerViewDescriptorSet();
 	auto pso = CreatePipelineState();
 	for (const auto& pass : m_passes | std::views::values)
 	{

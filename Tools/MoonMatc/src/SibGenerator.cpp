@@ -4,6 +4,8 @@
 
 #include "SibGenerator.h"
 
+#include <Rendering/Data/EngineDescriptorSets.h>
+
 namespace Moon::Matc
 {
 	SamplerBlockInfo CollectSamplerBlock(const MaterialBuilder& p_material)
@@ -12,6 +14,9 @@ namespace Moon::Matc
 		for (const Parameter& parameter : p_material.parameters)
 		{
 			if (!IsSamplerType(parameter.type)) { continue; }
+			// View-owned IBL textures belong to the per-view set; they are not material
+			// descriptors and must not be serialized into MAT_SIB.
+			if (Rendering::Data::EngineDescriptorSets::IsGlobalSampler(parameter.name)) { continue; }
 
 			SamplerInfo sampler;
 			sampler.name = parameter.name;

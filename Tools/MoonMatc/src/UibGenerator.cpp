@@ -8,6 +8,8 @@
 #include <cctype>
 #include <sstream>
 
+#include <Rendering/Data/EngineDescriptorSets.h>
+
 #include "SibGenerator.h"
 #include "TextUtils.h"
 
@@ -54,14 +56,17 @@ namespace Moon::Matc
 	void LayoutParameters(MaterialFile& p_material)
 	{
 		uint32_t offset = 0;
-		// Per-material descriptor set: binding 0 is MaterialParams, samplers start at 1.
-		uint32_t samplerBinding = 1;
+		// Per-view IBL samplers keep their fixed units; per-material samplers follow them.
+		uint32_t samplerBinding =
+			Rendering::Data::EngineDescriptorSets::kFirstMaterialTextureSlot;
 
 		for (Parameter& parameter : p_material.parameters)
 		{
 			if (IsSamplerType(parameter.type))
 			{
-				parameter.binding = samplerBinding++;
+				parameter.binding = Rendering::Data::EngineDescriptorSets::IsGlobalSampler(parameter.name)
+					? Rendering::Data::EngineDescriptorSets::GlobalSamplerUnit(parameter.name)
+					: samplerBinding++;
 				continue;
 			}
 
@@ -153,7 +158,7 @@ namespace Moon::Matc
 
 		if (p_blockSize > 0)
 		{
-			out << "layout(std140, binding = 2) uniform MaterialParams\n{\n";
+			out << "layout(std140, binding = 3) uniform MaterialParams\n{\n";
 			for (const Parameter& parameter : p_parameters)
 			{
 				if (IsSamplerType(parameter.type))
@@ -174,6 +179,11 @@ namespace Moon::Matc
 		{
 			if (!IsSamplerType(parameter.type))
 			{
+				continue;
+			}
+			if (Rendering::Data::EngineDescriptorSets::IsGlobalSampler(parameter.name))
+			{
+				// Declared by the per-view prelude, not by the material set.
 				continue;
 			}
 			out << "layout(binding = " << parameter.binding << ") uniform "

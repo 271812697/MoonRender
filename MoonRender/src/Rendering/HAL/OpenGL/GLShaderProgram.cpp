@@ -82,27 +82,38 @@ void Rendering::HAL::GLShaderProgramContext::InitializeDescriptorBindings(
 
 	// Per-view / per-renderable sets use the engine's fixed slot table. No map is needed for
 	// them, and no material can move their slots.
-	const auto setFixedBlock = [p_programId](const char* p_name, uint32_t p_slot)
+	const auto setFixedBinding = [p_programId](
+		const Rendering::Data::EngineDescriptorSets::Binding& p_binding)
 	{
-		const GLuint index = glGetUniformBlockIndex(p_programId, p_name);
+		if (p_binding.kind == Rendering::Data::DescriptorSetLayout::Kind::Texture)
+		{
+			const GLint location = glGetUniformLocation(p_programId, p_binding.name);
+			if (location >= 0)
+			{
+				glUniform1i(location, static_cast<GLint>(p_binding.slot));
+			}
+			return;
+		}
+		const GLuint index = glGetUniformBlockIndex(p_programId, p_binding.name);
 		if (index != GL_INVALID_INDEX)
 		{
-			glUniformBlockBinding(p_programId, index, p_slot);
+			glUniformBlockBinding(p_programId, index, p_binding.slot);
 		}
 	};
 	for (const auto& binding : Rendering::Data::EngineDescriptorSets::kPerViewBindings)
 	{
-		setFixedBlock(binding.name, binding.slot);
+		setFixedBinding(binding);
 	}
 	for (const auto& binding : Rendering::Data::EngineDescriptorSets::kPerRenderableBindings)
 	{
-		setFixedBlock(binding.name, binding.slot);
+		setFixedBinding(binding);
 	}
 
 	// Only the per-material set is material-specific. Its buffer slots start after the engine's
-	// fixed blocks so it can never alias EngineUBO/ReflectionUBO/ObjectUBO.
+	// fixed blocks so it can never alias EngineUBO/ReflectionUBO/ObjectUBO; its texture units
+	// start after the view's fixed IBL textures.
 	GLuint bufferSlot = Rendering::Data::EngineDescriptorSets::kFirstMaterialBufferSlot;
-	GLuint textureSlot = 0;
+	GLuint textureSlot = Rendering::Data::EngineDescriptorSets::kFirstMaterialTextureSlot;
 	for (const Rendering::Data::DescriptorSetLayout::Binding& binding
 		: p_bindings[Rendering::Data::kPerMaterialDescriptorSet])
 	{

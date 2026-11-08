@@ -132,20 +132,21 @@ namespace Rendering::Core
 		Rendering::Resources::Mesh m_unitCube;
 		/** The view's split-sum DFG LUT: global, bound for every material that declares
 		 * _BRDFLut (see Material::UploadParameterBlock). Set by CompositeRenderer each frame. */
-		void SetBrdfLut(Rendering::HAL::Texture* p_lut) { m_brdfLut = p_lut; }
-		void SetEngineDescriptorSet(Rendering::Data::DescriptorSet* p_perRenderable)
+		void SetBrdfLut(Rendering::HAL::Texture* p_lut);
+		void SetEngineDescriptorSets(
+			Rendering::Data::DescriptorSet* p_perView,
+			Rendering::Data::DescriptorSet* p_perRenderable)
 		{
+			m_perViewSet = p_perView;
 			m_perRenderableSet = p_perRenderable;
 		}
 		/** The view's environment (filament's IndirectLight): the irradiance cube (diffuse) and
-		 * the prefiltered cube (specular). Bound per draw like the DFG LUT, so a material
-		 * instance created before the sky pass baked them still samples the view's environment
-		 * instead of the empty black cube. */
-		void SetEnvironmentTextures(Rendering::HAL::Texture* p_irradianceCube, Rendering::HAL::Texture* p_prefilterCube)
-		{
-			m_irradianceCube = p_irradianceCube;
-			m_prefilterCube = p_prefilterCube;
-		}
+		 * the prefiltered cube (specular). These are view descriptors, not material properties. */
+		void SetEnvironmentTextures(
+			Rendering::HAL::Texture* p_irradianceCube,
+			Rendering::HAL::Texture* p_prefilterCube);
+		/** Binds the per-view set once, after its view textures have been assigned. */
+		void BindPerViewDescriptorSet() const;
 	protected:
 		Data::FrameDescriptor m_frameDescriptor;
 		Context::Driver& m_driver;
@@ -163,6 +164,7 @@ namespace Rendering::Core
 		std::optional<Rendering::Data::MaterialSignatureSet> m_previousMaterialSignature = std::nullopt;
 		Rendering::Data::Material* m_presentShader;
 		Rendering::Data::Material m_presentMaterial;
+		Rendering::Data::DescriptorSet* m_perViewSet = nullptr;
 		Rendering::Data::DescriptorSet* m_perRenderableSet = nullptr;
 	private:
 		static std::atomic_bool s_isDrawing;

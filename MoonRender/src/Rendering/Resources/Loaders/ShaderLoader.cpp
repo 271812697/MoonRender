@@ -875,8 +875,7 @@ void main()
 			}
 		}
 
-		// Samplers: layout(binding = N) should have put each one on the unit the runtime binds
-		// its texture to. The value is what the driver decided at link time.
+		// Samplers: per-view IBL textures use the fixed units; material samplers follow them.
 		for (const Rendering::Data::MaterialParameter& parameter : p_definition.Parameters())
 		{
 			if (!parameter.isSampler)
@@ -890,12 +889,26 @@ void main()
 				continue; // not read by this variant
 			}
 
+			GLint expected = 0;
+			if (Rendering::Data::EngineDescriptorSets::IsGlobalSampler(parameter.name))
+			{
+				if (parameter.name == "_BRDFLut") { expected = 0; }
+				else if (parameter.name == "_IrradianceCube") { expected = 1; }
+				else { expected = 2; }
+			}
+			else
+			{
+				expected = static_cast<GLint>(
+					Rendering::Data::EngineDescriptorSets::kFirstMaterialTextureSlot
+					+ (parameter.binding > 0 ? parameter.binding - 1 : 0));
+			}
+
 			GLint unit = -1;
 			glGetUniformiv(program, location, &unit);
-			if (unit != static_cast<GLint>(parameter.binding))
+			if (unit != expected)
 			{
-				std::cout << std::format("[Shader Binding] {}: sampler {} is on unit {}, the package says {}",
-					p_parser.Name(), parameter.name, unit, parameter.binding) << std::endl;
+				std::cout << std::format("[Shader Binding] {}: sampler {} is on unit {}, expected {}",
+					p_parser.Name(), parameter.name, unit, expected) << std::endl;
 			}
 		}
 	}

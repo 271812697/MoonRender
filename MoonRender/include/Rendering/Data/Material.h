@@ -113,10 +113,6 @@ namespace Rendering::Data
 		{
 			m_defaultInstance->LateUpdateTexture(p_name, p_path);
 		}
-		void BindGlobalTexture(const std::string& p_name, Rendering::HAL::Texture* p_texture)
-		{
-			m_defaultInstance->BindGlobalTexture(p_name, p_texture);
-		}
 
 		// ---- variant / draw API ---------------------------------------------------------
 		uint64_t Revision() const { return m_defaultInstance->Revision(); }

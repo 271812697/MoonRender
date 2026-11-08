@@ -108,9 +108,6 @@ namespace Rendering::Data
 		/** Clears every parameter override, then re-seeds from the definition. */
 		void ResetProperties();
 
-		/** Binds a view-owned texture (DFG LUT, environment cubes) for the next draw. */
-		void BindGlobalTexture(const std::string& p_name, Rendering::HAL::Texture* p_texture);
-
 		/** The texture/asset currently in a descriptor slot (used to inherit a material's
 		 * defaults when a plain instance is created). */
 		Rendering::HAL::TextureHandle* GetTexture(uint32_t p_binding) const
