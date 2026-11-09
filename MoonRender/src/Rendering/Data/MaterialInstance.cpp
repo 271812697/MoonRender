@@ -471,6 +471,9 @@ Rendering::Data::MaterialInstance::MaterialInstance(Material& p_definition, bool
 	}
 	else if (m_material != nullptr)
 	{
+		// A plain instance inherits the material default's feature selection; a per-shape
+		// instance must see the same feature set as the .mat it was created from.
+		m_features = m_material->Features();
 		ResetProperties();
 	}
 }
@@ -1554,6 +1557,7 @@ void Rendering::Data::MaterialInstance::CopyStateFrom(const MaterialInstance& p_
 	m_gpuInstances = p_other.m_gpuInstances;
 	m_drawOrder = p_other.m_drawOrder;
 	m_lineWidth = p_other.m_lineWidth;
+	m_features = p_other.m_features;
 }
 
 

@@ -1,5 +1,5 @@
-// The topology edge lines: one flat colour for the whole line batch, cut by the section plane
-// in the CLIP_PLANE variant.
+// The topology edge lines: one flat colour for the whole line batch, always cut by the
+// current section plane (the same unconditional test the surface shaders use).
 //
 // Written in the material form MoonMatc consumes (see docs/ShaderPipeline.md). Both stages own
 // their main(): the vertex stage declares a flat line id varying of its own besides the block
@@ -16,8 +16,6 @@ material {
 
     // The viewport clips the edges of a sectioned body with the section plane.
     vertexAttributes : [POSITION, UV0, NORMAL, DOMAIN_ID],
-
-    features : [ CLIP_PLANE ],
 
     parameters : [
         // Nothing sets it and its only use is commented out in the vertex stage, so the 1e-6
@@ -63,14 +61,12 @@ flat in int lineId;
 out vec4 FRAGMENT_COLOR;
 void main()
 {
-#if defined(CLIP_PLANE)
     if(ubo_enableClip==1){
         float offsetw=dot(ubo_plane.xyz,fs_in.FragPos)+ubo_plane.w;
         if(offsetw>0){
             discard;
         }    
     }
-#endif
     FRAGMENT_COLOR = vec4(color, 1);
 }
 }

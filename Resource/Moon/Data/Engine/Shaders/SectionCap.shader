@@ -27,16 +27,14 @@ material {
         { type : samplerCube, name : _PrefilterCube },
         { type : sampler2D,   name : _BRDFLut },
         { type : float,       name : u_environmentIntensity, default : 0.5 },
-        // Hatching spacing in *pixels* (see the stripe block below): 8 px apart with a 1 px
-        // dark line, so the density and the contrast no longer change with the zoom.
-        { type : float,       name : u_HatchPeriodPx,  default : 20.0 },
-        { type : float,       name : u_HatchBandPx,    default : 5.0 },
+        // Hatching spacing in world units. The pattern is anchored to the section plane, so
+        // moving the camera changes only its projection, never its position on the cut.
+        { type : float,       name : u_HatchPeriod,  default : 2.0 },
+        { type : float,       name : u_HatchBand,    default : 0.5 },
         // 0 = light lines on the fill, 1 = black lines.
         { type : float,       name : u_HatchContrast,  default : 0.80 },
-        // Stripe angle on screen, in degrees.
-        { type : float,       name : u_HatchAngleDeg,  default : 45.0 },
-        // 1 = the angle is fixed in screen space, 0 = the stripes follow the plane's projection.
-        { type : float,       name : u_HatchScreenFixed, default : 1.0 }
+        // Stripe angle around the section normal, in degrees.
+        { type : float,       name : u_HatchAngleDeg,  default : 45.0 }
     ]
 }
 
@@ -82,42 +80,24 @@ fragment {
         // Reversed-Z depth range: window depth is 1 at near and 0 at far.
         gl_FragDepth = 0.5 - (clipPos.z / clipPos.w) * 0.5;
 
-        // Hatching stripes, derived from the clip plane alone.
+        // Hatching stripes, derived from the clip plane alone and anchored in world space.
         vec3 n = normalize(ubo_plane.xyz);
         vec3 ref = abs(n.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
         vec3 lineDir = normalize(cross(n, ref));
+        float hatchAngle = radians(u_HatchAngleDeg);
+        vec3 stripeDir = normalize(cos(hatchAngle) * lineDir
+            + sin(hatchAngle) * cross(n, lineDir));
         vec3 planeOrigin = -ubo_plane.w * n;
 
-        // Hatching with a *screen-space* period: the stripe coordinate is `dist / |gradient|`,
-        // i.e. the world-space coordinate across the stripes counted in pixels, so dividing it
-        // by u_HatchPeriodPx gives stripes exactly that many pixels apart at any zoom. World
-        // stripes used to fall below the Nyquist limit when zoomed out and average into a flat
-        // grey.
-        //
-        // The direction is the screen angle u_HatchAngleDeg by default (it reads as hatching
-        // whatever the section's orientation is); u_HatchScreenFixed = 0 follows the plane's
-        // own stripe direction instead, which keeps the pattern anchored to the model.
-        float dist;
-        float angle = radians(u_HatchAngleDeg);
-        if (u_HatchScreenFixed > 0.5)
-        {
-            vec2 stripeNormal = vec2(-sin(angle), cos(angle));   // across the stripes
-            dist = dot(gl_FragCoord.xy, stripeNormal);
-        }
-        else
-        {
-            dist = dot(hit - planeOrigin, lineDir) / max(length(vec2(dFdx(dot(hit - planeOrigin, lineDir)),
-                dFdy(dot(hit - planeOrigin, lineDir)))), 1e-9);
-        }
-        // One unit of `dist` is one pixel, so the pattern below is purely in pixels and can no
-        // longer alias when the camera pulls back.
-        float phase = abs(fract(dist / u_HatchPeriodPx) - 0.5) * 2.0;   // 0 = line centre
-        float halfW = (u_HatchBandPx * 0.5) / u_HatchPeriodPx;
-        float aa = 1.0 / u_HatchPeriodPx;                               // one pixel of phase
+        // World-space coordinate across the stripes. No screen derivative normalisation: that
+        // made the period camera-dependent, so the pattern slid over the section whenever the
+        // view moved. fwidth() is only used for one-pixel anti-aliasing.
+        float dist = dot(hit - planeOrigin, stripeDir);
+        float phase = abs(fract(dist / u_HatchPeriod) - 0.5) * 2.0;   // 0 = line centre
+        float halfW = (u_HatchBand * 0.5) / u_HatchPeriod;
+        float aa = max(fwidth(dist) / u_HatchPeriod, 1e-6);
         float tStrip = smoothstep(halfW - aa, halfW + aa, phase);
 
-        // No level of detail: the spacing is 8 px and the line is 1 px at every zoom, so the
-        // pattern can never become denser than its own period - there is nothing to fade.
         vec3 lineColor = u_Albedo.rgb * (1.0 - clamp(u_HatchContrast, 0.0, 1.0));
         vec3 albedo = mix(lineColor, u_Albedo.rgb, tStrip);
 

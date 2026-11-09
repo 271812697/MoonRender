@@ -172,8 +172,6 @@ namespace MOON {
 					tempMat->SetBackfaceCulling(false);
 					tempMat->SetCastShadows(false);
 					tempMat->SetReceiveShadows(false);
-					// Enable the clip plane discard in Standard.shader.
-					tempMat->AddFeature("CLIP_PLANE");
 					// IBL: the three pieces Filament's standard model reads - irradiance
 					// (diffuse), prefiltered radiance (specular) and the DFG lookup table.
 					tempMat->SetProperty("_IrradianceCube", GetSceneView.GetRenderer().GetIrradianceCube());
@@ -774,7 +772,6 @@ namespace MOON {
 				Core::Resources::MaterialAsset* tempMat = new Core::Resources::MaterialAsset();
 				Core::Global::ServiceLocator::Get<Core::ResourceManagement::MaterialManager>().RegisterResource(materilaMap[i], tempMat);
 				tempMat->AddFeature("NORMAL_MAPPING");
-				tempMat->AddFeature("CLIP_PLANE");
 				tempMat->SetMaterial(Core::Global::ServiceLocator::Get<Editor::Core::Context>().shaderManager[":Shaders\\Standard.shader"]);
 				// Overrides after the shader: SetShader now takes the state from the material block.
 				tempMat->SetBackfaceCulling(false);

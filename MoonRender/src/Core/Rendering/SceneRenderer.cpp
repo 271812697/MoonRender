@@ -298,11 +298,10 @@ namespace
 						m_capMaterial.SetProperty(p_property, static_cast<float>(std::atof(p_value)));
 					}
 				};
-				hatchFromEnv("MOON_HATCH_PERIOD", "u_HatchPeriodPx");
-				hatchFromEnv("MOON_HATCH_BAND", "u_HatchBandPx");
+				hatchFromEnv("MOON_HATCH_PERIOD", "u_HatchPeriod");
+				hatchFromEnv("MOON_HATCH_BAND", "u_HatchBand");
 				hatchFromEnv("MOON_HATCH_CONTRAST", "u_HatchContrast");
 				hatchFromEnv("MOON_HATCH_ANGLE", "u_HatchAngleDeg");
-				hatchFromEnv("MOON_HATCH_PLANE", "u_HatchScreenFixed");
 				p_pso.stencilFuncOp = ::Rendering::Settings::EComparaisonAlgorithm::NOTEQUAL;
 				p_pso.stencilFuncRef = 0;
 				p_pso.stencilFuncMask = 0xFF;
