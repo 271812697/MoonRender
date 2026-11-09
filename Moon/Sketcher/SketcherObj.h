@@ -422,7 +422,7 @@ namespace MOON {
 		 * the one number the drawing (SketcherObjWidget) and the snapping
 		 * (SketchPicking) both read, so the lattice seen and the lattice snapped to
 		 * stay the same at any zoom. */
-		void setGridTargetPx(float v) { m_gridTargetPx = v > 0.0f ? v : 20.0f; }
+		void setGridTargetPx(float v) { m_gridTargetPx = v > 0.0f ? v : 22.0f; }
 		float gridTargetPx() const { return m_gridTargetPx; }
 		void setGeometryVisible(int geoId, bool visible);
 		bool isGeometryVisible(int geoId) const
@@ -488,7 +488,7 @@ namespace MOON {
 		Base::Matrix4D planeTransform;
 		bool m_drawGrid = true;
 		bool m_snapToGrid = false;
-		float m_gridTargetPx = 20.0f;
+		float m_gridTargetPx = 22.0f;
 		std::set<int> mConstructionGeoIds;
 		std::set<int> mHiddenGeoIds;
 		Sketcher::Sketch solvedSketch;

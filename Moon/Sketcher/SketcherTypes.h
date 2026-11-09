@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <Eigen/Core>
 #include "Sketcher/Datatypes/GeoEnum.h"
 
@@ -60,8 +60,8 @@ namespace MOON {
 		 * The step, i.e. how far apart the lines are, is not here: it belongs to
 		 * the sketch (SketcherObj::gridTargetPx), because the snapping reads the
 		 * same lattice and the two have to agree. */
-		Eigen::Vector4<uint8_t> gridMinorColor { 255, 118, 118, 118 };
-		Eigen::Vector4<uint8_t> gridMajorColor { 255, 78, 78, 78 };
+		Eigen::Vector4<uint8_t> gridMinorColor { 45, 118, 118, 118 };
+		Eigen::Vector4<uint8_t> gridMajorColor { 60, 100, 100, 100 };
 		float curveLineWidth = 4.0f;
 		/** Line type of the construction geometry, as an index into the line-style gallery
 		 * (see EImLineStyle in Interactive/Effect/LineDashEffect.h: 0 solid, 1 dash, ...). An int
@@ -70,7 +70,8 @@ namespace MOON {
 		/** The axes are a backdrop, but they are what a sketch is laid out against,
 		 * so they are drawn a little heavier than the curves on top of them. */
 		float axisLineWidth = 3.0f;
-		float gridLineWidth = 3.0f;
+		/** Grid line width, in pixels: the shader draws hairlines, so this is small. */
+		float gridLineWidth = 1.0f;
 		float pointSize = 10.0f;
 	};
 }

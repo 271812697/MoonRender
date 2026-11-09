@@ -23,10 +23,11 @@ namespace MOON
 	 *
 	 * The channel is the same notion the built-in primitives already have: Sorted is the depth
 	 * tested pass (drawSort), Overlay is drawn over everything without a depth test
-	 * (drawUnsort). An effect states its channel once and the renderer calls it from the right
-	 * place. */
+	 * (drawUnsort), and Backdrop runs at the very start of the sorted pass - behind the axes and
+	 * the geometry, which is where a background belongs. */
 	enum class EImChannel
 	{
+		Backdrop,
 		Sorted,
 		Overlay
 	};

@@ -63,5 +63,10 @@ namespace MOON {
 		 *         or an orthographic one seen along the plane (the plane is a line on
 		 *         screen then, and its visible part runs off to infinity). */
 		bool gridView(SketcherObj& p_sketch, Editor::Panels::SceneView& p_view, GridView& p_out);
+
+		/** The adaptive grid step for a given on-screen scale: the 1 / 2 x 10^n value that puts
+		 * a cell closest to p_targetPx pixels across. Shared with the perspective grid, which
+		 * has no GridView to read a step from, so the two lattices stay the same lattice. */
+		float gridStepForScale(float p_targetPx, float p_pixelsPerUnit);
 	}
 }

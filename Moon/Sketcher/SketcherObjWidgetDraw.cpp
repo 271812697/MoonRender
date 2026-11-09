@@ -5,6 +5,7 @@
 #include "renderer/SceneView.h"
 #include "Interactive/Im3DRenderer.h"
 #include "Interactive/Effect/LineDashEffect.h"
+#include "Interactive/Effect/PlaneGridEffect.h"
 #include "Core/Global/ServiceLocator.h"
 #include "core/log.h"
 #include <Rendering/Overlay/Im2DRender.h>
@@ -530,200 +531,216 @@ namespace MOON {
             }
     void SketcherObjWidget::drawBackground()
     {
-        if (!InEdit()) return;
-
-        // Adaptive background grid: the major cells carry the stronger tone, the
-        // minor subdivisions inside them the weaker one. The spacing snaps to a
-        // 1 / 2 x 10^n step (see SketchPicking::gridView) so the on-screen density
-        // stays roughly constant while zooming, and so that the cell sides run
-        // 1, 0.2, 0.1, 0.02, 0.01 - round decimal values - instead of the
-        // 1, 0.5, 0.2, 0.1 the usual 1/2/5 ladder gives.
-        //
-        // Everything here is worked out in the (u, v) of the sketch plane, because
-        // that is the space the grid lives in - and that is exactly what the camera
-        // angle changes. An orthographic camera projects along its own view direction,
-        // so the part of the plane it shows is not a rectangle in (u, v): it is the
-        // quad where both view-space coordinates of a plane point stay inside the
-        // viewport. Reading the visible range off the viewport corners as an
-        // axis-aligned rectangle only holds face on - tilted, the true quad sticks out
-        // of that rectangle and the grid is left with corners missing.
-        if (m_sketch->isDrawGrid()) {
-            const Eigen::Vector4<uint8_t>& minorColor = m_drawOption.gridMinorColor;
-            const Eigen::Vector4<uint8_t>& majorColor = m_drawOption.gridMajorColor;
-            const float gridLineWidth = m_drawOption.gridLineWidth;
-            if (m_sceneView && m_sceneView->GetCamera()) {
-                // The backdrop belongs to the scene and not to an overlay: it goes into
-                // the depth-tested batch, so a solid standing in front of the sketch
-                // plane hides it and one standing behind it is covered by it. The
-                // overlay batch it used to be drawn in has no depth test at all, which
-                // is exactly why the grid used to paint itself over the whole view.
-                const BackdropDepth depth = MakeBackdropDepth(m_sceneView->GetCamera());
-                renderer->pushEnableSorting(true);
-                // One grid segment. splitBackdropSegment() hands back the pieces it has
-                // to be drawn as: itself (its own depth, which is what the occlusion
-                // needs) plus, where it runs past a clip plane, the overhang painted on
-                // that plane, so the grid still reaches the edge of the view.
-                const auto drawSegment = [&](
-                    const Eigen::Vector3f& p_a,
-                    const Eigen::Vector3f& p_b,
-                    const Eigen::Vector4<uint8_t>& p_color) {
-                    const BackdropSegment segment = splitBackdropSegment(depth, p_a, p_b);
-                    for (int i = 0; i < segment.count; ++i) {
-                        renderer->drawLine(
-                            segment.pieces[i].a,
-                            segment.pieces[i].b,
-                            gridLineWidth,
-                            p_color);
-                    }
-                };
-                // What a camera the analysis below cannot describe gets: one whose view
-                // direction lies in the sketch plane.
-                const auto drawFixedGrid = [&]() {
-                    const float extent = 100.0f;
-                    for (int k = -10; k <= 10; ++k) {
-                        const float g = k * 10.0f;
-                        const auto& col = (k % 5) == 0 ? majorColor : minorColor;
-                        drawSegment(
-                            m_sketch->plane().valueEigen(g, -extent),
-                            m_sketch->plane().valueEigen(g, extent),
-                            col);
-                        drawSegment(
-                            m_sketch->plane().valueEigen(-extent, g),
-                            m_sketch->plane().valueEigen(extent, g),
-                            col);
-                    }
-                };
-
-                SketchPicking::GridView grid;
-                if (!SketchPicking::gridView(*m_sketch, *m_sceneView, grid)) {
-                    drawFixedGrid();
-                    renderer->popEnableSorting();
-                    return;
-                }
-
-                // The visible quad: its four corners are the crossings of the two pairs
-                // of viewport borders, i.e. of
-                //     oX + u * uX + v * vX = +-hx      (left / right)
-                //     oY + u * uY + v * vY = +-hy      (bottom / top).
-                // The pairs meet in a point unless the view direction lies in the plane
-                // (det == 0), which the fallback above has already taken care of.
-                const float det = grid.uX * grid.vY - grid.vX * grid.uY;
-                float uMin = std::numeric_limits<float>::max();
-                float uMax = -std::numeric_limits<float>::max();
-                float vMin = uMin;
-                float vMax = uMax;
-                for (int sx = 0; sx < 2; ++sx) {
-                    const float cx = (sx == 0 ? grid.hx : -grid.hx) - grid.oX;
-                    for (int sy = 0; sy < 2; ++sy) {
-                        const float cy = (sy == 0 ? grid.hy : -grid.hy) - grid.oY;
-                        const float u = (cx * grid.vY - grid.vX * cy) / det;
-                        const float v = (grid.uX * cy - cx * grid.uY) / det;
-                        uMin = std::min(uMin, u);
-                        uMax = std::max(uMax, u);
-                        vMin = std::min(vMin, v);
-                        vMax = std::max(vMax, v);
-                    }
-                }
-
-                const float step = grid.step;
-
-                // How the two families crowd as the view turns. Lines of constant u are
-                // spaced along the u axis, and the plane's axes are sheared by the
-                // projection, so the *perpendicular* distance between two of them is
-                //     step * scaleU * sin(angle between the projected axes)
-                // in view space; the same for the other family with scaleV. The step is
-                // sized by the larger of the two scales (see SketchPicking::gridView), so
-                // the family across the foreshortened axis is the one that can come out
-                // denser than the target - and when it gets below a few pixels it turns
-                // into a grey band. Fading it by its own spacing keeps the rotation smooth
-                // without letting that happen.
-                const float scaleU = std::sqrt(grid.uX * grid.uX + grid.uY * grid.uY);
-                const float scaleV = std::sqrt(grid.vX * grid.vX + grid.vY * grid.vY);
-                const float sinTheta = (scaleU > 1.0e-6f && scaleV > 1.0e-6f)
-                    ? std::abs(det) / (scaleU * scaleV)
-                    : 0.0f;
-                const float viewportHeight = static_cast<float>(
-                    m_sceneView->GetRenderer().GetFrameDescriptor().renderHeight);
-                const float pixelsPerViewUnit = viewportHeight / (2.0f * grid.hy);
-                constexpr float kGridFadeStartPx = 8.0f;
-                constexpr float kGridFadeEndPx = 4.0f;
-                const auto familyFade = [&](float p_scaleAlongAxis) {
-                    const float spacingPx
-                        = grid.step * p_scaleAlongAxis * sinTheta * pixelsPerViewUnit;
-                    return std::clamp(
-                        (spacingPx - kGridFadeEndPx) / (kGridFadeStartPx - kGridFadeEndPx),
-                        0.0f, 1.0f);
-                };
-
-                // Narrows [p_lo, p_hi] down to the values of the free parameter that keep
-                // p_offset + p_coeff * t inside [-p_limit, p_limit], i.e. to the part of
-                // the line that is inside the viewport.
-                // @return false when no value of t is.
-                const auto narrowSpan = [](
-                    float p_offset, float p_coeff, float p_limit, float& p_lo, float& p_hi) {
-                    if (std::abs(p_coeff) < 1.0e-6f) {
-                        // The line runs parallel to this pair of borders: either all of it
-                        // is between them or none of it is.
-                        return std::abs(p_offset) <= p_limit;
-                    }
-                    const float t1 = (-p_limit - p_offset) / p_coeff;
-                    const float t2 = (p_limit - p_offset) / p_coeff;
-                    p_lo = std::max(p_lo, std::min(t1, t2));
-                    p_hi = std::min(p_hi, std::max(t1, t2));
-                    return p_lo <= p_hi;
-                };
-                // A grazing view stretches the quad without bound; the cap keeps the loop
-                // below finite by dropping the lines farthest out, which are far off
-                // screen by then anyway.
-                constexpr int kMaxLinesPerFamily = 2000;
-                // Lines of constant u (they run along v), then lines of constant v.
-                const auto drawFamily = [&](bool p_constantU) {
-                    // The family across the foreshortened axis crowds first; below a few
-                    // pixels of spacing it is just a grey band, so it fades out.
-                    const float fade = familyFade(p_constantU ? scaleU : scaleV);
-                    if (fade <= 0.0f) {
-                        return;
-                    }
-                    const float fixedX = p_constantU ? grid.uX : grid.vX;
-                    const float fixedY = p_constantU ? grid.uY : grid.vY;
-                    const float freeX = p_constantU ? grid.vX : grid.uX;
-                    const float freeY = p_constantU ? grid.vY : grid.uY;
-                    const float fixedMin = p_constantU ? uMin : vMin;
-                    const float fixedMax = p_constantU ? uMax : vMax;
-                    const float freeMin = p_constantU ? vMin : uMin;
-                    const float freeMax = p_constantU ? vMax : uMax;
-                    int first = static_cast<int>(std::ceil(fixedMin / step));
-                    int last = static_cast<int>(std::floor(fixedMax / step));
-                    if (last - first > kMaxLinesPerFamily) {
-                        const int middle = first + (last - first) / 2;
-                        first = middle - kMaxLinesPerFamily / 2;
-                        last = first + kMaxLinesPerFamily;
-                    }
-                    for (int i = first; i <= last; ++i) {
-                        const float g = i * step;
-                        float lo = freeMin;
-                        float hi = freeMax;
-                        if (!narrowSpan(grid.oX + g * fixedX, freeX, grid.hx, lo, hi)
-                            || !narrowSpan(grid.oY + g * fixedY, freeY, grid.hy, lo, hi)) {
-                            continue;
-                        }
-                        Eigen::Vector4<uint8_t> col = (i % 5) == 0 ? majorColor : minorColor;
-                        col[0] = static_cast<uint8_t>(
-                            static_cast<float>(col[0]) * fade + 0.5f);
-                        const Eigen::Vector3f rawA = p_constantU
-                            ? m_sketch->plane().valueEigen(g, lo)
-                            : m_sketch->plane().valueEigen(lo, g);
-                        const Eigen::Vector3f rawB = p_constantU
-                            ? m_sketch->plane().valueEigen(g, hi)
-                            : m_sketch->plane().valueEigen(hi, g);
-                        drawSegment(rawA, rawB, col);
-                    }
-                };
-                drawFamily(true);
-                drawFamily(false);
-                renderer->popEnableSorting();
-            }
+        if (!InEdit()) {
+            return;
         }
+        // The grid is a quad of the sketch plane whose pattern PlaneGridEffect evaluates per
+        // pixel - that is what gives it one-pixel lines at any zoom and no moire on a grazing
+        // view. The depth, though, comes from geometry, the same way the line-built grid got it:
+        // the quad is cut at the clip planes, the part inside the frustum keeps the plane's own
+        // depth (so the model occludes the grid exactly where it stands in front of the plane),
+        // and the parts that run past a clip plane are slid onto that plane - a fixed depth - so
+        // the grid still fills the view instead of being cut off at the edge.
+        PlaneGridEffect* grid = renderer ? renderer->findEffectAs<PlaneGridEffect>("PlaneGrid") : nullptr;
+        if (grid == nullptr || m_sceneView == nullptr || !m_sketch->isDrawGrid()) {
+            return;
+        }
+        // The plane in world space, and a point of it from its sketch coordinates.
+        const SketcherPlane2D& plane = m_sketch->plane();
+        const Eigen::Vector3f origin = plane.valueEigen(0.0, 0.0);
+        const Eigen::Vector3f axisU = plane.valueEigen(1.0, 0.0) - origin;
+        const Eigen::Vector3f axisV = plane.valueEigen(0.0, 1.0) - origin;
+        const auto world = [&](const Eigen::Vector2f& p_uv) {
+            return origin + axisU * p_uv.x() + axisV * p_uv.y();
+        };
+
+        // The visible quad, in sketch coordinates, and the cell size that keeps the on-screen
+        // density near gridTargetPx. The snapping reads the same ladder, so what is drawn and
+        // what snaps stay one lattice.
+        SketchPicking::GridView view;
+        std::vector<Eigen::Vector2f> quad;
+        float step = m_sketch->gridTargetPx();
+        if (SketchPicking::gridView(*m_sketch, *m_sceneView, view)) {
+            step = view.step;
+            // The visible quad: its four corners are the crossings of the two pairs of viewport
+            // borders with the plane, i.e. of
+            //     oX + u * uX + v * vX = +-hx      (left / right)
+            //     oY + u * uY + v * vY = +-hy      (bottom / top).
+            const float det = view.uX * view.vY - view.vX * view.uY;
+            if (std::abs(det) < 1.0e-6f) {
+                return;
+            }
+            float uMin = std::numeric_limits<float>::max();
+            float uMax = -std::numeric_limits<float>::max();
+            float vMin = uMin;
+            float vMax = uMax;
+            for (int sx = 0; sx < 2; ++sx) {
+                const float cx = (sx == 0 ? view.hx : -view.hx) - view.oX;
+                for (int sy = 0; sy < 2; ++sy) {
+                    const float cy = (sy == 0 ? view.hy : -view.hy) - view.oY;
+                    const float u = (cx * view.vY - view.vX * cy) / det;
+                    const float v = (view.uX * cy - cx * view.uY) / det;
+                    uMin = std::min(uMin, u);
+                    uMax = std::max(uMax, u);
+                    vMin = std::min(vMin, v);
+                    vMax = std::max(vMax, v);
+                }
+            }
+            quad = { { uMin, vMin }, { uMax, vMin }, { uMax, vMax }, { uMin, vMax } };
+        }
+        else {
+            // A perspective camera: gridView() cannot describe the plane there - its image is not
+            // a rectangle in view space and it runs out to the horizon - but every viewport
+            // corner still has a ray, and that ray meets the plane in exactly one point. Those
+            // four points are the quad, so the grid is as infinite here as it is face on.
+            //
+            // A corner whose ray runs along the plane meets it at an unbounded distance. That
+            // point is held inside a large box on the plane instead of at infinity: holding it
+            // *on* the plane is what keeps the quad planar (its depth has to be the plane's), and
+            // the box is far enough out that the cells there are already sub-pixel and the
+            // fragment stage has faded the grid out.
+            const Rendering::Entities::Camera* camera = m_sceneView->GetCamera();
+            if (camera == nullptr) {
+                return;
+            }
+            const Maths::FVector3 eyeV = camera->GetPosition();
+            const Eigen::Vector3f eye(eyeV.x, eyeV.y, eyeV.z);
+            const Eigen::Vector3f normal = axisU.cross(axisV).normalized();
+            const auto& fd = m_sceneView->GetRenderer().GetFrameDescriptor();
+            const float viewportW = static_cast<float>(fd.renderWidth);
+            const float viewportH = static_cast<float>(fd.renderHeight);
+            if (viewportW <= 0.0f || viewportH <= 0.0f) {
+                return;
+            }
+            const float planeDistance = std::abs((origin - eye).dot(normal));
+            const float maxExtent = std::max(planeDistance * 1.0e4f, 1.0e5f);
+            const auto hitUv = [&](const Eigen::Vector2f& p_screen, Eigen::Vector2f& p_uv) {
+                const Eigen::Vector3f p = renderer->screenToWorld(p_screen);
+                const Eigen::Vector3f dir = p - eye;
+                const float denom = dir.dot(normal);
+                if (std::abs(denom) < 1.0e-9f) {
+                    return false;
+                }
+                const float t = (origin - p).dot(normal) / denom;
+                if (t <= 0.0f) {
+                    return false;
+                }
+                const Eigen::Vector3f relative = (p + dir * t) - origin;
+                p_uv = { relative.dot(axisU), relative.dot(axisV) };
+                return true;
+            };
+            const auto holdInside = [&](Eigen::Vector2f& p_uv) {
+                const float extent = std::max(std::abs(p_uv.x()), std::abs(p_uv.y()));
+                if (extent > maxExtent) {
+                    p_uv *= maxExtent / extent;
+                }
+            };
+            Eigen::Vector2f centreUv{ 0.0f, 0.0f };
+            const bool haveCentre = hitUv({ viewportW * 0.5f, viewportH * 0.5f }, centreUv);
+            if (!haveCentre) {
+                // The plane is behind the camera everywhere on screen: nothing to draw.
+                return;
+            }
+            holdInside(centreUv);
+            const Eigen::Vector2f screenCorners[4] = {
+                { 0.0f, 0.0f }, { viewportW, 0.0f }, { viewportW, viewportH }, { 0.0f, viewportH } };
+            bool haveAllCorners = true;
+            for (int i = 0; i < 4 && haveAllCorners; ++i) {
+                Eigen::Vector2f uv = centreUv;
+                haveAllCorners = hitUv(screenCorners[i], uv);
+                if (haveAllCorners) {
+                    holdInside(uv);
+                    quad.push_back(uv);
+                }
+            }
+            if (!haveAllCorners) {
+                // Some corner looks at the sky: the visible part of the plane is unbounded in that
+                // direction, so cover the viewport with a box around the centre instead.
+                quad.clear();
+                const float radius = maxExtent * 0.1f;
+                quad = { { centreUv.x() - radius, centreUv.y() - radius },
+                         { centreUv.x() + radius, centreUv.y() - radius },
+                         { centreUv.x() + radius, centreUv.y() + radius },
+                         { centreUv.x() - radius, centreUv.y() + radius } };
+            }
+            // The cells follow the pixel scale at the point under the screen centre.
+            const Eigen::Vector3f centre = world(centreUv);
+            const Eigen::Vector2f screenCentre = renderer->worldToScreen(centre);
+            const float scaleU = (renderer->worldToScreen(centre + axisU) - screenCentre).norm();
+            const float scaleV = (renderer->worldToScreen(centre + axisV) - screenCentre).norm();
+            step = SketchPicking::gridStepForScale(m_sketch->gridTargetPx(),
+                std::max(std::max(scaleU, scaleV), 1.0e-6f));
+        }
+
+        const BackdropDepth depth = MakeBackdropDepth(m_sceneView->GetCamera());
+        const auto depthAt = [&](const Eigen::Vector2f& p_uv) {
+            return depth.depthOf(world(p_uv));
+        };
+
+        // Sutherland-Hodgman against one depth bound: the polygon is planar, so depth runs
+        // linearly along every edge and the crossing is exact.
+        const auto clipAt = [&](const std::vector<Eigen::Vector2f>& p_poly, bool p_keepAbove,
+                                float p_bound) {
+            std::vector<Eigen::Vector2f> out;
+            const size_t n = p_poly.size();
+            for (size_t i = 0; i < n; ++i) {
+                const Eigen::Vector2f a = p_poly[i];
+                const Eigen::Vector2f b = p_poly[(i + 1) % n];
+                const float da = depthAt(a);
+                const float db = depthAt(b);
+                const bool insideA = p_keepAbove ? (da >= p_bound) : (da <= p_bound);
+                const bool insideB = p_keepAbove ? (db >= p_bound) : (db <= p_bound);
+                if (insideA) {
+                    out.push_back(a);
+                }
+                if (insideA != insideB) {
+                    const float t = (p_bound - da) / (db - da);
+                    out.push_back(a + (b - a) * t);
+                }
+            }
+            return out;
+        };
+
+        // Emits one piece as triangles. p_fixedDepth slides each vertex along the view direction
+        // to that depth: under an orthographic camera it stays where it is on screen, which is
+        // exactly how the overhang used to be painted flat on the clip plane.
+        const auto emitPiece = [&](const std::vector<Eigen::Vector2f>& p_poly, bool p_fixedDepth,
+                              float p_fixed) {
+            if (p_poly.size() < 3) {
+                return;
+            }
+            for (size_t i = 1; i + 1 < p_poly.size(); ++i) {
+                const Eigen::Vector2f triangle[3] = { p_poly[0], p_poly[i], p_poly[i + 1] };
+                for (const Eigen::Vector2f& uv : triangle) {
+                    Eigen::Vector3f position = world(uv);
+                    if (p_fixedDepth) {
+                        position += depth.forward * (p_fixed - depthAt(uv));
+                    }
+                    grid->AddVertex(position, uv.x(), uv.y());
+                }
+            }
+        };
+
+        if (depth.usable) {
+            // Inside the depth range: the plane's own depth, so the model and the grid occlude
+            // each other. Either side of it: the overhang, on the clip plane it runs past.
+            emitPiece(clipAt(clipAt(quad, true, depth.lowBound), false, depth.highBound), false, 0.0f);
+            emitPiece(clipAt(quad, false, depth.lowBound), true, depth.lowBound);
+            emitPiece(clipAt(quad, true, depth.highBound), true, depth.highBound);
+        }
+        else {
+            // A camera that cannot describe a depth range (any perspective one): there is no
+            // split to make, and the clip planes cut the geometry themselves.
+            emitPiece(quad, false, 0.0f);
+        }
+
+        // Vertex colours are packed ABGR, a material colour is plain RGBA.
+        const auto toColor = [](const Eigen::Vector4<uint8_t>& c) {
+            return Maths::FVector4{
+                c[3] / 255.0f, c[2] / 255.0f, c[1] / 255.0f, c[0] / 255.0f };
+        };
+        grid->SetStyle(step, toColor(m_drawOption.gridMinorColor),
+            toColor(m_drawOption.gridMajorColor), m_drawOption.gridLineWidth);
     }
     void SketcherObjWidget::drawSketchAxes()
     {

@@ -13,6 +13,7 @@
 #include "Interactive/MathUtil/MathUtil.h"
 #include "Interactive/Im3DPalette.h"
 #include "Interactive/Effect/LineDashEffect.h"
+#include "Interactive/Effect/PlaneGridEffect.h"
 #include "Settings/DebugSetting.h"
 #include "core/Global/ServiceLocator.h"
 #include "renderer/SceneView.h"
@@ -218,6 +219,8 @@ namespace MOON
 		// without a depth test (the scene never hides what is being edited), and that is the
 		// channel this effect serves.
 		registerEffect(std::make_unique<LineDashEffect>());
+		// The sketch's background grid, in the backdrop channel (behind the axes and the geometry).
+		registerEffect(std::make_unique<PlaneGridEffect>());
 
 		preStoreMesh();
 	}
@@ -1661,6 +1664,11 @@ namespace MOON
 		p_pso.depthTest = true;
 		p_pso.depthFunc = Rendering::Settings::EComparaisonAlgorithm::GREATER_EQUAL;
 		driver->SetPipelineState(p_pso);
+
+		// Backdrop effects first: they are what the axes and the geometry below are drawn on top
+		// of (the sketch grid is one), and they blend, so the order is what keeps them behind.
+		drawEffects(EImChannel::Backdrop);
+
 		// Enable Depth Test
 		for (int i = 0; i < vertexData[1].size(); ++i)
 		{

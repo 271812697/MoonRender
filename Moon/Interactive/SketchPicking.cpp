@@ -368,6 +368,33 @@ namespace MOON {
         return ret;
     }
 
+    float gridStepForScale(float p_targetPx, float p_pixelsPerUnit)
+    {
+        // The step ladder is 1 / 2 x 10^n and nothing else: consecutive zoom levels divide the
+        // cell by 2, then by 5, so the cell side runs
+        //     1, 0.2, 0.1, 0.02, 0.01, 0.002, ...
+        // - every value a round decimal. The 1 / 2 / 5 ladder this replaced also stepped through
+        // 0.5 and 0.05, i.e. half values, which is what made the cells look irregular.
+        //
+        // The rung taken is the one closest to the target, not the first one above it: snapping
+        // up left the cells at up to five times the target for the zooms that fall between 2 and
+        // 10, so the grid visibly thinned out for a moment while zooming. Nearest keeps the
+        // on-screen spacing within about 1.6x of the target at every zoom.
+        const float targetStep = p_targetPx / std::max(p_pixelsPerUnit, 1.0e-6f);
+        const float mag = std::pow(
+            10.0f,
+            std::floor(std::log10(std::max(targetStep, 1.0e-6f)))
+        );
+        float step = mag;
+        if (std::abs(2.0f * mag - targetStep) < std::abs(step - targetStep)) {
+            step = 2.0f * mag;
+        }
+        if (std::abs(10.0f * mag - targetStep) < std::abs(step - targetStep)) {
+            step = 10.0f * mag;
+        }
+        return step;
+    }
+
     bool gridView(SketcherObj& sketch, Editor::Panels::SceneView& view, GridView& p_out)
     {
         const auto* camera = view.GetCamera();
@@ -441,28 +468,10 @@ namespace MOON {
         const float scaleU = std::sqrt(uX * uX + uY * uY);
         const float scaleV = std::sqrt(vX * vX + vY * vY);
         const float scale = std::max(std::max(scaleU, scaleV), 1.0e-6f);
-        // The spacing the sketch asks for, in screen pixels (the panel sets it); the
-        // same number drawBackground() draws its lattice with.
-        const float targetStep = sketch.gridTargetPx() * 2.0f * halfH / (screenH * scale);
-        // The step ladder is 1 / 2 x 10^n and nothing else: consecutive zoom levels
-        // divide the cell by 2, then by 5, so the cell side runs
-        //     1, 0.2, 0.1, 0.02, 0.01, 0.002, ...
-        // - every value a round decimal. The 1 / 2 / 5 ladder this replaced also
-        // stepped through 0.5 and 0.05, i.e. half values, which is what made the
-        // cells look irregular. The price of dropping them is that the coarsest jump
-        // is 5x, so the spacing on screen swings between the target and ~5x it.
-        const float mag = std::pow(
-            10.0f,
-            std::floor(std::log10(std::max(targetStep, 1.0e-6f)))
-        );
-        float step = mag;
-        if (step < targetStep) {
-            step = 2.0f * mag;
-        }
-        if (step < targetStep) {
-            step = 10.0f * mag;
-        }
-        p_out.step = step;
+        // The spacing the sketch asks for, in screen pixels (the panel sets it); the same number
+        // drawBackground() draws its lattice with.
+        const float pixelsPerUnit = screenH * scale / (2.0f * halfH);
+        p_out.step = gridStepForScale(sketch.gridTargetPx(), pixelsPerUnit);
         return true;
     }
 
