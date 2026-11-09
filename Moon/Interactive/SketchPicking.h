@@ -1,5 +1,6 @@
 #pragma once
 #include <set>
+#include <Maths/FMatrix4.h>
 #include "Sketcher/SketcherObj.h"
 
 namespace Editor::Panels { class SceneView; }
@@ -21,6 +22,43 @@ namespace MOON {
 		using PointPos = Sketcher::PointPos;
 		using CurveSegment = SketcherObj::CurveSegment;
 		using SegPoint = SketcherObj::SegPoint;
+
+		/** Projects sketch coordinates to viewport pixels.
+		 *
+		 * Camera::GetViewPortMatrix() already carries the projection, so under a perspective
+		 * camera the homogeneous w varies from point to point across the plane and has to be
+		 * divided out. Multiplying the matrix by a Vector3d does not do that - the w is dropped -
+		 * which is why the hit tests drifted as soon as the sketch was seen in perspective: the
+		 * distances were being measured in a space where the plane's image is not the plane.
+		 */
+		struct SketchProjector
+		{
+			SketchProjector(const Maths::FMatrix4& p_viewPortMatrix, const SketcherPlane2D& p_plane)
+				: m_matrix(p_viewPortMatrix), m_plane(p_plane) {
+			}
+			/** @return the viewport pixel of sketch coordinates (u, v). */
+			Base::Vector3d operator()(double p_u, double p_v) const
+			{
+				const SketcherPlane2D& plane = m_plane;
+				const double x = plane.origin.x + p_u * plane.xAxis.x + p_v * plane.yAxis.x;
+				const double y = plane.origin.y + p_u * plane.xAxis.y + p_v * plane.yAxis.y;
+				const double z = plane.origin.z + p_u * plane.xAxis.z + p_v * plane.yAxis.z;
+				const float* m = m_matrix.data;
+				const double px = m[0] * x + m[1] * y + m[2] * z + m[3];
+				const double py = m[4] * x + m[5] * y + m[6] * z + m[7];
+				const double pw = m[12] * x + m[13] * y + m[14] * z + m[15];
+				// An orthographic camera leaves w at 1, so this divide is a no-op there.
+				const double w = std::abs(pw) > 1.0e-9 ? pw : 1.0;
+				return Base::Vector3d{ px / w, py / w, 0.0 };
+			}
+			/** The same for a sketch-plane point given as a 3D vector with z ignored. */
+			Base::Vector3d operator()(const Base::Vector3d& p_uv) const
+			{
+				return (*this)(p_uv.x, p_uv.y);
+			}
+			Maths::FMatrix4 m_matrix;
+			SketcherPlane2D m_plane;
+		};
 
 		/** How the sketch plane lies in the viewport right now: what the adaptive
 		 * background grid is drawn from, and what the grid snapping has to agree with -
@@ -49,7 +87,7 @@ namespace MOON {
 		};
 
 		/** Which curve of the sketch a viewport position is on, or NoGeoId. */
-		int pickGeoIndex(SketcherObj& p_sketch, const Base::Vector2d& p_pos, const Base::Matrix4D& p_viewPortMat);
+		int pickGeoIndex(SketcherObj& p_sketch, const Base::Vector2d& p_pos, const Maths::FMatrix4& p_viewPortMatrix);
 		/** Which element of the sketch - a curve, or a marker on one - a position
 		 * picks. */
 		SelectGeoId testSelect(SketcherObj& p_sketch, Editor::Panels::SceneView& p_view, const Base::Vector2d& p_pos);

@@ -356,15 +356,9 @@ namespace MOON {
         SelectGeoId& next
     ) const
     {
-        const Maths::FMatrix4 mat = m_sceneView->GetCamera()->GetViewPortMatrix();
-        const Base::Matrix4D viewPortMat(
-            mat.data[0], mat.data[1], mat.data[2], mat.data[3],
-            mat.data[4], mat.data[5], mat.data[6], mat.data[7],
-            mat.data[8], mat.data[9], mat.data[10], mat.data[11],
-            mat.data[12], mat.data[13], mat.data[14], mat.data[15]
-        );
-        const Base::Matrix4D trans = viewPortMat * m_sketch->getplaneTransform();
-        const Base::Vector3d p1 = trans * Base::Vector3d(pos.x, pos.y, 0.0);
+        const SketchPicking::SketchProjector screen(
+            m_sceneView->GetCamera()->GetViewPortMatrix(), m_sketch->plane());
+        const Base::Vector3d p1 = screen(pos.x, pos.y);
         constexpr double kTol = 5.0;
 
         const auto isSelected = [this](const SelectGeoId& s) {
@@ -389,7 +383,7 @@ namespace MOON {
                 if (sp.pointPos == PointPos::none) {
                     continue;
                 }
-                const double dist = (p1 - trans * sp.coord).Length();
+                const double dist = (p1 - screen(sp.coord)).Length();
                 if (dist < kTol) {
                     const SelectGeoId cand{ i, sp.pointPos };
                     if (!(cand.GeoId == current.GeoId && cand.pointPos == current.pointPos)

@@ -25,11 +25,13 @@ namespace MOON {
         return (p - proj).Length();
     };
 
-    int pickGeoIndex(SketcherObj& sketch, const Base::Vector2d& pos, const Base::Matrix4D& mat)
+    int pickGeoIndex(SketcherObj& sketch, const Base::Vector2d& pos, const Maths::FMatrix4& p_viewPortMatrix)
     {
-
-        Base::Matrix4D trans = mat * sketch.getplaneTransform();
-        Base::Vector3d p1 = trans * Base::Vector3d(pos.x, pos.y, 0);
+        // The same projection as testSelect, for the same reason: it has to divide out the
+        // homogeneous w, or a perspective view measures every distance in a space the plane is
+        // not in.
+        const SketchProjector p_screen(p_viewPortMatrix, sketch.plane());
+        const Base::Vector3d p1 = p_screen(pos.x, pos.y);
 
         int ret = -1;
         double deltaTole = 15.0;
@@ -51,7 +53,7 @@ namespace MOON {
                     Base::Vector3d e = segment.point[k + 1];
                     // ✅ 使用 Lambda 计算真正的点到线段距离
                     double u;
-                    double dist = pointToSegmentDist(p1, trans * s, trans * e, u);
+                    double dist = pointToSegmentDist(p1, p_screen(s), p_screen(e), u);
 
                     if (dist < deltaTole && dist < minDist) {
                         minDist = dist;
@@ -65,15 +67,8 @@ namespace MOON {
 
     SelectGeoId testSelect(SketcherObj& sketch, Editor::Panels::SceneView& view, const Base::Vector2d& pos)
     {
-        Maths::FMatrix4 mat = view.GetCamera()->GetViewPortMatrix();
-        Base::Matrix4D viewPortMat(
-            mat.data[0], mat.data[1], mat.data[2], mat.data[3],
-            mat.data[4], mat.data[5], mat.data[6], mat.data[7],
-            mat.data[8], mat.data[9], mat.data[10], mat.data[11],
-            mat.data[12], mat.data[13], mat.data[14], mat.data[15]
-        );
-        Base::Matrix4D trans = viewPortMat * sketch.getplaneTransform();
-        Base::Vector3d p1 = trans * Base::Vector3d{ pos.x,pos.y,0.0 };
+        const SketchProjector screen(view.GetCamera()->GetViewPortMatrix(), sketch.plane());
+        const Base::Vector3d p1 = screen(pos.x, pos.y);
        double deltaTole = 5.0;
        double minDist = 10000.0;
        SelectGeoId ret = { NoGeoId,PointPos::none };
@@ -89,7 +84,7 @@ namespace MOON {
         // coincident element can still be reached by clicking again: the selection
         // cycles through the points that lie on top of each other.
         const double originTole = 10.0;
-        if ((p1 - trans * Base::Vector3d(0.0, 0.0, 0.0)).Length() < originTole) {
+        if ((p1 - screen(0.0, 0.0)).Length() < originTole) {
             ret.GeoId = Sketcher::GeoEnum::HAxis;
             ret.pointPos = PointPos::start;
             return ret;
@@ -135,7 +130,7 @@ namespace MOON {
             }
             auto& segment = sketch.segmentOf(geo);
             for (int j = 0; j < segment.sepoints.size(); j++) {
-                double dist = (p1 - trans * segment.sepoints[j].coord).Length();
+                double dist = (p1 - screen(segment.sepoints[j].coord)).Length();
                 if (dist < deltaTole && dist < minDist) {
                     minDist = dist;
                     ret.GeoId = geoId;
@@ -158,8 +153,8 @@ namespace MOON {
                         double u = 0.0;
                         double dist = pointToSegmentDist(
                             p1,
-                            trans * segment.point[j],
-                            trans * segment.point[j + 1],
+                            screen(segment.point[j]),
+                            screen(segment.point[j + 1]),
                             u);
 
                         if (dist < deltaTole && dist < minDist) {
@@ -171,7 +166,7 @@ namespace MOON {
                 else if (geo->is<Part::GeomPoint>())
                 {
                     Base::Vector3d pp = static_cast<Part::GeomPoint*>(geo)->getPoint();
-                    double dist = (p1 - trans * pp).Length();
+                    double dist = (p1 - screen(pp)).Length();
                     if (dist < deltaTole && dist < minDist) {
                         minDist = dist;
                         ret.GeoId = geoId;
@@ -194,10 +189,10 @@ namespace MOON {
                 if (!sketch.isAxisCurve(geoId)) {
                     continue;
                 }
-                const Base::Vector3d origin = trans * Base::Vector3d(0.0, 0.0, 0.0);
-                const Base::Vector3d tip = trans * (geoId == Sketcher::GeoEnum::VAxis
-                    ? Base::Vector3d(0.0, 1.0, 0.0)
-                    : Base::Vector3d(1.0, 0.0, 0.0));
+                const Base::Vector3d origin = screen(0.0, 0.0);
+                const Base::Vector3d tip = geoId == Sketcher::GeoEnum::VAxis
+                    ? screen(0.0, 1.0)
+                    : screen(1.0, 0.0);
                 const Base::Vector3d dir = tip - origin;
                 const double len = dir.Length();
                 if (len > 1e-12) {
@@ -216,16 +211,9 @@ namespace MOON {
 
     bool snapPoint(SketcherObj& sketch, Editor::Panels::SceneView& view, ImRenderer& renderer, Base::Vector2d& pos, const std::set<int>& avoid)
     {
-        Maths::FMatrix4 mat = view.GetCamera()->GetViewPortMatrix();
-        Base::Matrix4D pla(
-            mat.data[0], mat.data[1], mat.data[2], mat.data[3],
-            mat.data[4], mat.data[5], mat.data[6], mat.data[7],
-            mat.data[8], mat.data[9], mat.data[10], mat.data[11],
-            mat.data[12], mat.data[13], mat.data[14], mat.data[15]
-        );
-        Base::Matrix4D trans = pla * sketch.getplaneTransform();
+        const SketchProjector screen(view.GetCamera()->GetViewPortMatrix(), sketch.plane());
         //get the screen pos
-        Base::Vector3d screenpPos = trans * Base::Vector3d{ pos.x,pos.y,0.0 };
+        const Base::Vector3d screenpPos = screen(pos.x, pos.y);
         double deltaTole = 10.0;
         double minDist = 10000.0;
         bool ret = false;
@@ -248,7 +236,7 @@ namespace MOON {
                     continue;  // not sampled: nothing to snap to yet
                 }
                 for (const SegPoint& segPoint : segment->sepoints) {
-                    const double dist = (screenpPos - trans * segPoint.coord).Length();
+                    const double dist = (screenpPos - screen(segPoint.coord)).Length();
                     if (dist < deltaTole && dist < minDist) {
                         minDist = dist;
                         ret = true;
@@ -269,7 +257,7 @@ namespace MOON {
                 Part::Geometry* geo = sketch.geometries()[i].get();
                 auto& segment = sketch.segmentOf(geo);
                 for (int j = 0;j < segment.sepoints.size();j++) {
-                    double dist = (screenpPos - trans * segment.sepoints[j].coord).Length();
+                    double dist = (screenpPos - screen(segment.sepoints[j].coord)).Length();
                     if (dist < deltaTole && dist < minDist) {
                         minDist = dist;
                         ret = true;
@@ -282,7 +270,7 @@ namespace MOON {
         snapToExternalPoints();
         if (!ret) {
             //snap to orgin or XAxis or YAxis
-            Base::Vector3d screenOrigin = trans * Base::Vector3d(0, 0, 0);
+            Base::Vector3d screenOrigin = screen(0.0, 0.0);
             double dist = (screenpPos - screenOrigin).Length();
             if (dist < deltaTole) {
                 pos = { 0.0, 0.0 };
@@ -314,8 +302,8 @@ namespace MOON {
                             double u = 0.0;
                             double dist = pointToSegmentDist(
                                 screenpPos,
-                                trans * segment.point[j],
-                                trans * segment.point[j + 1],
+                                screen(segment.point[j]),
+                                screen(segment.point[j + 1]),
                                 u);
                             if (dist < deltaTole && dist < minDist) {
                                 minDist = dist;
@@ -346,8 +334,8 @@ namespace MOON {
                     double u = 0.0;
                     const double dist = pointToSegmentDist(
                         screenpPos,
-                        trans * segment->point[j],
-                        trans * segment->point[j + 1],
+                        screen(segment->point[j]),
+                        screen(segment->point[j + 1]),
                         u);
                     if (dist < deltaTole && dist < minDist) {
                         minDist = dist;
