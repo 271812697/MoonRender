@@ -12,6 +12,7 @@
 #include <Rendering/Overlay/Im2DFont.h>
 #include "Interactive/MathUtil/MathUtil.h"
 #include "Interactive/Im3DPalette.h"
+#include "Interactive/Effect/LineDashEffect.h"
 #include "Settings/DebugSetting.h"
 #include "core/Global/ServiceLocator.h"
 #include "renderer/SceneView.h"
@@ -21,6 +22,8 @@
 #include "Interactive/Screen/ScreenOverlayRegistry.h"
 #include "Sketcher/SketcherObj.h"
 #include <algorithm>
+#include <cmath>
+#include <cstring>
 
 #include "editor/View/sceneview/viewerwidget.h"
 #include <Rendering/Data/Material.h>
@@ -78,6 +81,49 @@ namespace MOON
 		static ImRenderer ImRenderer;
 		return ImRenderer;
 	}
+
+	// ---- custom drawing effects -----------------------------------------------------------
+	AImEffect* ImRenderer::registerEffect(std::unique_ptr<AImEffect> p_effect)
+	{
+		if (p_effect == nullptr)
+		{
+			return nullptr;
+		}
+		if (AImEffect* existing = findEffect(p_effect->Id()))
+		{
+			return existing;
+		}
+		AImEffect* raw = p_effect.get();
+		mEffects.push_back(std::move(p_effect));
+		return raw;
+	}
+
+	AImEffect* ImRenderer::findEffect(const std::string& p_id) const
+	{
+		for (const std::unique_ptr<AImEffect>& effect : mEffects)
+		{
+			if (effect->Id() == p_id)
+			{
+				return effect.get();
+			}
+		}
+		return nullptr;
+	}
+
+	void ImRenderer::drawEffects(EImChannel p_channel)
+	{
+		// The only thing the renderer knows about an effect: which channel it belongs to and that
+		// it has to be drawn once per frame. The effect already has the frame context (BeginFrame)
+		// and its own geometry, so this is the whole relationship.
+		for (const std::unique_ptr<AImEffect>& effect : mEffects)
+		{
+			if (effect->Desc().channel == p_channel)
+			{
+				effect->Draw(m_overlayGl);
+			}
+		}
+	}
+
 	void ImRenderer::initGizmoGl()
 	{
 		// Vertex array, vertex buffer and the gizmo materials: the gizmo pass draws with them
@@ -165,6 +211,14 @@ namespace MOON
 		// upload and the draw (Rendering::Overlay::Im3DGLRenderer).
 		m_overlayGl.Initialize();
 
+		// The custom effects. Each one owns its material and everything else it needs; the
+		// renderer only keeps them by id and hands them their runs.
+		//
+		// Line effects draw in the overlay channel: the sketch's construction curves are drawn
+		// without a depth test (the scene never hides what is being edited), and that is the
+		// channel this effect serves.
+		registerEffect(std::make_unique<LineDashEffect>());
+
 		preStoreMesh();
 	}
 	void ImRenderer::registerDebugSettings()
@@ -180,6 +234,8 @@ namespace MOON
 		delete mTriangleMaterial;
 		delete mCellMaterial;
 		delete mLitMaterial;
+		// Effect materials own GL programs, so they go down with the other overlay materials.
+		mEffects.clear();
 	}
     void ImRenderer::selectPolygon(int pid, int bid)
 	{
@@ -217,7 +273,7 @@ namespace MOON
 		default:
 			break;
 		};
-		firstVertThisPrim = getCurrentVertexList()->size();
+		firstVertThisPrim = static_cast<unsigned int>(getCurrentVertexList()->size());
 	}
 	void ImRenderer::end()
 	{
@@ -1502,17 +1558,22 @@ namespace MOON
 		cameraParam.snapRotation = 0.0f;
 		cameraParam.snapScale = 0.0f;
 		memcpy(keyDownCurr, cameraParam.keyDown, KeyCount); // must copy in case m_keyDown is updated after reset (e.g. by an app callback)
+
+		// The frame the effects build their geometry against: the camera is final at this point,
+		// so a submit method called later this frame can project its points itself.
+		ImEffectContext effectContext;
+		effectContext.viewProj = cameraParam.viewProj;
+		effectContext.viewProjT = cameraParam.viewProj.transpose();
+		effectContext.viewportWidth = cameraParam.viewportWidth;
+		effectContext.viewportHeight = cameraParam.viewportHeight;
+		for (const std::unique_ptr<AImEffect>& effect : mEffects)
+		{
+			effect->BeginFrame(effectContext);
+		}
 	}
 
 	void ImRenderer::test()
 	{
-		// TEMPORARY PROBE: MOON_TEXT_PROBE=1 draws one line of world-space text so the text pass
-		// can be checked without a caller yet.
-		
-
-		
-	
-		
 	}
 
 	void ImRenderer::drawUnsort()
@@ -1570,6 +1631,9 @@ namespace MOON
 				drawList.vertexData, drawList.vertexCount, sizeof(VertexFormat),
 				viewProjT.data(), cameraParam.viewportWidth, cameraParam.viewportHeight);
 		}
+
+		// Custom effects of this channel run after the built-in primitives, with the same state.
+		drawEffects(EImChannel::Overlay);
 	}
 
 	void ImRenderer::drawSort()
@@ -1645,6 +1709,10 @@ namespace MOON
 			mat->Unbind();
 
 		}
+
+		// Custom effects of this channel: depth tested like the primitives above, before the
+		// view-cube sub-viewport is set up below.
+		drawEffects(EImChannel::Sorted);
 
 		//draw lit vertex data
 		{

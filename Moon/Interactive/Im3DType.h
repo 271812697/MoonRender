@@ -1,4 +1,7 @@
 #pragma once
+#include <algorithm>
+#include <cstdint>
+
 #include <Eigen/Core>
 #include <Maths/FMatrix4.h>
 namespace Rendering {
@@ -18,6 +21,13 @@ namespace MOON
 		Eigen::Vector4<uint8_t> color;      // rgba8 (MSB = r)
 		Eigen::Vector3<float> normal;
 		Eigen::Vector2<float> uv;
+		/** One colour channel, packed: clamped and cast explicitly (an implicit float to uint8_t
+		 * is a narrowing conversion the compiler warns about, and out-of-range values would be
+		 * undefined). */
+		static uint8_t ColorByte(float p_value)
+		{
+			return static_cast<uint8_t>(std::clamp(p_value, 0.0f, 1.0f) * 255.0f);
+		}
 		VertexFormat()
 		{
 		}
@@ -30,14 +40,14 @@ namespace MOON
 			: positionSize(p.x(), p.y(), p.z(), 1.0)
 			, normal(n)
 			, uv(texCoord)
-			, color(c.w() * 255, c.z() * 255, c.y() * 255, c.x() * 255)
+			, color(ColorByte(c.w()), ColorByte(c.z()), ColorByte(c.y()), ColorByte(c.x()))
 		{
 		}
 		VertexFormat(const Eigen::Vector3f& p, const Eigen::Vector4f& c, const Eigen::Vector3f& n)
 			: positionSize(p.x(), p.y(), p.z(), 1.0)
 			, normal(n)
 			, uv(1.0, 1.0)
-			, color(c.w() * 255, c.z() * 255, c.y() * 255, c.x() * 255)
+			, color(ColorByte(c.w()), ColorByte(c.z()), ColorByte(c.y()), ColorByte(c.x()))
 		{
 		}
 		VertexFormat(const Eigen::Vector3f& p, const Eigen::Vector4<uint8_t>& c, const Eigen::Vector3f& n)

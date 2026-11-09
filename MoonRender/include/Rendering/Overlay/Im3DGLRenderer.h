@@ -35,12 +35,16 @@ namespace Rendering::Overlay
 
 		/** Uploads p_vertexData and draws it with p_material.
 		 * p_glPrimitive is GL_POINTS, GL_LINES or GL_TRIANGLES; p_isLinePass tells the shader the
-		 * viewport (only the line shader uses it). */
+		 * viewport (only the line shader uses it).
+		 * p_extraFloats > 0 means each vertex carries that many floats after the base layout
+		 * (a custom effect's per-vertex data); they are exposed as attribute 4 (and 5 for more
+		 * than four), so a shader can read them without the base layout growing for everybody. */
 		void Draw(::Rendering::Data::Material& p_material,
 			unsigned int p_glPrimitive, bool p_isLinePass,
 			const void* p_vertexData, size_t p_vertexCount, size_t p_vertexStride,
 			const float p_viewProjMatrix[16],
-			float p_viewportWidth, float p_viewportHeight);
+			float p_viewportWidth, float p_viewportHeight,
+			unsigned int p_extraFloats = 0);
 
 		/** Sets the pipeline state the mesh passes use (the widgets' own meshes: depth test with
 		 * greater-equal, stencil, blending on or off). */

@@ -21,6 +21,12 @@ namespace
 	constexpr int kColorLocation = 1;
 	constexpr int kNormalLocation = 2;
 	constexpr int kUvLocation = 3;
+	// A custom effect's per-vertex data follows the base layout: attribute 4 is up to four floats,
+	// attribute 5 the next four (an effect may declare up to eight). Its offset is derived from
+	// the stride rather than assumed: the editor's VertexFormat is 16-byte aligned and carries
+	// padding after its last member, so sizeof(VertexFormat) is not "40, the end of uv".
+	constexpr int kExtraLocation0 = 4;
+	constexpr int kExtraLocation1 = 5;
 	constexpr size_t kPositionOffset = 0;
 	constexpr size_t kColorOffset = 16;
 	constexpr size_t kNormalOffset = 20;
@@ -86,7 +92,8 @@ void Rendering::Overlay::Im3DGLRenderer::Draw(
 	unsigned int p_glPrimitive, bool p_isLinePass,
 	const void* p_vertexData, size_t p_vertexCount, size_t p_vertexStride,
 	const float p_viewProjMatrix[16],
-	float p_viewportWidth, float p_viewportHeight)
+	float p_viewportWidth, float p_viewportHeight,
+	unsigned int p_extraFloats)
 {
 	if (p_vertexCount == 0)
 	{
@@ -101,6 +108,34 @@ void Rendering::Overlay::Im3DGLRenderer::Draw(
 	glVertexAttribPointer(kColorLocation, 4, GL_UNSIGNED_BYTE, GL_TRUE, (GLsizei)p_vertexStride, (GLvoid*)kColorOffset);
 	glVertexAttribPointer(kNormalLocation, 3, GL_FLOAT, GL_FALSE, (GLsizei)p_vertexStride, (GLvoid*)kNormalOffset);
 	glVertexAttribPointer(kUvLocation, 2, GL_FLOAT, GL_FALSE, (GLsizei)p_vertexStride, (GLvoid*)kUvOffset);
+
+	// The effect channel. Attributes the shader does not declare cost nothing; ones it does and
+	// we leave disabled would read constant (0,0,0,1), so both are turned on only when the run
+	// actually carries the data.
+	if (p_extraFloats > 0)
+	{
+		// The effect data sits at the end of each vertex: stride minus the extra floats' size.
+		const size_t extraOffset = p_vertexStride - p_extraFloats * sizeof(float);
+		glEnableVertexAttribArray(kExtraLocation0);
+		glVertexAttribPointer(kExtraLocation0, static_cast<GLint>(std::min(p_extraFloats, 4u)),
+			GL_FLOAT, GL_FALSE, (GLsizei)p_vertexStride, (GLvoid*)extraOffset);
+		if (p_extraFloats > 4)
+		{
+			glEnableVertexAttribArray(kExtraLocation1);
+			glVertexAttribPointer(kExtraLocation1, static_cast<GLint>(p_extraFloats - 4u),
+				GL_FLOAT, GL_FALSE, (GLsizei)p_vertexStride,
+				(GLvoid*)(extraOffset + 4 * sizeof(float)));
+		}
+		else
+		{
+			glDisableVertexAttribArray(kExtraLocation1);
+		}
+	}
+	else
+	{
+		glDisableVertexAttribArray(kExtraLocation0);
+		glDisableVertexAttribArray(kExtraLocation1);
+	}
 
 	glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(p_vertexCount * p_vertexStride), p_vertexData, GL_STREAM_DRAW);
 

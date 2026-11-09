@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <Eigen/Core>
 #include "Sketcher/Datatypes/GeoEnum.h"
 
@@ -63,6 +63,10 @@ namespace MOON {
 		Eigen::Vector4<uint8_t> gridMinorColor { 255, 118, 118, 118 };
 		Eigen::Vector4<uint8_t> gridMajorColor { 255, 78, 78, 78 };
 		float curveLineWidth = 4.0f;
+		/** Line type of the construction geometry, as an index into the line-style gallery
+		 * (see EImLineStyle in Interactive/Effect/LineDashEffect.h: 0 solid, 1 dash, ...). An int
+		 * rather than the enum so this header stays free of the rendering include. */
+		int constructionLineStyle = 1;
 		/** The axes are a backdrop, but they are what a sketch is laid out against,
 		 * so they are drawn a little heavier than the curves on top of them. */
 		float axisLineWidth = 3.0f;

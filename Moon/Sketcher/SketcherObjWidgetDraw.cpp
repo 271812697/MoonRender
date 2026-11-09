@@ -4,6 +4,7 @@
 #include "Geometry.h"
 #include "renderer/SceneView.h"
 #include "Interactive/Im3DRenderer.h"
+#include "Interactive/Effect/LineDashEffect.h"
 #include "Core/Global/ServiceLocator.h"
 #include "core/log.h"
 #include <Rendering/Overlay/Im2DRender.h>
@@ -105,22 +106,28 @@ namespace MOON {
         ImRenderer* renderer,
         const SketcherPlane2D& plane,
         const std::vector<Base::Vector3d>& points,
-        float dashPx = 8.0f,
-        float gapPx = 6.0f
+        EImLineStyle style = EImLineStyle::Dash
     )
     {
         if (!renderer || points.size() < 2) {
             return;
         }
-        // The dash pattern is a renderer feature now (ImRenderer::drawDashedPolyline): it keeps
-        // the points in world space, so a construction line goes through the same pipeline as a
-        // solid one, and only the dash rhythm is measured in screen pixels.
+        LineDashEffect* effect = renderer->findEffectAs<LineDashEffect>("LineDash");
+        if (effect == nullptr) {
+            return;
+        }
+        // The line type is a shader effect now: the pattern is measured in screen pixels and
+        // evaluated per fragment, so zooming never re-tessellates anything. Every construction
+        // curve of the frame appends its vertices to the same buffer and is drawn in one call.
         std::vector<Eigen::Vector3f> world;
         world.reserve(points.size());
         for (const Base::Vector3d& point : points) {
             world.push_back(plane.valueEigen(point.x, point.y));
         }
-        renderer->drawDashedPolyline(world, dashPx, gapPx);
+        Eigen::Vector4<uint8_t> color = renderer->getColor();
+        // The primitives multiply by the global alpha; an effect picks it up itself.
+        color[0] = static_cast<uint8_t>(color[0] * renderer->getAlpha());
+        effect->DrawPolyline(world, renderer->getSize(), color, ImLineStylePattern(style));
     }
 
     // Default screen-space offset (in pixels) applied to the auto anchor when
@@ -1029,7 +1036,8 @@ namespace MOON {
             if (geo->isDerivedFrom<Part::GeomCurve>()) {
                 auto& seg = m_sketch->segmentOf(geo.get());
                 if (isConstruction) {
-                    drawDashedSketchPolyline(renderer, m_sketch->plane(), seg.point);
+                    drawDashedSketchPolyline(renderer, m_sketch->plane(), seg.point,
+                        static_cast<EImLineStyle>(m_drawOption.constructionLineStyle));
                 }
                 else {
                     for (int k = 0; k + 1 < static_cast<int>(seg.point.size()); k++) {

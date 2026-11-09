@@ -4,6 +4,7 @@
 #include <vector>
 #include <unordered_map>
 #include "Interactive/Im3DType.h"
+#include "Interactive/Im3DEffect.h"
 #include "Rendering/Resources/Texture.h"
 #include <Rendering/Overlay/Im3DGLRenderer.h>
 namespace Editor {
@@ -78,12 +79,6 @@ namespace MOON
 		void drawPointList(const std::vector<Eigen::Vector3f>& position, float size, Eigen::Vector4<uint8_t> color);
 		void drawLineList(const std::vector<Eigen::Vector3f>& position, float _size, Eigen::Vector4<uint8_t> _color);
 
-		/** World-space lines drawn with a dash pattern.
-		 * The endpoints stay world space, so a dashed curve goes through exactly the pipeline a
-		 * solid one does (same depth test, size and colour stacks); only the dash rhythm is
-		 * measured in screen pixels, which keeps the pattern size constant under zoom.
-		 * p_position holds endpoint pairs, p_phase lets a strip continue the pattern across its
-		 * segments. */
 		/** Draws UTF-8 text in world space. p_right and p_up span the glyph quads, so the caller
 		 * chooses the orientation (screen facing or lying on a sketch plane) and the size.
 		 * p_position is the baseline start. Text goes into its own vertex list and is drawn with
@@ -129,6 +124,14 @@ namespace MOON
 			const Eigen::Vector3f& p_basisRight, const Eigen::Vector3f& p_basisUp,
 			float p_offsetXPx = 0.0f, float p_offsetYPx = 0.0f, bool p_overlay = true);
 
+		/** World-space lines drawn with a dash pattern by tessellating them on the CPU. Kept for
+		 * the callers that have not moved to the LineDash effect yet (see Im3DEffect.h and
+		 * Interactive/Effect/LineDashEffect.h); the CPU path re-splits every frame.
+		 * The endpoints stay world space, so a dashed curve goes through exactly the pipeline a
+		 * solid one does (same depth test, size and colour stacks); only the dash rhythm is
+		 * measured in screen pixels, which keeps the pattern size constant under zoom.
+		 * p_position holds endpoint pairs; p_phase lets a strip continue the pattern across its
+		 * segments. */
 		void drawDashedLineList(const std::vector<Eigen::Vector3f>& p_position, float p_size,
 			Eigen::Vector4<uint8_t> p_color, float p_dashPx, float p_gapPx, float p_phase = 0.0f);
 
@@ -139,6 +142,23 @@ namespace MOON
 		/** Same, with the current size and colour. */
 		void drawDashedPolyline(const std::vector<Eigen::Vector3f>& p_points,
 			float p_dashPx, float p_gapPx, float p_phase = 0.0f);
+
+		// ---- custom drawing effects ------------------------------------------------------
+		//
+		// The built-in primitives are drawn with one material per primitive type; an effect is a
+		// self-contained drawing unit that consumes a run of vertices and knows how to draw them.
+		// The renderer only knows AImEffect: it collects the vertices and hands each run to the
+		// effect, which binds its own material, applies its own settings and issues the draw. The
+		// concrete looks (dash patterns, colour ramps, glow, ...) never appear here.
+
+		/** Registers an effect; the renderer takes ownership. The effect builds its own material,
+		 * so this needs the GL context and belongs where the built-in materials are created
+		 * (ImRenderer::PrepareGl). */
+		AImEffect* registerEffect(std::unique_ptr<AImEffect> p_effect);
+
+		AImEffect* findEffect(const std::string& p_id) const;
+		template <class T>
+		T* findEffectAs(const std::string& p_id) const { return dynamic_cast<T*>(findEffect(p_id)); }
 		void drawTriangleList(const std::vector<Eigen::Vector3f>& position, float _size, Eigen::Vector4<uint8_t> _color);
 		/** 带法线的三角形列表：normals 与 position 一一对应（通常同一个三角形的三个顶点共用
 		 * 一条面法线）。法线由调用方在构造几何时算好（WidgetViewData 的 TriangleFace 在
@@ -303,6 +323,10 @@ namespace MOON
 		/** 状态栈的只读面：操纵器要在自己压入的局部坐标系里画图/读当前透明度。 */
 		const Eigen::Matrix4f& getMatrix() const { return matrixStack.back(); }
 		float getAlpha() const { return alphaStack.back(); }
+		/** The current size / colour stack tops: what the line and point primitives would use, so
+		 * an effect submitting on behalf of a caller picks up the same pen. */
+		float getSize() const { return sizeStack.back(); }
+		const Eigen::Vector4<uint8_t>& getColor() const { return colorStack.back(); }
 		/** 本帧当前顶点桶里最后写入的顶点，供操纵器就地改 alpha（例如旋转环被
 		 * 球体挡住的部分）。桶为空或不在图元中间时返回 nullptr。 */
 		VertexFormat* lastVertex();
@@ -360,6 +384,9 @@ namespace MOON
 		std::vector<VertexList*> vertexData[2];
 		//lit
 		VertexList litVertexArray;
+		//effects
+		/** The effects the renderer owns and calls once per frame (see drawEffects). */
+		std::vector<std::unique_ptr<AImEffect>> mEffects;
 		/** Set by the overlay overload for the glyphs it emits next. */
 		bool pendingTextOverlay = false;
 		std::vector<TextVertex> textVertexArray;
@@ -387,13 +414,17 @@ namespace MOON
 		VertexList* getCurrentVertexList();
 		/** 带法线的顶点写进 litVertexArray 前，统一套上矩阵栈与全局 alpha。 */
 		void appendLitVertex(VertexFormat& vertex, const Eigen::Vector3f& position, const Eigen::Vector3f& normal);
+		/** Appends one vertex to the open effect run, base followed by the sticky extra floats. */
+		/** Calls Draw on every effect of p_channel. This is the renderer's only relationship
+		 * with the effects: it owns them and gives them the frame's draw entry. */
+		void drawEffects(EImChannel p_channel);
 		const DrawList* getDrawLists() const
 		{
 			return drawLists.data();
 		}
 		unsigned int getDrawListCount() const
 		{
-			return drawLists.size();
+			return static_cast<unsigned int>(drawLists.size());
 		}
 	};
 }
