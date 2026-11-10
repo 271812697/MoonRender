@@ -29,6 +29,8 @@ namespace Editor::Panels
 		void FitToFocus(const Maths::FVector3& dir);
 		void LookAt(const Maths::FVector3& pivot,const Maths::FVector3& dir,float radius);
 		Maths::FVector2 worldToScreen(const Maths::FVector3& worldPos);
+		/** Bounding sphere of every active model, merged into one. */
+		bool GetSceneSphere(::Rendering::Geometry::BoundingSphere& p_outSphere);
 		void FitToScene(const Maths::FVector3& dir);
 		/** Fits the view to the focus sphere - the selection when there is one,
 		 * every active model otherwise - and then applies p_rotation on top of it:
@@ -72,8 +74,6 @@ namespace Editor::Panels
 		/** Bounding sphere of the selected model; false when nothing selected has
 		 * a model to fit. */
 		bool GetSelectionSphere(::Rendering::Geometry::BoundingSphere& p_outSphere);
-		/** Bounding sphere of every active model, merged into one. */
-		bool GetSceneSphere(::Rendering::Geometry::BoundingSphere& p_outSphere);
 		/** The selection when there is one, the scene otherwise. */
 		bool GetFocusSphere(::Rendering::Geometry::BoundingSphere& p_outSphere);
 		/** Shared fit pose: adjust the projection first, then place the camera

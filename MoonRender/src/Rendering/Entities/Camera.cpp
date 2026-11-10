@@ -1,4 +1,4 @@
-﻿#include <cmath>
+#include <cmath>
 #include <iostream>
 #include "Rendering/Entities/Camera.h"
 #include "Maths/FMatrix4.h"
@@ -6,6 +6,7 @@ Rendering::Entities::Camera::Camera(Tools::Utils::OptRef<Maths::FTransform> p_tr
 	Entity{ p_transform },
 	m_projectionMode(Settings::EProjectionMode::PERSPECTIVE),
 	m_fov(60.0f),
+	m_dollyOffset(0.0f),
 	m_size(5.0f),
 	m_near(0.1f),
 	m_far(1200.f),
@@ -179,14 +180,88 @@ void Rendering::Entities::Camera::SetRotation(const Maths::FQuaternion& p_rotati
 	transform->SetWorldRotation(p_rotation);
 }
 
+void Rendering::Entities::Camera::SetFovKeepingFraming(float p_value, const Maths::FVector3& p_focus)
+{
+	const float fov = std::clamp(p_value, 0.0f, 90.0f);
+	const float oldFov = m_fov;
+	if (std::abs(fov - oldFov) < 1.0e-4f)
+	{
+		return;
+	}
+
+	constexpr float kDegToRad = 3.14159265359f / 180.0f;
+	const Maths::FVector3 eye = GetPosition();
+	const Maths::FVector3 forward = transform->GetWorldForward();
+	// Distance along the view axis to the focus, and the world half-height the view covers there
+	// - the framing this keeps.
+	const float distance = std::max((p_focus - eye).Dot(forward), 1.0e-4f);
+	const float framing = oldFov > 0.0f
+		? distance * std::tan(oldFov * kDegToRad * 0.5f)
+		: m_size;
+
+	// A field of view of zero is the orthographic end of the same control: any finite distance
+	// will do there (the projection has no vanishing point), so the camera just stays far enough
+	// out that the near plane does not cut into the scene. Past the cap the framing gives a
+	// little instead of the camera rolling back without end - the remaining perspective at that
+	// point is worth less than what the distance costs (the near plane, the orbit radius).
+	const float wantedDistance = fov > 0.0f
+		? framing / std::tan(fov * kDegToRad * 0.5f)
+		: framing * 10.0f;
+	const float newDistance = std::min(wantedDistance, framing * 200.0f);
+
+	SetSize(framing);
+	SetFov(fov); // selects the projection mode from the field of view
+	// distance is measured *along* forward, from the camera towards the focus. Moving the camera
+	// by forward * delta therefore reduces it by delta, so getting from `distance` to
+	// `newDistance` means moving along -forward. The other sign walks the camera through the focus
+	// and the framing is lost for good.
+	const float delta = newDistance - distance;
+	SetPosition(eye - forward * delta);
+
+	// The near and far planes belong to the frustum, not to the eye: their *world* positions have
+	// to survive the move, and both are held as distances from the eye. Rolling the eye back by
+	// delta therefore means adding delta to each of them. Leaving this to whoever recomputes the
+	// depth range later would mean a frame - and, more to the point, a projection - built with
+	// planes that no longer match the frustum they were chosen for.
+	const float nearShifted = m_near + delta;
+	SetNear(std::max(nearShifted, 1.0e-4f * std::max(newDistance, 1.0f)));
+	if (std::isfinite(m_far))
+	{
+		// A perspective camera keeps an infinite far plane, and there is nothing to shift there.
+		const float farShifted = m_far + delta;
+		if (farShifted > m_near)
+		{
+			SetFar(farShifted);
+		}
+	}
+	// Remember how far the eye was pushed, so the depth range can stay where it was: the near and
+	// far planes belong to the frustum, not to the eye's temporary distance.
+	m_dollyOffset += delta;
+}
+
 void Rendering::Entities::Camera::SetFov(float p_value)
 {
-	m_fov = p_value;
+	// The field of view is the only control: zero is the orthographic end of it, and the
+	// projection mode follows from that instead of being a second switch to keep in sync.
+	m_fov = std::clamp(p_value, 0.0f, 90.0f);
+	m_projectionMode = (m_fov <= 0.0f)
+		? Settings::EProjectionMode::ORTHOGRAPHIC
+		: Settings::EProjectionMode::PERSPECTIVE;
 }
 
 void Rendering::Entities::Camera::SetSize(float p_value)
 {
     m_size = p_value;
+}
+
+void Rendering::Entities::Camera::SetDollyOffset(float p_value)
+{
+	m_dollyOffset = p_value;
+}
+
+float Rendering::Entities::Camera::GetDollyOffset() const
+{
+	return m_dollyOffset;
 }
 
 void Rendering::Entities::Camera::SetNear(float p_value)
@@ -232,6 +307,14 @@ void Rendering::Entities::Camera::SetFrustumLightCulling(bool p_enable)
 void Rendering::Entities::Camera::SetProjectionMode(Rendering::Settings::EProjectionMode p_projectionMode)
 {
     m_projectionMode = p_projectionMode;
+    // Switching the mode moves the same control (see SetFov): orthographic is a field of view of
+    // zero, and going back to a perspective one needs a field of view to go back to.
+    if (p_projectionMode == Settings::EProjectionMode::ORTHOGRAPHIC) {
+        m_fov = 0.0f;
+    }
+    else if (m_fov <= 0.0f) {
+        m_fov = 45.0f;
+    }
 }
 
 void Rendering::Entities::Camera::ProjectionFitToSphere(Rendering::Geometry::BoundingSphere& sphere, const Maths::FVector3& dir)
@@ -343,17 +426,14 @@ Maths::FMatrix4 Rendering::Entities::Camera::CalculateProjectionMatrix(uint16_t 
 	m_windowHeight = p_windowHeight;
 	m_ratio = p_windowWidth / static_cast<float>(p_windowHeight);
 
-    switch (m_projectionMode)
-    {
-    case EProjectionMode::ORTHOGRAPHIC:
+    // The field of view decides the projection: zero is orthographic (the size is the framing,
+    // i.e. the half height of the view at the pivot plane), anything above it is perspective.
+    // m_projectionMode is kept in sync with it by SetFov/SetProjectionMode and is what the rest
+    // of the engine asks when it needs to know which kind of projection it is looking at.
+    if (m_fov <= 0.0f) {
         return FMatrix4::CreateOrthographic(m_size, m_ratio, m_near, m_far);
-
-    case EProjectionMode::PERSPECTIVE: 
-        return FMatrix4::CreatePerspective(m_fov, m_ratio, m_near, m_far);
-
-    default:
-        return FMatrix4::Identity;
     }
+    return FMatrix4::CreatePerspective(m_fov, m_ratio, m_near, m_far);
 }
 
 Maths::FMatrix4 Rendering::Entities::Camera::CalculateViewMatrix() const

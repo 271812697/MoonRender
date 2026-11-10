@@ -335,12 +335,24 @@ void ::Editor::Core::CameraController::UpdateDepthRange()
 			sceneRadius = Maths::FVector3::Length(b.pmax - b.pmin) * 0.5f;
 		}
 	}
-	const float dist = Maths::FVector3::Length(m_camera.GetPosition() - sceneCenter);
+	// The distance the range is sized from is the one the camera would be at without the
+	// dolly that holds the framing (Camera::SetFovKeepingFraming): the planes have to stay where they
+	// are while the field of view moves the eye past them.
+	const float dolly = m_camera.GetDollyOffset();
+	const float dist = std::max(
+		Maths::FVector3::Length(m_camera.GetPosition() - sceneCenter) - dolly, 0.0f);
 	const float near = std::max(dist * 0.01f, 0.001f);
 	if (!std::isfinite(near)) {
 		return;
 	}
-	m_camera.SetNear(near);
+	// Shifting the planes by the dolly keeps them where they are in the world, but a wide field of
+	// view moves the eye *forwards*, and the shift can then drag the near plane past it - a near
+	// plane at or behind the eye is not a projection at all, and the whole scene drops out of the
+	// frustum at once (that is what a field of view over 60 degrees used to do). It stops a hair
+	// in front of the eye instead, scaled with the scene so the depth range keeps its precision.
+	const float sceneScale = std::max(dist, 1.0f);
+	const float nearShifted = std::max(near + dolly, sceneScale * 1.0e-4f);
+	m_camera.SetNear(nearShifted);
 
 	// A perspective view gets no far plane at all - the projection takes the limit of
 	// the finite one (FMatrix4::CreateFrustum), so nothing is ever cut off for being
@@ -362,8 +374,9 @@ void ::Editor::Core::CameraController::UpdateDepthRange()
 	const float far = std::max(dist + sceneRadius * 2.0f, 1200.0f);
 	// Whatever the bounds were, a degenerate plane pair is not something the camera
 	// should be given: the previous values are kept instead.
-	if (std::isfinite(far) && near < far) {
-		m_camera.SetFar(far);
+	const float farShifted = far + dolly;
+	if (std::isfinite(farShifted) && nearShifted < farShifted) {
+		m_camera.SetFar(farShifted);
 	}
 }
 void Editor::Core::CameraController::HandleFirstMouse()
