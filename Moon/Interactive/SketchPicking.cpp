@@ -5,6 +5,9 @@
 
 #include <cmath>
 
+// The plane's normal is a cross product, which lives in Eigen's geometry module.
+#include <Eigen/Geometry>
+
 namespace MOON {
 	namespace SketchPicking {
     static double pointToSegmentDist(const Base::Vector3d& p, const Base::Vector3d& s, const Base::Vector3d& e, double& u) {
@@ -463,18 +466,67 @@ namespace MOON {
         return true;
     }
 
+    bool gridStep(SketcherObj& sketch, Editor::Panels::SceneView& view, ImRenderer& renderer, float& p_step)
+    {
+        GridView grid;
+        if (gridView(sketch, view, grid))
+        {
+            p_step = grid.step;
+            return true;
+        }
+        // A perspective camera has no view-space rectangle to read the scale from, so it is taken
+        // where the view looks: at the point of the plane under the centre of the viewport.
+        const auto* camera = view.GetCamera();
+        if (camera == nullptr)
+        {
+            return false;
+        }
+        const auto& fd = view.GetRenderer().GetFrameDescriptor();
+        const float width = static_cast<float>(fd.renderWidth);
+        const float height = static_cast<float>(fd.renderHeight);
+        if (width <= 0.0f || height <= 0.0f)
+        {
+            return false;
+        }
+        const Eigen::Vector3f origin = sketch.plane().valueEigen(0.0, 0.0);
+        const Eigen::Vector3f axisU = sketch.plane().valueEigen(1.0, 0.0) - origin;
+        const Eigen::Vector3f axisV = sketch.plane().valueEigen(0.0, 1.0) - origin;
+        const Eigen::Vector3f normal = axisU.cross(axisV).normalized();
+        const Maths::FVector3 eyeV = camera->GetPosition();
+        const Eigen::Vector3f eye(eyeV.x, eyeV.y, eyeV.z);
+        const Eigen::Vector3f ray = renderer.screenToWorld({ width * 0.5f, height * 0.5f });
+        const Eigen::Vector3f dir = ray - eye;
+        const float denom = dir.dot(normal);
+        if (std::abs(denom) < 1.0e-9f)
+        {
+            return false;
+        }
+        const float t = (origin - ray).dot(normal) / denom;
+        if (t <= 0.0f)
+        {
+            return false;
+        }
+        const Eigen::Vector3f hit = ray + dir * t;
+        const Eigen::Vector2f screenHit = renderer.worldToScreen(hit);
+        const float scaleU = (renderer.worldToScreen(hit + axisU) - screenHit).norm();
+        const float scaleV = (renderer.worldToScreen(hit + axisV) - screenHit).norm();
+        p_step = gridStepForScale(sketch.gridTargetPx(),
+            std::max(std::max(scaleU, scaleV), 1.0e-6f));
+        return true;
+    }
+
     bool snapToGridPoint(SketcherObj& sketch, Editor::Panels::SceneView& view, ImRenderer& renderer, Base::Vector2d& pos)
     {
         if (!sketch.isSnapToGrid() || !sketch.isDrawGrid()) {
             return false;
         }
         // The very step drawBackground() draws its lattice with: the cursor has to
-        // land on the intersections the user sees, whatever the camera does.
-        GridView grid;
-        if (!gridView(sketch, view, grid)) {
+        // land on the intersections the user sees, whatever the camera does - and a perspective
+        // view snaps to the grid as well, which is what gridStep() is for.
+        float step = 0.0f;
+        if (!gridStep(sketch, view, renderer, step)) {
             return false;
         }
-        const float step = grid.step;
         const double gx = std::round(pos.x / step) * step;
         const double gy = std::round(pos.y / step) * step;
         const auto worldOf = [&sketch](const Base::Vector2d& sk) {

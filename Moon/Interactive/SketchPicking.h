@@ -106,5 +106,17 @@ namespace MOON {
 		 * a cell closest to p_targetPx pixels across. Shared with the perspective grid, which
 		 * has no GridView to read a step from, so the two lattices stay the same lattice. */
 		float gridStepForScale(float p_targetPx, float p_pixelsPerUnit);
+
+		/** The adaptive grid step of the view, whichever projection it is using.
+		 *
+		 * Both the lattice the sketch draws and the one the cursor snaps to come from here, so
+		 * they are the same lattice - including in a perspective view, where gridView() (which
+		 * describes the plane in view space) has nothing to say and the scale is taken where the
+		 * view looks instead: the plane point under the centre of the viewport.
+		 *
+		 * @return false when there is no lattice to speak of: no camera, a viewport that has not
+		 *         been sized, or a view looking along the plane. */
+		bool gridStep(SketcherObj& p_sketch, Editor::Panels::SceneView& p_view,
+			ImRenderer& p_renderer, float& p_step);
 	}
 }

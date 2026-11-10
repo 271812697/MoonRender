@@ -663,13 +663,14 @@ namespace MOON {
                          { centreUv.x() + radius, centreUv.y() + radius },
                          { centreUv.x() - radius, centreUv.y() + radius } };
             }
-            // The cells follow the pixel scale at the point under the screen centre.
-            const Eigen::Vector3f centre = world(centreUv);
-            const Eigen::Vector2f screenCentre = renderer->worldToScreen(centre);
-            const float scaleU = (renderer->worldToScreen(centre + axisU) - screenCentre).norm();
-            const float scaleV = (renderer->worldToScreen(centre + axisV) - screenCentre).norm();
-            step = SketchPicking::gridStepForScale(m_sketch->gridTargetPx(),
-                std::max(std::max(scaleU, scaleV), 1.0e-6f));
+            // The cell size comes from the very query the cursor snaps with
+            // (SketchPicking::gridStep): in a perspective view the scale varies across the screen,
+            // and what is drawn and what snaps must still be one lattice, so there is exactly one
+            // place that decides which rung of the ladder is in use.
+            float perspectiveStep = step;
+            if (SketchPicking::gridStep(*m_sketch, *m_sceneView, *renderer, perspectiveStep)) {
+                step = perspectiveStep;
+            }
         }
 
         const BackdropDepth depth = MakeBackdropDepth(m_sceneView->GetCamera());
