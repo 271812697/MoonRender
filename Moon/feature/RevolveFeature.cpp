@@ -53,7 +53,7 @@ namespace MOON {
         try {
             Part::TopoShape face = getProfileFace();
             Part::TopoShape baseShape;
-            if (m_baseFeature) {
+            if (dynamic_cast<Feature3D*>(m_baseFeature)) {
                 baseShape = getBaseTopoShape();
             }
             gp_Ax1 raxis = axis;

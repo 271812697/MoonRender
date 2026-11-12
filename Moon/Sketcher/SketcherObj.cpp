@@ -182,22 +182,71 @@ namespace MOON {
     void SketcherObj::makeDone()
     {
         doneWireShape = toShape();
+        doneFaceShape = Part::TopoShape();
         if (!doneWireShape.isEmpty()) {
-            try
-            {
-                 doneFaceShape = doneWireShape.makeElementFace(nullptr, "Part::FaceMakerBullseye");
+            // Only the wires that enclose a region go to the face maker: it refuses the whole
+            // set as soon as one of them is open ("Wire is not closed"), and a sketch in
+            // progress is a closed profile with a line beside it. The others are still curves
+            // of the sketch - see getDoneFreeWires().
+            std::vector<Part::TopoShape> closedWires;
+            for (const Part::TopoShape& wire : doneWires()) {
+                if (BRep_Tool::IsClosed(wire.getShape())) {
+                    closedWires.push_back(wire);
+                }
             }
-            catch (Part::NullShapeException&e)
-            {
-                CORE_ERROR("the shape is null ,can't make a face");
-            }
-            catch (Base::ValueError&e) {
-                CORE_ERROR(e.what());
+            if (!closedWires.empty()) {
+                try
+                {
+                    // Given the wire shape's hasher, like the whole shape used to be: the face
+                    // and its edges are then named the way they always were.
+                    Part::TopoShape faces(0, doneWireShape.Hasher);
+                    faces.makeElementFace(
+                        closedWires, nullptr, "Part::FaceMakerBullseye");
+                    doneFaceShape = faces;
+                }
+                catch (Part::NullShapeException&)
+                {
+                    CORE_ERROR("the shape is null ,can't make a face");
+                }
+                catch (Base::ValueError&e) {
+                    CORE_ERROR(e.what());
+                }
             }
         }
         // Leaving the edit session (camera, tools) is the widget's business: it is the
         // one that calls this when the user commits the sketch, see
         // SketcherObjWidget::finishEdit().
+    }
+
+    std::vector<Part::TopoShape> SketcherObj::doneWires() const
+    {
+        if (doneWireShape.isNull()) {
+            return {};
+        }
+        // A sketch with a single closed wire hands that wire over on its own, not as a
+        // compound of one.
+        if (doneWireShape.getShape().ShapeType() == TopAbs_WIRE) {
+            return { doneWireShape };
+        }
+        return doneWireShape.getSubTopoShapes(TopAbs_WIRE);
+    }
+
+    std::vector<Part::TopoShape> SketcherObj::getDoneFreeWires() const
+    {
+        // A wire inside a face is the face's outline, so it is covered by construction: the
+        // ones that are not are exactly the wires the face maker was not given.
+        const bool haveFaces = !doneFaceShape.isNull();
+        std::vector<Part::TopoShape> free;
+        for (const Part::TopoShape& wire : doneWires()) {
+            if (wire.isNull()) {
+                continue;
+            }
+            if (haveFaces && BRep_Tool::IsClosed(wire.getShape())) {
+                continue;
+            }
+            free.push_back(wire);
+        }
+        return free;
     }
 
     int SketcherObj::solve(bool updateGeoAfterSolving)

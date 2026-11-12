@@ -1,4 +1,4 @@
-#include "feature/PipeFeature.h"
+﻿#include "feature/PipeFeature.h"
 #include "feature/SketcherFeature.h"
 #include "feature/SubShapeRef.h"
 #include "Sketcher/SketcherObj.h"
@@ -20,6 +20,7 @@
 #include <TopoDS.hxx>
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Face.hxx>
+#include <TopoDS_Iterator.hxx>
 #include <TopoDS_Wire.hxx>
 #include <gp_Ax2.hxx>
 #include <gp_Dir.hxx>
@@ -33,8 +34,12 @@ namespace MOON
 {
 	namespace
 	{
-		/** The first wire inside a shape, whichever way it is nested (a sketch hands
-		 * its wire over on its own, a compound wraps it). */
+		/** The first wire of a shape, whichever way it is nested (a sketch hands its wire over
+		 * on its own, a compound wraps it).
+		 *
+		 * A closed sketch curve is no wire any more: its closed wire became the outer wire of a
+		 * face (see SketcherObj::makeDone). A path sketch of a circle is therefore a face now,
+		 * and its outline is the path. */
 		TopoDS_Wire firstWireOf(const TopoDS_Shape& p_shape)
 		{
 			if (p_shape.IsNull()) {
@@ -42,6 +47,24 @@ namespace MOON
 			}
 			if (p_shape.ShapeType() == TopAbs_WIRE) {
 				return TopoDS::Wire(p_shape);
+			}
+			// The wires that are not inside a face first: those are the open curves of a sketch,
+			// and a path is one of them unless all the sketch draws is a closed outline.
+			for (TopoDS_Iterator it(p_shape); it.More(); it.Next()) {
+				if (it.Value().ShapeType() == TopAbs_WIRE) {
+					return TopoDS::Wire(it.Value());
+				}
+			}
+			for (TopoDS_Iterator it(p_shape); it.More(); it.Next()) {
+				if (it.Value().ShapeType() == TopAbs_FACE) {
+					const TopoDS_Wire outline = BRepTools::OuterWire(TopoDS::Face(it.Value()));
+					if (!outline.IsNull()) {
+						return outline;
+					}
+				}
+			}
+			if (p_shape.ShapeType() == TopAbs_FACE) {
+				return BRepTools::OuterWire(TopoDS::Face(p_shape));
 			}
 			for (TopExp_Explorer explorer(p_shape, TopAbs_WIRE);
 				explorer.More();
@@ -256,7 +279,7 @@ namespace MOON
 	{
 		try {
 			Part::TopoShape baseShape;
-			if (m_baseFeature != nullptr) {
+			if (dynamic_cast<Feature3D*>(m_baseFeature)) {
 				baseShape = getBaseTopoShape();
 			}
 
