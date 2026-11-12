@@ -275,10 +275,10 @@ namespace MOON {
 		// decorate it share one implementation of the corner arithmetic.
 		ScreenLayout cubeLayout;
 		cubeLayout.anchor = EScreenAnchor::TopRight;
-		cubeLayout.offset = ImVec2(
+		cubeLayout.offset = ScreenPoint(
 			static_cast<float>(kViewCubeMargin),
 			static_cast<float>(kViewCubeMargin));
-		cubeLayout.size = ImVec2(
+		cubeLayout.size = ScreenPoint(
 			static_cast<float>(kViewCubeSize),
 			static_cast<float>(kViewCubeSize));
 

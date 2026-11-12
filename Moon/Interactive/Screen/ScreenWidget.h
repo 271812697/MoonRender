@@ -28,10 +28,10 @@ namespace MOON
 	/** Styling used by DrawShapes() for the three visual states. */
 	struct ScreenShapeStyle
 	{
-		ImU32 idleFill = IM_COL32(206, 216, 232, 170);
-		ImU32 hotFill = IM_COL32(255, 255, 0, 235);
-		ImU32 pressedFill = IM_COL32(255, 176, 40, 255);
-		ImU32 outline = IM_COL32(24, 26, 30, 150);
+		ScreenColor idleFill = ScreenColorOf(206, 216, 232, 170);
+		ScreenColor hotFill = ScreenColorOf(255, 255, 0, 235);
+		ScreenColor pressedFill = ScreenColorOf(255, 176, 40, 255);
+		ScreenColor outline = ScreenColorOf(24, 26, 30, 150);
 		float outlineWidth = 1.0f;
 		float hotOutlineWidth = 2.0f;
 	};
@@ -90,13 +90,13 @@ namespace MOON
 		/** A shape was clicked; p_action is HitShape::action. */
 		virtual void OnAction(int p_action) {}
 		/** Cursor moved while this widget holds a capture. */
-		virtual void OnDrag(const ImVec2& p_localCursor) {}
+		virtual void OnDrag(const ScreenPoint& p_localCursor) {}
 		/** The widget just captured the cursor. */
-		virtual void OnDragBegin(const ImVec2& p_localCursor) {}
+		virtual void OnDragBegin(const ScreenPoint& p_localCursor) {}
 		/** The capture ended, either on release or because the widget stopped
 		 * being interactive (tool switch, disabled). This is where a widget
 		 * commits or discards the value it was dragging. */
-		virtual void OnDragEnd(const ImVec2& p_localCursor) {}
+		virtual void OnDragEnd(const ScreenPoint& p_localCursor) {}
 		/** State transition hook, for widgets that react to hover. */
 		virtual void OnStateChanged(EScreenState p_state) {}
 		/** Widgets can temporarily switch themselves off, e.g. while the camera
@@ -106,12 +106,12 @@ namespace MOON
 		// Cursor and input, all in top-left viewport pixels. The interactor holds
 		// the position of the event being dispatched, so the press callback sees
 		// the exact press position instead of the previous frame's cursor.
-		ImVec2 GetCursor() const;
-		ImVec2 GetCursorLocal() const;
+		ScreenPoint GetCursor() const;
+		ScreenPoint GetCursorLocal() const;
 		/** Cursor movement of the current event, for drag handling. */
-		ImVec2 GetFrameDelta() const;
+		ScreenPoint GetFrameDelta() const;
 		bool IsCursorInsideViewport() const;
-		ImVec2 GetViewportSize() const;
+		ScreenPoint GetViewportSize() const;
 		bool IsCtrlDown() const;
 		bool IsShiftDown() const;
 		bool IsAltDown() const;
@@ -119,7 +119,7 @@ namespace MOON
 		// Geometry helpers.
 		const std::vector<HitShape>& GetShapes() const;
 		/** Index of the shape under the cursor, -1 when none. */
-		int HitTestShapes(const ImVec2& p_localCursor) const;
+		int HitTestShapes(const ScreenPoint& p_localCursor) const;
 		int GetHotShape() const { return mHotShape; }
 		/** Shape grabbed by the current press or drag (-1 when none).
 		 *
@@ -131,7 +131,7 @@ namespace MOON
 		/** Rebuild the shapes on the next query. */
 		void MarkGeometryDirty() { mGeometryDirty = true; }
 		/** Cursor shown while hovering a shape (Arrow leaves it to others). */
-		void SetHoverCursor(ImGuiMouseCursor p_cursor) { mHoverCursor = p_cursor; }
+		void SetHoverCursor(EScreenCursor p_cursor) { mHoverCursor = p_cursor; }
 		/** Draw every shape with the style, highlighting the hovered one. */
 		/** Index of the shape the cursor is on, -1 when none is hot. */
 	int HotShapeIndex() const { return mHotShape; }
@@ -159,7 +159,7 @@ namespace MOON
 		float mZOrder = 0.0f;
 		float mUiScale = 1.0f;
 		bool mRectBlocksCursor = true;
-		ImGuiMouseCursor mHoverCursor = ImGuiMouseCursor_Arrow;
+		EScreenCursor mHoverCursor = EScreenCursor::Arrow;
 		ScreenShapeStyle mShapeStyle;
 	};
 }

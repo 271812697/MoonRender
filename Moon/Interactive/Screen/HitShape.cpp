@@ -10,7 +10,7 @@ namespace MOON
 		constexpr float kPi = 3.14159265358979f;
 		constexpr float kDegToRad = kPi / 180.0f;
 
-		float Cross2D(const ImVec2& p_a, const ImVec2& p_b, const ImVec2& p_c)
+		float Cross2D(const ScreenPoint& p_a, const ScreenPoint& p_b, const ScreenPoint& p_c)
 		{
 			return (p_b.x - p_a.x) * (p_c.y - p_a.y)
 				- (p_b.y - p_a.y) * (p_c.x - p_a.x);
@@ -23,25 +23,25 @@ namespace MOON
 			return diff;
 		}
 
-		ImVec2 Centroid(const std::vector<ImVec2>& p_points)
+		ScreenPoint Centroid(const std::vector<ScreenPoint>& p_points)
 		{
-			ImVec2 sum(0.0f, 0.0f);
-			for (const ImVec2& point : p_points)
+			ScreenPoint sum(0.0f, 0.0f);
+			for (const ScreenPoint& point : p_points)
 			{
 				sum.x += point.x;
 				sum.y += point.y;
 			}
 			const float count = static_cast<float>(std::max<size_t>(p_points.size(), 1));
-			return ImVec2(sum.x / count, sum.y / count);
+			return ScreenPoint(sum.x / count, sum.y / count);
 		}
 
 		/** Grows a convex outline by p_pad pixels around its centroid. */
-		std::vector<ImVec2> PaddedOutline(
-			const std::vector<ImVec2>& p_points,
-			const ImVec2& p_center,
+		std::vector<ScreenPoint> PaddedOutline(
+			const std::vector<ScreenPoint>& p_points,
+			const ScreenPoint& p_center,
 			float p_pad)
 		{
-			std::vector<ImVec2> outline;
+			std::vector<ScreenPoint> outline;
 			outline.reserve(p_points.size());
 			if (p_pad <= 0.0f)
 			{
@@ -49,7 +49,7 @@ namespace MOON
 			}
 
 			float maxDistance = 0.0f;
-			for (const ImVec2& point : p_points)
+			for (const ScreenPoint& point : p_points)
 			{
 				maxDistance = std::max(
 					maxDistance,
@@ -63,16 +63,16 @@ namespace MOON
 			}
 
 			const float grow = 1.0f + p_pad / maxDistance;
-			for (const ImVec2& point : p_points)
+			for (const ScreenPoint& point : p_points)
 			{
-				outline.push_back(ImVec2(
+				outline.push_back(ScreenPoint(
 					p_center.x + (point.x - p_center.x) * grow,
 					p_center.y + (point.y - p_center.y) * grow));
 			}
 			return outline;
 		}
 
-		bool PointInConvexOutline(const ImVec2& p_point, const std::vector<ImVec2>& p_outline)
+		bool PointInConvexOutline(const ScreenPoint& p_point, const std::vector<ScreenPoint>& p_outline)
 		{
 			if (p_outline.size() < 3)
 			{
@@ -82,8 +82,8 @@ namespace MOON
 			bool hasPositive = false;
 			for (size_t i = 0; i < p_outline.size(); ++i)
 			{
-				const ImVec2& a = p_outline[i];
-				const ImVec2& b = p_outline[(i + 1) % p_outline.size()];
+				const ScreenPoint& a = p_outline[i];
+				const ScreenPoint& b = p_outline[(i + 1) % p_outline.size()];
 				const float side = Cross2D(a, b, p_point);
 				hasNegative |= side < 0.0f;
 				hasPositive |= side > 0.0f;
@@ -94,7 +94,7 @@ namespace MOON
 		}
 	}
 
-	ImVec2 HitShape::LocalCenter() const
+	ScreenPoint HitShape::LocalCenter() const
 	{
 		switch (type)
 		{
@@ -103,13 +103,13 @@ namespace MOON
 		case EType::RingArc:
 			return center;
 		case EType::Path:
-			return path ? path->Center() : ImVec2(0.0f, 0.0f);
+			return path ? path->Center() : ScreenPoint(0.0f, 0.0f);
 		default:
-			return points.empty() ? ImVec2(0.0f, 0.0f) : Centroid(points);
+			return points.empty() ? ScreenPoint(0.0f, 0.0f) : Centroid(points);
 		}
 	}
 
-	bool HitShape::Contains(const ImVec2& p_local) const
+	bool HitShape::Contains(const ScreenPoint& p_local) const
 	{
 		switch (type)
 		{
@@ -154,7 +154,7 @@ namespace MOON
 			{
 				return false;
 			}
-			const std::vector<ImVec2> outline = PaddedOutline(points, LocalCenter(), pad);
+			const std::vector<ScreenPoint> outline = PaddedOutline(points, LocalCenter(), pad);
 			return PointInConvexOutline(p_local, outline);
 		}
 
@@ -177,9 +177,9 @@ namespace MOON
 
 	void HitShape::Draw(
 		::Rendering::Overlay::Im2D::DrawList* p_drawList,
-		const ImVec2& p_offset,
-		ImU32 p_fill,
-		ImU32 p_outline,
+		const ScreenPoint& p_offset,
+		ScreenColor p_fill,
+		ScreenColor p_outline,
 		float p_outlineWidth) const
 	{
 		if (p_drawList == nullptr)
@@ -191,8 +191,8 @@ namespace MOON
 		{
 		case EType::Rect:
 		{
-			const ImVec2 min(p_offset.x + center.x - halfExtent.x, p_offset.y + center.y - halfExtent.y);
-			const ImVec2 max(p_offset.x + center.x + halfExtent.x, p_offset.y + center.y + halfExtent.y);
+			const ScreenPoint min(p_offset.x + center.x - halfExtent.x, p_offset.y + center.y - halfExtent.y);
+			const ScreenPoint max(p_offset.x + center.x + halfExtent.x, p_offset.y + center.y + halfExtent.y);
 			if (p_fill != 0)
 			{
 				p_drawList->AddRectFilled(min, max, p_fill);
@@ -209,7 +209,7 @@ namespace MOON
 
 		case EType::Circle:
 		{
-			const ImVec2 point(p_offset.x + center.x, p_offset.y + center.y);
+			const ScreenPoint point(p_offset.x + center.x, p_offset.y + center.y);
 			if (p_fill != 0)
 			{
 				p_drawList->AddCircleFilled(point, radius, p_fill);
@@ -259,9 +259,9 @@ namespace MOON
 			}
 			std::vector<::Rendering::Overlay::Im2D::Vec2> outline;
 			outline.reserve(points.size());
-			for (const ImVec2& point : points)
+			for (const ScreenPoint& point : points)
 			{
-				outline.push_back(ImVec2(p_offset.x + point.x, p_offset.y + point.y));
+				outline.push_back(ScreenPoint(p_offset.x + point.x, p_offset.y + point.y));
 			}
 			if (p_fill != 0)
 			{
@@ -293,20 +293,20 @@ namespace MOON
 			// In Stroke mode the outline *is* the shape, so it takes the main
 			// color (the one that changes on hover / press).
 			const bool strokeIsMainColor = pickMode == EPickMode::Stroke;
-			const ImU32 strokeColor = strokeIsMainColor ? p_fill : p_outline;
+			const ScreenColor strokeColor = strokeIsMainColor ? p_fill : p_outline;
 			const float strokeThickness = strokeIsMainColor
 				? std::max(strokeWidth, 1.0f)
 				: p_outlineWidth;
 
 			if (wantFill)
 			{
-				const std::vector<ImVec2>& triangles = path->GetFillTriangles();
+				const std::vector<ScreenPoint>& triangles = path->GetFillTriangles();
 				for (size_t t = 0; t + 2 < triangles.size(); t += 3)
 				{
 					p_drawList->AddTriangleFilled(
-						ImVec2(p_offset.x + triangles[t].x, p_offset.y + triangles[t].y),
-						ImVec2(p_offset.x + triangles[t + 1].x, p_offset.y + triangles[t + 1].y),
-						ImVec2(p_offset.x + triangles[t + 2].x, p_offset.y + triangles[t + 2].y),
+						ScreenPoint(p_offset.x + triangles[t].x, p_offset.y + triangles[t].y),
+						ScreenPoint(p_offset.x + triangles[t + 1].x, p_offset.y + triangles[t + 1].y),
+						ScreenPoint(p_offset.x + triangles[t + 2].x, p_offset.y + triangles[t + 2].y),
 						p_fill);
 				}
 			}
@@ -314,14 +314,14 @@ namespace MOON
 			std::vector<::Rendering::Overlay::Im2D::Vec2> scratch;
 			for (size_t loopIndex = 0; loopIndex < path->loops.size(); ++loopIndex)
 			{
-				const std::vector<ImVec2>& loop = path->loops[loopIndex];
+				const std::vector<ScreenPoint>& loop = path->loops[loopIndex];
 				if (loop.size() < 2)
 				{
 					continue;
 				}
 				scratch.clear();
 				scratch.reserve(loop.size());
-				for (const ImVec2& point : loop)
+				for (const ScreenPoint& point : loop)
 				{
 					scratch.push_back(::Rendering::Overlay::Im2D::Vec2(p_offset.x + point.x, p_offset.y + point.y));
 				}

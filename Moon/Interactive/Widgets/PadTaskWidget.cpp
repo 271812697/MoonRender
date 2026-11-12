@@ -48,7 +48,10 @@ class PadTaskWidget::Internal {
 		Eigen::Vector3f xAxis = { 0,1,0 };
 		Eigen::Vector3f yAxis = { 0,0,1 };
 		Eigen::Vector3f rotDir = { 1,0,0 };
-		float radius = 25;
+		/** The ring the taper handle rides on, in the arrow's own units: the arrow is modelled
+		 * ten units long, so this keeps the ring just outside its tip instead of twice its
+		 * length across the face. */
+		float radius = 18;
 		Eigen::Vector3f originCenter = {0,0,0};
 		WidgetViewData viewData;
 		GizmoAxisTranslate transLatePick;
@@ -85,13 +88,18 @@ class PadTaskWidget::Internal {
 	void PadTaskWidget::onUpdate()
 	{
 		const float ratio = ComputeFixedScaleRatio(*m_sceneView, mInternal->center);
-		if (mInternal->mRefScaleRatio < 0.0f)
-		{
-			// Lock the gizmo to its current screen size; afterwards it stays
-			// constant no matter how the camera moves.
-			mInternal->mRefScaleRatio = ratio;
-		}
-		const float scale = mInternal->mRefScaleRatio > 0.0f ? ratio / mInternal->mRefScaleRatio : 1.0f;
+		// One on-screen size, whatever camera happened to be looking when the handle appeared.
+		//
+		// The handle used to freeze the ratio of its first frame and scale by how far the camera
+		// had moved since, which keeps it constant - at the size that first frame gave it. Start
+		// with the camera far away and it came out a few pixels wide. The ratio is inversely
+		// proportional to pixels per world unit (200 of them per unit, see
+		// ComputeFixedScaleRatio), so scaling by the ratio itself and dividing by the size the
+		// arrow is modelled at gives a target measured in pixels instead of in what the camera
+		// saw first.
+		constexpr float kAuthoredWorldSize = 10.0f;
+		constexpr float kTargetPixels = 110.0f;
+		const float scale = kTargetPixels * ratio / (200.0f * kAuthoredWorldSize);
 		mInternal->mLastScale = scale;
 
 		// Keep the rotate handle on the scaled circle so drawing and picking

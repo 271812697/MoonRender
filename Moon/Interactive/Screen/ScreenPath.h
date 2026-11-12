@@ -1,6 +1,6 @@
 #pragma once
 #include "Interactive/Screen/ScreenLayout.h"
-#include <ThirdParty/imgui/imgui/imgui.h>
+#include <Rendering/Overlay/Im2D.h>
 #include <vector>
 
 namespace MOON
@@ -20,38 +20,39 @@ namespace MOON
 	{
 		/** Sub paths. Open ones (a polyline) are legal: they are drawn stroked
 		 * and, when used for filling, treated as if closed. */
-		std::vector<std::vector<ImVec2>> loops;
+		std::vector<std::vector<ScreenPoint>> loops;
 		std::vector<bool> closed;
 
-		ImVec2 boundsMin{ 0.0f, 0.0f };
-		ImVec2 boundsMax{ 0.0f, 0.0f };
+		ScreenPoint boundsMin{ 0.0f, 0.0f };
+		ScreenPoint boundsMax{ 0.0f, 0.0f };
 		bool boundsValid = false;
 
 		bool IsEmpty() const { return loops.empty(); }
 
 		void RecomputeBounds();
-		ImVec2 Size() const;
-		ImVec2 Center() const;
+		ScreenPoint Size() const;
+
+		ScreenPoint Center() const;
 
 		/** Scales / rotates / translates every point in place.
 		 * p_flipY mirrors around the shape center, which is what turns sketch
 		 * space (y up) into screen space (y down). */
-		void Transform(ImVec2 p_scale, float p_rotationDeg, ImVec2 p_translation, bool p_flipY);
+		void Transform(ScreenPoint p_scale, float p_rotationDeg, ScreenPoint p_translation, bool p_flipY);
 
 		/** Fits the shape into p_rect preserving the aspect ratio, optionally
 		 * flipping y. Used to map a baked sketch into a widget rectangle. */
 		void FitInto(const ScreenRect& p_rect, bool p_flipY);
 
 		/** Even-odd test across every loop. */
-		bool ContainsPoint(const ImVec2& p_local) const;
+		bool ContainsPoint(const ScreenPoint& p_local) const;
 		/** Fill plus a growing margin: inside the shape or within p_pad of the
 		 * outline. This is how HitShape::pad behaves for filled paths, where the
 		 * outline cannot simply be scaled outward. */
-		bool ContainsPointWithPad(const ImVec2& p_local, float p_pad) const;
+		bool ContainsPointWithPad(const ScreenPoint& p_local, float p_pad) const;
 		/** Distance from p_local to the nearest outline segment. */
-		float DistanceToOutline(const ImVec2& p_local) const;
+		float DistanceToOutline(const ScreenPoint& p_local) const;
 		/** Stroke test: within p_halfWidth of the outline. */
-		bool NearOutline(const ImVec2& p_local, float p_halfWidth) const;
+		bool NearOutline(const ScreenPoint& p_local, float p_halfWidth) const;
 
 		/** Triangle list (3 vertices per triangle) for filling loop 0.
 		 *
@@ -70,22 +71,22 @@ namespace MOON
 		 * The result is cached and invalidated by RecomputeBounds(), so callers
 		 * must go through it after changing the loops.
 		 */
-		const std::vector<ImVec2>& GetFillTriangles() const;
+		const std::vector<ScreenPoint>& GetFillTriangles() const;
 		/** Nesting depth of every closed loop (0 = outermost) plus the smallest
 		 * loop containing it, used by the even-odd fill. */
 		void ComputeNesting(std::vector<int>& p_outDepths, std::vector<int>& p_outParents) const;
 		/** Even-odd triangulation over all closed loops (holes included). */
-		bool TriangulateEvenOdd(std::vector<ImVec2>& p_outTriangles) const;
+		bool TriangulateEvenOdd(std::vector<ScreenPoint>& p_outTriangles) const;
 		/** Ear clipping of one simple polygon; appends to p_outTriangles. */
 		bool TriangulateSimplePolygon(
-			const std::vector<ImVec2>& p_points,
-			std::vector<ImVec2>& p_outTriangles) const;
+			const std::vector<ScreenPoint>& p_points,
+			std::vector<ScreenPoint>& p_outTriangles) const;
 		/** True when the triangles cover the even-odd region exactly and every
 		 * one of them lies inside it. */
-		bool ValidateTriangulation(const std::vector<ImVec2>& p_triangles) const;
+		bool ValidateTriangulation(const std::vector<ScreenPoint>& p_triangles) const;
 
 		/** Cache for GetFillTriangles(); reset whenever the geometry changes. */
-		mutable std::vector<ImVec2> mFillTriangles;
+		mutable std::vector<ScreenPoint> mFillTriangles;
 		mutable bool mFillTrianglesValid = false;
 
 		/** Writes the loops next to the executable so a rejected fill can be

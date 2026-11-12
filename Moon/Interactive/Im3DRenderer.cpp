@@ -2100,6 +2100,22 @@ namespace MOON
 		for (EventWidget* widget : widgets) {
 			widget->update();
 		}
+
+		// The cursor a 2D widget asked for while it drew (see ScreenWidget::onUpdate): asking is all
+		// a widget can do, because it is not the layer that knows the windowing library. This one is,
+		// so the wish becomes a cursor shape here.
+		switch (ScreenOverlayRegistry::Instance().TakeCursorRequest())
+		{
+		case EScreenCursor::TextInput:   ImGui::SetMouseCursor(ImGuiMouseCursor_TextInput);   break;
+		case EScreenCursor::ResizeAll:   ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeAll);   break;
+		case EScreenCursor::ResizeNS:    ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);    break;
+		case EScreenCursor::ResizeEW:    ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);    break;
+		case EScreenCursor::ResizeNESW:  ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNESW);  break;
+		case EScreenCursor::ResizeNWSE:  ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNWSE);  break;
+		case EScreenCursor::Hand:        ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);        break;
+		case EScreenCursor::NotAllowed:  ImGui::SetMouseCursor(ImGuiMouseCursor_NotAllowed);  break;
+		default: break;   // Arrow: the editor's own cursor is already that
+		}
 	}
 	void ImRenderer::placeDrawTask(const std::string& name, std::function<void()> task)
 	{
@@ -2113,6 +2129,20 @@ namespace MOON
 	void ImRenderer::cancleDrawTask(const std::string& name)
 	{
 		cancelList.push_back(name);
+	}
+
+	bool ImRenderer::IsAnyWidgetUsingMouse() const
+	{
+		for (const auto& it : mGizmoWidgets)
+		{
+			const EventWidget* widget = it.second;
+			if (widget != nullptr && widget->isActived() && widget->isVisible()
+				&& widget->IsUsingMouse())
+			{
+				return true;
+			}
+		}
+		return false;
 	}
 
 	void ImRenderer::addGizmoWidget(EventWidget* widget)

@@ -29,14 +29,22 @@
 #include "editor/UI/TaskPanel/MirrorTask.h"
 #include "editor/UI/TaskPanel/LinearPatternTask.h"
 #include "editor/UI/TaskPanel/ShapeHelper.h"
+#include "editor/UI/TaskPanel/SelectionTaskLauncher.h"
+#include "editor/UI/TaskPanel/TaskSession.h"
+#include "editor/UI/TaskPanel/PadInteraction.h"
+#include "editor/UI/TaskPanel/FilletInteraction.h"
 
 
 namespace MOON {
     BaseTaskDialog* createFeatureDialog(Feature* feature) {
         ExtrudeFeature* extrude=dynamic_cast<ExtrudeFeature*>(feature);
         if (extrude) {
-            ExtrudeTaskDialog* dialog = new ExtrudeTaskDialog(nullptr, extrude->addSubType == 0 ? ExtrudeType::Additive : ExtrudeType::Subtractive,feature);
-            return dialog;
+            // Editing a pad that is already in the chain: the interaction is the one that exists,
+            // the panel only edits it. Begin() builds nothing here - it puts the handles on the
+            // pad that is already there, which is what the user drags.
+            auto pad = std::make_unique<PadInteraction>(extrude);
+            pad->Begin();
+            return new ExtrudeTaskDialog(std::move(pad));
         }
 
         SketcherFeature* sketcher = dynamic_cast<SketcherFeature*>(feature);
@@ -52,8 +60,11 @@ namespace MOON {
         }
         FilletFeature* fillet = dynamic_cast<FilletFeature*>(feature);
         if (fillet) {
-            FilletTask* dialog = new FilletTask(nullptr,fillet);
-            return dialog;
+            // Editing a fillet that is already in the chain: Begin() builds nothing, it puts the
+            // handles on the fillet that is there and previews it.
+            auto interaction = std::make_unique<FilletInteraction>(fillet);
+            interaction->Begin();
+            return new FilletTask(std::move(interaction));
         }
         RevolveFeature* revolve = dynamic_cast<RevolveFeature*>(feature);
         if (revolve) {
@@ -156,6 +167,20 @@ namespace MOON {
         connect(btnOk, &QPushButton::clicked, this, &TaskViewWidget::clickOk);
         connect(btnApply, &QPushButton::clicked, this, &TaskViewWidget::clickApply);
         connect(btnCancel, &QPushButton::clicked, this, &TaskViewWidget::clickCancel);
+
+        // Picking a face is a second way to start a task: the operation it can start is offered
+        // in the viewport (see SelectionTaskLauncher), and the session is what holds it until the
+        // user starts dragging.
+        m_session = new TaskSession(*this);
+        m_selectionLauncher = new SelectionTaskLauncher(*m_session, *this);
+    }
+
+    TaskViewWidget::~TaskViewWidget()
+    {
+        delete m_selectionLauncher;
+        m_selectionLauncher = nullptr;
+        delete m_session;
+        m_session = nullptr;
     }
 
     void TaskViewWidget::setTaskDialog(BaseTaskDialog* dlg)

@@ -7,11 +7,14 @@
 #include "BaseTaskDialog.h"
 namespace MOON {
     class Feature;
+    class SelectionTaskLauncher;
+    class TaskSession;
     class TaskViewWidget : public QWidget
     {
         Q_OBJECT
     public:
         explicit TaskViewWidget(QWidget* parent = nullptr);
+        ~TaskViewWidget() override;
 
         // 切换任务UI
         void setTaskDialog(BaseTaskDialog* dlg);
@@ -38,6 +41,11 @@ namespace MOON {
         QWidget* m_contentWidget;
         QVBoxLayout* m_contentLayout;
         BaseTaskDialog* m_currentTask = nullptr;
+        /** What task is going on: built, or only offered on a pick (see TaskSession). */
+        TaskSession* m_session = nullptr;
+        /** Offers the operation a picked face can start, instead of making the user find it in
+         * the task bar (see SelectionTaskLauncher). */
+        SelectionTaskLauncher* m_selectionLauncher = nullptr;
     };
 }
 

@@ -1,5 +1,5 @@
 #pragma once
-#include <ThirdParty/imgui/imgui/imgui.h>
+#include "Interactive/Screen/ScreenLayout.h"
 #include <Rendering/Overlay/Im2D.h>
 #include <memory>
 #include <vector>
@@ -47,9 +47,9 @@ namespace MOON
 		int action = 0;
 
 		/** Rect: center. Circle / RingArc: circle center. */
-		ImVec2 center{ 0.0f, 0.0f };
+		ScreenPoint center{ 0.0f, 0.0f };
 		/** Rect: half size. */
-		ImVec2 halfExtent{ 0.0f, 0.0f };
+		ScreenPoint halfExtent{ 0.0f, 0.0f };
 		/** Circle / RingArc: radius of the center line of the band. */
 		float radius = 0.0f;
 		/** RingArc: half thickness of the band. */
@@ -58,7 +58,7 @@ namespace MOON
 		float startAngleDeg = 0.0f;
 		float sweepAngleDeg = 0.0f;
 		/** Triangle / Polygon: convex outline in local space. */
-		std::vector<ImVec2> points;
+		std::vector<ScreenPoint> points;
 
 		/** Path: the outline. Shared between widgets that use the same shape. */
 		std::shared_ptr<const ScreenPath> path;
@@ -71,14 +71,14 @@ namespace MOON
 		/** Extra pick area in pixels, applied uniformly to every shape type. */
 		float pad = 0.0f;
 
-		bool Contains(const ImVec2& p_local) const;
+		bool Contains(const ScreenPoint& p_local) const;
 		void Draw(
 			::Rendering::Overlay::Im2D::DrawList* p_drawList,
-			const ImVec2& p_offset,
-			ImU32 p_fill,
-			ImU32 p_outline,
+			const ScreenPoint& p_offset,
+			ScreenColor p_fill,
+			ScreenColor p_outline,
 			float p_outlineWidth) const;
 		/** Center of the shape in local space; used for pads and labels. */
-		ImVec2 LocalCenter() const;
+		ScreenPoint LocalCenter() const;
 	};
 }

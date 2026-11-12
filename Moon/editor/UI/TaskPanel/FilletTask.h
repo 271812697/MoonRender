@@ -1,31 +1,52 @@
-﻿#pragma once
-#include "editor/UI/TaskPanel/ParamTaskDialog.h"
-#include "editor/UI/TaskPanel/ShapeHelper.h"
-namespace MOON {
-	class FilletTask : public ParamTaskDialog, public ShapeHelper
-	{
+#pragma once
+#include <memory>
 
+#include "editor/UI/TaskPanel/ParamTaskDialog.h"
+
+namespace MOON {
+	class FilletInteraction;
+	class FilletFeature;
+	class FeatureInteraction;
+
+	/** The fillet's panel.
+	 *
+	 * It edits a fillet that already exists - the interaction it is given owns the handles, the
+	 * feature and the preview (see FilletInteraction). The panel builds no handle and no feature:
+	 * a fillet picked in the viewport is handed to it, and so is one started from the task bar.
+	 */
+	class FilletTask : public ParamTaskDialog
+	{
+		Q_OBJECT
 	public:
-		explicit FilletTask(QWidget* parent = nullptr,Feature* feature=nullptr);
-		~FilletTask();
-		virtual QVariant getParamValue(const QString& propertyName);
-		virtual void setParamValue(const QString& propertyName, const QVariant& value);
-		virtual void clickOk() override;
-		virtual void clickApply() override;
-		virtual void clickCancel() override;
+		explicit FilletTask(std::unique_ptr<FilletInteraction> p_fillet, QWidget* parent = nullptr);
+		~FilletTask() override;
+
+		FilletInteraction* GetFillet() const { return m_fillet.get(); }
+
+		QVariant getParamValue(const QString& propertyName) override;
+		void setParamValue(const QString& propertyName, const QVariant& value) override;
+		void clickOk() override;
+		void clickApply() override;
+		void clickCancel() override;
+
 	private:
-		void onWidgetLengthInvoke1();
-		void onWidgetLengthInvoke2();
 		/** Lists the edges this fillet is applied to (the References group of the panel). */
 		void refreshReferenceRows();
 		/** Takes the edges the viewport has selected and adds them to the fillet. */
 		void applyPickedEdges();
 		/** Drops the rows that are selected in the list from the fillet. */
 		void removeSelectedEdges();
-		/** An edge picked while the panel is open is added to the fillet - the same
-		 * gesture as pressing "Add from Selection", without the click. */
-		virtual void onSelectEdge(const std::vector<Part::TopoShape>& edge) override;
+		/** A handle was dragged: the interaction took the value, the number follows. */
+		void refreshRadius();
+
+		FilletFeature* feature() const;
+
+		std::unique_ptr<FilletInteraction> m_fillet;
 		class Internal;
 		Internal* mInternal = nullptr;
 	};
+
+	/** The fillet's panel, built for a task handed over as a generic interaction (see
+	 * MakePadPanel for the same thing on the other side of the task). */
+	BaseTaskDialog* MakeFilletPanel(std::unique_ptr<FeatureInteraction> p_interaction);
 }

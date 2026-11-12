@@ -1,6 +1,8 @@
 #pragma once
 #include <vector>
 
+#include "Interactive/Screen/ScreenLayout.h"
+
 namespace MOON
 {
 	class ScreenWidget;
@@ -37,6 +39,12 @@ namespace MOON
 		/** Top most widget owning the position, nullptr when none does. */
 		ScreenWidget* GetOwnerAt(float p_x, float p_y) const;
 
+		/** A widget wants this cursor on screen while the mouse is on it. Reset when read, so the
+		 * request lives for one frame and a widget that stops asking goes back to the arrow. */
+		void RequestCursor(EScreenCursor p_cursor);
+		/** Takes the cursor that was asked for this frame, and clears the request. */
+		EScreenCursor TakeCursorRequest();
+
 	private:
 		ScreenOverlayRegistry() = default;
 		~ScreenOverlayRegistry() = default;
@@ -45,5 +53,6 @@ namespace MOON
 
 	private:
 		std::vector<ScreenWidget*> mWidgets;
+		EScreenCursor mCursorRequest = EScreenCursor::Arrow;
 	};
 }

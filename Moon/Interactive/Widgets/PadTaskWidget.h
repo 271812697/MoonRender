@@ -5,7 +5,9 @@ namespace MOON
 	enum PadTaskEvent{
 		LengthChange=1001,
 		AngleChange,
-		None
+		// Not "None": SelectEvent (core/SelectionManager.h) already has one of those in this
+		// namespace, and the two headers meet in the same translation unit.
+		NoEvent
 	};
 	class PadTaskWidget: public EventWidget
 	{
@@ -31,6 +33,8 @@ namespace MOON
 		virtual void onLeftMousePressed()override;
 		virtual void onLeftMouseReleased()override;
 		virtual void onMouseMove()override;
+		/** Hot or dragging: the cursor belongs to this handle, not to the face behind it. */
+		bool IsUsingMouse() const override { return mState != Stop; }
 	private:
 		class Internal;
 		Internal* mInternal = nullptr;

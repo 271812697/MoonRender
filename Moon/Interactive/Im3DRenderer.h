@@ -292,6 +292,8 @@ namespace MOON
 		void addGizmoWidget(EventWidget* widget);
 		void removeGizmoWidget(EventWidget* widget);
 		EventWidget* getGizmoWidget(const std::string&name);
+		/** Whether a widget has the mouse right now (see EventWidget::IsUsingMouse). */
+		bool IsAnyWidgetUsingMouse() const;
 		std::unordered_map<unsigned int, EventWidget*>& getGizmoWidgets() {
 			return mGizmoWidgets;
 		}

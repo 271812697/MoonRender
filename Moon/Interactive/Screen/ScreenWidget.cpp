@@ -3,7 +3,7 @@
 #include "Interactive/Screen/ScreenOverlayRegistry.h"
 #include <Rendering/Overlay/Im2DRender.h>
 #include <Rendering/Overlay/Im2D.h>
-#include <ThirdParty/imgui/imgui/imgui.h>
+#include <Rendering/Overlay/Im2D.h>
 #include <cmath>
 
 namespace MOON
@@ -30,7 +30,7 @@ namespace MOON
 
 	bool ScreenWidget::IsInteractive() const
 	{
-		// Deliberately free of any ImGui state: the interaction layer must not
+		// Deliberately free of any UI-library state: the interaction layer must not
 		// depend on the library that currently happens to do the drawing.
 		return isActived() && isVisible() && IsInteractionEnabled();
 	}
@@ -58,28 +58,28 @@ namespace MOON
 		}
 	}
 
-	ImVec2 ScreenWidget::GetCursor() const
+	ScreenPoint ScreenWidget::GetCursor() const
 	{
 		if (Interactor == nullptr)
 		{
-			return ImVec2(0.0f, 0.0f);
+			return ScreenPoint(0.0f, 0.0f);
 		}
-		// Top-left pixels: the same space as the layout and the ImGui overlay.
+		// Top-left pixels: the same space as the layout and the Im2D overlay.
 		const int* position = Interactor->GetEventPositionFlipY();
-		return ImVec2(static_cast<float>(position[0]), static_cast<float>(position[1]));
+		return ScreenPoint(static_cast<float>(position[0]), static_cast<float>(position[1]));
 	}
 
-	ImVec2 ScreenWidget::GetCursorLocal() const
+	ScreenPoint ScreenWidget::GetCursorLocal() const
 	{
 		EnsureGeometry();
 		return mRect.ToLocal(GetCursor());
 	}
 
-	ImVec2 ScreenWidget::GetFrameDelta() const
+	ScreenPoint ScreenWidget::GetFrameDelta() const
 	{
 		if (Interactor == nullptr)
 		{
-			return ImVec2(0.0f, 0.0f);
+			return ScreenPoint(0.0f, 0.0f);
 		}
 		const int* current = Interactor->GetEventPositionFlipY();
 		const int* previous = Interactor->GetLastEventPosition();
@@ -87,7 +87,7 @@ namespace MOON
 		Interactor->GetSize(previousSize);
 		// LastEventPosition keeps the bottom-left convention too.
 		const float previousY = static_cast<float>(previousSize[1] - 1 - previous[1]);
-		return ImVec2(
+		return ScreenPoint(
 			static_cast<float>(current[0] - previous[0]),
 			static_cast<float>(current[1] - previousY));
 	}
@@ -97,14 +97,14 @@ namespace MOON
 		return Interactor != nullptr && Interactor->IsCursorInsideViewport();
 	}
 
-	ImVec2 ScreenWidget::GetViewportSize() const
+	ScreenPoint ScreenWidget::GetViewportSize() const
 	{
 		int viewportSize[2] = { 0, 0 };
 		if (Interactor != nullptr)
 		{
 			Interactor->GetSize(viewportSize);
 		}
-		return ImVec2(static_cast<float>(viewportSize[0]), static_cast<float>(viewportSize[1]));
+		return ScreenPoint(static_cast<float>(viewportSize[0]), static_cast<float>(viewportSize[1]));
 	}
 
 	bool ScreenWidget::IsCtrlDown() const
@@ -134,7 +134,7 @@ namespace MOON
 		return mShapes;
 	}
 
-	int ScreenWidget::HitTestShapes(const ImVec2& p_localCursor) const
+	int ScreenWidget::HitTestShapes(const ScreenPoint& p_localCursor) const
 	{
 		EnsureGeometry();
 		// Back to front: the shapes drawn last are on top, so they must win when
@@ -157,7 +157,7 @@ namespace MOON
 		}
 
 		EnsureGeometry();
-		const ImVec2 screenCursor = GetCursor();
+		const ScreenPoint screenCursor = GetCursor();
 
 		// Overlapping widgets: only the one on top may react. Widgets at the same
 		// z order keep the old behaviour of both reacting.
@@ -193,7 +193,7 @@ namespace MOON
 		}
 
 		EnsureGeometry();
-		const ImVec2 point(p_x, p_y);
+		const ScreenPoint point(p_x, p_y);
 		if (mRectBlocksCursor && mRect.Contains(point))
 		{
 			return true;
@@ -212,7 +212,7 @@ namespace MOON
 			return true;
 		}
 		EnsureGeometry();
-		return HitTestShapes(mRect.ToLocal(ImVec2(p_x, p_y))) >= 0;
+		return HitTestShapes(mRect.ToLocal(ScreenPoint(p_x, p_y))) >= 0;
 	}
 
 	void ScreenWidget::SetState(EScreenState p_state)
@@ -255,7 +255,7 @@ namespace MOON
 			return;
 		}
 
-		const ImVec2 localCursor = mRect.ToLocal(GetCursor());
+		const ScreenPoint localCursor = mRect.ToLocal(GetCursor());
 
 		if (mState == EScreenState::Dragging)
 		{
@@ -287,12 +287,13 @@ namespace MOON
 			return;
 		}
 
-		// The only ImGui touch outside the draw calls themselves: the hovered
-		// cursor shape. Kept here so the interaction code above stays free of the
-		// library that will eventually be replaced.
-		if (mHotShape >= 0 && mHoverCursor != ImGuiMouseCursor_Arrow)
+		// The hovered cursor shape: the widget says which cursor it wants while the
+		// mouse is on one of its shapes, and the overlay host - which is the layer
+		// that talks to the windowing library - puts it on screen. Nothing here has
+		// to know what that library is.
+		if (mHotShape >= 0 && mHoverCursor != EScreenCursor::Arrow)
 		{
-			ImGui::SetMouseCursor(mHoverCursor);
+			ScreenOverlayRegistry::Instance().RequestCursor(mHoverCursor);
 		}
 
 		DrawContent(*drawList, mRect);
@@ -361,11 +362,11 @@ namespace MOON
 	void ScreenWidget::DrawShapes(::Rendering::Overlay::Im2D::DrawList& p_drawList, const ScreenRect& p_rect)
 	{
 		EnsureGeometry();
-		const ImVec2 offset = p_rect.TopLeft();
+		const ScreenPoint offset = p_rect.TopLeft();
 		for (size_t i = 0; i < mShapes.size(); ++i)
 		{
 			const bool hot = static_cast<int>(i) == mHotShape;
-			ImU32 fill = mShapeStyle.idleFill;
+			ScreenColor fill = mShapeStyle.idleFill;
 			float outlineWidth = mShapeStyle.outlineWidth;
 			if (hot) {
 				fill = (mState == EScreenState::Pressed)

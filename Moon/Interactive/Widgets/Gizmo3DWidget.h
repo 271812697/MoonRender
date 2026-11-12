@@ -88,6 +88,7 @@ namespace MOON
 		void setRotate(float p_angleDegree, float x, float y, float z);
 
 		IntersectiveState GetState() const { return mState; }
+		bool IsUsingMouse() const override { return mState != Stop; }
 		int GetHoveredHandle() const { return mPickHandle; }
 
 	private:

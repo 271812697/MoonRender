@@ -11,7 +11,7 @@ namespace MOON
 	namespace
 	{
 		/** Squared distance from p to the segment a-b. */
-		float DistanceToSegmentSquared(const ImVec2& p, const ImVec2& a, const ImVec2& b)
+		float DistanceToSegmentSquared(const ScreenPoint& p, const ScreenPoint& a, const ScreenPoint& b)
 		{
 			const float abX = b.x - a.x;
 			const float abY = b.y - a.y;
@@ -31,7 +31,7 @@ namespace MOON
 
 		/** Cross product of (b - a) and (c - a); > 0 means a convex corner for a
 		 * counter-clockwise polygon. */
-		float Cross3(const ImVec2& a, const ImVec2& b, const ImVec2& c)
+		float Cross3(const ScreenPoint& a, const ScreenPoint& b, const ScreenPoint& c)
 		{
 			return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
 		}
@@ -39,10 +39,10 @@ namespace MOON
 		/** Strictly inside a counter-clockwise triangle; points on the edge count
 		 * as outside, which keeps ear clipping conservative. */
 		bool PointInTriangleStrict(
-			const ImVec2& p,
-			const ImVec2& a,
-			const ImVec2& b,
-			const ImVec2& c)
+			const ScreenPoint& p,
+			const ScreenPoint& a,
+			const ScreenPoint& b,
+			const ScreenPoint& c)
 		{
 			constexpr float kEpsilon = 1e-6f;
 			return Cross3(a, b, p) > kEpsilon
@@ -57,10 +57,10 @@ namespace MOON
 		 * edge, which blocks every candidate in the strict pass.
 		 */
 		bool PointInTriangleByMargin(
-			const ImVec2& p,
-			const ImVec2& a,
-			const ImVec2& b,
-			const ImVec2& c,
+			const ScreenPoint& p,
+			const ScreenPoint& a,
+			const ScreenPoint& b,
+			const ScreenPoint& c,
 			float p_margin)
 		{
 			const float sideAB = Cross3(a, b, p);
@@ -83,13 +83,13 @@ namespace MOON
 		}
 
 		/** Twice the signed area of a closed outline. */
-		float SignedDoubleArea(const std::vector<ImVec2>& p_loop)
+		float SignedDoubleArea(const std::vector<ScreenPoint>& p_loop)
 		{
 			float sum = 0.0f;
 			for (size_t i = 0; i < p_loop.size(); ++i)
 			{
-				const ImVec2& a = p_loop[i];
-				const ImVec2& b = p_loop[(i + 1) % p_loop.size()];
+				const ScreenPoint& a = p_loop[i];
+				const ScreenPoint& b = p_loop[(i + 1) % p_loop.size()];
 				sum += a.x * b.y - b.x * a.y;
 			}
 			return sum;
@@ -99,9 +99,9 @@ namespace MOON
 		 * so it is not a corner and carries no area. A point that doubles back
 		 * (a spike) is kept. */
 		bool IsStraightContinuation(
-			const ImVec2& p_previous,
-			const ImVec2& p_current,
-			const ImVec2& p_next)
+			const ScreenPoint& p_previous,
+			const ScreenPoint& p_current,
+			const ScreenPoint& p_next)
 		{
 			const float incomingX = p_current.x - p_previous.x;
 			const float incomingY = p_current.y - p_previous.y;
@@ -122,9 +122,9 @@ namespace MOON
 		/** Removes duplicate points and points on a straight line. A straight
 		 * chain stalls the ear clipping: no corner on a line is convex, so
 		 * nothing can be clipped any more. */
-		std::vector<ImVec2> CleanOutline(const std::vector<ImVec2>& p_loop)
+		std::vector<ScreenPoint> CleanOutline(const std::vector<ScreenPoint>& p_loop)
 		{
-			std::vector<ImVec2> cleaned;
+			std::vector<ScreenPoint> cleaned;
 			cleaned.reserve(p_loop.size());
 			const size_t count = p_loop.size();
 			for (size_t i = 0; i < count; ++i)
@@ -142,7 +142,7 @@ namespace MOON
 		}
 
 		/** Crossing test for one loop (the even-odd building block). */
-		bool PointInLoop(const std::vector<ImVec2>& p_loop, const ImVec2& p_point)
+		bool PointInLoop(const std::vector<ScreenPoint>& p_loop, const ScreenPoint& p_point)
 		{
 			bool inside = false;
 			const size_t count = p_loop.size();
@@ -152,8 +152,8 @@ namespace MOON
 			}
 			for (size_t i = 0, j = count - 1; i < count; j = i++)
 			{
-				const ImVec2& a = p_loop[i];
-				const ImVec2& b = p_loop[j];
+				const ScreenPoint& a = p_loop[i];
+				const ScreenPoint& b = p_loop[j];
 				if ((a.y > p_point.y) == (b.y > p_point.y))
 				{
 					continue;
@@ -175,10 +175,10 @@ namespace MOON
 
 		/** Proper crossing of two segments (they may not merely touch). */
 		bool SegmentsCrossProperly(
-			const ImVec2& p1,
-			const ImVec2& p2,
-			const ImVec2& p3,
-			const ImVec2& p4)
+			const ScreenPoint& p1,
+			const ScreenPoint& p2,
+			const ScreenPoint& p3,
+			const ScreenPoint& p4)
 		{
 			const float d1 = Cross3(p3, p4, p1);
 			const float d2 = Cross3(p3, p4, p2);
@@ -195,8 +195,8 @@ namespace MOON
 		 * outside" looks like from the outside.
 		 */
 		int CountSelfIntersections(
-			const std::vector<ImVec2>& p_loop,
-			std::vector<ImVec2>& p_outFirstCrossings,
+			const std::vector<ScreenPoint>& p_loop,
+			std::vector<ScreenPoint>& p_outFirstCrossings,
 			int p_maxCrossings = 4)
 		{
 			const size_t count = p_loop.size();
@@ -233,13 +233,13 @@ namespace MOON
 
 		/** Rightmost vertex: the representative point used to find out which
 		 * loops contain another one. */
-		size_t RightmostIndex(const std::vector<ImVec2>& p_loop)
+		size_t RightmostIndex(const std::vector<ScreenPoint>& p_loop)
 		{
 			size_t best = 0;
 			for (size_t i = 1; i < p_loop.size(); ++i)
 			{
-				const ImVec2& point = p_loop[i];
-				const ImVec2& current = p_loop[best];
+				const ScreenPoint& point = p_loop[i];
+				const ScreenPoint& current = p_loop[best];
 				if (point.x > current.x || (point.x == current.x && point.y > current.y))
 				{
 					best = i;
@@ -248,25 +248,25 @@ namespace MOON
 			return best;
 		}
 
-		ImVec2 RightmostPoint(const std::vector<ImVec2>& p_loop)
+		ScreenPoint RightmostPoint(const std::vector<ScreenPoint>& p_loop)
 		{
 			return p_loop[RightmostIndex(p_loop)];
 		}
 
-		std::vector<ImVec2> AsWinding(const std::vector<ImVec2>& p_loop, bool p_counterClockwise)
+		std::vector<ScreenPoint> AsWinding(const std::vector<ScreenPoint>& p_loop, bool p_counterClockwise)
 		{
 			const bool isCounterClockwise = SignedDoubleArea(p_loop) > 0.0f;
 			if (isCounterClockwise == p_counterClockwise)
 			{
 				return p_loop;
 			}
-			std::vector<ImVec2> reversed(p_loop.rbegin(), p_loop.rend());
+			std::vector<ScreenPoint> reversed(p_loop.rbegin(), p_loop.rend());
 			return reversed;
 		}
 
 		/** Splices a hole into the polygon with a bridge, producing a single
 		 * "keyhole" polygon that the ear clipping can handle. */
-		bool BridgeHole(std::vector<ImVec2>& p_polygon, const std::vector<ImVec2>& p_hole)
+		bool BridgeHole(std::vector<ScreenPoint>& p_polygon, const std::vector<ScreenPoint>& p_hole)
 		{
 			if (p_hole.size() < 3 || p_polygon.size() < 3)
 			{
@@ -274,15 +274,15 @@ namespace MOON
 			}
 
 			const size_t holeStart = RightmostIndex(p_hole);
-			const ImVec2 bridgeStart = p_hole[holeStart];
+			const ScreenPoint bridgeStart = p_hole[holeStart];
 
 			// Closest polygon edge crossing the ray bridgeStart -> +x.
 			float bestX = 0.0f;
 			size_t bestEdge = p_polygon.size();
 			for (size_t i = 0; i < p_polygon.size(); ++i)
 			{
-				const ImVec2& a = p_polygon[i];
-				const ImVec2& b = p_polygon[(i + 1) % p_polygon.size()];
+				const ScreenPoint& a = p_polygon[i];
+				const ScreenPoint& b = p_polygon[(i + 1) % p_polygon.size()];
 				if ((a.y > bridgeStart.y) == (b.y > bridgeStart.y))
 				{
 					continue;
@@ -310,7 +310,7 @@ namespace MOON
 				? bestEdge
 				: nextEdge;
 
-			std::vector<ImVec2> merged;
+			std::vector<ScreenPoint> merged;
 			merged.reserve(p_polygon.size() + p_hole.size() + 2);
 			merged.insert(merged.end(), p_polygon.begin(), p_polygon.begin() + candidate + 1);
 			// Walk the hole starting at its rightmost vertex, then close it.
@@ -331,9 +331,9 @@ namespace MOON
 		// Any geometry change invalidates the cached fill triangulation.
 		mFillTrianglesValid = false;
 		mFillTriangles.clear();
-		for (const std::vector<ImVec2>& loop : loops)
+		for (const std::vector<ScreenPoint>& loop : loops)
 		{
-			for (const ImVec2& point : loop)
+			for (const ScreenPoint& point : loop)
 			{
 				if (!boundsValid)
 				{
@@ -352,41 +352,41 @@ namespace MOON
 		}
 	}
 
-	ImVec2 ScreenPath::Size() const
+	ScreenPoint ScreenPath::Size() const
 	{
 		if (!boundsValid)
 		{
-			return ImVec2(0.0f, 0.0f);
+			return ScreenPoint(0.0f, 0.0f);
 		}
-		return ImVec2(boundsMax.x - boundsMin.x, boundsMax.y - boundsMin.y);
+		return ScreenPoint(boundsMax.x - boundsMin.x, boundsMax.y - boundsMin.y);
 	}
 
-	ImVec2 ScreenPath::Center() const
+	ScreenPoint ScreenPath::Center() const
 	{
 		if (!boundsValid)
 		{
-			return ImVec2(0.0f, 0.0f);
+			return ScreenPoint(0.0f, 0.0f);
 		}
-		return ImVec2(
+		return ScreenPoint(
 			(boundsMin.x + boundsMax.x) * 0.5f,
 			(boundsMin.y + boundsMax.y) * 0.5f);
 	}
 
 	void ScreenPath::Transform(
-		ImVec2 p_scale,
+		ScreenPoint p_scale,
 		float p_rotationDeg,
-		ImVec2 p_translation,
+		ScreenPoint p_translation,
 		bool p_flipY)
 	{
 		const float radians = p_rotationDeg * 3.14159265358979f / 180.0f;
 		const float cosValue = std::cos(radians);
 		const float sinValue = std::sin(radians);
-		const ImVec2 pivot = Center();
+		const ScreenPoint pivot = Center();
 		const float flip = p_flipY ? -1.0f : 1.0f;
 
-		for (std::vector<ImVec2>& loop : loops)
+		for (std::vector<ScreenPoint>& loop : loops)
 		{
-			for (ImVec2& point : loop)
+			for (ScreenPoint& point : loop)
 			{
 				const float localX = (point.x - pivot.x) * p_scale.x;
 				const float localY = (point.y - pivot.y) * p_scale.y * flip;
@@ -402,20 +402,20 @@ namespace MOON
 	void ScreenPath::FitInto(const ScreenRect& p_rect, bool p_flipY)
 	{
 		RecomputeBounds();
-		const ImVec2 size = Size();
+		const ScreenPoint size = Size();
 		if (!boundsValid || size.x <= 1e-6f || size.y <= 1e-6f)
 		{
 			return;
 		}
 
 		const float scale = std::min(p_rect.w / size.x, p_rect.h / size.y);
-		const ImVec2 shapeCenter = Center();
-		const ImVec2 targetCenter(p_rect.x + p_rect.w * 0.5f, p_rect.y + p_rect.h * 0.5f);
+		const ScreenPoint shapeCenter = Center();
+		const ScreenPoint targetCenter(p_rect.x + p_rect.w * 0.5f, p_rect.y + p_rect.h * 0.5f);
 		const float flip = p_flipY ? -1.0f : 1.0f;
 
-		for (std::vector<ImVec2>& loop : loops)
+		for (std::vector<ScreenPoint>& loop : loops)
 		{
-			for (ImVec2& point : loop)
+			for (ScreenPoint& point : loop)
 			{
 				point.x = targetCenter.x + (point.x - shapeCenter.x) * scale;
 				point.y = targetCenter.y + (point.y - shapeCenter.y) * scale * flip;
@@ -424,12 +424,12 @@ namespace MOON
 		RecomputeBounds();
 	}
 
-	float ScreenPath::DistanceToOutline(const ImVec2& p_local) const
+	float ScreenPath::DistanceToOutline(const ScreenPoint& p_local) const
 	{
 		float bestSquared = FLT_MAX;
 		for (size_t loopIndex = 0; loopIndex < loops.size(); ++loopIndex)
 		{
-			const std::vector<ImVec2>& loop = loops[loopIndex];
+			const std::vector<ScreenPoint>& loop = loops[loopIndex];
 			if (loop.size() < 2)
 			{
 				continue;
@@ -451,12 +451,12 @@ namespace MOON
 		return bestSquared == FLT_MAX ? FLT_MAX : std::sqrt(bestSquared);
 	}
 
-	bool ScreenPath::NearOutline(const ImVec2& p_local, float p_halfWidth) const
+	bool ScreenPath::NearOutline(const ScreenPoint& p_local, float p_halfWidth) const
 	{
 		return DistanceToOutline(p_local) <= p_halfWidth;
 	}
 
-	bool ScreenPath::ContainsPoint(const ImVec2& p_local) const
+	bool ScreenPath::ContainsPoint(const ScreenPoint& p_local) const
 	{
 		// Even-odd across the closed loops, so a loop nested inside another one
 		// punches a hole. Open loops are strokes, they have no interior.
@@ -475,7 +475,7 @@ namespace MOON
 		return inside;
 	}
 
-	bool ScreenPath::ContainsPointWithPad(const ImVec2& p_local, float p_pad) const
+	bool ScreenPath::ContainsPointWithPad(const ScreenPoint& p_local, float p_pad) const
 	{
 		if (ContainsPoint(p_local))
 		{
@@ -493,7 +493,7 @@ namespace MOON
 		p_outDepths.assign(loops.size(), 0);
 		p_outParents.assign(loops.size(), -1);
 
-		std::vector<std::vector<ImVec2>> cleaned;
+		std::vector<std::vector<ScreenPoint>> cleaned;
 		std::vector<size_t> sourceIndex;
 		for (size_t i = 0; i < loops.size(); ++i)
 		{
@@ -501,7 +501,7 @@ namespace MOON
 			{
 				continue;
 			}
-			std::vector<ImVec2> loop = CleanOutline(loops[i]);
+			std::vector<ScreenPoint> loop = CleanOutline(loops[i]);
 			if (loop.size() < 3)
 			{
 				continue;
@@ -512,7 +512,7 @@ namespace MOON
 
 		for (size_t i = 0; i < cleaned.size(); ++i)
 		{
-			const ImVec2 representative = RightmostPoint(cleaned[i]);
+			const ScreenPoint representative = RightmostPoint(cleaned[i]);
 			int depth = 0;
 			int parent = -1;
 			float parentArea = FLT_MAX;
@@ -538,10 +538,10 @@ namespace MOON
 	}
 
 	bool ScreenPath::TriangulateSimplePolygon(
-		const std::vector<ImVec2>& p_points,
-		std::vector<ImVec2>& p_outTriangles) const
+		const std::vector<ScreenPoint>& p_points,
+		std::vector<ScreenPoint>& p_outTriangles) const
 	{
-		const std::vector<ImVec2> loop = CleanOutline(p_points);
+		const std::vector<ScreenPoint> loop = CleanOutline(p_points);
 		const size_t pointCount = loop.size();
 		if (pointCount < 3)
 		{
@@ -552,7 +552,7 @@ namespace MOON
 		// on the outline, where the even-odd test has no defined answer.
 		float extentX = 0.0f;
 		float extentY = 0.0f;
-		for (const ImVec2& point : loop)
+		for (const ScreenPoint& point : loop)
 		{
 			extentX = std::max(extentX, std::abs(point.x));
 			extentY = std::max(extentY, std::abs(point.y));
@@ -613,9 +613,9 @@ namespace MOON
 				{
 					const size_t previousIndex = (i + indices.size() - 1) % indices.size();
 					const size_t nextIndex = (i + 1) % indices.size();
-					const ImVec2& a = loop[indices[previousIndex]];
-					const ImVec2& b = loop[indices[i]];
-					const ImVec2& c = loop[indices[nextIndex]];
+					const ScreenPoint& a = loop[indices[previousIndex]];
+					const ScreenPoint& b = loop[indices[i]];
+					const ScreenPoint& c = loop[indices[nextIndex]];
 
 					if (Cross3(a, b, c) <= 0.0f)
 					{
@@ -630,7 +630,7 @@ namespace MOON
 						{
 							continue;
 						}
-						const ImVec2& candidate = loop[static_cast<size_t>(other)];
+						const ScreenPoint& candidate = loop[static_cast<size_t>(other)];
 						const bool contains = pass == 0
 							? PointInTriangleStrict(candidate, a, b, c)
 							: PointInTriangleByMargin(candidate, a, b, c, margin);
@@ -665,9 +665,9 @@ namespace MOON
 
 		if (indices.size() == 3)
 		{
-			const ImVec2& a = loop[indices[0]];
-			const ImVec2& b = loop[indices[1]];
-			const ImVec2& c = loop[indices[2]];
+			const ScreenPoint& a = loop[indices[0]];
+			const ScreenPoint& b = loop[indices[1]];
+			const ScreenPoint& c = loop[indices[2]];
 			if (std::abs(Cross3(a, b, c)) > minDoubleArea)
 			{
 				p_outTriangles.push_back(a);
@@ -678,7 +678,7 @@ namespace MOON
 		return true;
 	}
 
-	bool ScreenPath::TriangulateEvenOdd(std::vector<ImVec2>& p_outTriangles) const
+	bool ScreenPath::TriangulateEvenOdd(std::vector<ScreenPoint>& p_outTriangles) const
 	{
 		p_outTriangles.clear();
 
@@ -690,7 +690,7 @@ namespace MOON
 			return false;
 		}
 
-		std::vector<std::vector<ImVec2>> cleaned(loops.size());
+		std::vector<std::vector<ScreenPoint>> cleaned(loops.size());
 		for (size_t i = 0; i < loops.size(); ++i)
 		{
 			if (i < closed.size() && !closed[i])
@@ -709,14 +709,14 @@ namespace MOON
 
 			// Outer polygon counter-clockwise, its holes clockwise: the bridged
 			// result is a single keyhole polygon with a consistent winding.
-			std::vector<ImVec2> merged = AsWinding(cleaned[index], true);
+			std::vector<ScreenPoint> merged = AsWinding(cleaned[index], true);
 			for (size_t hole = 0; hole < loops.size(); ++hole)
 			{
 				if (depths[hole] != depths[index] + 1 || parents[hole] != static_cast<int>(index))
 				{
 					continue;
 				}
-				const std::vector<ImVec2> holeLoop = AsWinding(cleaned[hole], false);
+				const std::vector<ScreenPoint> holeLoop = AsWinding(cleaned[hole], false);
 				if (!BridgeHole(merged, holeLoop))
 				{
 					return false;
@@ -730,14 +730,14 @@ namespace MOON
 		return !p_outTriangles.empty();
 	}
 
-	bool ScreenPath::ValidateTriangulation(const std::vector<ImVec2>& p_triangles) const
+	bool ScreenPath::ValidateTriangulation(const std::vector<ScreenPoint>& p_triangles) const
 	{
 		if (p_triangles.size() < 3 || p_triangles.size() % 3 != 0)
 		{
 			return false;
 		}
 
-		const ImVec2 pathSize = Size();
+		const ScreenPoint pathSize = Size();
 		const float extent = std::max(std::max(pathSize.x, pathSize.y), 1.0f);
 		// A correct triangulation has every centroid inside the region. Tangent
 		// geometry (an arc running into a cap, as in a slot) leaves sliver
@@ -755,10 +755,10 @@ namespace MOON
 		float worstOutsideDistance = 0.0f;
 		for (size_t i = 0; i + 2 < p_triangles.size(); i += 3)
 		{
-			const ImVec2& a = p_triangles[i];
-			const ImVec2& b = p_triangles[i + 1];
-			const ImVec2& c = p_triangles[i + 2];
-			const ImVec2 centroid(
+			const ScreenPoint& a = p_triangles[i];
+			const ScreenPoint& b = p_triangles[i + 1];
+			const ScreenPoint& c = p_triangles[i + 2];
+			const ScreenPoint centroid(
 				(a.x + b.x + c.x) / 3.0f,
 				(a.y + b.y + c.y) / 3.0f);
 			if (!ContainsPoint(centroid))
@@ -817,7 +817,7 @@ namespace MOON
 				{
 					continue;
 				}
-				std::vector<ImVec2> firstCrossings;
+				std::vector<ScreenPoint> firstCrossings;
 				const int selfIntersections = CountSelfIntersections(
 					loops[i], firstCrossings);
 				if (selfIntersections > 0)
@@ -845,7 +845,7 @@ namespace MOON
 		return true;
 	}
 
-	const std::vector<ImVec2>& ScreenPath::GetFillTriangles() const
+	const std::vector<ScreenPoint>& ScreenPath::GetFillTriangles() const
 	{
 		if (mFillTrianglesValid)
 		{
@@ -910,7 +910,7 @@ namespace MOON
 				<< " points=" << loops[i].size()
 				<< " area=" << (std::abs(SignedDoubleArea(loops[i])) * 0.5f)
 				<< "\n";
-			for (const ImVec2& point : loops[i])
+			for (const ScreenPoint& point : loops[i])
 			{
 				file << point.x << " " << point.y << "\n";
 			}

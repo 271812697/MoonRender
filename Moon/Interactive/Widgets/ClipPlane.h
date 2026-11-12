@@ -14,7 +14,10 @@ namespace MOON
 		Maths::FVector4 getClipPlane();
 		virtual void onLeftMousePressed()override;
 		virtual void onLeftMouseReleased()override;
-		virtual void onMouseMove()override;	
+		virtual void onMouseMove()override;
+		/** Hot or dragging: the cursor belongs to this handle, not to what is behind it (see
+		 * EventWidget::IsUsingMouse). */
+		bool IsUsingMouse() const override { return mState != Stop; }	
 		enum PickMeshId
 		{
 			XAxis,

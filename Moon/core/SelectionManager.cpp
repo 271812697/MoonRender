@@ -145,8 +145,17 @@ namespace MOON {
 		std::unordered_set<SelectID, SelectIDHash> beforeSelect = mInternal->selectIDs;
 		//this means select nothing we need clear
 		if (mInternal->mSelectMode == SelectMode::OverrideSelect&& selectIdLists.size()==0) {
+			const bool changed = !mInternal->selectIDs.empty();
 			mInternal->clearSelectEffect(mInternal->selectIDs);
 			mInternal->selectIDs.clear();
+			// A click on empty space is how a user drops what was selected (and, for a task that
+			// was only being offered on a picked face, how they drop that too). It gets its own
+			// event: nothing is selected afterwards, so it is not the "something was picked" event
+			// listeners use to act on a pick. Returning without any event left every listener
+			// believing the old selection was still standing.
+			if (changed) {
+				InvokeEvent(ClearSelect);
+			}
 			return;
 		}
 		

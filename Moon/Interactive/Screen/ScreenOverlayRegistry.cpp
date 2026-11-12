@@ -81,4 +81,16 @@ namespace MOON
 		}
 		return false;
 	}
+
+	void ScreenOverlayRegistry::RequestCursor(EScreenCursor p_cursor)
+	{
+		mCursorRequest = p_cursor;
+	}
+
+	EScreenCursor ScreenOverlayRegistry::TakeCursorRequest()
+	{
+		const EScreenCursor requested = mCursorRequest;
+		mCursorRequest = EScreenCursor::Arrow;
+		return requested;
+	}
 }

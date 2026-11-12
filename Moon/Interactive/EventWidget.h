@@ -17,6 +17,14 @@ namespace MOON
 		unsigned int getWidgetId() const { return mWidgetId; }
 		const std::string& getName() const { return mName; }
 		bool isActived() const { return mActive; }
+		/** Whether this widget has the mouse right now - the cursor is on one of its handles, or it
+		 * is dragging one.
+		 *
+		 * A handle in the viewport is drawn over the model but is not part of it, so the scene
+		 * picking under the cursor still finds the face or the edge behind the handle. A click that
+		 * starts a drag must not also count as a pick of what is behind it: that would replace the
+		 * operation the handle belongs to with one offered by the face it happens to cover. */
+		virtual bool IsUsingMouse() const { return false; }
 		bool isVisible() const { return mVisible; }
 		void setActive(bool flag);
 		void setVisible(bool flag);

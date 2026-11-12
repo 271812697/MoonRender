@@ -4,6 +4,10 @@
 #include "editor/Command/command.h"
 #include "editor/UI/TaskPanel/TaskViewWidget.h"
 #include "editor/UI/TaskPanel/ExtrudeTaskDialog.h"
+#include "editor/UI/TaskPanel/PadInteraction.h"
+#include "editor/UI/TaskPanel/FilletInteraction.h"
+#include "editor/UI/TaskPanel/FilletTask.h"
+#include <memory>
 #include "editor/UI/TaskPanel/ThicknessTaskDialog.h"
 #include "editor/UI/TaskPanel/FilletTask.h"
 #include "editor/UI/TaskPanel/ChamferTask.h"
@@ -25,22 +29,40 @@
 #include <initializer_list>
 namespace MOON {
 
+	/** A pad opened from the task bar is built straight away, at its default size: its preview is
+	 * what the user is meant to see while the panel is open. The handles and the feature belong to
+	 * the interaction, which the panel then owns. */
+	static BaseTaskDialog* createPadPanel(ExtrudeType p_type)
+	{
+		auto pad = std::make_unique<PadInteraction>(p_type);
+		pad->Begin();
+		return new ExtrudeTaskDialog(std::move(pad));
+	}
+
+	/** A fillet opened from the task bar is built straight away, from the edges the viewport has
+	 * selected: its preview is what the user is meant to see while the panel is open. */
+	static BaseTaskDialog* createFilletPanel()
+	{
+		auto fillet = std::make_unique<FilletInteraction>();
+		fillet->Begin();
+		return new FilletTask(std::move(fillet));
+	}
+
 	BaseTaskDialog* createTaskDialog(const std::string name) {
 		if (name == "Pad") {
-			ExtrudeTaskDialog* extrude= new ExtrudeTaskDialog(nullptr, ExtrudeType::Additive);
-			return extrude;
+			return createPadPanel(ExtrudeType::Additive);
 		}
 		if (name == "Thickness") {
 			return new ThicknessTaskDialog();
 		}
 		if (name == "Fillet") {
-			return new FilletTask();
+			return createFilletPanel();
 		}
 		if (name == "Chamfer") {
 			return new ChamferTask();
 		}
 		if (name == "Pocket") {
-			return new ExtrudeTaskDialog(nullptr, ExtrudeType::Subtractive);
+			return createPadPanel(ExtrudeType::Subtractive);
 		}
 		if (name == "Revolve") {
 			return new RevolutionTask(RevolutionType::ReAdditive,nullptr);

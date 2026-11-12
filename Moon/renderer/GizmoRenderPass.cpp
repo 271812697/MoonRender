@@ -9,6 +9,7 @@
 #include "Interactive/Im3DRenderer.h"
 #include "Settings/DebugSetting.h"
 #include "Interactive/Widgets/RotateCenter.h"
+#include "Interactive/Widgets/SelectWidget.h"
 #include "Interactive/Widgets/Measurement.h"
 #include "Interactive/Widgets/ClipPlane.h"
 #include "Interactive/Widgets/Gizmo2DWidget.h"
@@ -50,6 +51,10 @@ class Editor::Rendering::GizmoRenderPass::GizmoRenderPassInternal {
 			mSelf(gizmoPass)
 		{
 			mWidgets["RotateCenter"] = new MOON::RotateCenter("RotateCenter");
+		// Selection is a widget of its own: the picking pass only answers queries, and this is
+		// the widget that turns the answer into the selection event the tree and the task panels
+		// listen to (see SelectWidget).
+		mWidgets["SelectWidget"] = new MOON::SelectWidget("SelectWidget");
 			mWidgets["Measure"] = new MOON::Measurement("Measure");
 			mWidgets["ClipPlane"] = new MOON::ClipPlane("ClipPlane");
 			// The in-plane gizmo: two axis arrows, a rectangular plane handle and a rotation ring.
