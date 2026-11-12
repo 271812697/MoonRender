@@ -12,6 +12,7 @@
 #include "core/ViewTool.h"
 #include "core/log.h"
 #include "feature/FilletFeature.h"
+#include "Interactive/Interactive/ExecuteCommand.h"
 #include "Interactive/Widgets/AxisTranslationWidget.h"
 #include "base/BoundBox.h"
 #include "App/GizmoHelper.h"
@@ -145,6 +146,64 @@ namespace MOON
 	void FilletInteraction::SetParamChangedCallback(std::function<void()> p_callback)
 	{
 		m_onParamChanged = std::move(p_callback);
+	}
+
+	void FilletInteraction::SetEdgesChangedCallback(std::function<void()> p_callback)
+	{
+		m_onEdgesChanged = std::move(p_callback);
+	}
+
+	void FilletInteraction::onSelectEdge(const std::vector<Part::TopoShape>& p_edge)
+	{
+		// The picked edge is added to the fillet, which is the same thing the panel's "Add from
+		// Selection" button does with the selection - without the extra click, since a pick is
+		// exactly what the user means by it. While the operation is only offered there is no
+		// panel and no list, and a pick there is the launcher's (it replaces the offer).
+		if (!m_started || m_feature == nullptr)
+		{
+			return;
+		}
+		Feature* base = nullptr;
+		std::vector<std::string> picked;
+		if (!ViewTool::getSelectedBasedFeature(base, picked) || base == nullptr)
+		{
+			return;
+		}
+		if (base != m_feature->getBaseFeature())
+		{
+			// A fillet runs along edges of the one shape it is built on: an edge of another
+			// feature is not something it could carry.
+			return;
+		}
+		std::vector<std::string> references = m_feature->getSubValues();
+		for (const std::string& reference : picked)
+		{
+			if (reference.rfind("Edge_", 0) != 0)
+			{
+				continue;  // a fillet runs along edges; a face or a whole object is not one
+			}
+			if (std::find(references.begin(), references.end(), reference) == references.end())
+			{
+				references.push_back(reference);
+			}
+		}
+		if (references.size() == m_feature->getSubValues().size())
+		{
+			return;  // nothing new was selected
+		}
+		// The mapped names stay with their reference: the ones already there are kept, the new
+		// edges start without any and are resolved - and named - on the next build.
+		std::vector<std::vector<std::string>> names = m_feature->getReferenceNames();
+		names.resize(references.size());
+		m_feature->setSubValues(references);
+		m_feature->setReferenceNames(names);
+		// The list first, the preview second: that is the order the panel's own button path has,
+		// and it leaves the list right even if the kernel refuses the new edge.
+		if (m_onEdgesChanged)
+		{
+			m_onEdgesChanged();
+		}
+		UpdatePreview();
 	}
 
 	void FilletInteraction::Attach(const Part::TopoShape& p_edge)

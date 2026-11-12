@@ -7,10 +7,10 @@
 #include "editor/UI/TaskPanel/PadInteraction.h"
 #include "editor/UI/TaskPanel/FilletInteraction.h"
 #include "editor/UI/TaskPanel/FilletTask.h"
+#include "editor/UI/TaskPanel/ChamferInteraction.h"
+#include "editor/UI/TaskPanel/ChamferTask.h"
 #include <memory>
 #include "editor/UI/TaskPanel/ThicknessTaskDialog.h"
-#include "editor/UI/TaskPanel/FilletTask.h"
-#include "editor/UI/TaskPanel/ChamferTask.h"
 #include "editor/UI/TaskPanel/RevolutionTask.h"
 #include "editor/UI/TaskPanel/DatumLineTask.h"
 #include "editor/UI/TaskPanel/DatumPlaneTask.h"
@@ -48,6 +48,15 @@ namespace MOON {
 		return new FilletTask(std::move(fillet));
 	}
 
+	/** The chamfer, the same way: built from the selected edges, previewed while the panel is
+	 * open. */
+	static BaseTaskDialog* createChamferPanel()
+	{
+		auto chamfer = std::make_unique<ChamferInteraction>();
+		chamfer->Begin();
+		return new ChamferTask(std::move(chamfer));
+	}
+
 	BaseTaskDialog* createTaskDialog(const std::string name) {
 		if (name == "Pad") {
 			return createPadPanel(ExtrudeType::Additive);
@@ -59,7 +68,7 @@ namespace MOON {
 			return createFilletPanel();
 		}
 		if (name == "Chamfer") {
-			return new ChamferTask();
+			return createChamferPanel();
 		}
 		if (name == "Pocket") {
 			return createPadPanel(ExtrudeType::Subtractive);

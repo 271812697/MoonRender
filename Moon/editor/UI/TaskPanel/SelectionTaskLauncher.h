@@ -19,6 +19,9 @@ namespace MOON
 	struct TaskOfferRule
 	{
 		const char* name;
+		/** The icon the ribbon shows for it (a qrc path, resolved through Theme::Icon so the SVG
+		 * follows the colour scheme). The switcher at the cursor is what it is for. */
+		const char* icon;
 		/** Whether the picked sub-shape offers this operation. */
 		bool (*matches)(const Part::TopoShape& p_picked);
 		/** The interaction, in its offered state (handles on the pick, nothing built). */
@@ -54,6 +57,12 @@ namespace MOON
 		 * selected and an offer standing on the old pick has nothing to stand on. */
 		void onSelectionCleared();
 
+		/** Asks which of the operations the pick offers is meant: a row of icon buttons at the
+		 * cursor, the same icons the ribbon shows.
+		 * @return false when the user dismissed it. */
+		bool chooseRuleAtCursor(const std::vector<const TaskOfferRule*>& p_rules,
+			const TaskOfferRule*& p_chosen);
+
 		TaskSession& m_session;
 		TaskViewWidget& m_host;
 		/** The registrations, kept whole: AddObserver hands back the tag and the command it
@@ -67,5 +76,14 @@ namespace MOON
 		/** The pick this has already acted on, for the same reason: the same selection arrives
 		 * here again when the dispatch starts over. */
 		size_t m_handledPick = 0;
+		/** The operation this user picked last for a face and for an edge.
+		 *
+		 * A pick can offer more than one operation (a face offers a pad and a thickness, an edge a
+		 * fillet and a chamfer), and there is no way to tell which one is meant from the geometry
+		 * alone. The switcher asks, and the answer is remembered per kind, so the common case stays
+		 * a single click: the menu only appears when the pick really has alternatives.
+		 */
+		const char* m_lastFaceRule = nullptr;
+		const char* m_lastEdgeRule = nullptr;
 	};
 }

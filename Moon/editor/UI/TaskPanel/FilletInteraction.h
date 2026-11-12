@@ -53,8 +53,16 @@ namespace MOON
 		void UpdatePreview();
 		/** A handle was dragged and the interaction already took the value. */
 		void SetParamChangedCallback(std::function<void()> p_callback);
+		/** The set of edges changed - an edge was picked while the panel was open and the
+		 * interaction added it - so the panel's list has to be read again. */
+		void SetEdgesChangedCallback(std::function<void()> p_callback);
 
 	private:
+		/** An edge was picked while the task is open: it is added to the fillet, the same thing
+		 * the panel's "Add from Selection" does with the selection. Nothing is added while the
+		 * operation is only offered - there is no panel and no list yet. */
+		void onSelectEdge(const std::vector<Part::TopoShape>& p_edge) override;
+
 		/** A handle was dragged. Before the fillet exists this is what starts it.
 		 *
 		 * One entry per handle: the radius is the length of the arrow that was dragged, and the
@@ -105,5 +113,6 @@ namespace MOON
 		ExecuteCommandPair m_lengthObserver2{ 0, nullptr };
 		std::function<void()> m_onBegin;
 		std::function<void()> m_onParamChanged;
+		std::function<void()> m_onEdgesChanged;
 	};
 }

@@ -18,6 +18,7 @@
 #include "feature/ExtrudeFeature.h"
 #include "feature/ThicknessFeature.h"
 #include "feature/FilletFeature.h"
+#include "feature/ChamferFeature.h"
 #include "feature/RevolveFeature.h"
 #include "feature/DatumLineFeature.h"
 #include "feature/DatumPlaneFeature.h"
@@ -33,6 +34,8 @@
 #include "editor/UI/TaskPanel/TaskSession.h"
 #include "editor/UI/TaskPanel/PadInteraction.h"
 #include "editor/UI/TaskPanel/FilletInteraction.h"
+#include "editor/UI/TaskPanel/ChamferInteraction.h"
+#include "editor/UI/TaskPanel/ChamferTask.h"
 
 
 namespace MOON {
@@ -65,6 +68,14 @@ namespace MOON {
             auto interaction = std::make_unique<FilletInteraction>(fillet);
             interaction->Begin();
             return new FilletTask(std::move(interaction));
+        }
+        ChamferFeature* chamfer = dynamic_cast<ChamferFeature*>(feature);
+        if (chamfer) {
+            // The chamfer, the same way: its interaction is the one the feature already is and
+            // the panel only edits it.
+            auto interaction = std::make_unique<ChamferInteraction>(chamfer);
+            interaction->Begin();
+            return new ChamferTask(std::move(interaction));
         }
         RevolveFeature* revolve = dynamic_cast<RevolveFeature*>(feature);
         if (revolve) {

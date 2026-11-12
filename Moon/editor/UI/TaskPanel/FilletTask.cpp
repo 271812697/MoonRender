@@ -60,10 +60,13 @@ namespace MOON {
         // The handles are the interaction's; a drag already put the value on the feature, the
         // panel only has to show it.
         m_fillet->SetParamChangedCallback([this]() { refreshRadius(); });
+        // An edge picked while the panel is open is added to the fillet by the interaction; the
+        // list of edges is what follows.
+        m_fillet->SetEdgesChangedCallback([this]() { refreshReferenceRows(); });
 
         // The edges the fillet is applied to, listed with the buttons that take them from
         // the selection - the same shape the sweep's path list has. An edge picked while
-        // the panel is open lands here as well (see onSelectEdge).
+        // the panel is open lands here as well (see FilletInteraction::onSelectEdge).
         auto* references = new QWidget(this);
         auto* referencesLayout = new QVBoxLayout(references);
         referencesLayout->setContentsMargins(0, 0, 0, 0);
