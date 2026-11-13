@@ -1,4 +1,4 @@
-#include "Interactive/Widgets/Gizmo3DWidget.h"
+﻿#include "Interactive/Widgets/Gizmo3DWidget.h"
 #include "Interactive/Widgets/GizmoGeometry.h"
 #include "Interactive/Im3DRenderer.h"
 #include "Interactive/MathUtil/MathUtil.h"
@@ -435,7 +435,7 @@ namespace MOON
 
 		if (mImInvoke)
 		{
-			this->InvokeEvent(Gizmo3DEvent::TransformChange);
+			this->InvokeEvent(Gizmo3DEvent::Gizmo3DTransformChange);
 		}
 	}
 
@@ -501,7 +501,7 @@ namespace MOON
 		// contract AxisTranslationWidget has.
 		if (!mImInvoke)
 		{
-			this->InvokeEvent(Gizmo3DEvent::TransformChange);
+			this->InvokeEvent(Gizmo3DEvent::Gizmo3DTransformChange);
 		}
 	}
 
