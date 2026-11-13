@@ -20,6 +20,7 @@
 #include "editor/UI/TaskPanel/FeatureInteraction.h"
 #include "editor/UI/TaskPanel/PadInteraction.h"
 #include "editor/UI/TaskPanel/ExtrudeTaskDialog.h"
+#include "editor/UI/TaskPanel/SketchTaskDialog.h"
 #include "Interactive/Interactive/ExecuteCommand.h"
 #include "editor/UI/TaskPanel/FilletInteraction.h"
 #include "editor/UI/TaskPanel/FilletTask.h"
@@ -30,8 +31,9 @@ namespace MOON
 {
 	namespace
 	{
-		/** A planar face is a profile a pad can be grown from. */
-		bool offersPad(const Part::TopoShape& p_picked)
+		/** A planar face is a profile: something to grow material from, or a shape to cut into.
+		 * Which of the two is not something the face says. */
+		bool offersPlanarFace(const Part::TopoShape& p_picked)
 		{
 			if (p_picked.isNull() || p_picked.getShape().ShapeType() != TopAbs_FACE)
 			{
@@ -44,6 +46,11 @@ namespace MOON
 		std::unique_ptr<FeatureInteraction> makePad()
 		{
 			return std::make_unique<PadInteraction>(ExtrudeType::Additive);
+		}
+
+		std::unique_ptr<FeatureInteraction> makePocket()
+		{
+			return std::make_unique<PadInteraction>(ExtrudeType::Subtractive);
 		}
 
 		/** An edge of a body is what a fillet or a chamfer runs along. */
@@ -62,15 +69,28 @@ namespace MOON
 			return std::make_unique<ChamferInteraction>();
 		}
 
+		/** A sketch has no interaction: nothing to drag before it, so its panel is the whole of
+		 * the task. The panel reads the picked face itself and builds the sketch on its plane -
+		 * the same thing the task bar's "Create Sketch" does. */
+		BaseTaskDialog* makeSketchPanel(std::unique_ptr<FeatureInteraction>)
+		{
+			return new SketchTaskDialog();
+		}
+
 		/** The operations a pick can offer, in the order they are tried.
 		 *
 		 * A row is all it takes: what the operation accepts, how its interaction is made in the
-		 * offered state, and the panel that then edits it. An edge offers two rows, which is what
+		 * offered state, and the panel that then edits it. A planar face offers three rows (grow
+		 * material, cut material, sketch on it) and an edge two (fillet, chamfer), which is what
 		 * the switcher at the cursor is for; anything else in the picking path is untouched.
 		 */
 		const TaskOfferRule kOfferRules[] = {
 			{ "Pad", ":/widgets/icons/model32/PartDesign_Pad.svg",
-				offersPad, makePad, &MakePadPanel },
+				offersPlanarFace, makePad, &MakePadPanel },
+			{ "Pocket", ":/widgets/icons/model32/PartDesign_Pocket.svg",
+				offersPlanarFace, makePocket, &MakePadPanel },
+			{ "Sketch", ":/widgets/icons/Sketcher_NewSketch.svg",
+				offersPlanarFace, nullptr, &makeSketchPanel },
 			{ "Fillet", ":/widgets/icons/model32/PartDesign_Fillet.svg",
 				offersEdge, makeFillet, &MakeFilletPanel },
 			{ "Chamfer", ":/widgets/icons/model32/PartDesign_Chamfer.svg",
@@ -203,7 +223,17 @@ namespace MOON
 
 		CORE_INFO("[SelectionTaskLauncher] offering '{0}' on the picked shape", chosen->name);
 		m_starting = true;
-		m_session.Offer(chosen->makeInteraction(), shapes[1], chosen->panel);
+		if (chosen->makeInteraction == nullptr)
+		{
+			// A panel-only operation: there is no handle to drag and nothing to build first, so
+			// the panel is what the answer opens, straight away - the task bar's way of opening
+			// a sketch.
+			m_host.setTaskDialog(chosen->panel(nullptr));
+		}
+		else
+		{
+			m_session.Offer(chosen->makeInteraction(), shapes[1], chosen->panel);
+		}
 		m_starting = false;
 		// A pick that is replaced forgets the old one, so that picking the same shape again once
 		// the offer is gone offers it again - SelectionManager does not repeat a selection that

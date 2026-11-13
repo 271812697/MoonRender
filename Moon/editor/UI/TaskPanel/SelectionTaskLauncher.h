@@ -24,9 +24,12 @@ namespace MOON
 		const char* icon;
 		/** Whether the picked sub-shape offers this operation. */
 		bool (*matches)(const Part::TopoShape& p_picked);
-		/** The interaction, in its offered state (handles on the pick, nothing built). */
+		/** The interaction, in its offered state (handles on the pick, nothing built) - or null
+		 * for an operation that has none: a sketch on the picked face is its panel, there is
+		 * nothing to drag before it. */
 		std::unique_ptr<FeatureInteraction>(*makeInteraction)();
-		/** Its panel, taking the interaction over (see MakePadPanel). */
+		/** Its panel, taking the interaction over (see MakePadPanel) - or, when there is no
+		 * interaction, making itself from the pick. */
 		TaskSession::PanelFactory panel;
 	};
 
@@ -78,10 +81,10 @@ namespace MOON
 		size_t m_handledPick = 0;
 		/** The operation this user picked last for a face and for an edge.
 		 *
-		 * A pick can offer more than one operation (a face offers a pad and a thickness, an edge a
-		 * fillet and a chamfer), and there is no way to tell which one is meant from the geometry
-		 * alone. The switcher asks, and the answer is remembered per kind, so the common case stays
-		 * a single click: the menu only appears when the pick really has alternatives.
+		 * A pick can offer more than one operation - a planar face a pad and a pocket, an edge a
+		 * fillet and a chamfer - and there is no way to tell which one is meant from the geometry
+		 * alone: a face is a profile whether the user wants to add material or cut it away. The
+		 * switcher asks, and the answer is remembered per kind.
 		 */
 		const char* m_lastFaceRule = nullptr;
 		const char* m_lastEdgeRule = nullptr;
