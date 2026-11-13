@@ -58,7 +58,7 @@ namespace MOON {
 		edgeChild.SetParent(*this);
 		vertexChild.SetParent(*this);
 		AddComponent<Core::ECS::Components::CTopoShape>();
-		topoShape = &GetComponent<Core::ECS::Components::CTopoShape>()->GetTopoShape();
+		
 		faceChild.AddComponent<Core::ECS::Components::CModelRenderer>();
 		faceChild.AddComponent<Core::ECS::Components::CMaterialRenderer>();
 		faceChild.AddComponent<Core::ECS::Components::CBatchMeshTriangle>();
@@ -68,6 +68,7 @@ namespace MOON {
 		vertexChild.AddComponent<Core::ECS::Components::CModelRenderer>();
 		vertexChild.AddComponent<Core::ECS::Components::CMaterialRenderer>();
 		vertexChild.AddComponent<Core::ECS::Components::CBatchMeshPoint>();
+		topoShape = &GetComponent<Core::ECS::Components::CTopoShape>()->GetTopoShape();
 		
 		
 		auto faceModel = new ::Rendering::Resources::Model(p_name + std::string("_faceModel")+std::to_string(this->GetID()));

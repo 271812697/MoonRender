@@ -1,4 +1,4 @@
-
+﻿
 #include "TopoShape.h"
 #include "SketcherFeature.h"
 #include "core/log.h"
@@ -24,6 +24,7 @@ namespace MOON {
 	};
     SketcherFeature::SketcherFeature(const std::string& p_name) :ProfileFeature(p_name, "Sketcher"),mInternal(new Internal(this))
 	{
+
 	}
 	SketcherObj* SketcherFeature::getSketcherObj()
 	{

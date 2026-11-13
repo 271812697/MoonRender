@@ -1,4 +1,4 @@
-#include <tinyxml2.h>
+﻿#include <tinyxml2.h>
 #include <tracy/Tracy.hpp>
 #include <Core/ECS/Actor.h>
 #include <map>
@@ -18,6 +18,7 @@
 #include "renderer/SceneView.h"
 #include "editor/View/sceneview/viewerwidget.h"
 #include "core/JobSystem.h"
+#include "feature/SketcherFeature.h"
 #include "Tools.h"
 #include <TopoDS.hxx>
 #include <BRep_Tool.hxx>
@@ -204,11 +205,12 @@ namespace Core::ECS::Components
 	{
 		::Rendering::Data::MaterialInstance* material = FaceMaterialOf(owner);
 		if (material == nullptr) {
-			// The render anchors are not up yet; TopoActor() calls this again once
-			// they are, and the colour is kept until then.
 			return;
 		}
 		material->SetProperty("u_Albedo", mInternal->color);
+        if (fabs(mInternal->color.w - 1.0) > FLT_EPSILON) {
+            material->SetBlendMode(::Rendering::Settings::EBlendMode::BLEND_TRANSPARENT);
+        }
 	}
 
     void CTopoShape::switchHighLightMode(HighLightOption::Mode mode)
@@ -291,95 +293,15 @@ namespace Core::ECS::Components
                 mInternal->childMeshInfos.clear();
                 std::vector<Data::ComplexGeoData::Domain> domains;
                 {
-                    
                     ZoneScopedN("GetDomain");
                     mInternal->mTopoShape.getDomainfaces(domains, mInternal->mTopoShape.getAccuracy());
-                    //the follow code will crash in release mode
-                    /*
-                    
-                    static MOON::System::JobSystem::Context locctx;
-                    TopoDS_Shape shape=mInternal->mTopoShape.getShape();
-                    if (!shape.IsNull()) {
-                        auto defaultAngularDeflection = [](double linearTolerance)
-                            {
-                                // Default OCC angular deflection is 0.5 radians, or about 28.6 degrees.
-                                // That is a bit coarser than necessary for performance, so we default to at
-                                // most 0.1 radians, or 5.7 degrees. We also do not go finer than 0.005, or
-                                // roughly 0.28 degree angular resolution, to avoid performance tanking
-                                // completely at very fine resolutions.
-                                return std::min(0.1, linearTolerance * 5 + 0.005);
-                            };
-
-                         BRepMesh_IncrementalMesh aMesh(shape, mInternal->mTopoShape.getAccuracy(),
-                                                 Standard_False,
-                                                
-                                                defaultAngularDeflection(mInternal->mTopoShape.getAccuracy()),
-                                                 false);
-                        
-
-                         TopTools_IndexedMapOfShape faceMap;
-                         TopExp::MapShapes(shape, TopAbs_FACE, faceMap); 
-                         std::size_t countFaces = faceMap.Extent();
-                         domains.resize(countFaces);
-                         auto lamda = [&](JobDispatchArgs arg) {
-                             int i = arg.jobIndex + 1;
-                             const TopoDS_Face& face = TopoDS::Face(faceMap(i));
-                             std::vector<gp_Pnt> points;
-                             std::vector<gp_Vec> normals;
-                             std::vector<Poly_Triangle> facets;
-                             if (!Part::Tools::getTriangulation(face, points, normals, facets)) {
-                                 // For a face that cannot be meshed append an empty domain.
-                                 // It's important for some algorithms (e.g. color mapping) that the numbers of
-                                 // faces and domains match
-                                 Data::ComplexGeoData::Domain domain;
-                                 domains[arg.jobIndex]=domain;
-                             }
-                             else {
-                                 Data::ComplexGeoData::Domain domain;
-                                 // copy the points
-                                 domain.points.reserve(points.size());
-                                 domain.normals.reserve(points.size());
-                                 for (const auto& it : points) {
-                                     Standard_Real X, Y, Z;
-                                     it.Coord(X, Y, Z);
-                                     domain.points.emplace_back(X, Y, Z);
-                                 }
-                                 for (const auto& it : normals) {
-                                     Standard_Real X, Y, Z;
-                                     it.Coord(X, Y, Z);
-                                     domain.normals.emplace_back(X, Y, Z);
-                                 }
-                                 // copy the triangles
-                                 domain.facets.reserve(facets.size());
-                                 for (const auto& it : facets) {
-                                     Standard_Integer N1, N2, N3;
-                                     it.Get(N1, N2, N3);
-
-                                     Data::ComplexGeoData::Facet tria;
-                                     tria.I1 = N1;
-                                     tria.I2 = N2;
-                                     tria.I3 = N3;
-                                     domain.facets.push_back(tria);
-                                 }
-
-                                 domains[arg.jobIndex]=domain;
-                             }
-
-                          };
-                         MOON::System::JobSystem::Dispatch(locctx, countFaces, 10, lamda);
-                         MOON::System::JobSystem::Wait(locctx);
-                    }                    
-                    */
-
                 }
                
                 std::vector<::Rendering::Geometry::VertexBVH> faceVertices;
                 std::vector<unsigned int>indices;
-
                 std::vector<Maths::FVector4>domainColor;
                 unsigned int vertexOffset = 0;
                 unsigned int indexOffset = 0;
-                
                 std::vector<::Rendering::Geometry::bbox>domainBoxs;
                 std::vector<uint32_t>domainRange;
                 auto faceChild = owner.GetChild("AllFaces");
@@ -390,8 +312,6 @@ namespace Core::ECS::Components
                 std::vector<std::pair<int,int>>domainVertexNum;
                 std::vector<std::pair<int, int>>domainIndexNum; 
                 int numDomains =0 ;
-                //int vertexOffset = 0;
-                //int indexOffset = 0;
                 ZoneScopedN("Batch");
                 for (int i = 0; i < domains.size(); i++) {
                     if (domains[i].facets.size() > 0) {
@@ -449,8 +369,6 @@ namespace Core::ECS::Components
                     MOON::System::JobSystem::Dispatch(mergeCtx, numDomains, 10, lamda);
                     MOON::System::JobSystem::Wait(mergeCtx);
                 }
-
-
                 ::Rendering::Resources::Mesh* faceMesh = nullptr;
                 {
                     ZoneScopedN("faceMesh");
@@ -470,12 +388,6 @@ namespace Core::ECS::Components
                 model->AddMesh(faceMesh);
                 faceMesh->ComputeBoundingSphereAndBox();
                 model->computeBoxAndShpere();
-                //auto computeBox =[=](JobDispatchArgs arg) {
-                //    faceMesh->ComputeBoundingSphereAndBox();
-                //    model->computeBoxAndShpere();
-                //};
-                //static MOON::System::JobSystem::Context computeBoxCtx;
-                //MOON::System::JobSystem::Execute(computeBoxCtx,computeBox);
 
                 //these two tex have leaks!!!!
                 //domain colors Tex
@@ -576,7 +488,6 @@ namespace Core::ECS::Components
                         MOON::System::JobSystem::Wait(ctx);
                     }
                 }
-
                 //build lines
                 std::vector<::Rendering::Geometry::VertexBVH> p_vertices;
                 std::vector<uint32_t>lineIndex;
@@ -755,6 +666,16 @@ namespace Core::ECS::Components
             updateChildMesh();
         }
 	}
+
+    void CTopoShape::OnStart()
+    {
+        //MOON::SketcherFeature* sketch = dynamic_cast<MOON::SketcherFeature*>(&owner);
+       // owner.GetTag() == "Sketcher";
+        if (owner.GetTag() == "Sketcher") {
+            mInternal->color = Maths::FVector4(0,1,1,0.5);
+            ApplyColor();
+        }
+    }
 
     void CTopoShape::updateChildBuffer()
     {
