@@ -128,6 +128,12 @@ void Core::Rendering::SkyboxRenderPass::Draw(::Rendering::Data::PipelineState p_
 		m_clearMaterial.SetProperty("uClearColor", mSetting.clearColor);
 		m_clearMaterial.SetProperty("uTopColor", mSetting.topColor);
 		m_clearMaterial.SetProperty("uBottomColor", mSetting.bottomColor);
+		// Where the ramp sits on the dome, and how strong its corners are darkened (see
+		// ClearBackground.shader and SkyBoxSetting).
+		m_clearMaterial.SetProperty("uGradientCenter", mSetting.gradientCenter);
+		m_clearMaterial.SetProperty("uGradientSpread", mSetting.gradientSpread);
+		m_clearMaterial.SetProperty("uGradientCurve", mSetting.gradientCurve);
+		m_clearMaterial.SetProperty("uGradientVignette", mSetting.gradientVignette);
 		m_renderer.Present(m_clearMaterial);
 	}
 }

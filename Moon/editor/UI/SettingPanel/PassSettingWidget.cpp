@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include "core/SceneSystem/BvhService.h"
 #include "editor/UI/SettingPanel/PassSettingWidget.h"
 #include "Core/Global/ServiceLocator.h"
@@ -113,8 +113,13 @@ namespace MOON {
 	public:
 		SkyBoxPassComponent(::Core::Rendering::SkyboxRenderPass* p) :RenderPassComponent(p) {
 			mProperties.push_back(new EnumProperty("BackGround mode", this));
-			mProperties.push_back(new ColorPickerProperty("Top Color", this));
-			mProperties.push_back(new ColorPickerProperty("Bottom Color", this));
+			// The two ends of the dome gradient: the colour overhead and the colour below.
+			mProperties.push_back(new ColorPickerProperty("Zenith Color", this));
+			mProperties.push_back(new ColorPickerProperty("Ground Color", this));
+			mProperties.push_back(new SliderFloatProperty("Gradient Center", this, 0.0f, 1.0f));
+			mProperties.push_back(new SliderFloatProperty("Gradient Spread", this, 0.05f, 2.0f));
+			mProperties.push_back(new SliderFloatProperty("Gradient Curve", this, 0.2f, 4.0f));
+			mProperties.push_back(new SliderFloatProperty("Vignette", this, 0.0f, 1.0f));
 			mProperties.push_back(new ColorPickerProperty("Clear Color", this));
 			mProperties.push_back(new TextureProperty("SkyBox Texture", this));
 			//mProperties.push_back(new SliderFloatProperty("SSAO Bias", this, 0.001f, 10.0f));
@@ -128,14 +133,26 @@ namespace MOON {
 				QList<QString>list = {"Gradient"  ,"SkyBox","PureColor"};
 				return QVariant::fromValue(list);
 			}
-			else if (propertyName == "Top Color") {
+			else if (propertyName == "Zenith Color") {
 				
 				auto v = skypass->GetSetting().topColor;
 				return QVariant::fromValue(QColor(v.x * 255, v.y * 255, v.z * 255, v.w * 255));
 			}
-			else if (propertyName == "Bottom Color") {
+			else if (propertyName == "Ground Color") {
 				auto v = skypass->GetSetting().bottomColor;
 				return QVariant::fromValue(QColor(v.x * 255, v.y * 255, v.z * 255, v.w * 255));
+			}
+			else if (propertyName == "Gradient Center") {
+				return QVariant::fromValue(skypass->GetSetting().gradientCenter);
+			}
+			else if (propertyName == "Gradient Spread") {
+				return QVariant::fromValue(skypass->GetSetting().gradientSpread);
+			}
+			else if (propertyName == "Gradient Curve") {
+				return QVariant::fromValue(skypass->GetSetting().gradientCurve);
+			}
+			else if (propertyName == "Vignette") {
+				return QVariant::fromValue(skypass->GetSetting().gradientVignette);
 			}
 			else if (propertyName == "Clear Color") {
 				auto v = skypass->GetSetting().clearColor;
@@ -154,13 +171,25 @@ namespace MOON {
 			else if (propertyName == "BackGround mode") {
 				skypass->GetSetting().mode = static_cast<::Core::Rendering::SkyMode>(value.value<int>());
 			}
-			else if (propertyName == "Top Color") {
+			else if (propertyName == "Zenith Color") {
 				auto color = value.value<QColor>();
 				skypass->GetSetting().topColor = Maths::FVector4{ color.red() / 255.0f,color.green() / 255.0f,color.blue() / 255.0f,color.alpha() / 255.0f };
 			}
-			else if (propertyName=="Bottom Color") {
+			else if (propertyName=="Ground Color") {
 				auto color = value.value<QColor>();
 				skypass->GetSetting().bottomColor = Maths::FVector4{ color.red() / 255.0f,color.green() / 255.0f,color.blue() / 255.0f,color.alpha() / 255.0f };
+			}
+			else if (propertyName == "Gradient Center") {
+				skypass->GetSetting().gradientCenter = value.toFloat();
+			}
+			else if (propertyName == "Gradient Spread") {
+				skypass->GetSetting().gradientSpread = value.toFloat();
+			}
+			else if (propertyName == "Gradient Curve") {
+				skypass->GetSetting().gradientCurve = value.toFloat();
+			}
+			else if (propertyName == "Vignette") {
+				skypass->GetSetting().gradientVignette = value.toFloat();
 			}
 			else if (propertyName == "Clear Color") {
 				auto color = value.value<QColor>();
