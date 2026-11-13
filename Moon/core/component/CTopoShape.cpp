@@ -1,4 +1,4 @@
-﻿#include <tinyxml2.h>
+#include <tinyxml2.h>
 #include <tracy/Tracy.hpp>
 #include <Core/ECS/Actor.h>
 #include <map>
@@ -76,10 +76,12 @@ namespace Core::ECS::Components
         HighLightOption highOption;
 		/** What GetColor() answers while there is no material to read the colour
 		 * back from; SetColor() keeps it up to date (see ApplyColor). The default used to be
-		 * FilamentPBR's #b8b8b8 (Qt-Filament's MaterialPreview default); under the viewport's
-		 * light rig that read as a mid grey, so a new shape starts from white instead, the same
-		 * base the CAD previews and the reference cups use. */
-		Maths::FVector4 color{ 1.0f, 1.0f, 1.0f, 1.0f };
+		 * FilamentPBR's #b8b8b8 (Qt-Filament's MaterialPreview default), which reads as a mid
+		 * grey under the viewport's rig, and then plain white, which reads as a warm-neutral
+		 * light grey - both miss the cool cast a CAD body has in the reference viewports.
+		 * #DAE2EE (a light grey a touch towards blue, B - R = +20) is what lands on their lit
+		 * faces (~#A4ADB8) under the same rig. */
+		Maths::FVector4 color{ 0.855f, 0.886f, 0.933f, 1.0f };
 		CTopoShape* mSelf = nullptr;
 		Part::TopoShape mTopoShape;
         std::vector<std::pair<int, int>>childMeshInfos;
