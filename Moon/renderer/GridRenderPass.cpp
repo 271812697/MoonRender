@@ -135,7 +135,10 @@ void Editor::Rendering::GridRenderPass::Draw(::Rendering::Data::PipelineState p_
 		}
 	};
 	m_mirroFbo.Bind();
-	m_renderer.Clear(true, true, false, Maths::FVector4(1.0, 1.0, 1.0 ,0.2));
+	// The alpha is the coverage mask the floor shader reads: an object writes its own alpha
+	// where it draws, everything else keeps the 0 cleared here, and the floor uses that to
+	// draw itself only where the mirror actually holds something (see Grid.shader).
+	m_renderer.Clear(true, true, false, Maths::FVector4(1.0, 1.0, 1.0, 0.0));
 	drawMirroModels(filteredDrawables.opaques | std::views::values,false);
 	drawMirroModels(filteredDrawables.lines | std::views::values, false);
 	drawMirroModels(filteredDrawables.transparents | std::views::values,true);
@@ -192,7 +195,7 @@ void Editor::Rendering::GridRenderPass::Draw(::Rendering::Data::PipelineState p_
 	model = Maths::FMatrix4::Transpose(model);
 	const auto& color = m_mirroFbo.GetAttachment<::Rendering::HAL::GLTexture>(::Rendering::Settings::EFramebufferAttachment::COLOR, 0);
 	const auto& shadow = m_mirroShadowFbo[0].GetAttachment<::Rendering::HAL::GLTexture>(::Rendering::Settings::EFramebufferAttachment::COLOR, 0);
-	m_gridMaterial.SetProperty("u_Color", gridDescriptor.gridColor*0.7);
+	m_gridMaterial.SetProperty("u_Color", gridDescriptor.gridColor*0.7f);
 	m_gridMaterial.SetProperty("u_PlaneTransform", model);
 	m_gridMaterial.SetProperty("u_MirrorTex", &color.value());
 	m_gridMaterial.SetProperty("u_MirrorShadowTex", &shadow.value());
