@@ -10,7 +10,6 @@
 #include "Core/ECS/Components/CBatchMeshTriangle.h"
 #include "Core/ECS/Components/CBatchMeshLine.h"
 #include "Core/ResourceManagement/ModelManager.h"
-#include "editor/View/sceneview/viewerwidget.h"
 #include "core/component/CTopoShape.h"
 #include <Core/Global/ServiceLocator.h>
 #include <Core/SceneSystem/Scene.h>

@@ -8,7 +8,7 @@
 #include "Core/ECS/Components/CBatchMeshLine.h"
 #include "Core/ECS/Components/CBatchMeshPoint.h"
 #include "Core/ResourceManagement/ModelManager.h"
-#include "editor/View/sceneview/viewerwidget.h"
+#include "editor/UI/TreeViewPanel/treesync.h"
 #include "Core/Global/ServiceLocator.h"
 #include "renderer/Context.h"
 #include "core/component/CTopoShape.h"
@@ -115,7 +115,7 @@ namespace MOON {
 			topoShape->ApplyColor();
 		}
 		if (addToTree) {
-			GetViewerWidget.addActorToTreeView(this);
+			GetTreeViewSync.Add(this);
 		}
 	}
 
@@ -146,7 +146,7 @@ namespace MOON {
 		// The row the tree shows this actor as goes with it: a row outlives its actor
 		// otherwise, and whoever reads the actor off such a row - renaming it, moving it,
 		// deleting the chain it belongs to - would be reading freed memory.
-		GetViewerWidget.removeActorFromTreeView(this);
+		GetTreeViewSync.Remove(this);
 		if (m_scene) {
 			m_scene->RemoveActor(this);
 		}		

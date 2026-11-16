@@ -124,8 +124,8 @@
 
 **现状差距**
 
-- 已经有**独立的共享 GL 上下文**（`QtGLContextHost`，`ViewerWidget::CreateRenderContext`），但绘制仍在
-  GUI 线程的 `ViewerWidget::paintGL` 里；
+- 已经有**独立的共享 GL 上下文**（`QtGLContextHost`，由 `Editor::Core::RenderModuleHost` 建立），绘制也在
+  那个上下文里（`ViewportFrame::Render`，窗口只负责粘贴），但仍跑在 GUI 线程上；
 - 没有命令队列，资源是裸指针（`Material*` / `Mesh*` / `Model*`），没有句柄层；
 - 已经存在"跨线程发 GL 调用"的实例：STEP 导入在 JobSystem 工作线程里跑
   `Feature::makeDone()` → `CTopoShape::discretizationShape()` → `new Mesh` → 顶点缓冲上传

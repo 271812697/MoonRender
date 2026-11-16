@@ -288,8 +288,7 @@ void Rendering::Overlay::Im2DRender::NewFrame()
 	mInternal->SyncFontAtlases();
 }
 
-void Rendering::Overlay::Im2DRender::EndFrame(
-	::Rendering::Context::Driver& p_driver, uint16_t p_viewWidth, uint16_t p_viewHeight)
+void Rendering::Overlay::Im2DRender::EndFrame(uint16_t p_viewWidth, uint16_t p_viewHeight)
 {
 	// Closes the run the last primitive opened; without it the tail of the frame is dropped.
 	mInternal->m_drawList.AddDrawCommand();

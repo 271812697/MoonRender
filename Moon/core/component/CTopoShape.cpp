@@ -16,7 +16,7 @@
 #include "Interactive/Im3DRenderer.h"
 
 #include "renderer/SceneView.h"
-#include "editor/View/sceneview/viewerwidget.h"
+#include "editor/UI/TreeViewPanel/treesync.h"
 #include "core/JobSystem.h"
 #include "feature/SketcherFeature.h"
 #include "Tools.h"
@@ -571,7 +571,7 @@ namespace Core::ECS::Components
             }
             // The topology actors (Solid/Shell/Face_*/Edge_*) were rebuilt;
             // ask the TreeView to refresh so the new hierarchy is visible.
-            GetViewerWidget.refreshTreeView();
+            GetTreeViewSync.Refresh();
         }
         // The vertices are a batch of their own, on the "AllVertices" render child:
         // none of the topology tree is rebuilt for them, which is why they are not

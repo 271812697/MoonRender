@@ -173,26 +173,31 @@ newFrame() → 首次调用 createDeviceObjects()（编译 shader、建 VAO/VBO�
 
 ## 5. 帧循环设计
 
-### 5.1 主视口（ViewerWidget）
+### 5.1 主视口（ViewerWidget → ViewportFrame / ViewportOverlay）
 
-编排位于 [viewerwidget.cpp](../Moon/editor/View/sceneview/viewerwidget.cpp) 的 `paintGL`：
+窗口层现在是一个纯 Qt 外壳 [viewerwidget.cpp](../Moon/editor/View/sceneview/viewerwidget.cpp)：只负责尺寸、事件转发，以及在**窗口自己的上下文**里把模块的帧 blit 进默认帧缓冲（[FramePaster](../MoonRender/include/Rendering/View/FramePaster.h)）。一帧的编排在 [viewportframe.cpp](../Moon/editor/View/sceneview/viewportframe.cpp)，叠加层在 [viewportoverlay.cpp](../Moon/editor/View/sceneview/viewportoverlay.cpp)，两者都跑在渲染模块自己的上下文上：
 
 ```
-paintGL()
-  ├─ ImRenderer::newImgui()          // QtImGui::newFrame(imref) + ImPlot::SetCurrentContext
-  ├─ Im2DRender::newFrame()          // MOON 迷你 imgui 2D 覆盖层
-  ├─ ImRenderer::newFrame(mSceneView)// 3D 即时绘制（网格、坐标轴、Gizmo 等）
-  ├─ mSceneView->Update / Render / Present
-  ├─ debugImgui()                    // ImGui::Image 显示 G-buffer 纹理（调试开关）
-  ├─ Im2DRender::endFrame()
-  └─ ImRenderer::endImgui()          // ImGui::Render() + QtImGui::render(imref)
+ViewerWidget::paintGL()
+  ├─ CallBackManager::exectue()                  // 上一帧排队的编辑操作
+  ├─ ViewportFrame::Render()                     // 以下都在渲染模块的上下文里
+  │    ├─ ViewportOverlay::BeginFrame()          // ImRenderer::newImgui() + Im2DRender::NewFrame()
+  │    │                                         // + ImRenderer::newFrame(view)（Gizmo pass 开启时）
+  │    ├─ DocumentSession::FlushPendingRead()    // 打开的文件在这里真正被读
+  │    ├─ SceneView::Update()                    // 含待处理的 BuildBvh + FitToFocus
+  │    ├─ TreeViewSync::Flush()                  // 场景树的增删改，每帧一次
+  │    ├─ SceneView::Render(overlay)             // 帧内回调：ViewportOverlay::EndFrame 画 G-buffer /
+  │    │                                         // FPS 统计，然后 Im2DRender::EndFrame + endImgui
+  │    └─ DoneCurrent()
+  └─ makeCurrent() + FramePaster::Paste()        // 回到窗口上下文贴图
 ```
 
 要点：
 
-- Dear ImGui 作为**最后一层覆盖**渲染在默认帧缓冲上（`mSceneView->Present()` 之后）；
-- `ImGui::Render()` 由应用调用，`QtImGui::render()` 只负责把 `ImDrawData` 画出来；
-- 3D 覆盖层的拾取/交互（`Im3DRenderer` 的 `makeHot/makeActive` 体系）与 ImGui 控件互不干扰，但共用 `GetForegroundDrawList()` 绘制圆点/线段等（如 `PointHandleGizmo::lineSplit`）。
+- **上下文边界就是这一刀**：模块上下文里的一切在 `ViewportFrame`，窗口上下文里的一切在 `ViewerWidget`；
+- Dear ImGui 仍然作为**最后一层覆盖**画在模块的 present target 里（帧内回调），所以窗口粘贴出来的图已经包含 ImGui、2D 覆盖层和 Gizmo；
+- 3D 覆盖层的拾取/交互（`Im3DRenderer` 的 `makeHot/makeActive` 体系）与 ImGui 控件互不干扰，但共用 `GetForegroundDrawList()` 绘制圆点/线段等（如 `PointHandleGizmo::lineSplit`）；
+- 待读的文档、待建的场景 BVH、待同步的场景树都在帧循环里落地：打开一个文件不会被读两次，也不会在视口就绪之前被读。
 
 ### 5.2 调试窗口（debugOpenGlWidget）
 
@@ -352,7 +357,7 @@ ImPlot 的上下文是**全局单例指针 `GImPlot`**（见 [implot.cpp](../Moo
 | 3D 主视口 | [Im3DRenderer.cpp](../Moon/Interactive/Im3DRenderer.cpp) | `QtImGui::initialize(&GetService(ViewerWidget), false)`；`newImgui/endImgui` 包裹每帧；前景绘制列表用于 2D 交互元素 |
 | 调试窗口 | [debugOpenGlWidget.cpp](../Moon/editor/Debug/debugOpenGlWidget.cpp) | 独立 `QOpenGLWidget`，定时器驱动重绘，验证 imgui 后端 |
 | 设置面板 | [DebugSetting.cpp](../Moon/Settings/DebugSetting.cpp) | `ImGui::SliderScalarN` 等控件渲染调试参数 |
-| G-buffer 调试 | [viewerwidget.cpp](../Moon/editor/View/sceneview/viewerwidget.cpp) | `ImGui::Image` 显示 position/normal/occlusion 纹理 |
+| G-buffer 调试 | [viewportoverlay.cpp](../Moon/editor/View/sceneview/viewportoverlay.cpp) | `ImGui::Image` 显示 position/normal/occlusion 纹理 |
 
 两个主集成点都使用 `defaultRender=false`（每窗口独立渲染器），并在 `newFrame` 后各自 `ImPlot::SetCurrentContext(ctx)`。
 

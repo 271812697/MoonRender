@@ -51,6 +51,16 @@ namespace Core::Global
 			return found != __SERVICES.end() && found->second.has_value();
 		}
 
+		/** Forgets a service. What a surface does when it is destroyed: the service locator
+		 * holds a pointer, not an owner, and nothing that outlives the widget it points at
+		 * may be left reaching for it. Removing one that was never provided is not an
+		 * error. */
+		template<typename T>
+		static void Remove()
+		{
+			__SERVICES.erase(typeid(T).hash_code());
+		}
+
 	private:
 		static std::unordered_map<size_t, std::any> __SERVICES;
 	};

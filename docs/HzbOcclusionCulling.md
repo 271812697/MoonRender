@@ -487,7 +487,7 @@ hzbPass.SetCuller(&m_hzbCuller);
 | `MoonRender/include/Core/Rendering/HzbCuller.h` + `src/Core/Rendering/HzbCuller.cpp` | 网格存储、BVH 分层测试、`(Mesh*, actorID)` 实例 key、子树实例收集、偏置策略、统计 |
 | `MoonRender/include/Core/Rendering/HzbBuildPass.h` + `src/Core/Rendering/HzbBuildPass.cpp` | MSAA 深度解析、金字塔构建、回读、网格下发 |
 | `MoonRender/include/Core/Rendering/SceneRenderer.h` + `src/Core/Rendering/SceneRenderer.cpp` | pass 注册、`FilterDrawables` 接入、`GetHzbCuller` / `GetHzbStats` |
-| `Moon/editor/View/sceneview/viewerwidget.cpp` | 屏幕统计 + 每秒 `[HZB]` 日志、`hzbBias` 同步 |
+| `Moon/editor/View/sceneview/viewportoverlay.cpp` | 屏幕统计 + 每秒 `[HZB]` 日志、`hzbBias` 同步 |
 | `Moon/Settings/DebugSetting.cpp` | `hzbBias` / `showFPS` 等调试项与滑块 |
 
 ---

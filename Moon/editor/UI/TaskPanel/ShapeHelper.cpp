@@ -1,5 +1,5 @@
 ﻿#include "editor/UI/TaskPanel/ShapeHelper.h"
-#include "editor/View/sceneview/viewerwidget.h"
+#include "editor/UI/TreeViewPanel/treesync.h"
 #include "TopoShape.h"
 #include "core/component/TopoShapeActor.h"
 #include "core/component/CTopoShape.h"
@@ -198,14 +198,14 @@ namespace MOON {
 			for (auto& ac : scene->GetActors()) {
 				if (dynamic_cast<Feature*>(ac)&&ac!=feature) {
 					ac->SetActive(false);
-					GetViewerWidget.modifyActorInTreeView(ac);
+					GetTreeViewSync.Update(ac);
 				}
 			}
 			// The feature this panel belongs to is the tip again: it was taken out of
 			// the scene while the panel was open (see rollBackToBase).
 			if (!feature->IsActive()) {
 				feature->SetActive(true);
-				GetViewerWidget.modifyActorInTreeView(feature);
+				GetTreeViewSync.Update(feature);
 			}
 			mInternal->rolledBack = false;
 			//add to treeview if not exist and discterize shape
@@ -213,7 +213,7 @@ namespace MOON {
 			//clear preview
 			auto preActor = scene->FindActorByName("TopoShapePreview");
 			if (preActor) {
-				GetViewerWidget.removeActorFromTreeView(preActor);
+				GetTreeViewSync.Remove(preActor);
 				scene->RemoveActor(preActor);
 				delete preActor;
 			}
@@ -241,7 +241,7 @@ namespace MOON {
 		auto scene = view.GetScene();
 		auto preActor = scene->FindActorByName("TopoShapePreview");
 		if (preActor) {
-			GetViewerWidget.removeActorFromTreeView(preActor);
+			GetTreeViewSync.Remove(preActor);
 			scene->RemoveActor(preActor);
 			delete preActor;
 		}
@@ -261,13 +261,13 @@ namespace MOON {
 		mInternal->featureWasActive = feature->IsActive();
 		if (mInternal->featureWasActive) {
 			feature->SetActive(false);
-			GetViewerWidget.modifyActorInTreeView(feature);
+			GetTreeViewSync.Update(feature);
 		}
 		Feature* base = feature->getBaseFeature();
 		mInternal->baseWasActive = base != nullptr && base->IsActive();
 		if (base != nullptr && !mInternal->baseWasActive) {
 			base->SetActive(true);
-			GetViewerWidget.modifyActorInTreeView(base);
+			GetTreeViewSync.Update(base);
 		}
 		mInternal->rolledBack = true;
 		CORE_INFO(
@@ -288,11 +288,11 @@ namespace MOON {
 		Feature* base = feature->getBaseFeature();
 		if (base != nullptr && !mInternal->baseWasActive) {
 			base->SetActive(false);
-			GetViewerWidget.modifyActorInTreeView(base);
+			GetTreeViewSync.Update(base);
 		}
 		if (mInternal->featureWasActive && !feature->IsActive()) {
 			feature->SetActive(true);
-			GetViewerWidget.modifyActorInTreeView(feature);
+			GetTreeViewSync.Update(feature);
 		}
 	}
 	void ShapeHelper::setFeature(Feature* feature)

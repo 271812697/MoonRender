@@ -2,7 +2,6 @@
 #include "editor/Language.h"
 #include <gp_Pln.hxx>
 #include "editor/Command/menubar/sketch.h"
-#include "editor/View/sceneview/viewerwidget.h"
 #include "editor/UI/TaskPanel/TaskViewWidget.h"
 #include "editor/UI/TaskPanel/SketchTaskDialog.h"
 #include "renderer/SceneView.h"

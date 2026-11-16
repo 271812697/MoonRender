@@ -1,6 +1,6 @@
 #include "openFile.h"
 #include "editor/Language.h"
-#include "editor/View/sceneview/viewerwidget.h"
+#include "editor/DocumentSession.h"
 #include "Core/Global/ServiceLocator.h"
 #include "core/log.h"
 #include "surfacemesh/algorithm/decimation.h"
@@ -56,9 +56,11 @@ namespace MOON {
 		: Command(parentObject)
 	{
 		
-		auto& viewer = GetService(ViewerWidget);
+		// Opening is the document session's job: it records the request, brings the workspace
+		// up and reads the file in the frame loop, where the scene and the view exist.
+		auto& session = GetService(DocumentSession);
 		
-		connect(this, &OpenFileCommand::readFilePath, &viewer, &ViewerWidget::onReadFile);
+		connect(this, &OpenFileCommand::readFilePath, &session, &DocumentSession::Open);
 		auto openfile=new QAction(this);
 		setAction(openfile);
 		openfile->setObjectName(QString::fromUtf8("actionFileOpen"));

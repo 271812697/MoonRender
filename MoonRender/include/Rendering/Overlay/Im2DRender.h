@@ -11,10 +11,6 @@ namespace Rendering::Overlay::Im2D
 	class Font;
 }
 
-namespace Rendering::Context {
-	class Driver;
-}
-
 namespace Rendering::Overlay
 {
 	/** The GL side of Im2D: uploads one frame of screen-space geometry and draws it.
@@ -33,8 +29,12 @@ namespace Rendering::Overlay
 
 		void NewFrame();
 		/** Draws what was collected. p_viewWidth/Height are the view's size in pixels: the
-		 * projection is built from them, screen space to clip space. */
-		void EndFrame(::Rendering::Context::Driver& p_driver, uint16_t p_viewWidth, uint16_t p_viewHeight);
+		 * projection is built from them, screen space to clip space.
+		 *
+		 * Nothing but that size is needed: the frame already has the module's context current,
+		 * and the state this touches is saved and restored here. (It used to take the driver,
+		 * which it never read.) */
+		void EndFrame(uint16_t p_viewWidth, uint16_t p_viewHeight);
 
 	private:
 		Im2DRender();

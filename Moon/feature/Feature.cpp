@@ -1,6 +1,6 @@
 ﻿#include "core/component/TopoShapeActor.h"
 
-#include "editor/View/sceneview/viewerwidget.h"
+#include "editor/UI/TreeViewPanel/treesync.h"
 #include "core/component/CTopoShape.h"
 #include <Core/Global/ServiceLocator.h>
 #include "Feature.h"
@@ -238,7 +238,7 @@ namespace MOON {
 	void Feature::makeDone()
 	{
 		if (!hasInTree) {
-			GetViewerWidget.addActorToTreeView(this);
+			GetTreeViewSync.Add(this);
 			hasInTree = true;
 		}
 		// This is the commit point: OK of a task panel, the end of a recompute and

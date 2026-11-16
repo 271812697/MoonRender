@@ -5,6 +5,10 @@
 #include "Rendering/Geometry/BoundingSphere.h"
 
 #include <chrono>
+#include <functional>
+#include <optional>
+
+#include <Tools/Eventing/Event.h>
 namespace Core::SceneSystem
 {
 	class SceneManager;
@@ -18,6 +22,7 @@ namespace Editor::Panels
 		SceneView(
 			const std::string& p_title
 		);
+		~SceneView();
 
 		virtual void Update(float p_deltaTime) override;
 		virtual void InitFrame() override;
@@ -45,10 +50,44 @@ namespace Editor::Panels
 		 */
 		void FitToFocusWithRotation(const Maths::FQuaternion& p_rotation);
 		void BuildBvh();
+		/** Frames what the view is about to work on - and builds the scene query that the
+		 * fit and every culling decision read - as soon as the scene has something to
+		 * frame.
+		 *
+		 * A document that was just read arrives without scene query structures and with the
+		 * camera still on the previous one. Fitting it right away is wrong for the reads
+		 * that fill their actors on a job thread (a STEP import): the actors are in the
+		 * scene while the models they will hold are still empty, and framing those frames
+		 * the previous document. So the fit is a request: it is ticked once per Update, and
+		 * waits for the first frame in which a model actually has bounds. A file that was
+		 * never readable gives up after kFitTimeoutFrames frames, so a request cannot fire
+		 * later, on geometry an unrelated feature added.
+		 *
+		 * p_onFitted runs right after the fit, in the frame it happened (the viewport cuts
+		 * a demo section there).
+		 *
+		 * An empty scene query is worse than none: the camera controller reads the scene
+		 * bounds to scale its zoom and pan, and the default (empty) box gives it infinities
+		 * to scale by. That is why the build waits for a triangle - unless the wait has run
+		 * out, so a triangle-free document is still framed. */
+		void RequestFitWhenReady(std::function<void()> p_onFitted = {});
+		/** True while a RequestFitWhenReady has not been served or given up on. */
+		bool IsFitPending() const;
+		/** How many frames the pending fit has left before it gives up. */
+		int PendingFitFrames() const;
+		/** True during the first frames of a pending fit: what the frame loop traces, so a
+		 * crash a few frames after a read says on which step it happened. */
+		bool ShouldTraceFitFrames() const;
 		void SetGizmoOperation(Core::EGizmoOperation p_operation);
 		Core::EGizmoOperation GetGizmoOperation() const;
 		/** Takes an event the window layer already translated, see InputEvent. */
 		void ReceiveEvent(const InputEvent& p_event) override;
+		/** Drops the hover highlight and the highlighted gizmo axis.
+		 *
+		 * The highlight comes from the picking target, and that is only re-read while the
+		 * cursor moves: a cursor that leaves the viewport produces no more moves, so without
+		 * this the shape under it stayed lit until the cursor came back. */
+		void ClearHoverHighlight();
 		bool MouseHit(Maths::FVector3& out);
 		bool MouseClipHit(Maths::FVector3& out,const Maths::FVector4& clipPlane);
 		Editor::Rendering::PickingRenderPass::PickingResult GetPickResult();
@@ -66,6 +105,13 @@ namespace Editor::Panels
 		virtual ::Core::Rendering::SceneRenderer::SceneDescriptor CreateSceneDescriptor() override;
 	private:
 		virtual void DrawFrame() override;
+		/** Serves a pending RequestFitWhenReady once the scene has something to frame. */
+		void TickRequestedFit();
+		/** True when some model in the scene has bounds to frame. */
+		bool HasModelToFrame();
+		/** True when some model in the scene holds a triangle mesh with bounds, i.e. when a
+		 * scene query build would have something to index. */
+		bool HasTrianglesToQuery();
 		void HandleActorPicking();
 		/** Applies a pick result to the hover / selection state. */
 		void ApplyPickResult(const Rendering::PickingRenderPass::PickingResult& p_result);
@@ -108,5 +154,19 @@ namespace Editor::Panels
 		bool m_clickPickPending = false;
 		int m_clickPickX = 0;
 		int m_clickPickY = 0;
+
+		/** A read is framed as soon as the scene has a model to frame - see
+		 * RequestFitWhenReady - and gives up after this many frames, so an unreadable file
+		 * cannot leave a fit waiting to fire when a later feature adds one. */
+		static constexpr int kFitTimeoutFrames = 600;
+		bool m_fitPending = false;
+		int m_fitFramesLeft = 0;
+		/** Run in the frame the pending fit happened; may be empty. */
+		std::function<void()> m_onFitted;
+
+		/** The view's subscription to Actor::DestroyedEvent, which is static: it has to be
+		 * removed when the view goes, or the event keeps calling into a view that is not
+		 * there any more (see the destructor). */
+		std::optional<Tools::Eventing::ListenerID> m_actorDestroyedListener;
 	};
 }

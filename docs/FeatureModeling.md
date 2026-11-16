@@ -98,7 +98,7 @@ bool FilletFeature::execute() {
 
 ```cpp
 void Feature::makeDone() {
-    if (!hasInTree) { GetViewerWidget.addActorToTreeView(this); hasInTree = true; }
+    if (!hasInTree) { GetTreeViewSync.Add(this); hasInTree = true; }
     auto comp = GetComponent<CTopoShape>();
     comp->discretizationShape();          // B-Rep → 三角网格，供渲染/拾取
     FeatureBody::instance().populateFeature(this);   // 更新特征链

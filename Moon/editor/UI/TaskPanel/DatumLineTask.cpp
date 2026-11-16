@@ -9,7 +9,7 @@
 #include "core/ViewTool.h"
 #include "core/log.h"
 #include "renderer/SceneView.h"
-#include "editor/View/sceneview/viewerwidget.h"
+#include "editor/UI/TreeViewPanel/treesync.h"
 #include <Core/Global/ServiceLocator.h>
 #include <Maths/FVector3.h>
 
@@ -142,7 +142,7 @@ namespace MOON
 		auto scene = view.GetScene();
 		auto preActor = scene->FindActorByName("DatumLinePreview");
 		if (preActor) {
-			GetViewerWidget.removeActorFromTreeView(preActor);
+			GetTreeViewSync.Remove(preActor);
 			scene->RemoveActor(preActor);
 			delete preActor;
 		}

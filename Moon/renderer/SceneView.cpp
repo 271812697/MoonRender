@@ -7,6 +7,7 @@
 #include "Core/Global/ServiceLocator.h"
 #include <Core/SceneSystem/SceneManager.h>
 #include <Rendering/Geometry/bvh.h>
+#include <Rendering/Resources/Mesh.h>
 #include "SceneView.h"
 #include "editor/parsescene.h"   // EnsureViewportLights
 #include "Settings/DebugSetting.h"
@@ -89,19 +90,35 @@ Editor::Panels::SceneView::SceneView
 	m_fallbackMaterial.SetMaterial(::Core::Global::ServiceLocator::Get<Editor::Core::Context>().shaderManager[":Shaders\\Unlit.shader"]);
 	m_fallbackMaterial.SetProperty("u_Diffuse", Maths::FVector4{ 1.f, 0.f, 1.f, 1.0f });
 	m_fallbackMaterial.SetProperty("u_DiffuseMap", static_cast<::Rendering::Resources::Texture*>(nullptr));
-	::Core::ECS::Actor::DestroyedEvent += [this](const ::Core::ECS::Actor& actor)
+	// The ID is kept: the event is static, and the listener has to be removed when this view
+	// goes (see the destructor).
+	m_actorDestroyedListener = ::Core::ECS::Actor::DestroyedEvent += [this](const ::Core::ECS::Actor& actor)
 		{
 			if (m_highlightedActor.has_value() && m_highlightedActor.value().GetID() == actor.GetID())
 			{
 				m_highlightedActor.reset();
 			}
 		};
-	
+}
+
+Editor::Panels::SceneView::~SceneView()
+{
+	// The destroyed event is static: the listener above captures `this`, and it is invoked
+	// for every actor that goes - including every actor of the scene, while the scene itself
+	// is being taken down. Left registered, it calls into a view that no longer exists and
+	// reads its members out of freed memory.
+	if (m_actorDestroyedListener.has_value())
+	{
+		::Core::ECS::Actor::DestroyedEvent -= *m_actorDestroyedListener;
+	}
 }
 
 void Editor::Panels::SceneView::Update(float p_deltaTime)
 {
 	AViewControllable::Update(p_deltaTime);
+	// Ahead of the early returns below: a pending fit belongs to the scene, not to the light
+	// rig, and a scene that has no rig yet still has to be framed.
+	TickRequestedFit();
 	GetScene()->Update(p_deltaTime);
 	// The rig is part of what a viewport needs, not of how the scene was loaded: a .moon document
 	// is built by MoonDocument::open, which never went through the scene parser that used to be
@@ -454,6 +471,122 @@ void Editor::Panels::SceneView::BuildBvh()
 	}
 }
 
+void Editor::Panels::SceneView::RequestFitWhenReady(std::function<void()> p_onFitted)
+{
+	m_onFitted = std::move(p_onFitted);
+	m_fitPending = true;
+	m_fitFramesLeft = kFitTimeoutFrames;
+}
+
+bool Editor::Panels::SceneView::IsFitPending() const
+{
+	return m_fitPending;
+}
+
+int Editor::Panels::SceneView::PendingFitFrames() const
+{
+	return m_fitFramesLeft;
+}
+
+bool Editor::Panels::SceneView::ShouldTraceFitFrames() const
+{
+	// The first frames of the wait are the ones worth tracing: a crash a few frames after
+	// a read says the scene or the topology actors are not ready for what was read.
+	return m_fitPending && m_fitFramesLeft > kFitTimeoutFrames - 8;
+}
+
+void Editor::Panels::SceneView::TickRequestedFit()
+{
+	if (!m_fitPending)
+	{
+		return;
+	}
+
+	if (HasModelToFrame())
+	{
+		// The triangles of the read come first: a scene query build that runs before them
+		// comes back empty. Once there is something to index - or once the wait has run
+		// out, so a triangle-free document is still framed - the build and the fit happen
+		// in the same frame, still inside the render loop, which is what BuildBvh needs.
+		if (HasTrianglesToQuery() || m_fitFramesLeft <= 1)
+		{
+			m_fitPending = false;
+			CORE_INFO("[Viewer] the document was read; building the scene query");
+			BuildBvh();
+			CORE_INFO("[Viewer] scene query built; framing the view");
+			FitToFocus(GetCamera()->GetTransform().GetWorldForward());
+			CORE_INFO("[Viewer] view framed");
+			// Taken before it runs: the callback may ask for another fit (a second document
+			// opened from a slot), and that request must survive this one.
+			if (m_onFitted)
+			{
+				const std::function<void()> onFitted = std::move(m_onFitted);
+				m_onFitted = nullptr;
+				onFitted();
+			}
+		}
+		else
+		{
+			--m_fitFramesLeft;
+		}
+	}
+	else if (--m_fitFramesLeft <= 0)
+	{
+		// Nothing frameable ever came out of the read (an unreadable file): stop waiting, so
+		// an unrelated later actor cannot trigger this fit after the fact.
+		m_fitPending = false;
+		m_onFitted = nullptr;
+	}
+}
+
+bool Editor::Panels::SceneView::HasModelToFrame()
+{
+	// A read can put its actors in the scene before the shapes they will hold exist (a STEP
+	// import builds them on a job thread), and framing those would frame the previous file
+	// instead of the one that was just read.
+	auto* scene = GetScene();
+	if (scene == nullptr)
+	{
+		return false;
+	}
+	for (auto* modelRenderer : scene->GetFastAccessComponents().modelRenderers)
+	{
+		if (modelRenderer == nullptr || !modelRenderer->owner.IsActive())
+			continue;
+		auto* model = modelRenderer->GetModel();
+		if (model != nullptr && model->GetBoundingSphere().radius > 0.0f)
+			return true;
+	}
+	return false;
+}
+
+bool Editor::Panels::SceneView::HasTrianglesToQuery()
+{
+	auto* scene = GetScene();
+	if (scene == nullptr)
+	{
+		return false;
+	}
+	for (auto* modelRenderer : scene->GetFastAccessComponents().modelRenderers)
+	{
+		if (modelRenderer == nullptr || !modelRenderer->owner.IsActive())
+			continue;
+		auto* model = modelRenderer->GetModel();
+		if (model == nullptr)
+			continue;
+		for (auto* mesh : model->GetMeshes())
+		{
+			if (mesh == nullptr)
+				continue;
+			if (mesh->GetPrimitiveMode() != ::Rendering::Settings::EPrimitiveMode::TRIANGLES)
+				continue;
+			if (mesh->GetBoundingBox().isValid())
+				return true;
+		}
+	}
+	return false;
+}
+
 void Editor::Panels::SceneView::SetGizmoOperation(Editor::Core::EGizmoOperation p_operation)
 {
 	m_currentOperation = p_operation;
@@ -718,6 +851,12 @@ void Editor::Panels::SceneView::HandleActorPicking()
 		pickingResult = finishedPick;
 		ApplyPickResult(pickingResult.result);
 	}
+}
+
+void Editor::Panels::SceneView::ClearHoverHighlight()
+{
+	m_highlightedActor = {};
+	m_highlightedGizmoDirection = {};
 }
 
 void Editor::Panels::SceneView::ApplyPickResult(
