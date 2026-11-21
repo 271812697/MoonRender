@@ -1,4 +1,4 @@
-﻿#include <Core/Global/ServiceLocator.h>
+#include <Core/Global/ServiceLocator.h>
 #include <Core/Rendering/FramebufferUtil.h>
 #include <Core/Rendering/PostProcess/BloomEffect.h>
 #include <Core/ResourceManagement/ShaderManager.h>
@@ -57,11 +57,11 @@ Core::Rendering::PostProcess::BloomEffect::BloomEffect(::Rendering::Core::Compos
 	// We don't use a ping-pong buffer here, since we need to keep all the intermediate results.
 	for (auto& buffer : m_bloomSamplingBuffers)
 	{
-		FramebufferUtil::SetupFramebuffer(buffer, kBloomTextureDesc, false, false);
+		::Core::Rendering::FramebufferUtil::SetupFramebufferWithDriver(buffer, kBloomTextureDesc, false, false);
 	}
 
 	// Prepare bloom output buffer.
-	FramebufferUtil::SetupFramebuffer(m_bloomOutputBuffer, kBloomTextureDesc, false, false);
+	::Core::Rendering::FramebufferUtil::SetupFramebufferWithDriver(m_bloomOutputBuffer, kBloomTextureDesc, false, false);
 
 	auto& shaderManager = GetService(Core::ResourceManagement::ShaderManager);
 

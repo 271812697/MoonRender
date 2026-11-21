@@ -1,26 +1,12 @@
-﻿#pragma once
-
-#include <Core/ResourceManagement/MaterialManager.h>
-#include <Core/ResourceManagement/ModelManager.h>
-#include <Core/ResourceManagement/ShaderManager.h>
-#include <Core/ResourceManagement/TextureManager.h>
-#include <Core/SceneSystem/SceneManager.h>
+#pragma once
+// The editor's name for the engine's Context: the class itself lives in the engine
+// (MoonRender/include/Core/Context.h), which knows nothing about Qt or the editor. Everything in
+// the editor that says Editor::Core::Context keeps compiling and keeps referring to the same type,
+// which also means ServiceLocator::Get<Editor::Core::Context>() and Get<Core::Context>() are the
+// same lookup.
+#include <Core/Context.h>
 
 namespace Editor::Core
 {
-	class Context
-	{
-	public:
-		Context(const std::string& p_projectPath, const std::string& p_projectName);
-		virtual ~Context();
-	public:
-		std::string engineAssetsPath;
-		std::string editorAssetsPath;
-		std::unique_ptr<::Rendering::Context::Driver> driver;
-		::Core::SceneSystem::SceneManager sceneManager;
-		::Core::ResourceManagement::ModelManager modelManager;
-		::Core::ResourceManagement::TextureManager textureManager;
-		::Core::ResourceManagement::ShaderManager shaderManager;
-		::Core::ResourceManagement::MaterialManager materialManager;
-	};
+	using Context = ::Core::Context;
 }

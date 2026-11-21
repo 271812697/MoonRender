@@ -8,12 +8,14 @@
 #include <Core/Rendering/EngineBufferRenderFeature.h>
 #include <Rendering/Features/FrameInfoRenderFeature.h>
 #include <Rendering/Overlay/Im2DRender.h>
+#include <Rendering/Overlay/Im2D.h>
 
 #include "Interactive/Im3DRenderer.h"
+
+#include <Rendering/Overlay/FrameInfo.h>
 #include "Settings/DebugSetting.h"
 #include "core/log.h"
 
-#include <ThirdParty/imgui/imgui/imgui.h>
 
 #include <cstdio>
 #include <cstdlib>
@@ -41,44 +43,64 @@ namespace MOON
 		m_lastFrame = now;
 		m_hasLastFrame = true;
 
-		// ImGui's and the 2D draw list's frames are opened here, on the module's context:
-		// Im2DRender::newFrame creates its shader and vertex array on first use, and those
-		// belong to the context that draws with them.
-		ImRenderer::instance().newImgui();
+		// The 2D draw list's frame is opened here: its objects (program, array, buffers) are
+		// created through the command stream on first use, and the list is what the widgets
+		// append to while the frame is recorded.
 		Rendering::Overlay::Im2DRender::Instance().NewFrame();
 		// The 3D overlay (the view cube, the rotation centre) is drawn in the same frame
 		// when its pass is on; the pass is what decides.
+		BeginGizmoFrame(p_view);
+	}
+
+	void ViewportOverlay::BeginGizmoFrame(Editor::Panels::SceneView& p_view)
+	{
 		if (p_view.GetRenderer().GetPass<Editor::Rendering::GizmoRenderPass>("ImRenderer").IsEnabled())
 		{
-			ImRenderer::instance().newFrame(&p_view);
+			// The overlay gets the frame's facts, not the view: the camera, the viewport and the
+			// input it needs to draw against, plus the framing it may ask for.
+			Rendering::Overlay::FrameInfo frameInfo;
+			if (auto* camera = p_view.GetCamera())
+			{
+				frameInfo.viewMatrix = camera->GetViewMatrix();
+				frameInfo.projectionMatrix = camera->GetProjectionMatrix();
+				frameInfo.projectionMode = camera->GetProjectionMode();
+				const Maths::FTransform& cameraTransform = camera->GetTransform();
+				frameInfo.cameraForward = cameraTransform.GetWorldForward();
+				frameInfo.cameraUp = cameraTransform.GetWorldUp();
+				frameInfo.cameraPosition = cameraTransform.GetWorldPosition();
+			}
+			frameInfo.input = &p_view.getInutState();
+			const auto [frameWidth, frameHeight] = p_view.GetSafeSize();
+			frameInfo.width = frameWidth;
+			frameInfo.height = frameHeight;
+			frameInfo.fitToFocus = [&p_view](const Maths::FVector3& p_direction)
+			{
+				p_view.FitToFocus(p_direction);
+			};
+			ImRenderer::instance().newFrame(frameInfo);
 		}
 	}
 
-	void ViewportOverlay::EndFrame(Editor::Panels::SceneView& p_view)
+	void ViewportOverlay::BeginOverlay2D(Editor::Panels::SceneView& p_view)
 	{
-		DrawGbufferViews(p_view);
+		// The list is rebuilt every frame; the renderer uploads and draws it through the command
+		// stream (see Im2DRender::EndFrame), so this side only needs the list itself.
+		Rendering::Overlay::Im2DRender::Instance().NewFrame();
+	}
+
+	void ViewportOverlay::EndOverlay2D(Editor::Panels::SceneView& p_view, ::Rendering::Context::Driver& p_driver)
+	{
+		// The stats are text in the same draw list the widgets use, so they belong to this half:
+		// with a render thread this is the only exit the overlay has (see BeginOverlay2D).
 		DrawFrameStats(p_view);
 
 		const auto [overlayWidth, overlayHeight] = p_view.GetSafeSize();
-		Rendering::Overlay::Im2DRender::Instance().EndFrame(overlayWidth, overlayHeight);
-		ImRenderer::instance().endImgui();
+		Rendering::Overlay::Im2DRender::Instance().EndFrame(p_driver, overlayWidth, overlayHeight);
 	}
 
-	void ViewportOverlay::DrawGbufferViews(Editor::Panels::SceneView& p_view)
+	void ViewportOverlay::EndFrame(Editor::Panels::SceneView& p_view, ::Rendering::Context::Driver& p_driver)
 	{
-		if (!DebugSettings::instance().getNode("DebugImgui")->getData<bool>())
-		{
-			return;
-		}
-
-		const auto [viewWidth, viewHeight] = p_view.GetSafeSize();
-		const ImVec2 a = { 0, 1 }, b = { 1, 0 };
-		const ImVec2 size = ImVec2(static_cast<float>(viewWidth), static_cast<float>(viewHeight));
-		auto& gbufferData = p_view.GetRenderer().GetPass<::Core::Rendering::GbufferPass>("Gbuffer").GetGbufferData();
-		ImGui::Image(gbufferData.position->GetID(), size, a, b);
-		ImGui::Image(gbufferData.normal->GetID(), size, a, b);
-		ImGui::Image(gbufferData.occlusion->GetID(), size, a, b);
-		ImGui::Image(gbufferData.occlusionBlur->GetID(), size, a, b);
+		EndOverlay2D(p_view, p_driver);
 	}
 
 	void ViewportOverlay::DrawFrameStats(Editor::Panels::SceneView& p_view)
@@ -132,7 +154,13 @@ namespace MOON
 			hzbPass.GetReadbackSkippedFrames(),
 			hzbPass.GetLastReadbackLatencyFrames()
 		);
-		ImGui::GetForegroundDrawList()->AddText({ 20,20 }, IM_COL32(255, 255, 100, 255), text);
+		// The stats are drawn by the 2D overlay (the same draw list the widgets use), not by ImGui:
+		// the module's frame has no ImGui in it, and this way the text travels the same command
+		// stream as the rest of the overlay.
+		auto& render2d = Rendering::Overlay::Im2DRender::Instance();
+		render2d.GetDrawList().AddText(render2d.GetFont(), 18.0f,
+			Rendering::Overlay::Im2D::Vec2(20.0f, 20.0f),
+			Rendering::Overlay::Im2D::ColorU32(255, 255, 100, 255), text);
 	}
 
 	void ViewportOverlay::ApplyClipDemo(Editor::Panels::SceneView& p_view)

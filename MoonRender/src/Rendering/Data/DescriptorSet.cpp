@@ -88,7 +88,7 @@ namespace Rendering::Data
 		const Descriptor* descriptor = FindTexture(p_binding);
 		const Descriptor::TextureInfo* texture =
 			descriptor != nullptr ? descriptor->GetTexture() : nullptr;
-		return texture != nullptr ? texture->handle : nullptr;
+		return texture != nullptr ? texture->direct : nullptr;
 	}
 
 	Rendering::Resources::Texture* DescriptorSet::GetTextureAsset(uint32_t p_binding) const

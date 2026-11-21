@@ -1,8 +1,16 @@
 #include "viewerwidget.h"
+#include <Rendering/Overlay/Screen/ScreenOverlayRegistry.h>
+#include <unordered_map>
 
 #include "viewportframe.h"
 
 #include "renderer/RenderModuleHost.h"
+#include "renderer/QtGLContextHost.h"
+
+
+#include <cstdlib>
+#include <Rendering/Context/IPlatform.h>
+#include "Interactive/Im3DRenderer.h"
 #include "glloader.h"
 #include "core/callbackManager.h"
 #include "Core/Global/ServiceLocator.h"
@@ -21,7 +29,7 @@ namespace MOON {
 		format.setSamples(0);
 		this->setFormat(format);
 		// The widget itself is a service: the tools that draw with the module's context
-		// (ImGui's input, the view parameters, the picture a project card is shown by) need
+		// (the view parameters, the picture a project card is shown by) need
 		// the surface they belong to. It is only ever reached for the widget - what is open
 		// and what the scene shows are services of their own now.
 		RegService(ViewerWidget, *this);
@@ -45,7 +53,8 @@ namespace MOON {
 		Editor::Core::RenderModuleHost::Destroy();
 	}
 
-	void ViewerWidget::initializeGL()
+	
+void ViewerWidget::initializeGL()
 	{
 		QOpenGLWidget::initializeGL();
 		// The editor's own GL entry points, resolved from this widget's context - the first
@@ -58,6 +67,27 @@ namespace MOON {
 		this->doneCurrent();
 		CreateRenderModule();
 		this->makeCurrent();
+
+		// The overlay's 2D widgets ask for a cursor shape (a hand over the view cube, resize
+		// arrows over the gizmos); the windowing layer is what puts it on screen. This is that
+		// layer, so it installs itself as the sink: the overlay never touches a Qt type.
+		MOON::ScreenOverlayRegistry::Instance().SetCursorSink([this](MOON::EScreenCursor p_cursor)
+		{
+			static const std::unordered_map<MOON::EScreenCursor, Qt::CursorShape> shapes = {
+				{ MOON::EScreenCursor::Arrow, Qt::ArrowCursor },
+				{ MOON::EScreenCursor::Hand, Qt::PointingHandCursor },
+				{ MOON::EScreenCursor::TextInput, Qt::IBeamCursor },
+				{ MOON::EScreenCursor::ResizeAll, Qt::SizeAllCursor },
+				{ MOON::EScreenCursor::ResizeNS, Qt::SizeVerCursor },
+				{ MOON::EScreenCursor::ResizeEW, Qt::SizeHorCursor },
+				{ MOON::EScreenCursor::ResizeNESW, Qt::SizeBDiagCursor },
+				{ MOON::EScreenCursor::ResizeNWSE, Qt::SizeFDiagCursor },
+				{ MOON::EScreenCursor::NotAllowed, Qt::ForbiddenCursor },
+			};
+			const auto it = shapes.find(p_cursor);
+			setCursor(it != shapes.end() ? it->second : Qt::ArrowCursor);
+		});
+
 	}
 
 	void ViewerWidget::CreateRenderModule()
@@ -67,13 +97,51 @@ namespace MOON {
 		// the widgets only paste the result. A texture name only means something in the group
 		// that created it, which is what lets the material panel paste a frame the module
 		// rendered. Without a global share context it shares this widget's, as before.
-		QOpenGLContext* shareContext = QOpenGLContext::globalShareContext();
-		if (shareContext == nullptr)
+		// With a render thread the source is this widget's own context, exactly as the Qt-Filament
+		// demo does it: Qt's global share context belongs to the GUI thread's context group, and
+		// sharing from it on another thread makes the widget's own makeCurrent trip Qt's thread
+		// check. Without a render thread the global context stays as before, so the material
+		// preview keeps seeing the module's frames.
+		QOpenGLContext* shareContext = nullptr;
+		if (Editor::Core::RenderModuleHost::ThreadedMode())
 		{
 			shareContext = context();
 		}
+		else
+		{
+			shareContext = QOpenGLContext::globalShareContext();
+			if (shareContext == nullptr)
+			{
+				shareContext = context();
+			}
+		}
 
-		Editor::Core::RenderModuleHost& module = Editor::Core::RenderModuleHost::Create(shareContext);
+		// The engine does not know what a QOpenGLContext is: the editor hands it a context through
+		// the interface, and supplies the host-side GL objects that belong to that context (the
+		// overlay geometry) as the build callback.
+		// The engine's module, on a context of its own. The platform entry point
+		// (Create(platform, sharedContext, ...), Filament's Platform::createDriver shape) is in
+		// place and is what the render thread will use; the live path still hands in a context
+		// host, because switching it currently crashes in the first frame - see
+		// docs/RenderThreadPlan.md.
+		auto qtHost = std::make_unique<Editor::Core::QtGLContextHost>();
+		// Qt only lets a QOffscreenSurface be created on the GUI thread, and a surface made on the
+		// render thread is invalid: makeCurrent then reports success while every GL call on that
+		// thread lands on a drawable that cannot be drawn to (that is the crash at the first
+		// glDrawElements). The surface the render thread will use is therefore prepared here, on
+		// the GUI thread, before the engine starts - see QtGLContextHost::PrepareSurface.
+		qtHost->PrepareSurface(shareContext);
+		std::unique_ptr<Rendering::Context::IPlatform> platform = std::move(qtHost);
+		Editor::Core::RenderModuleHost& module = Editor::Core::RenderModuleHost::Create(
+			std::move(platform),
+			shareContext,
+			[] {
+				// The overlay's host-side objects only (see ImRenderer::init). The gizmo's geometry
+				// is built on the first frame instead (see
+				// ViewportFrame::Render), where the context that owns it is current and the uploads
+				// it causes can travel the same path as the draws that need them.
+				MOON::ImRenderer::instance().init();
+			});
 		if (!module.IsReady())
 		{
 			// No context of its own (sharing refused, or it could not be made current): build

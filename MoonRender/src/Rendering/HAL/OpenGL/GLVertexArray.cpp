@@ -1,50 +1,31 @@
-﻿#include <glad/glad.h>
+#include <glad/glad.h>
 
-#include <Rendering/HAL/OpenGL/GLVertexArray.h>
+#include <Rendering/Backend/BackendResources.h>
+#include <Rendering/Context/Driver.h>
+#include <Rendering/HAL/Common/HALDriverAccess.h>
+#include <Rendering/HAL/Common/ResourceOps.h>
 #include <Rendering/HAL/OpenGL/GLTypes.h>
+#include <Rendering/HAL/OpenGL/GLVertexArray.h>
 #include <assert.h>
-
-namespace
-{
-	uint32_t GetDataTypeSizeInBytes(Rendering::Settings::EDataType p_type)
-	{
-		switch (p_type)
-		{
-		case Rendering::Settings::EDataType::BYTE: return sizeof(GLbyte);
-		case Rendering::Settings::EDataType::UNSIGNED_BYTE: return sizeof(GLubyte);
-		case Rendering::Settings::EDataType::SHORT: return sizeof(GLshort);
-		case Rendering::Settings::EDataType::UNSIGNED_SHORT: return sizeof(GLushort);
-		case Rendering::Settings::EDataType::INT: return sizeof(GLint);
-		case Rendering::Settings::EDataType::UNSIGNED_INT: return sizeof(GLuint);
-		case Rendering::Settings::EDataType::FLOAT: return sizeof(GLfloat);
-		case Rendering::Settings::EDataType::DOUBLE: return sizeof(GLdouble);
-		default: return 0;
-		}
-	}
-
-	uint32_t CalculateTotalVertexSize(std::span<const Rendering::Settings::VertexAttribute> p_attributes)
-	{
-		uint32_t result = 0;
-
-		for (const auto& attribute : p_attributes)
-		{
-			result += GetDataTypeSizeInBytes(attribute.type) * attribute.count;
-		}
-
-		return result;
-	}
-}
 
 template<>
 Rendering::HAL::GLVertexArray::TVertexArray()
 {
-	glCreateVertexArrays(1, &m_context.id);
+	// createVertexArrayS/createVertexArrayR: the handle exists here, the name is made on the side
+	// that owns the context (a vertex array is a container object and is not shared).
+	m_context.handle = ::Rendering::Backend::GetHandleAllocator().Allocate<::Rendering::Backend::HwVertexArray>();
+	::Rendering::HAL::ResourceOps::EnsureVertexArray(m_context.handle);
 }
 
 template<>
 Rendering::HAL::GLVertexArray::~TVertexArray()
 {
-	glDeleteVertexArrays(1, &m_context.id);
+	if (m_context.handle)
+	{
+		::Rendering::HAL::ResourceOps::DestroyVertexArray(m_context.handle);
+		m_context.handle.clear();
+		m_context.attributeCount = 0;
+	}
 }
 
 template<>
@@ -62,46 +43,20 @@ void Rendering::HAL::GLVertexArray::SetLayout(
 {
 	assert(!IsValid()&& "Vertex array layout already set");
 
-	Bind();
-	if (p_indexBuffer.IsValid()) {
-		p_indexBuffer.Bind();
-	}
-	p_vertexBuffer.Bind();
+	// The layout is GL (glVertexAttribPointer against the array's buffers), so it goes through the
+	// same handle-addressed path every other resource operation uses: recorded when the context
+	// lives on another thread, applied here otherwise (see ResourceOps).
+	::Rendering::HAL::ResourceOps::SetVertexArrayLayout(
+		m_context.handle,
+		p_vertexBuffer.GetHandle(),
+		p_indexBuffer.IsValid() ? p_indexBuffer.GetHandle() : Rendering::Backend::ResourceHandle<Rendering::Backend::HwBufferObject>{},
+		p_attributes);
 
-	uint32_t attributeIndex = 0;
-
-	const uint32_t totalSize = CalculateTotalVertexSize(p_attributes);
-	intptr_t currentOffset = 0;
-
-	for (const auto& attribute : p_attributes)
+	for (uint32_t index = 0; index < static_cast<uint32_t>(p_attributes.size()); ++index)
 	{
-		assert(attribute.count >= 1 && attribute.count <= 4, "Attribute count must be between 1 and 4");
-
-		glEnableVertexAttribArray(attributeIndex);
-
-		glVertexAttribPointer(
-			static_cast<GLuint>(attributeIndex),
-			static_cast<GLint>(attribute.count),
-			EnumToValue<GLenum>(attribute.type),
-			static_cast<GLboolean>(attribute.normalized),
-			static_cast<GLsizei>(totalSize),
-			reinterpret_cast<const GLvoid*>(currentOffset)
-		);
-
-		const uint64_t typeSize = GetDataTypeSizeInBytes(attribute.type);
-		const uint64_t attributeSize = typeSize * attribute.count;
-		currentOffset += attributeSize;
-		++attributeIndex;
 		++m_context.attributeCount;
 	}
-
-	Unbind();
-	if (p_indexBuffer.IsValid()) {
-		p_indexBuffer.Unbind();
-	}
-	p_vertexBuffer.Unbind();
 }
-
 template<>
 void Rendering::HAL::GLVertexArray::ResetLayout()
 {
@@ -119,7 +74,7 @@ void Rendering::HAL::GLVertexArray::ResetLayout()
 template<>
 void Rendering::HAL::GLVertexArray::Bind() const
 {
-	glBindVertexArray(m_context.id);
+	glBindVertexArray(GetID());
 }
 
 template<>
@@ -131,5 +86,5 @@ void Rendering::HAL::GLVertexArray::Unbind() const
 template<>
 uint32_t Rendering::HAL::GLVertexArray::GetID() const
 {
-	return m_context.id;
+	return ::Rendering::Backend::Records::VertexArrayName(m_context.handle);
 }

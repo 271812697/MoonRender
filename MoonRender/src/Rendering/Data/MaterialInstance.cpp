@@ -12,6 +12,9 @@
 #include <vector>
 
 #include <tracy/Tracy.hpp>
+#include <Rendering/Backend/DescriptorRequests.h>
+#include <Rendering/Context/Driver.h>
+#include <Rendering/HAL/Common/HALDriverAccess.h>
 #include <Rendering/Data/Material.h>
 #include <Rendering/Data/EngineDescriptorSets.h>
 #include <Rendering/Data/MaterialBuilder.h>
@@ -19,6 +22,7 @@
 #include <Rendering/HAL/TextureHandle.h>
 #include <Rendering/Data/MaterialParser.h>
 #include <Rendering/Resources/Texture.h>
+#include <Rendering/Backend/BackendResources.h>
 
 #include <Tools/Utils/OptRef.h>
 #include "Core/Global/ServiceLocator.h"
@@ -26,21 +30,6 @@
 
 namespace
 {
-	template<typename T>
-	inline void HashCombine(std::size_t& seed, const T& value)
-	{
-		// A large odd constant derived from the golden ratio (64-bit variant).
-		// It helps distribute bits more uniformly and reduce clustering/collisions.
-		constexpr std::size_t kHashCombineConstant = 0x9e3779b97f4a7c15ULL;
-
-		seed ^= std::hash<T>{}(value)
-			+kHashCombineConstant
-			// Bit mixing. They spread entropy from earlier values so order matters
-			// and nearby hashes don't collapse into similar outputs.
-			+ (seed << 6)
-			+ (seed >> 2);
-	}
-
 	Rendering::Data::MaterialPropertyType UniformToPropertyValue(const std::any& p_uniformValue)
 	{
 		using namespace Maths;
@@ -268,8 +257,27 @@ namespace
 	{
 		if (auto target = p_texture ? p_texture : p_fallback)
 		{
-			target->Bind(p_textureSlot);
-			p_shader.SetUniform<int>(p_uniformName, p_textureSlot++);
+			const uint32_t slot = static_cast<uint32_t>(p_textureSlot);
+			if (::Rendering::Context::Driver* const driver = ::Rendering::HAL::CurrentDriver();
+				driver != nullptr && driver->IsRenderThreadActive())
+			{
+				// Both halves are GL, so they belong to the executor: the texture goes to its unit
+				// (BindDescriptor) and the sampler is told that unit (SetSamplerUnit). This is the
+				// loose-sampler path - a sampler that lives in the material's descriptor set needs
+				// neither, it is bound from the set at draw time.
+				::Rendering::Backend::BindDescriptorRequest request;
+				request.kind = ::Rendering::Backend::BindDescriptorRequest::Kind::Texture;
+				request.objectId = target->GetID();
+				request.slot = slot;
+				driver->BindDescriptor(request);
+				driver->SetSamplerUnit(p_shader.GetID(), p_uniformName, slot);
+			}
+			else
+			{
+				target->Bind(p_textureSlot);
+				p_shader.SetUniform<int>(p_uniformName, p_textureSlot);
+			}
+			++p_textureSlot;
 		}
 	}
 
@@ -668,7 +676,7 @@ const Rendering::Data::MaterialDefinition* Rendering::Data::MaterialInstance::De
 {
 	return m_material != nullptr ? m_material->Definition() : nullptr;
 }
-void Rendering::Data::MaterialInstance::UploadProperties(bool uploadStableProperties, Rendering::HAL::Texture* p_emptyTexture2D, Rendering::HAL::Texture* p_emptyTextureCube, Rendering::HAL::Texture* p_flatNormalTexture)
+void Rendering::Data::MaterialInstance::UploadProperties(Rendering::HAL::Texture* p_emptyTexture2D, Rendering::HAL::Texture* p_emptyTextureCube, Rendering::HAL::Texture* p_flatNormalTexture)
 {
 	ZoneScoped;
 
@@ -679,7 +687,7 @@ void Rendering::Data::MaterialInstance::UploadProperties(bool uploadStableProper
 	const bool hasDefinitionParameters = definition != nullptr && definition->HasParameterTable();
 	if (hasDefinitionParameters)
 	{
-		UploadParameterBlock(uploadStableProperties, p_emptyTexture2D, p_emptyTextureCube, p_flatNormalTexture);
+		UploadParameterBlock(p_emptyTexture2D, p_emptyTextureCube, p_flatNormalTexture);
 	}
 
 	/** The 1x1 texture a sampler gets when the material instance has none: the material's own
@@ -720,7 +728,6 @@ void Rendering::Data::MaterialInstance::UploadProperties(bool uploadStableProper
 	{
 		const std::string& name = uniform.name;
 		MaterialPropertyType& value = uniform.value;
-		if (!uploadStableProperties) continue;
 		if (hasDefinitionParameters && isDeclaredParameter(name)) continue;
 
 		const auto uniformData = program.GetUniformInfo(name);
@@ -788,6 +795,9 @@ void Rendering::Data::MaterialInstance::UploadProperties(bool uploadStableProper
 			{
 				if (*texture != nullptr)
 				{
+					// Still the eager path: creation runs where the context is, so the backend
+					// object exists by now. Binding through the handle is what this becomes once
+					// creation is a command (see docs/RenderThreadPlan.md §7).
 					handle = &(*texture)->GetTexture();
 				}
 			}
@@ -922,7 +932,6 @@ void Rendering::Data::MaterialInstance::ResetBlockToDefinition()
 
 
 void Rendering::Data::MaterialInstance::UploadParameterBlock(
-	bool p_uploadStableProperties,
 	Rendering::HAL::Texture* p_emptyTexture2D,
 	Rendering::HAL::Texture* p_emptyTextureCube,
 	Rendering::HAL::Texture* p_flatNormalTexture)
@@ -955,9 +964,18 @@ void Rendering::Data::MaterialInstance::UploadParameterBlock(
 	// across uploads; rewriting them here on every upload was redundant.
 	for (const MaterialDefinition::SamplerField& field : definition->SamplerFields())
 	{
+		// Late binding: a sampler that was given an asset is resolved to its backend object *here*,
+		// at upload time, through the front-end handle - not to whatever pointer happened to exist
+		// when the property was set. That is the prerequisite for the backend object being owned by
+		// the side that owns the context (see docs/RenderThreadPlan.md §7).
+		if (Rendering::Resources::Texture* asset = m_descriptorSet.GetTextureAsset(field.binding))
+		{
+			m_descriptorSet.SetTexture(field.binding, &asset->GetTexture(), asset);
+			continue;
+		}
+
 		Rendering::HAL::TextureHandle* handle = m_descriptorSet.GetTexture(field.binding);
-		Rendering::Resources::Texture* asset = m_descriptorSet.GetTextureAsset(field.binding);
-		if (handle != nullptr || asset != nullptr)
+		if (handle != nullptr)
 		{
 			continue;
 		}
@@ -1031,7 +1049,6 @@ bool Rendering::Data::MaterialInstance::ResetPropertyToDefault(const std::string
 				return p_uniform.name == p_name;
 			});
 			++m_revision;
-			InvalidatePropertySignature();
 			return true;
 		}
 		return false;
@@ -1047,7 +1064,6 @@ bool Rendering::Data::MaterialInstance::ResetPropertyToDefault(const std::string
 				return p_uniform.name == p_name;
 			});
 			++m_revision;
-			InvalidatePropertySignature();
 			return true;
 		}
 		return false;
@@ -1065,7 +1081,6 @@ bool Rendering::Data::MaterialInstance::ResetPropertyToDefault(const std::string
 		}
 		m_descriptorSet.SetTexture(parameter->binding, handle, asset);
 		++m_revision;
-		InvalidatePropertySignature();
 		return true;
 	}
 
@@ -1087,7 +1102,6 @@ bool Rendering::Data::MaterialInstance::ResetPropertyToDefault(const std::string
 		{
 			std::memcpy(block.data() + offset, inherited.data() + offset, size);
 			++m_revision;
-			InvalidatePropertySignature();
 			return true;
 		}
 	}
@@ -1099,14 +1113,12 @@ bool Rendering::Data::MaterialInstance::ResetPropertyToDefault(const std::string
 	}
 	WriteBlockValue(block, parameter->type, value, offset);
 	++m_revision;
-	InvalidatePropertySignature();
 	return true;
 }
 
 
 void Rendering::Data::MaterialInstance::ResetProperties()
 {
-	InvalidatePropertySignature();
 	m_looseUniforms.clear();
 	ReleaseDescriptorSet();
 	EnsureDescriptorSet();
@@ -1139,35 +1151,40 @@ void Rendering::Data::MaterialInstance::UpdateProperties()
 }
 
 
-Rendering::Data::MaterialSignatureSet Rendering::Data::MaterialInstance::Bind(
-	HAL::Texture* p_emptyTexture,
-	HAL::Texture* p_emptyTextureCube,
+void Rendering::Data::MaterialInstance::Bind(
 	std::optional<const std::string_view> p_pass,
-	Tools::Utils::OptRef<const Data::FeatureSet> p_featureSetOverride,
-	const std::optional<MaterialSignatureSet>& p_previousMaterialSignature
+	Tools::Utils::OptRef<const Data::FeatureSet> p_featureSetOverride
 )
 {
 	ZoneScoped;
 	Material* material = MaterialOf();
 	if (material == nullptr)
 	{
-		return {};
+		return;
 	}
+	if (std::getenv("MOON_UNIFORMS") != nullptr)
+	{
+		// Which variant this bind asks for: the feature set decides the shader, and a set that
+		// differs between runs explains "same draw state, different pixels" (docs §8.65).
+		static int binds = 0;
+		const auto& features = p_featureSetOverride.value_or(FeaturesOf());
+		if (binds < 400 && !features.empty())
+		{
+			++binds;
+			std::fprintf(stderr, "[mi] pass=%s features=",
+				p_pass.has_value() ? std::string(p_pass.value()).c_str() : "<any>");
+			for (const auto& feature : features) { std::fprintf(stderr, "%s;", feature.c_str()); }
+			std::fprintf(stderr, "\n");
+			std::fflush(stderr);
+		}
+	}
+
 	auto& program = material->GetVariant(
 		p_pass,
 		p_featureSetOverride.value_or(FeaturesOf())
 	);
 
-	const auto signature = CalculateSignature(
-		program,
-		p_emptyTexture,
-		p_emptyTextureCube
-	);
-
-	if (!p_previousMaterialSignature || signature.bindSignature != p_previousMaterialSignature->bindSignature)
-	{
-		program.Bind();
-	}
+	program.Bind();
 
 	m_programInUse = program;
 
@@ -1176,8 +1193,6 @@ Rendering::Data::MaterialSignatureSet Rendering::Data::MaterialInstance::Bind(
 	// Loose uniforms are uploaded by UploadProperties(), which the renderer calls after this
 	// method selected and bound the program.
 	BindParameterBlock(program);
-
-	return signature;
 }
 
 
@@ -1253,7 +1268,6 @@ void Rendering::Data::MaterialInstance::SetProperty(const std::string p_name, co
 	}
 
 	++m_revision;
-	++m_stablePropertySignatureVersion;
 }
 
 
@@ -1636,28 +1650,4 @@ void Rendering::Data::MaterialInstance::SetTransparent(bool transparent)
 	}
 }
 
-
-void Rendering::Data::MaterialInstance::InvalidatePropertySignature()
-{
-	++m_stablePropertySignatureVersion;
-}
-
-
-Rendering::Data::MaterialSignatureSet Rendering::Data::MaterialInstance::CalculateSignature(Rendering::HAL::ShaderProgram& p_selectedProgram, Rendering::HAL::Texture* p_emptyTexture2D, Rendering::HAL::Texture* p_emptyTextureCube)
-{
-	ZoneScoped;
-
-	MaterialSignatureSet signature;
-
-	// Bind
-	HashCombine(signature.bindSignature, this);
-	HashCombine(signature.bindSignature, &p_selectedProgram);
-
-	// Stable Properties
-	signature.stablePropertySignature = signature.bindSignature;
-	HashCombine(signature.stablePropertySignature, m_stablePropertySignatureVersion);
-	HashCombine(signature.stablePropertySignature, p_emptyTexture2D);
-	HashCombine(signature.stablePropertySignature, p_emptyTextureCube);
-
-	return signature;
-}
+

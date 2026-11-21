@@ -159,15 +159,15 @@ namespace Editor::Rendering {
 			}
 		};
 
-		::Core::Rendering::FramebufferUtil::SetupFramebuffer(pathTracefbo, fBColorDesc, false, false,false);
+		::Core::Rendering::FramebufferUtil::SetupFramebufferWithDriver(pathTracefbo, fBColorDesc, false, false,false);
 		fBColorDesc.minFilter = ::Rendering::Settings::ETextureFilteringMode::NEAREST;
 		fBColorDesc.magFilter = ::Rendering::Settings::ETextureFilteringMode::NEAREST;
-		::Core::Rendering::FramebufferUtil::SetupFramebuffer(pathTraceFBOLowRes, fBColorDesc, false, false, false);
+		::Core::Rendering::FramebufferUtil::SetupFramebufferWithDriver(pathTraceFBOLowRes, fBColorDesc, false, false, false);
 		fBColorDesc.minFilter = ::Rendering::Settings::ETextureFilteringMode::LINEAR;
 		fBColorDesc.magFilter = ::Rendering::Settings::ETextureFilteringMode::LINEAR;
-		::Core::Rendering::FramebufferUtil::SetupFramebuffer(accumFBO, fBColorDesc, false, false, false);
-		::Core::Rendering::FramebufferUtil::SetupFramebuffer(outputFBO[0], fBColorDesc, false, false, false);
-		::Core::Rendering::FramebufferUtil::SetupFramebuffer(outputFBO[1], fBColorDesc, false, false, false);
+		::Core::Rendering::FramebufferUtil::SetupFramebufferWithDriver(accumFBO, fBColorDesc, false, false, false);
+		::Core::Rendering::FramebufferUtil::SetupFramebufferWithDriver(outputFBO[0], fBColorDesc, false, false, false);
+		::Core::Rendering::FramebufferUtil::SetupFramebufferWithDriver(outputFBO[1], fBColorDesc, false, false, false);
 	     
 
 		MOON::DebugSettings::instance().addCallBack("PathTrace", "Default", [this](MOON::NodeBase* self) {

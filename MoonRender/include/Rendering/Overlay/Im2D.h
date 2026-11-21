@@ -19,7 +19,30 @@
 
 namespace Rendering::Overlay::Im2D
 {
-	using TextureId = uint64_t;   ///< GL texture name; 0 means "no texture" (solid white).
+	/** What a draw command samples. Bit 63 set means the low 32 bits are a
+	 * Backend::ResourceHandle<HAL::Texture> id, resolved to the GL name when the command runs (on
+	 * the side that owns the context); without it the value is a raw GL name belonging to a
+	 * backend-owned texture (ImGui's font atlas, the overlay's white pixel). 0 means "no texture"
+	 * (solid white). That is filagui's arrangement, where ImGui's ImTextureID holds a front-end
+	 * Texture and the GL name is looked up at execution time. */
+	using TextureId = uint64_t;
+	static constexpr TextureId kTextureHandleFlag = TextureId{ 1 } << 63;
+
+	/** Packs a texture handle into a TextureId (see kTextureHandleFlag). */
+	inline TextureId TextureIdFromHandle(uint32_t p_handleId)
+	{
+		return kTextureHandleFlag | static_cast<TextureId>(p_handleId);
+	}
+
+	inline bool IsHandleTexture(TextureId p_texture)
+	{
+		return (p_texture & kTextureHandleFlag) != 0;
+	}
+
+	inline uint32_t HandleOfTexture(TextureId p_texture)
+	{
+		return static_cast<uint32_t>(p_texture & ~kTextureHandleFlag);
+	}
 	using ImU32 = uint32_t;
 
 	// ---------------------------------------------------------------------------------------

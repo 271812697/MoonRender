@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <Rendering/HAL/Common/TVertexBuffer.h>
 #include <Rendering/HAL/Common/TIndexBuffer.h>
 #include <Rendering/Settings/EDataType.h>

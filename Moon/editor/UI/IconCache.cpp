@@ -64,5 +64,8 @@ MOON::IconCache& MOON::IconCache::Instance()
 	{
 		return 0;
 	}
-	return static_cast<::Rendering::Overlay::Im2D::TextureId>(texture->GetTexture().GetID());
+	// The draw list carries a handle, not a GL name: the texture is resolved when the overlay's
+	// commands run, on the side that owns the context (see Im2D::kTextureHandleFlag and
+	// docs/RenderThreadPlan.md §7.8). That is what lets the texture itself be created by a command.
+	return ::Rendering::Overlay::Im2D::TextureIdFromHandle(texture->GetHandle().GetId());
 }

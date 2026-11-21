@@ -1,4 +1,5 @@
-﻿#include <glad/glad.h>
+#include <glad/glad.h>
+#include <Rendering/Backend/BackendResources.h>
 #include <Rendering/HAL/OpenGL/GLTextureHandle.h>
 #include <Rendering/HAL/OpenGL/GLTypes.h>
 
@@ -20,13 +21,17 @@ Rendering::HAL::GLTextureHandle::TTextureHandle(Settings::ETextureType p_type, u
 template<>
 void Rendering::HAL::GLTextureHandle::Bind(std::optional<uint32_t> p_slot) const
 {
+	// Binding is GL, so it only means something where the name is: inside a command, or without a
+	// render thread. On the recording side the name is the executor's, and binds go through
+	// BindDescriptor (see MaterialInstance::BindTexture).
+	const uint32_t id = GetID();
 	if (p_slot.has_value())
 	{
-		glBindTextureUnit(p_slot.value(), m_context.id);
+		glBindTextureUnit(p_slot.value(), id);
 	}
 	else
 	{
-		glBindTexture(m_context.type, m_context.id);
+		glBindTexture(m_context.type, id);
 	}
 }
 
@@ -39,7 +44,24 @@ void Rendering::HAL::GLTextureHandle::Unbind() const
 template<>
 uint32_t Rendering::HAL::GLTextureHandle::GetID() const
 {
-	return m_context.id;
+	if (m_context.id != 0u)
+	{
+		return m_context.id;
+	}
+	// Front end with a render thread: the name is in the record the handle names.
+	return ::Rendering::Backend::Records::TextureName(m_context.handleId);
+}
+
+template<>
+uint32_t Rendering::HAL::GLTextureHandle::GetHandleId() const
+{
+	return m_context.handleId;
+}
+
+template<>
+bool Rendering::HAL::GLTextureHandle::HasBackendName() const
+{
+	return m_context.id != 0u;
 }
 
 template<>

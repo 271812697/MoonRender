@@ -5,6 +5,9 @@
 namespace Editor::Panels {
 	class SceneView;
 }
+namespace Rendering::Context {
+	class Driver;
+}
 
 namespace MOON
 {
@@ -25,8 +28,25 @@ namespace MOON
 		/** Opens the overlay frames and measures the frame time against the previous one. */
 		void BeginFrame(Editor::Panels::SceneView& p_view);
 
-		/** Draws the overlay the debug settings ask for and closes the frames. */
-		void EndFrame(Editor::Panels::SceneView& p_view);
+		/** Opens only the 3D overlay's frame (the gizmos, the view cube): the facts the gizmo pass
+		 * draws against, and nothing from ImGui.
+		 *
+		 * This is what a render thread can run: the 3D overlay draws through the command stream
+		 * (Rendering::Overlay::Im3DGLRenderer), so the recording side needs neither a context nor
+		 * an ImGui frame. ImGui and the 2D draw list keep using BeginFrame/EndFrame until their
+		 * GL is commands too. */
+		void BeginGizmoFrame(Editor::Panels::SceneView& p_view);
+
+		/** Opens the 2D draw list's frame (the widgets' icons and lines). Same story as
+		 * BeginGizmoFrame: the list is built on this side and drawn through the command stream. */
+		void BeginOverlay2D(Editor::Panels::SceneView& p_view);
+
+		/** Draws the 2D draw list into the frame's target (a command), without the ImGui parts. */
+		void EndOverlay2D(Editor::Panels::SceneView& p_view, ::Rendering::Context::Driver& p_driver);
+
+		/** Draws the overlay the debug settings ask for and closes the frames. p_driver is the
+		 * command recorder the 2D overlay records its state setup on. */
+		void EndFrame(Editor::Panels::SceneView& p_view, ::Rendering::Context::Driver& p_driver);
 
 		/** TEMPORARY PROBE for the "imported STEP has no section" investigation: with
 		 * MOON_CLIP_DEMO=<ratio> set, cut the framed document with a horizontal plane
@@ -36,7 +56,6 @@ namespace MOON
 		static void ApplyClipDemo(Editor::Panels::SceneView& p_view);
 
 	private:
-		void DrawGbufferViews(Editor::Panels::SceneView& p_view);
 		void DrawFrameStats(Editor::Panels::SceneView& p_view);
 
 		std::chrono::steady_clock::time_point m_lastFrame{};

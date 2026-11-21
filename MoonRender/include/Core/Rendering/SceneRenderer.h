@@ -154,22 +154,13 @@ namespace Core::Rendering
 		 * sits inside the fade range, and the shader dithers the surface into a dot pattern. */
 		void SetExcludedFeatures(::Rendering::Data::FeatureSet p_features);
 
-		/** Drops the cached drawables so the next frame re-reads the scene. What a material swap
-		 * needs: the parse result (and the hash that guards it) was built against the old one, and
-		 * nothing in the scene graph changes when a component's material list is rewritten. */
-		void InvalidateParsedDrawables();
-
 		SceneDrawablesDescriptor ParseScene(
 			const SceneParsingInput& p_input
 		);
 
-		/** Rebuilds the cached parsed drawables when the scene content changed.
-		 *
-		 * The signature covers everything ParseScene reads: actor set/active
-		 * flags, transforms, models and their meshes (material indices, sub
-		 * ranges, index counts, primitive modes, bounds) and material renderer
-		 * state (materials, visibility flags, user matrix).
-		 */
+		/** Rebuilds the parsed drawables the passes draw from. Runs every frame: the content
+		 * signature that used to guard a cache is gone (it hashed the whole scene each frame, and
+		 * a stale entry was a silent wrong frame). */
 		void UpdateParsedDrawables(Core::SceneSystem::Scene& p_scene);
 
 
@@ -191,10 +182,8 @@ namespace Core::Rendering
 		
 		uint32_t m_hzbSkippedDrawables = 0;
 
-		/** Cached ParseScene output, see UpdateParsedDrawables. */
+		/** This frame's parsed drawables, see UpdateParsedDrawables. */
 		SceneDrawablesDescriptor m_parsedDrawables;
-		uint64_t m_parsedDrawablesHash = 0;
-		bool m_parsedDrawablesValid = false;
 		size_t m_lastParsedDrawableCount = 0;
 		::Rendering::Data::FeatureSet m_excludedFeatures;
 	};

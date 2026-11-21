@@ -12,6 +12,8 @@
 #include <unordered_set>
 #include<assert.h>
 #include <glad/glad.h>
+#include <Rendering/Context/Driver.h>
+#include <Rendering/HAL/Common/HALDriverAccess.h>
 #include <Rendering/HAL/ShaderProgram.h>
 #include <Rendering/HAL/ShaderStage.h>
 #include <Rendering/Data/MaterialBuilder.h>
@@ -806,6 +808,14 @@ void main()
 		const Rendering::Data::MaterialParser& p_parser,
 		Rendering::HAL::ShaderProgram& p_program)
 	{
+		// The check reads the program's blocks and block sizes from GL, which needs the program and
+		// the context. In threaded mode the program is built on the executor (see
+		// GLShaderProgram::Link), so there is nothing to query on this side yet.
+		if (::Rendering::Context::Driver* const driver = ::Rendering::HAL::CurrentDriver();
+			driver != nullptr && driver->IsRenderThreadActive())
+		{
+			return;
+		}
 		// Resolve the program's fixed slots and material map before inspecting them.
 		p_program.Bind();
 		const GLuint program = static_cast<GLuint>(p_program.GetID());
@@ -1266,6 +1276,20 @@ namespace Rendering::Resources::Loaders
 						p_parser.Name(), spec.name, p_variant.pass);
 				}
 				return nullptr;
+			}
+
+			if (std::getenv("MOON_UNIFORMS") != nullptr)
+			{
+				// Which variant is being compiled, and a hash of its source: two modes that create a
+				// different set of programs are shading with different code (docs §8.66).
+				uint64_t sourceHash = 1469598103934665603ull;
+				for (const char c : source) { sourceHash = (sourceHash ^ static_cast<uint8_t>(c)) * 1099511628211ull; }
+				std::fprintf(stderr, "[variant] material=%s pass=%s stage=%s len=%zu hash=%016llx features=",
+					p_parser.Name().c_str(), p_variant.pass.c_str(), spec.name, source.size(),
+					static_cast<unsigned long long>(sourceHash));
+				for (const std::string& feature : p_variant.features) { std::fprintf(stderr, "%s;", feature.c_str()); }
+				std::fprintf(stderr, "\n");
+				std::fflush(stderr);
 			}
 
 			auto stage = std::make_shared<Rendering::HAL::ShaderStage>(spec.type);

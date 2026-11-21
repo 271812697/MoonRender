@@ -1,4 +1,5 @@
 #pragma once
+#include <optional>
 #include <Rendering/Settings/ETextureFilteringMode.h>
 #include <Rendering/Settings/ETextureWrapMode.h>
 #include <Rendering/Settings/EInternalFormat.h>

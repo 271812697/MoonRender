@@ -110,5 +110,10 @@ namespace MOON
 		 * a crash a few frames later says the scene or the topology actors were not ready
 		 * for what was read, and the counter says which frame it happened on. */
 		bool m_traceNextFrame = false;
+		/** Set when the frame's document read rebuilt geometry: the tree is a Qt model, so its
+		 * rebuild is deferred to the GUI thread, right after the render job finished. */
+		bool m_treeRefreshPending = false;
+		/** Whether the gizmo's geometry has been built (see ViewportFrame::Render). */
+		bool m_gizmoReady = false;
 	};
 }

@@ -20,6 +20,8 @@ target_link_libraries(${TARGET_NAME} PUBLIC
  # The shader sources packed at build time (Tools/ShaderPack): linking it is what makes
  # the engine find its shaders in the executable instead of on the disk.
  MoonShader
+ # The engine logs through spdlog (the editor's CORE_* macros are built on it too).
+ spdlog
  )
 target_compile_options(${TARGET_NAME} PRIVATE /bigobj )
 target_compile_definitions(${TARGET_NAME} PUBLIC GRAPHICS_API_OPENGL)

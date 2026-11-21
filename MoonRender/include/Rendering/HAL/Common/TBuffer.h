@@ -1,8 +1,14 @@
-﻿#pragma once
+#pragma once
 #include <optional>
+#include <Rendering/Backend/ResourceHandle.h>
 #include <Rendering/Settings/EGraphicsBackend.h>
 #include <Rendering/Settings/EAccessSpecifier.h>
 #include <Rendering/Settings/EBufferType.h>
+
+namespace Rendering::Backend
+{
+	struct HwBufferObject;
+}
 
 namespace Rendering::HAL
 {
@@ -86,6 +92,15 @@ namespace Rendering::HAL
 		* Returns the ID of the buffer
 		*/
 		uint32_t GetID() const;
+
+		/**
+		* The handle that names this buffer's backend object (see Backend::HandleAllocator and
+		* Backend::HwBufferObject): what a front-end object stores, instead of the HAL object.
+		*/
+		Rendering::Backend::ResourceHandle<Rendering::Backend::HwBufferObject> GetHandle() const
+		{
+			return m_buffer.handle;
+		}
 
 		/**
 		* Maps a range of the buffer for reading on the CPU.

@@ -3,6 +3,7 @@
 #include <memory>
 #include <Rendering/Core/ABaseRenderer.h>
 #include <Rendering/Core/ARenderPass.h>
+#include <Rendering/Core/PresentPass.h>
 #include <Rendering/Data/Describable.h>
 #include <Rendering/Features/ARenderFeature.h>
 #include <Rendering/Types/RenderFeatureType.h>
@@ -21,6 +22,10 @@ namespace Rendering::Core
 		virtual void BeginFrame(const Data::FrameDescriptor& p_frameDescriptor);
 
 		virtual void DrawFrame() final;
+
+		/** The present, as the last thing the frame draws: reads p_source's colour attachment and
+		 * writes p_target, with the pass context set explicitly (see PresentPass). */
+		void PresentTo(::Rendering::HAL::Framebuffer& p_source, ::Rendering::HAL::Framebuffer& p_target);
 
 		virtual void EndFrame() override;
 
@@ -61,6 +66,8 @@ namespace Rendering::Core
 
 	private:
 		Tools::Utils::OptRef<Core::ARenderPass> m_currentPass;
+		/** The present's pass object: not in m_passes, because its target belongs to the view. */
+		std::unique_ptr<PresentPass> m_presentPass;
 	};
 }
 

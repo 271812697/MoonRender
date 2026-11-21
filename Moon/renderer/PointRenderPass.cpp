@@ -1,6 +1,7 @@
-﻿#include <ranges>
+#include <ranges>
 #include <Core/ECS/Components/CMaterialRenderer.h>
 #include <Core/Rendering/EngineDrawableDescriptor.h>
+#include <Rendering/Backend/BackendResources.h>
 
 #include "Core/Global/ServiceLocator.h"
 #include "PointRenderPass.h"
@@ -34,11 +35,15 @@ void Editor::Rendering::PointRenderPass::Draw(::Rendering::Data::PipelineState p
 			//selectMode.
 			
 			auto selectMesh=selectModel->GetModel()->GetMeshes()[0];
-			auto& sphereVao=sphere->GetMeshes()[0]->getVertexArray();
-			auto& instanceVBO = selectMesh->getVertexBuffer();
-			
-			sphereVao.Bind();
-			instanceVBO.Bind();
+			// The mesh holds handles now (see docs/RenderThreadPlan.md §8.45): the GL names the
+			// fixed-function calls below need are resolved from them.
+			const uint32_t sphereVao = ::Rendering::Backend::Records::VertexArrayName(
+				sphere->GetMeshes()[0]->GetVertexArrayHandle());
+			const uint32_t instanceVBO = ::Rendering::Backend::Records::BufferName(
+				selectMesh->GetVertexBufferHandle());
+
+			glBindVertexArray(sphereVao);
+			glBindBuffer(GL_ARRAY_BUFFER, instanceVBO);
 			// Instance attribute 5 = the position of each vertex of the selected
 			// mesh. The stride has to come from the mesh: a model loaded from a file
 			// uses the 14 float Vertex layout, while a STEP/topology batch uses the
@@ -48,8 +53,8 @@ void Editor::Rendering::PointRenderPass::Draw(::Rendering::Data::PipelineState p
 			glVertexAttribPointer(
 				5, 3, GL_FLOAT, GL_FALSE, selectMesh->GetVertexStride(), (void*)0);
 			glVertexAttribDivisor(5, 1);  // ????????
-			sphereVao.Unbind();
-			instanceVBO.Unbind();
+			glBindVertexArray(0);
+			glBindBuffer(GL_ARRAY_BUFFER, 0);
 			m_PointMaterial.SetGPUInstances(selectMesh->GetVertexCount());
 			auto stateMask = m_PointMaterial.GenerateStateMask();
 			::Rendering::Entities::Drawable element;

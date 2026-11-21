@@ -401,6 +401,22 @@ namespace Core::ECS::Components
                     .data = domainColor.data()
                 };
                 ::Rendering::HAL::GLTexture* domainColorTex = new ::Rendering::HAL::GLTexture(::Rendering::Settings::ETextureType::TEXTURE_BUFFER);
+                if (std::getenv("MOON_UNIFORMS") != nullptr)
+                {
+                    // What the face colours hold before they go to the GPU: identical hashes in two
+                    // modes mean the difference is downstream, a different hash means the CAD build
+                    // produced different colours (docs/RenderThreadPlan.md §8.65).
+                    uint64_t hash = 1469598103934665603ull;
+                    const auto* bytes = reinterpret_cast<const uint8_t*>(domainColor.data());
+                    for (size_t b = 0; b < desc.buffetLen; ++b) { hash = (hash ^ bytes[b]) * 1099511628211ull; }
+                    std::fprintf(stderr, "[domain] colors=%zu hash=%016llx first=%.3f,%.3f,%.3f,%.3f\n",
+                        domainColor.size(), static_cast<unsigned long long>(hash),
+                        domainColor.empty() ? 0.0f : domainColor[0].x,
+                        domainColor.empty() ? 0.0f : domainColor[0].y,
+                        domainColor.empty() ? 0.0f : domainColor[0].z,
+                        domainColor.empty() ? 0.0f : domainColor[0].w);
+                    std::fflush(stderr);
+                }
                 domainColorTex->Allocate(desc);
                 // 创建并注册默认材质
                 auto& materialRenderer = *faceChild->GetComponent <Core::ECS::Components::CMaterialRenderer>();

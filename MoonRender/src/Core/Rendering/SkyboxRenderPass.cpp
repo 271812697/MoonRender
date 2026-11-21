@@ -1,4 +1,6 @@
 #include <algorithm>
+#include <cstdio>
+#include <cstdlib>
 #include <array>
 #include <cmath>
 #include <filesystem>
@@ -20,6 +22,23 @@
 #include <Rendering/HAL/Renderbuffer.h>
 #include <Rendering/HAL/Profiling.h>
 #include <Rendering/Resources/Loaders/TextureLoader.h>
+
+namespace
+{
+	/** MOON_FRAME_TRACE: the skybox pass' own milestones. The first frame on a render thread stops
+	 * inside Draw, and the passes it overlaps (the sky capture is a set of renders of its own) are
+	 * the suspects, so this says which step it was in. */
+	void TraceSky(const char* p_what)
+	{
+		static const bool trace = std::getenv("MOON_FRAME_TRACE") != nullptr;
+		if (trace)
+		{
+			std::fprintf(stderr, "[sky] %s\n", p_what);
+			std::fflush(stderr);
+		}
+	}
+}
+
 
 namespace
 {
@@ -85,28 +104,36 @@ void Core::Rendering::SkyboxRenderPass::Draw(::Rendering::Data::PipelineState p_
 {
 	ZoneScoped;
 	TracyGpuZone("SkyboxRenderPass");
+	TraceSky("enter");
+	if (std::getenv("MOON_SKY_RECAPTURE") != nullptr) { needUpdateSkyTexture = true; } // re-capture every frame: bisect switch
 	if (needUpdateSkyTexture && m_captureEnvironment) {
 		needUpdateSkyTexture = false;
+		// Recorded like every other GL operation: the binds, the per-face attachments and the
+		// draws travel as commands, so the capture runs where the context is (both modes).
 		computeSkyTexture();
-	}	
+	}
 	auto& engineBufferRenderFeature = m_renderer.GetFeature<Core::Rendering::EngineBufferRenderFeature>();
 	auto& frameDescriptor = m_renderer.GetFrameDescriptor();
 	if (auto output = frameDescriptor.outputMsaaBuffer)
 	{
-		output.value().Bind();
+		TraceSky("bind output");
+		m_renderer.BindFramebuffer(&output.value());
 	}
 	// computeSkyTexture() overwrites the engine UBO with the sky capture camera,
 	// so the real camera must always be restored regardless of the sky mode.
+	TraceSky("SetCamera");
 	engineBufferRenderFeature.SetCamera(frameDescriptor.camera.value());
 	//draw skybox
 	if(mSetting.mode==SkyMode::SkyBox)
 	{
 		//visible skybox
+		TraceSky("RemoveFeature");
 		m_skyboxMaterial.RemoveFeature("SKY_Convert");
 
 		// Draw skybox
 		::Rendering::Entities::Drawable skyboxDrawable;
 		skyboxDrawable.mesh = m_renderer.m_unitCube;
+		TraceSky("DefaultInstance");
 		skyboxDrawable.material = m_skyboxMaterial.DefaultInstance();
 		skyboxDrawable.stateMask.depthWriting = false;
 		skyboxDrawable.stateMask.colorWriting = true;
@@ -114,8 +141,11 @@ void Core::Rendering::SkyboxRenderPass::Draw(::Rendering::Data::PipelineState p_
 		skyboxDrawable.stateMask.frontfaceCulling = false;
 		skyboxDrawable.stateMask.backfaceCulling = false;
 		skyboxDrawable.stateMask.depthTest = false;
+		TraceSky("SetProperty SkyboxCube");
 		skyboxDrawable.material.value().SetProperty("SkyboxCube", prefilterCube.get());
-		m_renderer.DrawEntity(p_pso, skyboxDrawable);	
+		TraceSky("DrawEntity begin");
+		m_renderer.DrawEntity(p_pso, skyboxDrawable);
+		TraceSky("DrawEntity done");
 	}
 	else if (mSetting.mode == SkyMode::PureColor) {
 		m_clearMaterial.SetFeatures({ "PureColor" });
@@ -245,6 +275,11 @@ void Core::Rendering::SkyboxRenderPass::computeIrradianceSH()
 void Core::Rendering::SkyboxRenderPass::computeSkyTexture()
 {
 	using namespace Core::Rendering;
+	if (std::getenv("MOON_FRAME_TRACE") != nullptr)
+	{
+		std::fprintf(stderr, "[sky] capture\n");
+		std::fflush(stderr);
+	}
 	auto p_pso =m_renderer.CreatePipelineState();
 	skyTexture = GetService(Core::ResourceManagement::TextureManager).GetResource(mPath);
 	
@@ -269,7 +304,7 @@ void Core::Rendering::SkyboxRenderPass::computeSkyTexture()
 				}
 				};
 
-				::Core::Rendering::FramebufferUtil::SetupFramebuffer(brdfBuffer, fBColorDesc, false, false, false);
+				::Core::Rendering::FramebufferUtil::SetupFramebufferWithDriver(brdfBuffer, fBColorDesc, false, false, false);
 
 				
 
@@ -407,7 +442,7 @@ void Core::Rendering::SkyboxRenderPass::computeSkyTexture()
 			skyCamera.SetPosition({ 0.0f, 0.0f, 0.0f });
 			skyCamera.SetFov(90.0f);
 			const auto [width, height] = skyBoxBuffer.GetSize();
-			skyBoxBuffer.Bind();
+			m_renderer.BindFramebuffer(&skyBoxBuffer);
 			m_renderer.SetViewport(0, 0, width, height);
 			for (uint32_t faceIndex = 0; faceIndex < 6; ++faceIndex)
 			{
@@ -425,7 +460,7 @@ void Core::Rendering::SkyboxRenderPass::computeSkyTexture()
 				skyboxDrawable.material.value().SetProperty("u_SkyBoxTexture", skyTexture);
 				m_renderer.DrawEntity(p_pso, skyboxDrawable);
 			}
-			skyBoxBuffer.Unbind();
+			m_renderer.BindDefaultFramebuffer();
 			m_renderer.SetViewport(0, 0, frameDescriptor.renderWidth, frameDescriptor.renderHeight);
 			//it is important to do this at this point because we need the mipmaps for the prefilter
 			skyBoxCube->GenerateMipmaps();
@@ -440,7 +475,7 @@ void Core::Rendering::SkyboxRenderPass::computeSkyTexture()
 			skyCamera.SetPosition({ 0.0f, 0.0f, 0.0f });
 			skyCamera.SetFov(90.0f);
 			const auto [width, height] = irradianceBuffer.GetSize();
-			irradianceBuffer.Bind();
+			m_renderer.BindFramebuffer(&irradianceBuffer);
 			m_renderer.SetViewport(0, 0, width, height);
 			for (uint32_t faceIndex = 0; faceIndex < 6; ++faceIndex)
 			{
@@ -464,7 +499,7 @@ void Core::Rendering::SkyboxRenderPass::computeSkyTexture()
 				skyboxDrawable.material.value().SetProperty("intensity", m_environmentIntensity);
 				m_renderer.DrawEntity(p_pso, skyboxDrawable);
 			}
-			irradianceBuffer.Unbind();
+			m_renderer.BindDefaultFramebuffer();
 			// The irradiance cube is sampled with implicit LOD (mipmapped min filter),
 			// so the mip chain must be generated after the convolution.
 			irradianceCube->GenerateMipmaps();
@@ -505,7 +540,7 @@ void Core::Rendering::SkyboxRenderPass::computeSkyTexture()
 			// matches one output texel (Filament's level 0 is a filtered copy of its 256 source).
 			const float baseLod = std::log2(sourceWidth / static_cast<float>(width));
 
-			prefilterBuffer.Bind();
+			m_renderer.BindFramebuffer(&prefilterBuffer);
 			for (uint32_t mip = 0; mip < maxMipLevels; ++mip)
 			{
 				uint32_t mipWidth = static_cast<uint32_t>(width * std::pow(0.5f, mip));
@@ -566,7 +601,7 @@ void Core::Rendering::SkyboxRenderPass::computeSkyTexture()
 					m_renderer.DrawEntity(p_pso, skyboxDrawable);
 				}
 			}
-			prefilterBuffer.Unbind();
+			m_renderer.BindDefaultFramebuffer();
 			m_renderer.SetViewport(0, 0, frameDescriptor.renderWidth, frameDescriptor.renderHeight);
 		}
 		//brdf lut
@@ -583,10 +618,10 @@ void Core::Rendering::SkyboxRenderPass::computeSkyTexture()
 			blit.stateMask.backfaceCulling = false;
 			blit.stateMask.depthTest = false;
 			const auto [width, height] = brdfBuffer.GetSize();
-			brdfBuffer.Bind();
+			m_renderer.BindFramebuffer(&brdfBuffer);
 			m_renderer.SetViewport(0, 0, width, height);
 			m_renderer.DrawEntity(p_pso, blit);
-			brdfBuffer.Unbind();
+			m_renderer.BindDefaultFramebuffer();
 			m_renderer.SetViewport(0, 0, frameDescriptor.renderWidth, frameDescriptor.renderHeight);
 		}
 	}

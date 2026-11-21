@@ -1,5 +1,10 @@
-﻿#include <glad/glad.h>
+#include <glad/glad.h>
 
+#include <Rendering/Backend/BackendResources.h>
+#include <Rendering/Backend/BufferRequests.h>
+#include <Rendering/Context/Driver.h>
+#include <Rendering/HAL/Common/HALDriverAccess.h>
+#include <Rendering/HAL/Common/ResourceOps.h>
 #include <Rendering/HAL/OpenGL/GLBuffer.h>
 #include <Rendering/HAL/OpenGL/GLTypes.h>
 #include <assert.h>
@@ -9,20 +14,30 @@ Rendering::HAL::GLBuffer::TBuffer(Settings::EBufferType p_type) : m_buffer{
 	.type = p_type
 }
 {
-	glCreateBuffers(1, &m_buffer.id);
+	// Filament's createBufferObjectS/createBufferObjectR split: the slot is reserved here (no GL),
+	// and the name is made on the side that owns the context (see ResourceOps::EnsureBuffer).
+	m_buffer.handle = ::Rendering::Backend::GetHandleAllocator().Allocate<::Rendering::Backend::HwBufferObject>();
+	::Rendering::HAL::ResourceOps::EnsureBuffer(m_buffer.handle);
 }
 
 template<>
 Rendering::HAL::GLBuffer::~TBuffer()
 {
-	glDeleteBuffers(1, &m_buffer.id);
+	// Deletion is GL too: the record is freed now and the name is queued to the context side.
+	if (m_buffer.handle)
+	{
+		::Rendering::HAL::ResourceOps::DestroyBuffer(m_buffer.handle);
+		m_buffer.handle.clear();
+	}
 }
-
 template<>
 uint64_t Rendering::HAL::GLBuffer::Allocate(uint64_t p_size, Settings::EAccessSpecifier p_usage)
 {
 	assert(IsValid()&& "Cannot allocate memory for an invalid buffer");
-	glNamedBufferData(m_buffer.id, p_size, nullptr, EnumToValue<GLenum>(p_usage));
+
+	// The name is made on the side that owns the context: recorded when that side is another
+	// thread, done here otherwise (see ResourceOps).
+	::Rendering::HAL::ResourceOps::AllocateBuffer(m_buffer.handle, p_size, p_usage);
 	return m_buffer.allocatedBytes = p_size;
 }
 
@@ -32,12 +47,15 @@ void Rendering::HAL::GLBuffer::Upload(const void* p_data, std::optional<BufferMe
 	assert(IsValid()&&"Trying to upload data to an invalid buffer");
 	assert(!IsEmpty()&&"Trying to upload data to an empty buffer");
 
-	glNamedBufferSubData(
-		m_buffer.id,
+	// An upload is a command, like every other operation that needs the context (Filament's
+	// updateBufferObject): the bytes are copied into the command and written by the executor. The
+	// ring is sized for one batch (Filament's minCommandBufferSizeMB), so no flush can land
+	// between the bytes and the command any more.
+	::Rendering::HAL::ResourceOps::UploadBuffer(
+		m_buffer.handle,
+		p_data,
 		p_range ? p_range->offset : 0,
-		p_range ? p_range->size : m_buffer.allocatedBytes,
-		p_data
-	);
+		p_range ? p_range->size : m_buffer.allocatedBytes);
 }
 
 template<>
@@ -45,13 +63,28 @@ void Rendering::HAL::GLBuffer::Bind(std::optional<uint32_t> p_index) const
 {
 	assert(IsValid()&& "Cannot bind an invalid buffer");
 
+	// A binding point only means something on the side that owns the context: record it, so the
+	// executor binds it before the draws that read it run. Binding it here left the light SSBO
+	// unbound on the render thread and every lit surface read an empty light list (docs §8.67).
+	if (::Rendering::Context::Driver* const driver = ::Rendering::HAL::CurrentDriver();
+		driver != nullptr && driver->IsRenderThreadActive())
+	{
+		::Rendering::Backend::BindBufferRequest request;
+		request.handleId = m_buffer.handle.GetId();
+		request.type = m_buffer.type;
+		request.indexed = p_index.has_value();
+		request.index = p_index.value_or(0);
+		driver->EnqueueBindBuffer(request);
+		return;
+	}
+
 	if (p_index.has_value())
 	{
-		glBindBufferBase(EnumToValue<GLenum>(m_buffer.type), p_index.value(), m_buffer.id);
+		glBindBufferBase(EnumToValue<GLenum>(m_buffer.type), p_index.value(), GetID());
 	}
 	else
 	{
-		glBindBuffer(EnumToValue<GLenum>(m_buffer.type), m_buffer.id);
+		glBindBuffer(EnumToValue<GLenum>(m_buffer.type), GetID());
 	}
 }
 
@@ -59,7 +92,7 @@ template<>
 void Rendering::HAL::GLBuffer::BindRange(uint32_t p_index, uint64_t p_offset, uint64_t p_size) const
 {
 	assert(IsValid()&& "Cannot bind an invalid buffer");
-	glBindBufferRange(EnumToValue<GLenum>(m_buffer.type), p_index, m_buffer.id, p_offset, p_size);
+	glBindBufferRange(EnumToValue<GLenum>(m_buffer.type), p_index, GetID(), p_offset, p_size);
 }
 
 template<>
@@ -73,7 +106,8 @@ template<>
 bool Rendering::HAL::GLBuffer::IsValid() const
 {
 	return
-		m_buffer.id != 0 &&
+		static_cast<bool>(m_buffer.handle) &&
+		::Rendering::Backend::Records::BufferName(m_buffer.handle) != 0 &&
 		m_buffer.type != Settings::EBufferType::UNKNOWN;
 }
 
@@ -94,7 +128,7 @@ template<>
 uint32_t Rendering::HAL::GLBuffer::GetID() const
 {
 	assert(IsValid()&&"Cannot get ID of an invalid buffer");
-	return m_buffer.id;
+	return ::Rendering::Backend::Records::BufferName(m_buffer.handle);
 }
 
 template<>
@@ -104,7 +138,7 @@ void* Rendering::HAL::GLBuffer::MapRead(uint64_t p_offset, uint64_t p_size)
 	assert(!IsEmpty() && "Cannot map an empty buffer");
 
 	return glMapNamedBufferRange(
-		m_buffer.id,
+		GetID(),
 		p_offset,
 		p_size,
 		GL_MAP_READ_BIT
@@ -115,7 +149,7 @@ template<>
 void Rendering::HAL::GLBuffer::Unmap()
 {
 	assert(IsValid() && "Cannot unmap an invalid buffer");
-	glUnmapNamedBuffer(m_buffer.id);
+	glUnmapNamedBuffer(GetID());
 }
 
 template<>

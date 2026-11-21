@@ -4,10 +4,16 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdio>
+#include <cstdlib>
 
 #include <Maths/FVector2.h>
+#include <Rendering/Backend/BackendResources.h>
+#include <Rendering/Backend/OverlayRequests.h>
 #include <Rendering/Context/Driver.h>
 #include <Rendering/Data/Material.h>
+#include <Rendering/HAL/Common/HALDriverAccess.h>
+#include <Rendering/HAL/Common/ResourceOps.h>
 #include <Rendering/Settings/EBlendingEquation.h>
 #include <Rendering/Settings/EBlendingFactor.h>
 #include <Rendering/Settings/EComparaisonAlgorithm.h>
@@ -15,48 +21,53 @@
 
 namespace
 {
-	// The overlay's vertex layout, in bytes: the editor's VertexFormat (position+size, colour,
-	// normal, uv). Offsets are fixed here; the stride comes from the caller.
-	constexpr int kPositionLocation = 0;
-	constexpr int kColorLocation = 1;
-	constexpr int kNormalLocation = 2;
-	constexpr int kUvLocation = 3;
-	// A custom effect's per-vertex data follows the base layout: attribute 4 is up to four floats,
-	// attribute 5 the next four (an effect may declare up to eight). Its offset is derived from
-	// the stride rather than assumed: the editor's VertexFormat is 16-byte aligned and carries
-	// padding after its last member, so sizeof(VertexFormat) is not "40, the end of uv".
-	constexpr int kExtraLocation0 = 4;
-	constexpr int kExtraLocation1 = 5;
-	constexpr size_t kPositionOffset = 0;
-	constexpr size_t kColorOffset = 16;
-	constexpr size_t kNormalOffset = 20;
-	constexpr size_t kUvOffset = 32;
+	/** Records p_request for the executor, or - when this thread owns the context - runs it now
+	 * through the driver's own entry point (the driver decides: inside a batch it runs inline). */
+	Rendering::Context::Driver* CurrentDriver()
+	{
+		return ::Rendering::HAL::CurrentDriver();
+	}
+}
+
+Rendering::Overlay::Im3DGLRenderer::~Im3DGLRenderer()
+{
+	// The names live on the executor: freeing the slot queues the GL deletion there.
+	if (m_vertexArrayHandle != 0)
+	{
+		::Rendering::HAL::ResourceOps::DestroyVertexArray(
+			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwVertexArray>{ m_vertexArrayHandle });
+		m_vertexArrayHandle = 0;
+	}
+	if (m_vertexBufferHandle != 0)
+	{
+		::Rendering::HAL::ResourceOps::DestroyBuffer(
+			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwBufferObject>{ m_vertexBufferHandle });
+		m_vertexBufferHandle = 0;
+	}
 }
 
 void Rendering::Overlay::Im3DGLRenderer::Initialize()
 {
-	if (m_vao != 0)
+	if (m_vertexArrayHandle != 0)
 	{
 		return;
 	}
 
-	glGenVertexArrays(1, &m_vao);
-	glBindVertexArray(m_vao);
-	glGenBuffers(1, &m_vbo);
-	glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
+	// Filament's createVertexArray/createBuffer: the slot is taken here, the GL name is made on
+	// the side that owns the context. The attribute pointers are set per upload (the stride
+	// changes between draws), so nothing else has to happen at creation.
+	using namespace ::Rendering::Backend;
+	m_vertexArrayHandle = GetHandleAllocator().Allocate<HwVertexArray>().GetId();
+	::Rendering::HAL::ResourceOps::EnsureVertexArray(ResourceHandle<HwVertexArray>{ m_vertexArrayHandle });
 
-	// The attribute pointers are described with a stride filled in at draw time; these are only
-	// the offsets and formats, which do not change.
-	glEnableVertexAttribArray(kPositionLocation);
-	glVertexAttribPointer(kPositionLocation, 4, GL_FLOAT, GL_FALSE, 0, (GLvoid*)kPositionOffset);
-	glEnableVertexAttribArray(kColorLocation);
-	glVertexAttribPointer(kColorLocation, 4, GL_UNSIGNED_BYTE, GL_TRUE, 0, (GLvoid*)kColorOffset);
-	glEnableVertexAttribArray(kNormalLocation);
-	glVertexAttribPointer(kNormalLocation, 3, GL_FLOAT, GL_FALSE, 0, (GLvoid*)kNormalOffset);
-	glEnableVertexAttribArray(kUvLocation);
-	glVertexAttribPointer(kUvLocation, 2, GL_FLOAT, GL_FALSE, 0, (GLvoid*)kUvOffset);
+	m_vertexBufferHandle = GetHandleAllocator().Allocate<HwBufferObject>().GetId();
+	::Rendering::HAL::ResourceOps::EnsureBuffer(ResourceHandle<HwBufferObject>{ m_vertexBufferHandle });
 
-	glBindVertexArray(0);
+	if (std::getenv("MOON_FRAME_TRACE") != nullptr)
+	{
+		std::fprintf(stderr, "[ovl] init vao=%u vbo=%u\n", m_vertexArrayHandle, m_vertexBufferHandle);
+		std::fflush(stderr);
+	}
 }
 
 void Rendering::Overlay::Im3DGLRenderer::Begin(
@@ -82,9 +93,13 @@ void Rendering::Overlay::Im3DGLRenderer::Begin(
 	pso.depthTest = p_depthTest;
 	p_driver.SetPipelineState(pso);
 
-	glEnable(GL_POINT_SPRITE);
-	glEnable(GL_PROGRAM_POINT_SIZE);
-	glViewport(0, 0, static_cast<GLsizei>(p_viewportWidth), static_cast<GLsizei>(p_viewportHeight));
+	// gl_PointSize from the shader, for the point sprites and the text runs: capabilities, i.e. the
+	// executor's business like every other piece of GL state. POINT_SPRITE is the pre-core switch
+	// for the same thing and is kept because the editor's context is a compatibility profile.
+	p_driver.EnqueueCapability(::Rendering::Settings::ERenderingCapability::PROGRAM_POINT_SIZE, true);
+	p_driver.EnqueueCapability(::Rendering::Settings::ERenderingCapability::POINT_SPRITE, true);
+	p_driver.SetViewport(0, 0,
+		static_cast<uint32_t>(p_viewportWidth), static_cast<uint32_t>(p_viewportHeight));
 }
 
 void Rendering::Overlay::Im3DGLRenderer::Draw(
@@ -95,49 +110,16 @@ void Rendering::Overlay::Im3DGLRenderer::Draw(
 	float p_viewportWidth, float p_viewportHeight,
 	unsigned int p_extraFloats)
 {
-	if (p_vertexCount == 0)
+	if (p_vertexCount == 0 || m_vertexArrayHandle == 0)
 	{
 		return;
 	}
 
-	glBindVertexArray(m_vao);
-	glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
-
-	// The stride is known here: re-describe the attributes with it before uploading.
-	glVertexAttribPointer(kPositionLocation, 4, GL_FLOAT, GL_FALSE, (GLsizei)p_vertexStride, (GLvoid*)kPositionOffset);
-	glVertexAttribPointer(kColorLocation, 4, GL_UNSIGNED_BYTE, GL_TRUE, (GLsizei)p_vertexStride, (GLvoid*)kColorOffset);
-	glVertexAttribPointer(kNormalLocation, 3, GL_FLOAT, GL_FALSE, (GLsizei)p_vertexStride, (GLvoid*)kNormalOffset);
-	glVertexAttribPointer(kUvLocation, 2, GL_FLOAT, GL_FALSE, (GLsizei)p_vertexStride, (GLvoid*)kUvOffset);
-
-	// The effect channel. Attributes the shader does not declare cost nothing; ones it does and
-	// we leave disabled would read constant (0,0,0,1), so both are turned on only when the run
-	// actually carries the data.
-	if (p_extraFloats > 0)
+	::Rendering::Context::Driver* const driver = CurrentDriver();
+	if (driver == nullptr)
 	{
-		// The effect data sits at the end of each vertex: stride minus the extra floats' size.
-		const size_t extraOffset = p_vertexStride - p_extraFloats * sizeof(float);
-		glEnableVertexAttribArray(kExtraLocation0);
-		glVertexAttribPointer(kExtraLocation0, static_cast<GLint>(std::min(p_extraFloats, 4u)),
-			GL_FLOAT, GL_FALSE, (GLsizei)p_vertexStride, (GLvoid*)extraOffset);
-		if (p_extraFloats > 4)
-		{
-			glEnableVertexAttribArray(kExtraLocation1);
-			glVertexAttribPointer(kExtraLocation1, static_cast<GLint>(p_extraFloats - 4u),
-				GL_FLOAT, GL_FALSE, (GLsizei)p_vertexStride,
-				(GLvoid*)(extraOffset + 4 * sizeof(float)));
-		}
-		else
-		{
-			glDisableVertexAttribArray(kExtraLocation1);
-		}
+		return;
 	}
-	else
-	{
-		glDisableVertexAttribArray(kExtraLocation0);
-		glDisableVertexAttribArray(kExtraLocation1);
-	}
-
-	glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(p_vertexCount * p_vertexStride), p_vertexData, GL_STREAM_DRAW);
 
 	if (p_isLinePass)
 	{
@@ -150,12 +132,34 @@ void Rendering::Overlay::Im3DGLRenderer::Draw(
 		p_viewProjMatrix[8], p_viewProjMatrix[9], p_viewProjMatrix[10], p_viewProjMatrix[11],
 		p_viewProjMatrix[12], p_viewProjMatrix[13], p_viewProjMatrix[14], p_viewProjMatrix[15] });
 
+	// Both halves are GL, so they are recorded: the program and its uniforms (Bind records
+	// BindProgram, UploadProperties records the descriptor work), the stream upload, and the draw.
 	p_material.Bind();
 	// Bind() only selects the program; this path bypasses ABaseRenderer::DrawEntity, so the
 	// uniforms have to be pushed here.
-	p_material.UploadProperties(true);
+	p_material.UploadProperties();
 
-	glDrawArrays(p_glPrimitive, 0, (GLsizei)p_vertexCount);
+	::Rendering::Backend::UploadOverlayVerticesRequest upload;
+	upload.vertexArrayHandleId = m_vertexArrayHandle;
+	upload.vertexBufferHandleId = m_vertexBufferHandle;
+	upload.stride = static_cast<uint32_t>(p_vertexStride);
+	upload.extraFloats = p_extraFloats;
+	upload.vertices.assign(static_cast<const uint8_t*>(p_vertexData),
+		static_cast<const uint8_t*>(p_vertexData) + p_vertexCount * p_vertexStride);
+	driver->EnqueueUploadOverlayVertices(std::move(upload));
+
+	::Rendering::Backend::DrawVertexArrayRequest draw;
+	draw.vertexArrayHandleId = m_vertexArrayHandle;
+	draw.vertexCount = static_cast<uint32_t>(p_vertexCount);
+	draw.primitiveMode = p_glPrimitive;
+	driver->EnqueueDrawVertexArray(draw);
+
+	// Scaffolding, like Driver::Draw: without a render thread the material binds around this call
+	// are still immediate GL, so the command has to run before the caller does anything else.
+	if (!driver->IsRenderThreadActive())
+	{
+		driver->ExecutePendingCommands();
+	}
 }
 
 void Rendering::Overlay::Im3DGLRenderer::BeginMeshes(::Rendering::Context::Driver& p_driver, bool p_blending)
@@ -180,23 +184,40 @@ void Rendering::Overlay::Im3DGLRenderer::BeginMeshes(::Rendering::Context::Drive
 	p_driver.SetPipelineState(pso);
 }
 
-void Rendering::Overlay::Im3DGLRenderer::DrawBoundTriangles(
-	size_t p_vertexCount, int p_viewportX, int p_viewportY, int p_viewportWidth, int p_viewportHeight)
+void Rendering::Overlay::Im3DGLRenderer::DrawMesh(::Rendering::Context::Driver& p_driver,
+	size_t p_vertexCount, uint32_t p_vertexArrayHandle,
+	int p_viewportX, int p_viewportY, int p_viewportWidth, int p_viewportHeight)
 {
-	if (p_vertexCount == 0)
+	if (p_vertexCount == 0 || p_vertexArrayHandle == 0)
 	{
 		return;
 	}
 
-	if (p_viewportWidth > 0 && p_viewportHeight > 0)
-	{
-		glViewport(p_viewportX, p_viewportY, p_viewportWidth, p_viewportHeight);
-	}
+	::Rendering::Backend::DrawVertexArrayRequest draw;
+	draw.vertexArrayHandleId = p_vertexArrayHandle;
+	draw.vertexCount = static_cast<uint32_t>(p_vertexCount);
+	draw.primitiveMode = GL_TRIANGLES;
+	draw.viewportX = p_viewportX;
+	draw.viewportY = p_viewportY;
+	draw.viewportWidth = p_viewportWidth;
+	draw.viewportHeight = p_viewportHeight;
+	p_driver.EnqueueDrawVertexArray(draw);
 
-	glDrawArrays(GL_TRIANGLES, 0, (GLsizei)p_vertexCount);
+	// Same scaffold as Draw above: the immediate path around this draw binds its material here.
+	if (!p_driver.IsRenderThreadActive())
+	{
+		p_driver.ExecutePendingCommands();
+	}
 }
 
 void Rendering::Overlay::Im3DGLRenderer::SetViewport(int p_x, int p_y, int p_width, int p_height)
 {
-	glViewport(p_x, p_y, std::max(0, p_width), std::max(0, p_height));
+	if (::Rendering::Context::Driver* const driver = CurrentDriver())
+	{
+		driver->SetViewport(
+			static_cast<uint32_t>(std::max(0, p_x)),
+			static_cast<uint32_t>(std::max(0, p_y)),
+			static_cast<uint32_t>(std::max(0, p_width)),
+			static_cast<uint32_t>(std::max(0, p_height)));
+	}
 }

@@ -64,6 +64,13 @@ namespace Editor {
 			bool ReadFrame(std::vector<uint8_t>& p_pixels, int& p_width, int& p_height);
 			virtual void DrawFrame();
 			virtual ::Rendering::Entities::Camera* GetCamera() = 0;
+
+		/** Frames what this view is focused on, looking along p_direction.
+		 *
+		 * The overlay's navigation cube issues this when a face or arrow is clicked, and the overlay
+		 * is engine-side: framing is a view operation, so the hook lives on the view base. The
+		 * editor's view overrides it with the picking-aware version; a plain view does nothing. */
+		virtual void FitToFocus(const Maths::FVector3& p_direction) { (void)p_direction; }
 			virtual ::Core::SceneSystem::Scene* GetScene() = 0;
 			std::pair<uint16_t, uint16_t> GetSafeSize() const;
 		    ::Core::Rendering::SceneRenderer& GetRenderer() ;

@@ -1,4 +1,4 @@
-﻿#include <Core/ECS/Components/CMaterialRenderer.h>
+#include <Core/ECS/Components/CMaterialRenderer.h>
 #include <Core/Global/ServiceLocator.h>
 #include <Core/Rendering/EngineBufferRenderFeature.h>
 #include <Core/Rendering/EngineDrawableDescriptor.h>
@@ -56,11 +56,14 @@ void Core::Rendering::ShadowRenderPass::Draw(::Rendering::Data::PipelineState p_
 
 					engineBufferRenderFeature.SetCamera(light.shadowCamera.value());
 
-					light.shadowBuffer->Bind();
+					// Through the driver: the shadow target is GL, and with a render thread it is bound
+					// where the context is. A direct Bind() here is a no-op there, which left the shadow
+					// map unrendered and every lit surface in shadow (docs/RenderThreadPlan.md §8.60).
+					m_renderer.BindFramebuffer(light.shadowBuffer.get());
 					m_renderer.SetViewport(0, 0, light.shadowMapResolution, light.shadowMapResolution);
 					m_renderer.Clear(true, true, true);
 					_DrawShadows(pso, scene);
-					light.shadowBuffer->Unbind();
+					m_renderer.BindDefaultFramebuffer();
 
 					engineBufferRenderFeature.SetCamera(frameDescriptor.camera.value());
 				}
@@ -74,7 +77,7 @@ void Core::Rendering::ShadowRenderPass::Draw(::Rendering::Data::PipelineState p_
 
 	if (auto output = frameDescriptor.outputMsaaBuffer)
 	{
-		output.value().Bind();
+		m_renderer.BindFramebuffer(&output.value());
 	}
 
 	m_renderer.SetViewport(0, 0, frameDescriptor.renderWidth, frameDescriptor.renderHeight);

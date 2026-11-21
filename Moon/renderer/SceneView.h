@@ -31,7 +31,7 @@ namespace Editor::Panels
 		/** Fits whatever the view is about to work on - the selection, or the whole
 		 * scene when there is no selection or it cannot be framed - and looks from
 		 * p_dir. Used by the view cube faces, which must do something on every click. */
-		void FitToFocus(const Maths::FVector3& dir);
+		void FitToFocus(const Maths::FVector3& dir) override;
 		void LookAt(const Maths::FVector3& pivot,const Maths::FVector3& dir,float radius);
 		Maths::FVector2 worldToScreen(const Maths::FVector3& worldPos);
 		/** Bounding sphere of every active model, merged into one. */

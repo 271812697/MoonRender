@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <Rendering/Settings/DriverSettings.h>
 #include <Rendering/Settings/ERenderingCapability.h>
 #include <Rendering/Settings/EPrimitiveMode.h>
@@ -38,6 +38,9 @@ namespace Rendering::HAL
 		void DrawElementsInstanced(Settings::EPrimitiveMode p_primitiveMode, uint32_t p_indexCount, uint32_t p_instances);
 		void DrawArrays(Settings::EPrimitiveMode p_primitiveMode, uint32_t p_vertexCount);
 		void DrawArraysInstanced(Settings::EPrimitiveMode p_primitiveMode, uint32_t p_vertexCount, uint32_t p_instances);
+		/** Binds a vertex array object by name; 0 unbinds. The draw path records this, so the
+		 * backend is the one that knows how an array is bound to the pipeline. */
+		void BindVertexArray(uint32_t p_vertexArray);
 		void SetClearColor(float p_red, float p_green, float p_blue, float p_alpha);
 		void PolygonOffset(float a,float b);
 		void SetRasterizationLinesWidth(float p_width);
@@ -62,6 +65,9 @@ namespace Rendering::HAL
 		void SetCullFace(Settings::ECullFace p_cullFace);
 		void SetDepthWriting(bool p_enable);
 		void SetColorWriting(bool p_enableRed, bool p_enableGreen, bool p_enableBlue, bool p_enableAlpha);
+		/** Binds a framebuffer by name; 0 binds the default one. The render target a pass draws
+		 * into is a command now, so the backend is what turns "this target" into a GL bind. */
+		void BindFramebuffer(uint32_t p_framebuffer);
 		void SetViewport(uint32_t p_x, uint32_t p_y, uint32_t p_width, uint32_t p_height);
 		/** Sets the scissor rectangle (in framebuffer pixels, origin bottom-left).
 		 * The scissor test itself is toggled through the pipeline state. */

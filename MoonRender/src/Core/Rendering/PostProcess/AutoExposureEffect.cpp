@@ -1,4 +1,4 @@
-﻿#include <Core/Global/ServiceLocator.h>
+#include <Core/Global/ServiceLocator.h>
 #include <Core/Rendering/PostProcess/AutoExposureEffect.h>
 #include <Core/Rendering/FramebufferUtil.h>
 #include <Core/ResourceManagement/ShaderManager.h>
@@ -15,7 +15,7 @@ Core::Rendering::PostProcess::AutoExposureEffect::AutoExposureEffect(
 {
 	for (auto& buffer : m_exposurePingPongBuffer.GetFramebuffers())
 	{
-		FramebufferUtil::SetupFramebuffer(
+		::Core::Rendering::FramebufferUtil::SetupFramebufferWithDriver(
 			buffer,
 			kExposureBufferResolution,
 			kExposureBufferResolution,
@@ -23,7 +23,7 @@ Core::Rendering::PostProcess::AutoExposureEffect::AutoExposureEffect(
 		);
 	}
 
-	FramebufferUtil::SetupFramebuffer(
+	::Core::Rendering::FramebufferUtil::SetupFramebufferWithDriver(
 		m_luminanceBuffer,
 		kLuminanceBufferResolution,
 		kLuminanceBufferResolution,

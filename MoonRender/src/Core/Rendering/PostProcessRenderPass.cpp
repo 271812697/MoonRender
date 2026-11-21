@@ -1,4 +1,4 @@
-﻿#include <tracy/Tracy.hpp>
+#include <tracy/Tracy.hpp>
 #include <Core/ECS/Components/CPostProcessStack.h>
 #include <Core/Rendering/PostProcessRenderPass.h>
 #include <Core/Global/ServiceLocator.h>
@@ -16,7 +16,9 @@ Core::Rendering::PostProcessRenderPass::PostProcessRenderPass(::Rendering::Core:
 {
 	for (auto& buffer : m_pingPongBuffers.GetFramebuffers())
 	{
-		Core::Rendering::FramebufferUtil::SetupFramebuffer(
+		// Through the driver: the attachments are GL, and with a render thread they belong to the
+		// side that owns the context.
+		Core::Rendering::FramebufferUtil::SetupFramebufferWithDriver(
 			buffer, 1, 1, false, false, false
 		);
 	}
@@ -58,8 +60,27 @@ void Core::Rendering::PostProcessRenderPass::Draw(::Rendering::Data::PipelineSta
 	{
 		auto& mssaaframebuffer = m_renderer.GetFrameDescriptor().outputMsaaBuffer.value();
 		auto& presentbuffer = m_renderer.GetFrameDescriptor().presentBuffer.value();
+
+		// Self-healing: the ping-pong targets were built when this pass was constructed, which can
+		// be before the module's context existed. Their attachments then never landed, and every
+		// bind reports a framebuffer with a missing attachment. If a target has no colour
+		// attachment, build it now: the setup is a command, so it runs before the draws that follow
+		// in the same batch.
+		for (auto& buffer : m_pingPongBuffers.GetFramebuffers())
+		{
+			const bool hasColor = buffer.GetAttachment<::Rendering::HAL::GLTexture>(
+				::Rendering::Settings::EFramebufferAttachment::COLOR, 0).has_value();
+			if (!hasColor)
+			{
+				Core::Rendering::FramebufferUtil::SetupFramebufferWithDriver(buffer, 1, 1, false, false, false);
+			}
+		}
+
 		//msaa is not permitted to sample !so we turn to presentbuffer
-		Core::Rendering::FramebufferUtil::CopyFramebufferColor(mssaaframebuffer, 0, presentbuffer, 0);
+		// Through the driver: the resolve is two blits of GL state on two targets, so it belongs to
+		// the side that owns the context. The direct helper left presentbuffer holding the previous
+		// frame, and the blit below then sampled that instead of the scene.
+		m_renderer.GetDriver().CopyFramebufferColor(mssaaframebuffer, 0, presentbuffer, 0);
 		//Core::Rendering::FramebufferUtil::CopyFramebufferColor(framebuffer,0, m_pingPongBuffers[0],0);
 		m_renderer.Blit(p_pso, presentbuffer, m_pingPongBuffers[0], m_blitMaterial);
 

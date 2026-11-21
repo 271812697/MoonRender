@@ -5,6 +5,11 @@
 #include <string>
 #include <tinyxml2.h>
 #include <tracy/Tracy.hpp>
+#include <Core/Context.h>
+#include <Core/RenderModuleHost.h>
+#include <Rendering/Backend/CreateTextureRequest.h>
+#include <Rendering/Backend/BackendResources.h>
+#include <Rendering/Context/Driver.h>
 #include <Rendering/HAL/TextureHandle.h>
 #include <Rendering/Resources/Texture.h>
 #include <Core/ECS/Components/CAmbientSphereLight.h>
@@ -21,6 +26,50 @@
 #include <fstream>
 namespace Core::SceneSystem
 {
+
+	// Records a texture allocation (Filament's createTexture on a mutable texture) and drains, so
+	// the object exists for the material that binds it. All of this is load-time work: the GL call
+	// belongs on the side that owns the context, not on the caller's thread.
+	static void BvhRecordTextureAllocate(
+		::Rendering::Resources::Texture& p_texture,
+		const ::Rendering::Settings::TextureDesc& p_descriptor,
+		const void* p_initialData,
+		size_t p_initialSize,
+		const char* p_debugName)
+	{
+		auto* module = ::Core::RenderModuleHost::Instance();
+		::Rendering::Context::Driver* driver = module != nullptr && module->GetContext() != nullptr
+			? module->GetContext()->driver.get() : nullptr;
+		if (driver == nullptr || !p_texture.GetHandle())
+		{
+			::Rendering::HAL::Texture* const texture = ::Rendering::Backend::Records::CreateTexture(
+				p_texture.GetHandle(), ::Rendering::Settings::ETextureType::TEXTURE_BUFFER, p_debugName);
+			if (texture != nullptr)
+			{
+				auto descriptor = p_descriptor;
+				if (descriptor.mutableDesc.has_value())
+				{
+					descriptor.mutableDesc.value().data = p_initialData;
+				}
+				texture->Allocate(descriptor);
+			}
+			return;
+		}
+
+		::Rendering::Backend::CreateTextureRequest request;
+		request.handleId = p_texture.GetHandle().GetId();
+		request.type = ::Rendering::Settings::ETextureType::TEXTURE_BUFFER;
+		request.debugName = p_debugName;
+		request.allocate = true;
+		request.descriptor = p_descriptor;
+		if (p_initialData != nullptr && p_initialSize > 0)
+		{
+			request.pixels.assign(static_cast<const uint8_t*>(p_initialData),
+				static_cast<const uint8_t*>(p_initialData) + p_initialSize);
+		}
+		driver->CreateTexture(std::move(request));
+		driver->ExecutePendingCommands();
+	}
 
 	/** The per-mesh BVH a traversal walks. The ray tracing builds them for its own use
 	 * (see BvhService::BuildTracingData); the few queries that walk one without the ray
@@ -739,7 +788,8 @@ namespace Core::SceneSystem
 							if (mat) {
 								mat->AddFeature("TRIANGLE_INFO");
 								auto& tfo=it.second;
-								::Rendering::HAL::GLTexture* triangleInfoTex = nullptr;	
+								::Rendering::HAL::GLTexture* triangleInfoTex = nullptr;
+								::Rendering::Resources::Texture* triangleInfoAsset = nullptr;
 								// TriangleInfo Texture
 								::Rendering::Settings::TextureDesc desc;
 								desc.isTextureBuffer = true;
@@ -761,13 +811,19 @@ namespace Core::SceneSystem
 
 									if (v == nullptr) {
 
-										triangleInfoTex = new ::Rendering::HAL::GLTexture(::Rendering::Settings::ETextureType::TEXTURE_BUFFER);
-										triangleInfoTex->Allocate(desc);
-										mat->SetProperty("triangleInfoTex", triangleInfoTex);
+										// Front end + recorded creation: the material gets the asset, and the
+										// GL object is made on the side that owns the context.
+										triangleInfoAsset = new ::Rendering::Resources::Texture("");
+										BvhRecordTextureAllocate(*triangleInfoAsset, desc, tfo.data(),
+											tfo.size() * sizeof(::Core::SceneSystem::TriangleInfo), "triangleInfo");
+										mat->SetProperty("triangleInfoTex", triangleInfoAsset);
 									}
 									else
 									{
-										v->GetTexture().Allocate(desc);
+										// Recorded, not called here: the allocation belongs on the side that owns
+										// the context (see BvhRecordTextureAllocate).
+										BvhRecordTextureAllocate(*v, desc, tfo.data(),
+											tfo.size() * sizeof(::Core::SceneSystem::TriangleInfo), "triangleInfo");
 									}
 								}
 								else if (auto* handle = std::get_if<::Rendering::HAL::TextureHandle*>(&prop.value))

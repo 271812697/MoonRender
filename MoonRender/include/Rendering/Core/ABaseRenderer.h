@@ -150,6 +150,14 @@ namespace Rendering::Core
 	protected:
 		Data::FrameDescriptor m_frameDescriptor;
 		Context::Driver& m_driver;
+
+	public:
+		/** The driver the pass records on. Passes bind their targets through it instead of calling
+		 * HAL::Framebuffer::Bind(): a bind is a command, and the pass runs on the recording side. */
+		Context::Driver& GetDriver() const { return m_driver; }
+
+		void BindFramebuffer(HAL::Framebuffer* p_target) { m_driver.BindFramebuffer(p_target); }
+		void BindDefaultFramebuffer() { m_driver.BindFramebuffer(nullptr); }
 		Rendering::HAL::Texture m_emptyTexture2D;
 		Rendering::HAL::Texture m_emptyTextureCube;
 		/** The neutral tangent-space normal (0.5, 0.5, 1.0), bound for a sampler declared
@@ -161,12 +169,13 @@ namespace Rendering::Core
 		
 		Rendering::Data::PipelineState m_basePipelineState;
 		bool m_isDrawing;
-		std::optional<Rendering::Data::MaterialSignatureSet> m_previousMaterialSignature = std::nullopt;
 		Rendering::Data::Material* m_presentShader;
 		Rendering::Data::Material m_presentMaterial;
 		Rendering::Data::DescriptorSet* m_perViewSet = nullptr;
 		Rendering::Data::DescriptorSet* m_perRenderableSet = nullptr;
 	private:
 		static std::atomic_bool s_isDrawing;
+		/** Drawables recorded since the last frame end (a diagnostic for the debug overlay). */
+		static inline std::atomic<uint32_t> s_entityDraws{ 0 };
 	};
 }
