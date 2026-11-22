@@ -2083,3 +2083,28 @@ m_backend.SetCapability(ERenderingCapability::POLYGON_OFFSET_FILL, p_state.polyg
 顺带一个同类的坑（同一个函数族）：`GLBuffer::BindRange` 仍直接调 `glBindBufferRange`，目前没有调用点需要它走命令；如果以后有，照 `Bind` 的方式补一个命令即可。
 
 另外用调试着色器逐项排除过的（这些都是**相等**的，记录在此以免以后再查）：`linearAlbedo`、世界法线、`_IrradianceCube` 采样、`_BRDFLut` 采样、`ambientOcclusion/metallic/roughness`、`EngineUBO` 整块哈希、材质块、采样器绑定与贴图内容、顶点/索引数据。把 `evaluateIBL` 关掉（只留直接光）时差异反而变大，正是"直接光=0"的直接证据。
+### 8.68 相机不跟手的根因：呈现等的是"命令已提交"，不是"这一帧画完"（2026-11-22）
+
+**现象**：只有渲染线程模式下，右键拖拽旋转时相机恒定滞后（单线程正常）；帧率正常、CPU 侧相机与鼠标逐帧同步（`[cam]` 逐帧打点验证过：相机在鼠标移动的同一帧更新，0 帧延迟，松手后也不追赶）。
+
+**根因**：同步语义错了。
+
+```text
+主线程：录制 frame N → Execute() → Flush() + WaitForIdle()   ← 等的是 batch 被"执行"
+渲染线程：执行 batch N → ReleaseBuffers()
+主线程：贴图 m_presentTarget
+```
+
+`WaitForIdle()` 等的是 `m_outstanding == 0`，也就是**渲染线程把命令提交完并归还环形缓冲**——此时 GPU 还在画这一帧。主线程立刻去贴图，跨 context 读一个还在被写的纹理：驱动内部会做隐式同步，但"贴到屏幕上的内容"和"主线程以为的那一帧"对不上，表现为画面恒定落后一拍。
+
+**修法**（Filament swapchain 的 frame fence 形状）：
+
+1. `OpenGLDriver::WaitForFrameCompletion()`：`glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE)` +
+   循环 `glClientWaitSync(..., 20 ms)`，直到信号；
+2. `Driver::WaitAndExecute()` 在 `ReleaseBuffers()` **之前**调用它。
+
+于是 `WaitForIdle()` 的含义变成"这一帧已经画好了"，主线程呈现的必然是渲染线程完成的那一帧，不跳帧、不错帧、不贴半成品。
+
+代价：主线程真的等这一帧的 GPU 时间（单缓冲呈现的固有代价）；要拿回重叠，需要 present 目标双缓冲 + fence（UI 不阻塞），这是后续项。
+
+**验证**：两种模式均正常出图、`GL_INVALID` 0；用户实测线程模式下拖拽旋转已跟手。

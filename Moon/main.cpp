@@ -96,6 +96,9 @@ int main(int argc, char* argv[])
 		MOON::Editor editor;
 		editor.setWindowTitle("MOON");
 		editor.resize(1920, 1080);
+		// Starts maximized: the viewport is the thing being looked at, and a window that opens at
+		// 1920x1080 on a smaller desktop is not the same picture (docs/RenderThreadPlan.md §8.69).
+		editor.setWindowState(editor.windowState() | Qt::WindowMaximized);
 		editor.show();
 		// A project named on the command line is opened as soon as the event loop runs: the
 		// viewport builds its GL context on the first show, and a document is only loaded

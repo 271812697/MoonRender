@@ -98,6 +98,15 @@ namespace Rendering::Backend
 		 * state. Filament's OpenGLDriver::makeCurrent (called by FRenderer::beginFrame through the
 		 * swap chain): the context is made current for the frame that is about to be drawn. */
 		void MakeCurrent();
+		/** Blocks until the GPU has finished everything issued so far: a fence on the command stream
+		 * plus a wait for it.
+		 *
+		 * The consumer side needs this. It waits for a batch before presenting it (Driver::Execute ->
+		 * WaitForIdle), and a batch is only presentable once it is *drawn* - not when its commands
+		 * have been issued. Filament's swap chain does the same with its frame fences: the consumer
+		 * is handed a finished frame, one frame at a time, never a skipped or half-drawn one. Called
+		 * on the side that owns the context, at the end of a batch. */
+		void WaitForFrameCompletion();
 		void SetContextHost(::Rendering::Context::IGLContextHost* p_contextHost) { m_contextHost = p_contextHost; }
 
 		void CreateProgram(::Rendering::Backend::CreateProgramRequest p_request);

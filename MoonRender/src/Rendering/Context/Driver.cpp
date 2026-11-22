@@ -491,8 +491,42 @@ bool Rendering::Context::Driver::WaitAndExecute()
 		m_openGLDriver->Execute(batch.tail, batch.head);
 		m_executing = false;
 	}
+
+	// The batch is not "done" when its commands have been *issued*: the GPU is still drawing. The
+	// consumer side waits for this batch before it presents (Driver::Execute -> WaitForIdle), and
+	// without a fence that wait means "recorded and issued", so the paste can race the frame it is
+	// showing - which is the display trailing the camera by a frame. Fence first, then hand the ring
+	// back: that makes the consumer's wait mean "this frame is drawn"
+	// (docs/RenderThreadPlan.md §8.69).
+	m_openGLDriver->WaitForFrameCompletion();
+
+	// The frame is drawn now: say so, so the consumer can present it (frame N-1 while N is being
+	// drawn, exactly as the Qt/Filament demo does with its swap chain ring).
+	{
+		std::lock_guard lock(m_frameMutex);
+		++m_frameCompleted;
+	}
+	m_frameCondition.notify_all();
+
 	m_commandQueue->ReleaseBuffers(batches);
 	return true;
+}
+
+void Rendering::Context::Driver::WaitForFrameCompleted(uint64_t p_frameIndex)
+{
+	// Single-threaded, the frame was executed while it was recorded: there is nothing to wait for.
+	if (!m_renderThreadActive || p_frameIndex == 0)
+	{
+		return;
+	}
+	std::unique_lock lock(m_frameMutex);
+	m_frameCondition.wait(lock, [this, p_frameIndex] { return m_frameCompleted >= p_frameIndex; });
+}
+
+uint64_t Rendering::Context::Driver::GetCompletedFrameCount() const
+{
+	std::lock_guard lock(m_frameMutex);
+	return m_frameCompleted;
 }
 
 void Rendering::Context::Driver::MakeCurrent()

@@ -1,5 +1,7 @@
 #pragma once
 #include <string>
+#include <mutex>
+#include <condition_variable>
 #include <array>
 #include <functional>
 #include <thread>
@@ -229,6 +231,20 @@ namespace Rendering::Context
 		 * False means the queue was asked to exit (Filament's FEngine::execute, which returns
 		 * false to break the render thread's loop). */
 		bool WaitAndExecute();
+		/** Blocks until the batch that produced frame p_frameIndex has been drawn.
+		 *
+		 * The render thread passes its GPU fence before it counts a frame as completed (see
+		 * OpenGLDriver::WaitForFrameCompletion), so this is "the frame is finished", not "its
+		 * commands were issued". It is what lets the window present frame N-1 while frame N is
+		 * still being drawn - the swap chain's shape in the Qt/Filament demo, where the consumer
+		 * waits for the *previous* frame's commit instead of stalling on the current one
+		 * (docs/RenderThreadPlan.md §8.69).
+		 *
+		 * Single-threaded, execution already happened when the frame was recorded, so this
+		 * returns at once. */
+		void WaitForFrameCompleted(uint64_t p_frameIndex);
+		/** How many frames the executor has finished (drawn). */
+		uint64_t GetCompletedFrameCount() const;
 		/** Filament's Engine::execute: publishes the frame's recording and then runs it.
 		 *
 		 * With no render thread this call *is* the driver loop (FEngine::execute on the recording
@@ -275,5 +291,10 @@ namespace Rendering::Context
 		 * recording side: inside a command it must run inline, or it would wait for itself
 		 * (Filament's isThisThreadTheDriverThread). */
 		std::thread::id m_renderThreadId{};
+		/** Frames the executor has finished drawing, and the lock the consumer waits under. The
+		 * executor counts a frame only after its GPU fence, so this is "drawn", not "issued". */
+		mutable std::mutex m_frameMutex;
+		std::condition_variable m_frameCondition;
+		uint64_t m_frameCompleted = 0;
 	};
 }

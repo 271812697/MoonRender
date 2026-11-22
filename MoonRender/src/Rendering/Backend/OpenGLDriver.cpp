@@ -192,6 +192,34 @@ namespace Rendering::Backend
 			p_request.x, p_request.y, p_request.width, p_request.height);
 	}
 
+	void OpenGLDriver::WaitForFrameCompletion()
+	{
+		// A fence on the command stream, then a wait for it: when this returns the GPU has finished
+		// every draw, blit and upload issued so far. That is what makes the consumer's wait
+		// (Driver::Execute -> WaitForIdle) mean "this frame can be presented", instead of "its
+		// commands have been issued" - the difference between a display that shows the frame the
+		// camera was updated for and one that trails it (docs/RenderThreadPlan.md §8.69).
+		const GLsync fence = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+		if (fence == nullptr)
+		{
+			glFinish();
+			return;
+		}
+		glFlush();
+		// 20 ms per round and loop: a frame can take longer than that on a large viewport, and
+		// waiting for it is the point of this call, so it must not give up early.
+		for (;;)
+		{
+			const GLenum result = glClientWaitSync(fence, GL_SYNC_FLUSH_COMMANDS_BIT, 20000000ull);
+			if (result == GL_ALREADY_SIGNALED || result == GL_CONDITION_SATISFIED
+				|| result == GL_WAIT_FAILED)
+			{
+				break;
+			}
+		}
+		glDeleteSync(fence);
+	}
+
 	void OpenGLDriver::MakeCurrent()
 	{
 		// Filament's OpenGLDriver::makeCurrent: the platform makes the context current, then the
