@@ -48,6 +48,12 @@ Editor::Rendering::PickingRenderPass::PickingRenderPass(::Rendering::Core::Compo
 	// user picks carries both the id of what is under it and where on that geometry it is. It is a
 	// texture of its own format; its creation and its attach are commands like everything else on
 	// this target, so they are recorded here and built where the context is.
+	//
+	// Mutable on purpose. The target is created 1x1 here and resized to the frame before every
+	// pick, and only a mutable texture can be re-specified (glTexImage2D) - an immutable one
+	// (glTextureStorage2D) keeps its 1x1 storage, and because a framebuffer's render area is the
+	// smallest of its attachments, that clipped *both* attachments to one pixel and every pick read
+	// back zeros. The colour attachment is created mutable by FramebufferUtil for the same reason.
 	using namespace ::Rendering::Settings;
 	TextureDesc worldPositionDesc{
 		.width = 1,
@@ -57,6 +63,10 @@ Editor::Rendering::PickingRenderPass::PickingRenderPass(::Rendering::Core::Compo
 		.horizontalWrap = ETextureWrapMode::CLAMP_TO_BORDER,
 		.verticalWrap = ETextureWrapMode::CLAMP_TO_BORDER,
 		.internalFormat = EInternalFormat::RGBA32F,
+		.mutableDesc = MutableTextureDesc{
+			.format = EFormat::RGBA,
+			.type = EPixelDataType::FLOAT
+		}
 	};
 	auto worldPositionTexture = std::make_shared<::Rendering::HAL::Texture>(
 		ETextureType::TEXTURE_2D,
