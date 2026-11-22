@@ -36,7 +36,7 @@ Editor::Panels::AView::AView
 (
 	const std::string& p_title,
 	::Rendering::Context::Driver& p_driver) :
-	m_driver(&p_driver), m_framebuffer(p_title), m_presentTarget(p_title + "/Present"), name(p_title)
+	m_driver(&p_driver), m_framebuffer(p_title), name(p_title)
 {
 	m_driver->SetupFramebuffer(m_framebuffer, 1u, 1u, true, true, false, false);
 	m_driver->SetupFramebuffer(m_msaaframebuffer, 1u, 1u, true, true, false, true);
@@ -57,7 +57,13 @@ Editor::Panels::AView::AView
 			.type = ::Rendering::Settings::EPixelDataType::UNSIGNED_BYTE
 		}
 	};
-	m_driver->SetupFramebuffer(m_presentTarget, presentDesc, false, false, false);
+	// The present ring (see kPresentSlotCount): each slot is a complete frame target of its own.
+	for (uint32_t slot = 0; slot < kPresentSlotCount; ++slot)
+	{
+		m_presentTargets[slot] = std::make_unique<::Rendering::HAL::Framebuffer>(
+			p_title + "/Present" + std::to_string(slot));
+		m_driver->SetupFramebuffer(*m_presentTargets[slot], presentDesc, false, false, false);
+	}
 
 	// The three setups above are recorded. Everything that reads the frame - the widget that pastes
 	// it, the overlay - asks this view for the texture, so what was recorded has to run before the
@@ -168,7 +174,13 @@ void Editor::Panels::AView::Render(const std::function<void()>& p_drawOverlays)
 
 		m_driver->ResizeFramebuffer(m_framebuffer, winWidth, winHeight);
 		m_driver->ResizeFramebuffer(m_msaaframebuffer, winWidth, winHeight);
-		m_driver->ResizeFramebuffer(m_presentTarget, winWidth, winHeight);
+		// Every slot, not only the one this frame draws into: the slot the window is presenting kept
+		// the old size after a resize, and blitting a stale-sized texture into the widget scaled it
+		// and left the rest of the widget holding the previous frame - the "ghost" (docs 8.68).
+		for (const auto& presentSlot : m_presentTargets)
+		{
+			m_driver->ResizeFramebuffer(*presentSlot, winWidth, winHeight);
+		}
 		// HZB issues its own GL - fences and an asynchronous readback through a PBO ring - so it
 		// cannot run on the recording side yet. With a render thread it stays off until that
 		// readback becomes a command (docs/RenderThreadPlan.md).
@@ -185,11 +197,14 @@ void Editor::Panels::AView::Render(const std::function<void()>& p_drawOverlays)
 		TraceView("CopyFramebufferColor");
 		m_driver->CopyFramebufferColor(m_msaaframebuffer, 0, m_framebuffer, 0);
 		TraceView("PresentTo");
-		m_renderer->PresentTo(m_framebuffer, m_presentTarget);
+		m_renderer->PresentTo(m_framebuffer, PresentTarget());
 		TraceView("flush");
 		// Recorded, not executed: the batch is published here and run by the consumer's
 		// Driver::Execute() (see ViewportFrame::Render) - Filament's render() only flushes.
 		m_driver->Flush();
+		// This frame owns its slot; the next frame draws into the next one, so the window can paste
+		// a finished frame while the executor draws the next (docs/RenderThreadPlan.md §8.68).
+		++m_frameIndex;
 		TraceView("BindFramebuffer(nullptr)");
 		m_driver->BindFramebuffer(nullptr);
 		TraceView("done");
@@ -223,7 +238,13 @@ void Editor::Panels::AView::Render(const std::function<void()>& p_drawOverlays)
 
 		m_driver->ResizeFramebuffer(m_framebuffer, winWidth, winHeight);
 		m_driver->ResizeFramebuffer(m_msaaframebuffer, winWidth, winHeight);
-		m_driver->ResizeFramebuffer(m_presentTarget, winWidth, winHeight);
+		// Every slot, not only the one this frame draws into: the slot the window is presenting kept
+		// the old size after a resize, and blitting a stale-sized texture into the widget scaled it
+		// and left the rest of the widget holding the previous frame - the "ghost" (docs 8.68).
+		for (const auto& presentSlot : m_presentTargets)
+		{
+			m_driver->ResizeFramebuffer(*presentSlot, winWidth, winHeight);
+		}
 		// HZB issues its own GL - fences and an asynchronous readback through a PBO ring - so it
 		// cannot run on the recording side yet. With a render thread it stays off until that
 		// readback becomes a command (docs/RenderThreadPlan.md).
@@ -281,7 +302,7 @@ void Editor::Panels::AView::Render(const std::function<void()>& p_drawOverlays)
 		// that happens whether the present is a pass or a plain call, so the cause is on the
 		// overlay side (docs/RenderThreadPlan.md §7.12).
 		TraceView("PresentTo");
-		m_renderer->PresentTo(m_framebuffer, m_presentTarget);
+		m_renderer->PresentTo(m_framebuffer, PresentTarget());
 		// The overlays are part of the frame the window pastes: ImGui, the 2D draw list and the
 		// gizmos. Drawn here, into the same target, on the same context - which is what keeps
 		// them out of the window layer, and the module free of it.
@@ -294,6 +315,7 @@ void Editor::Panels::AView::Render(const std::function<void()>& p_drawOverlays)
 		// Engine::execute in the app loop, or the driver thread's loop when there is one. Keeping
 		// the two apart is what makes this call record-only: nothing here needs the GL result.
 		m_driver->Flush();
+		++m_frameIndex;
 		m_driver->BindFramebuffer(nullptr);
 		FrameMarkEnd(name.c_str());
 		m_driver->OnFrameCompleted();
@@ -305,7 +327,7 @@ void Editor::Panels::AView::Render(const std::function<void()>& p_drawOverlays)
 		{
 			auto pixels = std::make_shared<std::vector<uint8_t>>(4);
 			::Rendering::Backend::ReadPixelsRequest probe;
-			probe.framebufferId = m_presentTarget.GetID();
+			probe.framebufferId = PresentedTarget().GetID();
 			probe.readBufferIndex = 0;
 			probe.x = static_cast<uint32_t>(winWidth) / 2;
 			probe.y = static_cast<uint32_t>(winHeight) / 2;
@@ -328,19 +350,44 @@ void Editor::Panels::AView::Present()
 {
 	m_renderer->Present(m_framebuffer);
 }
+
 uint32_t Editor::Panels::AView::GetFrameTextureID()
 {
-	auto color = m_presentTarget.GetAttachment<::Rendering::HAL::Texture>(
+	auto color = PresentedTarget().GetAttachment<::Rendering::HAL::Texture>(
 		::Rendering::Settings::EFramebufferAttachment::COLOR);
 	return color.has_value() ? static_cast<uint32_t>(color.value().GetID()) : 0u;
 }
+
+void Editor::Panels::AView::WaitForPresentedFrame()
+{
+	// Wait for the frame about to be shown, never for the one being drawn: with a ring that frame
+	// was committed at least kPresentLatencyFrames ago, so this does not stall the window.
+	if (m_frameIndex > kPresentLatencyFrames)
+	{
+		m_driver->WaitForFrameCompleted(m_frameIndex - kPresentLatencyFrames);
+	}
+}
+
+::Rendering::HAL::Framebuffer& Editor::Panels::AView::PresentTarget()
+{
+	return *m_presentTargets[static_cast<size_t>(m_frameIndex % kPresentSlotCount)];
+}
+
+::Rendering::HAL::Framebuffer& Editor::Panels::AView::PresentedTarget()
+{
+	constexpr uint64_t slots = kPresentSlotCount;
+	constexpr uint64_t latency = kPresentLatencyFrames;
+	const uint64_t slot = m_frameIndex <= latency
+		? 0u : static_cast<uint64_t>((m_frameIndex - latency) % slots);
+	return *m_presentTargets[static_cast<size_t>(slot)];
+}
 bool Editor::Panels::AView::ReadFrame(std::vector<uint8_t>& p_pixels, int& p_width, int& p_height)
 {
-	if (m_presentTarget.GetID() == 0)
+	if (PresentedTarget().GetID() == 0)
 	{
 		return false;
 	}
-	const auto [width, height] = m_presentTarget.GetSize();
+	const auto [width, height] = PresentedTarget().GetSize();
 	if (width == 0 || height == 0)
 	{
 		return false;
@@ -349,7 +396,7 @@ bool Editor::Panels::AView::ReadFrame(std::vector<uint8_t>& p_pixels, int& p_wid
 	p_height = static_cast<int>(height);
 	p_pixels.resize(static_cast<size_t>(p_width) * p_height * 4);
 	// ReadPixels binds the target for the read and unbinds it again.
-	m_presentTarget.ReadPixels(0, 0, width, height,
+	PresentedTarget().ReadPixels(0, 0, width, height,
 		::Rendering::Settings::EPixelDataFormat::RGBA,
 		::Rendering::Settings::EPixelDataType::UNSIGNED_BYTE,
 		p_pixels.data());
@@ -387,6 +434,15 @@ void Editor::Panels::AView::Resize(int width, int height)
 	mWidth = width;
 	mHeight = height;
 	m_renderer->Resize(width, height);
+	// Every slot is its own target, so every one of them has to follow the window.
+	for (const auto& slot : m_presentTargets)
+	{
+		if (slot != nullptr)
+		{
+			m_driver->ResizeFramebuffer(*slot, static_cast<uint16_t>(width),
+				static_cast<uint16_t>(height));
+		}
+	}
 }
 namespace Editor::Panels {
 	InputState& Editor::Panels::AView::getInutState()

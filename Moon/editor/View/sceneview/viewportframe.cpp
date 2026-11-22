@@ -334,6 +334,9 @@ namespace
 		}
 
 		const auto [frameWidth, frameHeight] = view->GetSafeSize();
+		// The swap chain's ordering (the Qt/Filament demo's paintGL): the frame about to be pasted
+		// is the last one that was committed, never the one the render thread is drawing right now.
+		view->WaitForPresentedFrame();
 		result.texture = view->GetFrameTextureID();
 		result.width = frameWidth;
 		result.height = frameHeight;
