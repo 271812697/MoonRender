@@ -208,13 +208,18 @@ void Rendering::Core::ABaseRenderer::SetEnvironmentTextures(
 	// the capture baked. Two modes that disagree only with the captured cubes in place have their
 	// difference in the capture, not in the shading.
 	static const bool noIbl = std::getenv("MOON_NO_IBL") != nullptr;
-	if (p_irradianceCube != nullptr && p_irradianceCube->IsValid())
+	// Recorded unconditionally: the descriptor names the texture and resolves it when the set is
+	// bound, i.e. on the executor, after the sky capture of this same batch has created it. Asking
+	// IsValid() here was a read of an execution result at record time - with the batch run late it
+	// was false, the bind was skipped, every lit surface lost the environment term and the frame
+	// came out darker (docs/RenderThreadPlan.md §8.71).
+	if (p_irradianceCube != nullptr && m_perViewSet != nullptr)
 	{
 		m_perViewSet->SetTexture(
 			Rendering::Data::EngineDescriptorSets::kIrradianceCubeBinding,
 			noIbl ? &m_emptyTextureCube : p_irradianceCube);
 	}
-	if (p_prefilterCube != nullptr && p_prefilterCube->IsValid())
+	if (p_prefilterCube != nullptr && m_perViewSet != nullptr)
 	{
 		m_perViewSet->SetTexture(
 			Rendering::Data::EngineDescriptorSets::kPrefilterCubeBinding,
