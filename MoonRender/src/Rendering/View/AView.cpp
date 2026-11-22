@@ -182,12 +182,10 @@ void Editor::Panels::AView::Render(const std::function<void()>& p_drawOverlays)
 			m_driver->ResizeFramebuffer(*presentSlot, winWidth, winHeight);
 		}
 		// HZB issues its own GL - fences and an asynchronous readback through a PBO ring - so it
-		// cannot run on the recording side yet. With a render thread it stays off until that
-		// readback becomes a command (docs/RenderThreadPlan.md).
-		if (m_driver->IsRenderThreadActive())
-		{
-			m_renderer->GetPass<::Core::Rendering::HzbBuildPass>("HZB").SetEnabled(false);
-		}
+		// cannot run on the recording side yet. It stays off in both configurations, because the
+		// frame is recorded the same way in both; it comes back when that readback becomes a
+		// command (docs/RenderThreadPlan.md §8.72).
+		m_renderer->GetPass<::Core::Rendering::HzbBuildPass>("HZB").SetEnabled(false);
 		TraceView("BeginFrame");
 		m_renderer->BeginFrame(frameDescriptor);
 		TraceView("DrawFrame");
@@ -246,12 +244,10 @@ void Editor::Panels::AView::Render(const std::function<void()>& p_drawOverlays)
 			m_driver->ResizeFramebuffer(*presentSlot, winWidth, winHeight);
 		}
 		// HZB issues its own GL - fences and an asynchronous readback through a PBO ring - so it
-		// cannot run on the recording side yet. With a render thread it stays off until that
-		// readback becomes a command (docs/RenderThreadPlan.md).
-		if (m_driver->IsRenderThreadActive())
-		{
-			m_renderer->GetPass<::Core::Rendering::HzbBuildPass>("HZB").SetEnabled(false);
-		}
+		// cannot run on the recording side yet. It stays off in both configurations, because the
+		// frame is recorded the same way in both; it comes back when that readback becomes a
+		// command (docs/RenderThreadPlan.md §8.72).
+		m_renderer->GetPass<::Core::Rendering::HzbBuildPass>("HZB").SetEnabled(false);
 		TraceView("BeginFrame");
 		m_renderer->BeginFrame(frameDescriptor);
 

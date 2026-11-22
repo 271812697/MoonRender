@@ -15,8 +15,10 @@
 // struct travels as one command and the executor diffs it against what is applied, so the state
 // machine lives on the render side and its cache cannot go stale against a second copy on the
 // recording side. M2 also moves the draw submission itself - a draw is "material, state, bind
-// array, draw" - which is the unit the render thread will replay. What is still immediate is
-// resource creation (glGen* in the HAL) and the passes that draw through their own GL.
+// array, draw" - which is the unit the executor replays. What is not here is GL that still runs
+// synchronously on the side that owns the context: resource creation (drained at the call, because
+// a handle has to be usable by the commands recorded after it) and the few passes that do their own
+// GL (HZB, the path tracer - see docs/RenderThreadPlan.md §8.72).
 
 DECL_DRIVER_COMMAND(Viewport, (int32_t p_x, int32_t p_y, int32_t p_width, int32_t p_height), (p_x, p_y, p_width, p_height))
 DECL_DRIVER_COMMAND(Scissor, (int32_t p_x, int32_t p_y, int32_t p_width, int32_t p_height), (p_x, p_y, p_width, p_height))
@@ -28,7 +30,6 @@ DECL_DRIVER_COMMAND(DrawMesh, (const ::Rendering::Backend::DrawMeshRequest& p_re
 DECL_DRIVER_COMMAND(BindFramebuffer, (const ::Rendering::Backend::BindFramebufferRequest& p_request), (p_request))
 DECL_DRIVER_COMMAND(SetClearColor, (float p_red, float p_green, float p_blue, float p_alpha), (p_red, p_green, p_blue, p_alpha))
 DECL_DRIVER_COMMAND(Clear, (bool p_colorBuffer, bool p_depthBuffer, bool p_stencilBuffer), (p_colorBuffer, p_depthBuffer, p_stencilBuffer))
-DECL_DRIVER_COMMAND(DrawMaterial, (const ::Rendering::Backend::DrawMaterialRequest& p_request), (p_request))
 // Resource work, as a command like everything else: the request carries the descriptor and the
 // pixels (a copy, so the recording side's buffer can be rewritten right away), and the executor
 // allocates + uploads on the side that owns the context. Recorded before the draws that sample the
@@ -69,9 +70,6 @@ DECL_DRIVER_COMMAND(BindProgram, (uint32_t p_programId), (p_programId))
 // left the previous program bound - one program for a whole pass of different materials.
 DECL_DRIVER_COMMAND(BindProgramHandle, (uint32_t p_programHandleId), (p_programHandleId))
 DECL_DRIVER_COMMAND(DeclareProgramBindings, (::Rendering::Backend::DeclareProgramBindingsRequest p_request), (std::move(p_request)))
-// Loose sampler uniforms (a sampler that is not part of the material's descriptor set): the unit
-// has to be declared to the program on the side that owns the context.
-DECL_DRIVER_COMMAND(SetSamplerUnit, (uint32_t p_programId, std::string p_samplerName, uint32_t p_unit), (p_programId, std::move(p_samplerName), p_unit))
 // The overlay's own geometry (Im3D): it is a vertex stream built per frame, uploaded into the
 // overlay's buffer and drawn straight from it - no material pass, no mesh, just the array.
 DECL_DRIVER_COMMAND(UploadOverlayVertices, (::Rendering::Backend::UploadOverlayVerticesRequest p_request), (std::move(p_request)))

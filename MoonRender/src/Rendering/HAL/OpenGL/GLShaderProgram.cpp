@@ -21,13 +21,14 @@ namespace
 		return p_name.starts_with("ubo_") || p_name.starts_with("ReflectionUBO");
 	}
 
-	/** Whether the program is built on the side that owns the context (a render thread): then the
-	 * create-program command does the link there and everything GL about the program is recorded
-	 * (Filament's ProgramHandle + createProgram/bindProgram). */
+	/** Whether a driver exists to record into: then the create-program command builds the program on
+	 * the side that owns the context, and everything GL about it is recorded (Filament's
+	 * ProgramHandle + createProgram/bindProgram). The recording code is the same in both
+	 * configurations: without a render thread the batch runs on this thread at the end of the frame
+	 * (docs/RenderThreadPlan.md §8.72). */
 	bool IsProgramRecorded()
 	{
-		::Rendering::Context::Driver* const driver = ::Rendering::HAL::CurrentDriver();
-		return driver != nullptr && driver->IsRenderThreadActive();
+		return ::Rendering::HAL::CurrentDriver() != nullptr;
 	}
 
 	uint32_t ResolveProgramName(const Rendering::HAL::GLShaderProgramContext& p_context)
@@ -77,16 +78,16 @@ void Rendering::HAL::GLShaderProgram::Bind()
 	// Two halves, and they belong to different sides of the command stream:
 	//  - the slot numbers are bookkeeping from the layout (ComputeDescriptorSlots), and the
 	//    material asks for them through GetDescriptorSlot;
-	//  - declaring those numbers to the program is GL (DeclareDescriptorBindings). With a render
-	//    thread that has to run on the executor, once the program is linked there - the program
-	//    creation command (docs/RenderThreadPlan.md 8.44) is what will issue it.
+	//  - declaring those numbers to the program is GL (DeclareDescriptorBindings), so it is
+	//    recorded and runs on the executor, once the program is linked there - the program
+	//    creation command (docs/RenderThreadPlan.md 8.44) is what issues it.
 	if (!m_context.descriptorSlotsInitialized && m_context.descriptorBindingsConfigured)
 	{
 		m_context.ComputeDescriptorSlots(m_context.descriptorBindings);
 	}
 
 	::Rendering::Context::Driver* const driver = ::Rendering::HAL::CurrentDriver();
-	const bool contextIsHere = driver == nullptr || !driver->IsRenderThreadActive();
+	const bool contextIsHere = driver == nullptr;
 
 	if (!contextIsHere)
 	{
@@ -356,28 +357,6 @@ DECLARE_GET_UNIFORM_FUNCTION(Maths::FVector3, GLfloat, glGetUniformfv);
 DECLARE_GET_UNIFORM_FUNCTION(Maths::FVector4, GLfloat, glGetUniformfv);
 DECLARE_GET_UNIFORM_FUNCTION(Maths::FMatrix3, GLfloat, glGetUniformfv);
 DECLARE_GET_UNIFORM_FUNCTION(Maths::FMatrix4, GLfloat, glGetUniformfv);
-
-#define DECLARE_SET_UNIFORM_FUNCTION(type, func, ...) \
-template<> \
-template<> \
-void Rendering::HAL::GLShaderProgram::SetUniform<type>(const std::string& p_name, const type& value) \
-{ \
-	if (m_context.uniformsLocationCache.contains(p_name)) \
-	{ \
-		func(m_context.uniformsLocationCache.at(p_name), __VA_ARGS__); \
-	} \
-    else{\
-        func(glGetUniformLocation(m_context.id, p_name.c_str()), __VA_ARGS__);\
-	}\
-}
-
-DECLARE_SET_UNIFORM_FUNCTION(int, glUniform1i, value);
-DECLARE_SET_UNIFORM_FUNCTION(float, glUniform1f, value);
-DECLARE_SET_UNIFORM_FUNCTION(Maths::FVector2, glUniform2f, value.x, value.y);
-DECLARE_SET_UNIFORM_FUNCTION(Maths::FVector3, glUniform3f, value.x, value.y, value.z);
-DECLARE_SET_UNIFORM_FUNCTION(Maths::FVector4, glUniform4f, value.x, value.y, value.z, value.w);
-DECLARE_SET_UNIFORM_FUNCTION(Maths::FMatrix3, glUniformMatrix3fv, 1, GL_TRUE, &value.data[0]);
-DECLARE_SET_UNIFORM_FUNCTION(Maths::FMatrix4, glUniformMatrix4fv, 1, GL_TRUE, &value.data[0]);
 
 template<>
 void Rendering::HAL::GLShaderProgram::QueryUniforms()

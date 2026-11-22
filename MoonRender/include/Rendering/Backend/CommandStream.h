@@ -18,7 +18,6 @@
 #include <Rendering/Backend/CreateTextureRequest.h>
 #include <Rendering/Backend/OverlayRequests.h>
 #include <Rendering/Backend/TextureRequests.h>
-#include <Rendering/Backend/DrawMaterialRequest.h>
 #include <Rendering/Backend/DrawMeshRequest.h>
 #include <Rendering/Backend/TextureUploadRequest.h>
 #include <Rendering/Backend/UpdateTextureRequest.h>

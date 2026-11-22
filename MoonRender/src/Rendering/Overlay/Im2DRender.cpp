@@ -148,8 +148,9 @@ public:
 		p_driver.ExecutePendingCommands();
 		m_programName = Records::ProgramName(m_programHandle);
 
-		// The sampler always samples the same unit; the command sets it once.
-		p_driver.EnqueueSetSamplerUnit(m_programName, "Texture", 0);
+		// The sampler samples unit 0, which is what a sampler uniform is initialised to: the list's
+		// draws all bind their texture on GL_TEXTURE0 (see the DrawIndexedVertexArray command), so
+		// no glUniform1i is needed here.
 
 		// The array and its buffers: containers, so they are born where the context is and the
 		// front end only holds the handles.

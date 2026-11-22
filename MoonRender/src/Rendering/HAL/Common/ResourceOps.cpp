@@ -20,11 +20,12 @@ namespace Rendering::HAL::ResourceOps
 			return ::Rendering::HAL::CurrentDriver();
 		}
 
-		/** Whether the executor is another thread: then everything that needs the context has to
-		 * be recorded, because this side has no context to use. */
+		/** Whether there is a driver to record into: then everything that needs the context is
+		 * recorded, and the executor runs it - on another thread with a render thread, on this one
+		 * when the frame is executed (docs/RenderThreadPlan.md §8.72). */
 		bool IsRecorded(Rendering::Context::Driver* p_driver)
 		{
-			return p_driver != nullptr && p_driver->IsRenderThreadActive();
+			return p_driver != nullptr;
 		}
 
 		uint32_t GetDataTypeSizeInBytes(Rendering::Settings::EDataType p_type)

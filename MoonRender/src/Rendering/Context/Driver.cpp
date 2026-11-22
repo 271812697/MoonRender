@@ -24,11 +24,14 @@ namespace
 {
 	std::unique_ptr<Rendering::HAL::Backend> m_gfxBackend;
 
-	/** Space a batch is guaranteed after a flush, and the ring itself: large enough that a frame
-	 * of commands (today a few hundred bytes) never fills it, so flush never blocks when the
-	 * executor runs on the same thread. */
-	constexpr size_t kRequiredCommandBytes = 8 * 1024;
-	constexpr size_t kCommandRingBytes = 64 * 1024;
+	/** The ring the frame is recorded into, and the space a publish is guaranteed after a flush.
+	 *
+	 * Sized for a whole frame, like Filament's command buffer: a frame is tens of KB to a few MB of
+	 * commands, and recording is append-only - nothing runs from inside it any more, so the ring has
+	 * to hold everything between two Execute() calls (docs/RenderThreadPlan.md §8.72). 64 KB was not
+	 * enough, and a full ring used to have to run what it had, mid-frame. */
+	constexpr size_t kRequiredCommandBytes = 1024 * 1024;
+	constexpr size_t kCommandRingBytes = 8 * 1024 * 1024;
 }
 
 Rendering::Context::Driver::Driver(const Rendering::Settings::DriverSettings& p_driverSettings)
@@ -42,8 +45,6 @@ Rendering::Context::Driver::Driver(const Rendering::Settings::DriverSettings& p_
 	m_openGLDriver = std::make_unique<Rendering::Backend::OpenGLDriver>(*m_gfxBackend);
 	m_commandQueue = std::make_unique<Rendering::Backend::CommandBufferQueue>(kRequiredCommandBytes, kCommandRingBytes);
 	m_commandStream = std::make_unique<Rendering::Backend::CommandStream>(*m_commandQueue);
-	// Single-threaded the executor is this thread, so a full ring is drained from here; with a
-	// render thread publishing is enough and the queue blocks the producer until space comes back.
 
 	if (p_driverSettings.defaultPipelineState)
 	{
@@ -74,27 +75,6 @@ Rendering::Context::Driver::~Driver()
 	Rendering::Backend::DeferredDeleter::SetActive(false);
 }
 
-namespace
-{
-	/** Room kept free for one command, so a record never has to be split. */
-	constexpr size_t kCommandReserveBytes = Rendering::Backend::CommandBase::Align(256);
-
-	template <typename TCommand, typename... A>
-	void Record(Rendering::Context::Driver& p_driver, A&&... p_arguments)
-	{
-		Rendering::Backend::CommandBufferQueue& queue = p_driver.GetCommandBufferQueue();
-		const Rendering::Backend::CircularBuffer& ring = queue.GetCircularBuffer();
-		if (ring.Size() - ring.GetUsed() < kCommandReserveBytes)
-		{
-			// Long batches stay safe: what is recorded so far is executed before the ring is
-			// reused. (With the frame on its own thread this becomes a wait for the render thread
-			// to release a batch instead.)
-			p_driver.ExecutePendingCommands();
-		}
-		p_driver.GetCommandStream().Enqueue<TCommand>(std::forward<A>(p_arguments)...);
-	}
-}
-
 /** Expands a parenthesised argument list (the `params` column of DriverAPI.inc) into separate
  * arguments, so it can follow `*this,` in the generated recording stubs. */
 #define MOON_EXPAND_ARGS(...) __VA_ARGS__
@@ -102,14 +82,9 @@ namespace
 #define DECL_DRIVER_COMMAND(name, paramsDecl, params) \
 	void Rendering::Context::Driver::Enqueue##name paramsDecl \
 	{ \
-		if (m_executing) \
-		{ \
-			/* Already on the render side, inside a batch: run it now. Recording would append to \
-			 * the ring the executor is walking (see Driver::Enqueue). */ \
-			m_openGLDriver->name(MOON_EXPAND_ARGS params); \
-			return; \
-		} \
-		/* Recording lives on the command stream; this side only decides inline vs queued. */ \
+		/* Recording lives on the command stream and is the same in both configurations: the */ \
+		/* executor is the render thread, or this thread at the end of the frame (see */ \
+		/* ExecuteAll). Nothing runs inline here any more (docs/RenderThreadPlan.md §8.72). */ \
 		m_commandStream->name(MOON_EXPAND_ARGS params); \
 	}
 #include <Rendering/Backend/DriverAPI.inc>
@@ -118,32 +93,16 @@ namespace
 
 void Rendering::Context::Driver::Enqueue(std::function<void()> p_command)
 {
-	if (m_executing)
-	{
-		// Nested use: the batch is running, so this runs with it.
-		p_command();
-		return;
-	}
 	m_commandStream->Enqueue<::Rendering::Backend::CustomCommand>(std::move(p_command));
 }
 
 void Rendering::Context::Driver::ReadPixels(const ::Rendering::Backend::ReadPixelsRequest& p_request)
 {
-	if (m_executing)
-	{
-		m_openGLDriver->ReadPixels(p_request);
-		return;
-	}
 	m_commandStream->ReadPixels(p_request);
 }
 
 void Rendering::Context::Driver::ApplyVertexArrayLayout(const ::Rendering::Backend::SetVertexArrayLayoutRequest& p_request)
 {
-	if (m_executing)
-	{
-		m_openGLDriver->SetVertexArrayLayout(p_request);
-		return;
-	}
 	m_commandStream->SetVertexArrayLayout(p_request);
 }
 
@@ -154,47 +113,17 @@ void Rendering::Context::Driver::CreateProgram(::Rendering::Backend::CreateProgr
 		return;
 	}
 
-	if (m_executing)
-	{
-		m_openGLDriver->CreateProgram(std::move(p_request));
-		return;
-	}
 	m_commandStream->CreateProgram(std::move(p_request));
 }
 
 void Rendering::Context::Driver::BindProgram(uint32_t p_programId)
 {
-	if (m_executing)
-	{
-		m_openGLDriver->BindProgram(p_programId);
-		return;
-	}
 	m_commandStream->BindProgram(p_programId);
 }
 
 void Rendering::Context::Driver::BindProgramHandle(uint32_t p_programHandleId)
 {
-	if (m_executing)
-	{
-		m_openGLDriver->BindProgramHandle(p_programHandleId);
-		return;
-	}
 	m_commandStream->BindProgramHandle(p_programHandleId);
-}
-
-void Rendering::Context::Driver::SetSamplerUnit(uint32_t p_programId, std::string p_samplerName, uint32_t p_unit)
-{
-	if (p_programId == 0)
-	{
-		return;
-	}
-
-	if (m_executing)
-	{
-		m_openGLDriver->SetSamplerUnit(p_programId, std::move(p_samplerName), p_unit);
-		return;
-	}
-	m_commandStream->SetSamplerUnit(p_programId, std::move(p_samplerName), p_unit);
 }
 
 void Rendering::Context::Driver::DeclareProgramBindings(::Rendering::Backend::DeclareProgramBindingsRequest p_request)
@@ -204,11 +133,6 @@ void Rendering::Context::Driver::DeclareProgramBindings(::Rendering::Backend::De
 		return;
 	}
 
-	if (m_executing)
-	{
-		m_openGLDriver->DeclareProgramBindings(std::move(p_request));
-		return;
-	}
 	m_commandStream->DeclareProgramBindings(std::move(p_request));
 }
 
@@ -239,21 +163,11 @@ void Rendering::Context::Driver::UpdateBufferRange(
 	request.offset = p_offset;
 	request.size = p_size;
 	request.data = std::move(owned);
-	if (m_executing)
-	{
-		m_openGLDriver->UpdateBuffer(request);
-		return;
-	}
 	m_commandStream->UpdateBuffer(request);
 }
 
 void Rendering::Context::Driver::BindDescriptor(const ::Rendering::Backend::BindDescriptorRequest& p_request)
 {
-	if (m_executing)
-	{
-		m_openGLDriver->BindDescriptor(p_request);
-		return;
-	}
 	m_commandStream->BindDescriptor(p_request);
 }
 
@@ -262,9 +176,8 @@ void Rendering::Context::Driver::SetupFramebuffer(HAL::Framebuffer& p_target, ui
 {
 	if (std::getenv("MOON_FRAME_TRACE") != nullptr)
 	{
-		std::fprintf(stderr, "[setup] record target=%p name=%s %ux%u executing=%d\n",
-			static_cast<void*>(&p_target), p_target.GetDebugName().c_str(), p_width, p_height,
-			m_executing ? 1 : 0);
+		std::fprintf(stderr, "[setup] record target=%p name=%s %ux%u\n",
+			static_cast<void*>(&p_target), p_target.GetDebugName().c_str(), p_width, p_height);
 		std::fflush(stderr);
 	}	::Rendering::Backend::SetupFramebufferRequest request;
 	request.target = &p_target;
@@ -274,11 +187,6 @@ void Rendering::Context::Driver::SetupFramebuffer(HAL::Framebuffer& p_target, ui
 	request.useStencil = p_useStencil;
 	request.useMipMaps = p_useMipMaps;
 	request.useMultiSample = p_useMultiSample;
-	if (m_executing)
-	{
-		m_openGLDriver->SetupFramebuffer(request);
-		return;
-	}
 	m_commandStream->SetupFramebuffer(request);
 }
 
@@ -294,11 +202,6 @@ void Rendering::Context::Driver::SetupFramebuffer(HAL::Framebuffer& p_target, co
 	request.useMultiSample = p_useMultiSample;
 	request.useDesc = true;
 	request.desc = p_desc;
-	if (m_executing)
-	{
-		m_openGLDriver->SetupFramebuffer(request);
-		return;
-	}
 	m_commandStream->SetupFramebuffer(request);
 }
 
@@ -308,11 +211,6 @@ void Rendering::Context::Driver::ResizeFramebuffer(HAL::Framebuffer& p_target, u
 	request.target = &p_target;
 	request.width = p_width;
 	request.height = p_height;
-	if (m_executing)
-	{
-		m_openGLDriver->ResizeFramebuffer(request);
-		return;
-	}
 	m_commandStream->ResizeFramebuffer(request);
 }
 
@@ -325,11 +223,6 @@ void Rendering::Context::Driver::CopyFramebufferColor(
 	request.sourceIndex = p_sourceIndex;
 	request.target = &p_target;
 	request.targetIndex = p_targetIndex;
-	if (m_executing)
-	{
-		m_openGLDriver->CopyFramebufferColor(request);
-		return;
-	}
 	m_commandStream->CopyFramebufferColor(request);
 }
 
@@ -339,11 +232,6 @@ void Rendering::Context::Driver::CopyFramebufferDepth(
 	::Rendering::Backend::CopyFramebufferDepthRequest request;
 	request.source = &p_source;
 	request.target = &p_target;
-	if (m_executing)
-	{
-		m_openGLDriver->CopyFramebufferDepth(request);
-		return;
-	}
 	m_commandStream->CopyFramebufferDepth(request);
 }
 
@@ -351,15 +239,7 @@ void Rendering::Context::Driver::BindFramebuffer(const HAL::Framebuffer* p_targe
 {
 	::Rendering::Backend::BindFramebufferRequest request;
 	request.target = p_target;
-	if (m_executing)
-	{
-		m_openGLDriver->BindFramebuffer(request);
-		return;
-	}
 	EnqueueBindFramebuffer(request);
-	// Scaffolding, like SetPipelineState: the passes still issue immediate GL right after the
-	// bind, so it has to land before them (see DriverAPI.inc).
-	ExecutePendingCommands();
 }
 
 void Rendering::Context::Driver::CreateTexture(Rendering::Backend::CreateTextureRequest p_request)
@@ -396,14 +276,6 @@ void Rendering::Context::Driver::UploadTexture(Rendering::Backend::TextureUpload
 
 void Rendering::Context::Driver::Flush()
 {
-	// Inside a batch there is nothing to publish: the ring is the batch being walked, and handing it
-	// to the queue would publish a partial one. Filament's flush is a no-op on the driver thread for
-	// the same reason.
-	if (m_executing)
-	{
-		return;
-	}
-
 	// Front end: publish what has been recorded. Nothing to publish, nothing to do (the queue
 	// skips empty flushes the same way - Filament's flushCommandBuffer does).
 	if (m_commandQueue->GetCircularBuffer().IsEmpty())
@@ -415,13 +287,6 @@ void Rendering::Context::Driver::Flush()
 
 void Rendering::Context::Driver::ExecuteAll()
 {
-	// Already running a batch: everything recorded now runs as part of that walk, so there is
-	// nothing to execute here - re-entering would walk the same ring twice.
-	if (m_executing)
-	{
-		return;
-	}
-
 	// Resources whose last reference was dropped asynchronously (a mesh freed by a feature rebuild
 	// or a job thread) are destroyed here: this is a point where the module's context is current
 	// and the batch that could still have referenced them has just been replayed.
@@ -429,7 +294,7 @@ void Rendering::Context::Driver::ExecuteAll()
 
 	// Back end: take the published batches, run them, give the ring back. This is the body of the
 	// render thread's loop (Filament's FEngine::execute) - it just happens to run on the recording
-	// thread until the frame moves.
+	// thread when there is no render thread.
 	//
 	// The ring being empty does not mean there is nothing to run: Flush() may already have
 	// published a batch, and that batch is exactly what this has to execute. Only the batches
@@ -445,12 +310,7 @@ void Rendering::Context::Driver::ExecuteAll()
 	}
 	for (const Rendering::Backend::CircularBuffer::Range& batch : batches)
 	{
-		// While a batch runs, everything the driver is asked for happens inside it (see the
-		// recording stubs and Enqueue): recording from there would append to the ring the executor
-		// is walking.
-		m_executing = true;
 		m_openGLDriver->Execute(batch.tail, batch.head);
-		m_executing = false;
 	}
 	m_commandQueue->ReleaseBuffers(batches);
 }
@@ -487,9 +347,7 @@ bool Rendering::Context::Driver::WaitAndExecute()
 	Rendering::Backend::DeferredDeleter::Flush();
 	for (const Rendering::Backend::CircularBuffer::Range& batch : batches)
 	{
-		m_executing = true;
 		m_openGLDriver->Execute(batch.tail, batch.head);
-		m_executing = false;
 	}
 
 	// The batch is not "done" when its commands have been *issued*: the GPU is still drawing. The
@@ -534,11 +392,6 @@ void Rendering::Context::Driver::MakeCurrent()
 	// The frame's first command, exactly as Filament issues it (FRenderer::beginFrame ->
 	// FSwapChain::makeCurrent -> driver.makeCurrent): the executor makes the module's context
 	// current for the batch it is about to run.
-	if (m_executing)
-	{
-		m_openGLDriver->MakeCurrent();
-		return;
-	}
 	m_commandStream->MakeCurrent();
 }
 
@@ -550,15 +403,6 @@ void Rendering::Context::Driver::RequestExit()
 void Rendering::Context::Driver::Execute()
 {
 	// Filament's Engine::execute.
-	//
-	// Inside a batch there is nothing to execute: what is recorded now runs as part of the walk
-	// this call is already in. Without this, a command that drains would wait for the batch that is
-	// currently running - on the render thread that is a wait on itself.
-	if (m_executing)
-	{
-		return;
-	}
-
 	Flush();
 
 	// The recording side with a render thread: publishing is all it can do. The batch belongs to
@@ -630,25 +474,13 @@ void Rendering::Context::Driver::OnFrameCompleted()
 
 void Rendering::Context::Driver::SetViewport(uint32_t p_x, uint32_t p_y, uint32_t p_width, uint32_t p_height)
 {
-	{
-		static const bool trace = std::getenv("MOON_FRAME_TRACE") != nullptr;
-		if (trace)
-		{
-			std::fprintf(stderr, "[drv] viewport enter executing=%d active=%d same=%d\n", m_executing ? 1 : 0, m_renderThreadActive ? 1 : 0, (std::this_thread::get_id() == m_renderThreadId) ? 1 : 0);
-			std::fflush(stderr);
-		}
-	}
-	// A command, like everything else the frame issues. Passes set the viewport right before they
-	// bind textures and draw, so it is executed immediately after being recorded (scaffolding,
-	// same reason as SetPipelineState - see DriverAPI.inc).
+	// A command, like everything else the frame issues: recorded here, applied by the executor in
+	// the batch's order (docs/RenderThreadPlan.md §8.72).
 	EnqueueViewport(
 		static_cast<int32_t>(p_x),
 		static_cast<int32_t>(p_y),
 		static_cast<int32_t>(p_width),
 		static_cast<int32_t>(p_height));
-	{ static const bool t = std::getenv("MOON_FRAME_TRACE") != nullptr; if (t) { std::fprintf(stderr, "[drv] enqueued\n"); std::fflush(stderr); } }
-	ExecutePendingCommands();
-	{ static const bool t = std::getenv("MOON_FRAME_TRACE") != nullptr; if (t) { std::fprintf(stderr, "[drv] viewport executed\n"); std::fflush(stderr); } }
 }
 
 void Rendering::Context::Driver::Clear(
@@ -677,10 +509,6 @@ void Rendering::Context::Driver::Clear(
 
 	EnqueuePipelineState(pso);
 	EnqueueClear(p_colorBuffer, p_depthBuffer, p_stencilBuffer);
-	if (!m_executing)
-	{
-		ExecutePendingCommands();
-	}
 }
 
 void Rendering::Context::Driver::SetScissor(
@@ -695,9 +523,6 @@ void Rendering::Context::Driver::SetScissor(
 		static_cast<int32_t>(p_y),
 		static_cast<int32_t>(p_width),
 		static_cast<int32_t>(p_height));
-	{ static const bool t = std::getenv("MOON_FRAME_TRACE") != nullptr; if (t) { std::fprintf(stderr, "[drv] enqueued\n"); std::fflush(stderr); } }
-	ExecutePendingCommands();
-	{ static const bool t = std::getenv("MOON_FRAME_TRACE") != nullptr; if (t) { std::fprintf(stderr, "[drv] viewport executed\n"); std::fflush(stderr); } }
 }
 
 void Rendering::Context::Driver::Draw(
@@ -718,10 +543,9 @@ void Rendering::Context::Driver::Draw(Rendering::Data::PipelineState p_pso, cons
 		return;
 	}
 
-	// One draw is one batch: the state, the array binding and the draw call travel together and
-	// are executed as a block, which is where the GL calls used to be. The per-material binding
-	// (program, textures, UBOs) still happens immediately *before* this call, which is why the
-	// batch is drained here instead of once per frame - see DriverAPI.inc.
+	// One draw is a pipeline state, the array binding and the draw call, recorded in that order.
+	// The per-material binding (program, textures, UBOs) is recorded immediately before this call,
+	// so the whole drawable is a run of commands in the frame's batch.
 	EnqueuePipelineState(p_pso);
 
 	::Rendering::Backend::DrawMeshRequest request;
@@ -730,11 +554,6 @@ void Rendering::Context::Driver::Draw(Rendering::Data::PipelineState p_pso, cons
 	request.primitiveMode = p_primitiveMode;
 	request.instances = p_instances;
 	EnqueueDrawMesh(request);
-
-	if (!m_executing)
-	{
-		ExecutePendingCommands();
-	}
 }
 
 void Rendering::Context::Driver::SetPipelineState(Rendering::Data::PipelineState p_state)
@@ -743,15 +562,6 @@ void Rendering::Context::Driver::SetPipelineState(Rendering::Data::PipelineState
 	// against what the backend is in, and that cache belongs to whichever thread owns the
 	// context. Here the state is only recorded.
 	EnqueuePipelineState(p_state);
-
-	// Scaffolding for the step between M1 and M2: the draw calls are still immediate, so the
-	// state has to be applied before the next GL call rather than at the end of the frame. It
-	// goes away when Driver::Draw records its binding and draw calls too, and a frame becomes one
-	// batch with one drain.
-	if (!m_executing)
-	{
-		ExecutePendingCommands();
-	}
 }
 
 void Rendering::Context::Driver::ResetPipelineState()

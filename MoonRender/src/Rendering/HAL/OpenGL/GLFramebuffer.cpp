@@ -22,7 +22,7 @@ void Rendering::HAL::GLFramebuffer::Attach(
 	const auto attachmentIndex = EnumToValue<GLenum>(p_attachment) + static_cast<GLenum>(p_index);
 
 	::Rendering::Context::Driver* const driver = ::Rendering::HAL::CurrentDriver();
-	if (driver != nullptr && !driver->IsDriverThread())
+	if (driver != nullptr)
 	{
 		// Same as the texture attachment above: the target and the renderbuffer are named here,
 		// the attach happens where the context is.
@@ -145,11 +145,13 @@ Rendering::HAL::GLFramebuffer::TFramebuffer(std::string_view p_debugName) :
 	m_context{ .debugName = std::string{p_debugName} }
 {
 	// A framebuffer is a container object: like Filament's createRenderTargetS/R pair, the handle
-	// is taken here and the name is made where the context is. Without a render thread that is
-	// this thread, exactly as before.
+	// is taken here and the name is made where the context is. The setup is synchronous for the
+	// caller (what names this target next - an attach, a bind - is recorded from this side and runs
+	// after it in the same batch), and it is the same with or without a render thread
+	// (docs/RenderThreadPlan.md §8.72).
 	m_context.handle = ::Rendering::Backend::GetHandleAllocator().Allocate<::Rendering::Backend::HwFramebuffer>();
 	::Rendering::Context::Driver* const driver = ::Rendering::HAL::CurrentDriver();
-	if (driver != nullptr && driver->IsRenderThreadActive())
+	if (driver != nullptr)
 	{
 		driver->EnqueueCreateFramebuffer(m_context.handle.GetId());
 		driver->ExecutePendingCommands();
@@ -193,11 +195,12 @@ void Rendering::HAL::GLFramebuffer::Unbind() const
 
 bool Rendering::HAL::GLFramebuffer::Validate()
 {
-	// With a render thread the target's attachments are attached on the executor, so the status
-	// here would describe a state this thread cannot see. The bind trace ([fbo] bind ... status=)
-	// is where it is checked instead.
+	// With a driver the target's attachments are attached on the executor, so the status here would
+	// describe a state this thread cannot see. The bind trace ([fbo] bind ... status=) is where it
+	// is checked instead - in both configurations, because the recording code is the same
+	// (docs/RenderThreadPlan.md §8.72).
 	::Rendering::Context::Driver* const driver = ::Rendering::HAL::CurrentDriver();
-	if (driver != nullptr && !driver->IsDriverThread())
+	if (driver != nullptr)
 	{
 		return true;
 	}
@@ -304,7 +307,7 @@ template<>
 void Rendering::HAL::GLFramebuffer::SetDrawBuffers(const std::vector<uint32_t>& indices)
 {
 	::Rendering::Context::Driver* const driver = ::Rendering::HAL::CurrentDriver();
-	if (driver != nullptr && !driver->IsDriverThread())
+	if (driver != nullptr)
 	{
 		::Rendering::Backend::SetFramebufferDrawBuffersRequest request;
 		request.framebufferHandleId = m_context.handle.GetId();
@@ -331,7 +334,7 @@ template<>
 void Rendering::HAL::GLFramebuffer::SetTargetDrawBuffer(std::optional<uint32_t> p_index)
 {
 	::Rendering::Context::Driver* const driver = ::Rendering::HAL::CurrentDriver();
-	if (driver != nullptr && !driver->IsDriverThread())
+	if (driver != nullptr)
 	{
 		// One draw buffer is the single-entry form of SetDrawBuffers; the sky capture switches the
 		// cube face it writes this way.

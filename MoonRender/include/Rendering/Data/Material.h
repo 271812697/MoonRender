@@ -168,7 +168,6 @@ namespace Rendering::Data
 			return m_defaultInstance->SupportsProjectionMode(p_mode);
 		}
 		Rendering::Data::StateMask GenerateStateMask() const { return m_defaultInstance->GenerateStateMask(); }
-		Rendering::HAL::Texture* TextureOf(const std::string& p_name) const { return m_defaultInstance->TextureOf(p_name); }
 
 		void SetBlendable(bool p_blendable) { m_defaultInstance->SetBlendable(p_blendable); }
 		void SetBlendMode(Rendering::Settings::EBlendMode p_blendMode) { m_defaultInstance->SetBlendMode(p_blendMode); }

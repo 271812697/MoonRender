@@ -3,7 +3,6 @@
 #include <unordered_map>
 
 #include <Rendering/HAL/Backend.h>
-#include <Rendering/Backend/DrawMaterialRequest.h>
 #include <Rendering/Backend/CreateTextureRequest.h>
 #include <Rendering/Backend/UpdateTextureRequest.h>
 #include <Rendering/Backend/TextureRequests.h>
@@ -68,7 +67,6 @@ namespace Rendering::Backend
 		void BindFramebuffer(const ::Rendering::Backend::BindFramebufferRequest& p_request);
 		void SetClearColor(float p_red, float p_green, float p_blue, float p_alpha);
 		void Clear(bool p_colorBuffer, bool p_depthBuffer, bool p_stencilBuffer);
-		void DrawMaterial(const ::Rendering::Backend::DrawMaterialRequest& p_request);
 		void CreateTexture(::Rendering::Backend::CreateTextureRequest p_request);
 		void UpdateTexture(::Rendering::Backend::UpdateTextureRequest p_request);
 		void UploadTexture(::Rendering::Backend::TextureUploadRequest p_request);
@@ -116,8 +114,6 @@ namespace Rendering::Backend
 		 * create command has run. */
 		void BindProgramHandle(uint32_t p_programHandleId);
 		void DeclareProgramBindings(::Rendering::Backend::DeclareProgramBindingsRequest p_request);
-		/** Declares a loose sampler's texture unit to the program (glUniform1i). */
-		void SetSamplerUnit(uint32_t p_programId, std::string p_samplerName, uint32_t p_unit);
 		/** Uploads the overlay's per-frame vertex stream into its buffer and describes the vertex
 		 * format on its array (attribute pointers too: the stride varies per draw). */
 		void UploadOverlayVertices(::Rendering::Backend::UploadOverlayVerticesRequest p_request);

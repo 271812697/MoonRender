@@ -40,11 +40,13 @@ Rendering::HAL::GLTexture::TTexture(Settings::ETextureType p_type, std::string_v
 	m_textureContext.debugName = p_debugName;
 
 	::Rendering::Context::Driver* const driver = ::Rendering::HAL::CurrentDriver();
-	if (driver != nullptr && !driver->IsDriverThread())
+	if (driver != nullptr)
 	{
-		// Front end with a render thread: the GL name belongs to the side that owns the context, so
-		// this object is only the handle that names the slot there (Filament's Texture, and its
-		// createTextureS). Everything below - allocate, upload, attach, bind - is recorded.
+		// Front end: the GL name belongs to the side that owns the context, so this object is only
+		// the handle that names the slot there (Filament's Texture, and its createTextureS).
+		// Everything below - allocate, upload, attach, bind - is recorded, and the create is
+		// drained so what names this texture next records into the same batch after it. The same
+		// code with or without a render thread (docs/RenderThreadPlan.md §8.72).
 		m_context.handleId = ::Rendering::Backend::GetHandleAllocator()
 			.Allocate<::Rendering::HAL::Texture>().GetId();
 
@@ -53,8 +55,6 @@ Rendering::HAL::GLTexture::TTexture(Settings::ETextureType p_type, std::string_v
 		request.type = p_type;
 		request.debugName = std::string(p_debugName);
 		driver->CreateTexture(std::move(request));
-		// Resource creation is synchronous for the caller: what names this texture next (a
-		// framebuffer attachment, a material instance) does so from this side of the frame.
 		driver->ExecutePendingCommands();
 	}
 	else

@@ -88,12 +88,12 @@ namespace Rendering::Data
 
 	void Descriptor::Bind(uint32_t p_slot) const
 	{
-		// The bind is a command when the module runs its batches on a render thread (Filament's
-		// bindDescriptorSet): the recording side has no context, so a direct glBindBufferRange here
-		// simply does nothing and every draw then reads an unbound UBO - which is what an empty
-		// scene looks like.
+		// The bind is a command whenever there is a driver to record into (Filament's
+		// bindDescriptorSet): the GL call belongs to the batch that binds the drawable, and the
+		// recording side must not issue it - with a render thread there is no context there, and
+		// without one the pending batch would still be ahead of it (docs/RenderThreadPlan.md §8.72).
 		::Rendering::Context::Driver* const driver = ::Rendering::HAL::CurrentDriver();
-		const bool viaCommand = driver != nullptr && driver->IsRenderThreadActive();
+		const bool viaCommand = driver != nullptr;
 
 		if (const BufferInfo* buffer = GetBuffer())
 		{
@@ -151,10 +151,10 @@ namespace Rendering::Data
 			return;
 		}
 		// An upload is a command (Filament's updateBufferObject): the recording side only names the
-		// range, the executor writes it. Direct GL here would run without a context on the frame's
-		// thread as soon as the batches live on a render thread.
+		// range, the executor writes it - in both configurations, so the bytes land in the same
+		// place in the batch (docs/RenderThreadPlan.md §8.72).
 		::Rendering::Context::Driver* const driver = ::Rendering::HAL::CurrentDriver();
-		if (driver != nullptr && driver->IsRenderThreadActive())
+		if (driver != nullptr)
 		{
 			driver->UpdateBufferRange(buffer->bufferId, buffer->offset, p_data,
 				std::min(p_size, buffer->size));

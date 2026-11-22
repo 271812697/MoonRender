@@ -21,9 +21,9 @@ Rendering::HAL::GLTextureHandle::TTextureHandle(Settings::ETextureType p_type, u
 template<>
 void Rendering::HAL::GLTextureHandle::Bind(std::optional<uint32_t> p_slot) const
 {
-	// Binding is GL, so it only means something where the name is: inside a command, or without a
-	// render thread. On the recording side the name is the executor's, and binds go through
-	// BindDescriptor (see MaterialInstance::BindTexture).
+	// Binding is GL, so it only means something where the name is: inside a command, or when there
+	// is no driver to record into at all. The recording side records BindDescriptor instead (see
+	// Descriptor::Bind and MaterialInstance::BindParameterBlock).
 	const uint32_t id = GetID();
 	if (p_slot.has_value())
 	{
@@ -48,7 +48,7 @@ uint32_t Rendering::HAL::GLTextureHandle::GetID() const
 	{
 		return m_context.id;
 	}
-	// Front end with a render thread: the name is in the record the handle names.
+	// Front end: the name is in the record the handle names.
 	return ::Rendering::Backend::Records::TextureName(m_context.handleId);
 }
 

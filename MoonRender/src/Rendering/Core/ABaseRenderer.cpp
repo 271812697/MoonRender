@@ -4,7 +4,9 @@
 
 #include <cstdio>
 #include <cstdlib>
-#include <Rendering/Backend/DrawMaterialRequest.h>
+#include <Core/Global/ServiceLocator.h>
+#include <Core/ResourceManagement/MaterialManager.h>
+#include <Core/Resources/MaterialAsset.h>
 #include <Rendering/Data/DescriptorSet.h>
 #include <Rendering/Data/EngineDescriptorSets.h>
 #include <Rendering/Data/ProgramDescriptorBindings.h>
@@ -131,37 +133,27 @@ Rendering::Core::ABaseRenderer::ABaseRenderer(Context::Driver& p_driver) :
 
 	m_flatNormalTexture.Allocate(kEmptyTextureDesc);
 	m_flatNormalTexture.Upload(kFlatNormalPixel.data(), Settings::EFormat::RGBA, Settings::EPixelDataType::UNSIGNED_BYTE);
-	std::string v = R"(
-#version 450 core
 
-layout(location = 0) in vec2 geo_Pos;
-layout(location = 1) in vec2 geo_TexCoords;
-
-out vec2 TexCoords;
-
-void main()
-{
-    TexCoords = geo_TexCoords;
-    gl_Position = vec4(geo_Pos, 0.0, 1.0);
-}
-)";
-	std::string f = R"(
-#version 450 core
-
-in vec2 TexCoords;
-out vec4 FRAGMENT_COLOR;
-
-uniform sampler2D _InputTexture;
-
-void main()
-{
-    FRAGMENT_COLOR = texture(_InputTexture, TexCoords);
-}
-
-)";
-	//not free the m_presentShader shader?
-	m_presentShader = Rendering::Resources::Loaders::ShaderLoader::CreateFromSource(v, f);
-	m_presentMaterial.SetMaterial(m_presentShader);
+	// The present quad's material is an asset, not GLSL text built here: a MatC package declares
+	// `_InputTexture` as a material parameter, and the per-material descriptor set binds it on the
+	// side that owns the context. Rebuilding it from source left the sampler outside every set, so
+	// the texture had to be bound to a texture unit with GL calls issued from the recording side
+	// (docs/RenderThreadPlan.md §8.72).
+	if (::Core::Global::ServiceLocator::IsProvided<::Core::ResourceManagement::MaterialManager>())
+	{
+		m_presentMaterial = ::Core::Global::ServiceLocator::Get<::Core::ResourceManagement::MaterialManager>()
+			.GetResource(":Materials\\Blit.mat");
+	}
+	if (m_presentMaterial != nullptr && m_presentMaterial->HasMaterial())
+	{
+		m_presentShader = m_presentMaterial->MaterialOf();
+	}
+	else
+	{
+		m_presentMaterial = nullptr;
+		std::fprintf(stderr, "[renderer] Materials/Blit.mat is missing: the present pass has no material\n");
+		std::fflush(stderr);
+	}
 }
 
 void Rendering::Core::ABaseRenderer::SetBrdfLut(Rendering::HAL::Texture* p_lut)
@@ -393,7 +385,11 @@ void Rendering::Core::ABaseRenderer::Blit(
 
 void Rendering::Core::ABaseRenderer::Present(Rendering::HAL::Framebuffer& p_src)
 {
-	Present(p_src, m_presentMaterial.DefaultInstance());
+	if (m_presentMaterial == nullptr)
+	{
+		return;
+	}
+	Present(p_src, m_presentMaterial->Instance());
 }
 void Rendering::Core::ABaseRenderer::Present(
 	Rendering::HAL::Framebuffer& p_src,
@@ -484,7 +480,11 @@ void Rendering::Core::ABaseRenderer::Present(Rendering::Data::MaterialInstance& 
 }
 void Rendering::Core::ABaseRenderer::Present(Rendering::HAL::Texture& p_src)
 {	
-	Present(p_src, m_presentMaterial);
+	if (m_presentMaterial == nullptr)
+	{
+		return;
+	}
+	Present(p_src, m_presentMaterial->Instance());
 }
 bool Rendering::Core::ABaseRenderer::IsDrawable(const Entities::Drawable& p_drawable) const
 {
@@ -558,26 +558,19 @@ void Rendering::Core::ABaseRenderer::DrawEntity(
 		}
 	}
 
-	// The material binding - program, descriptors, uniform uploads - is a command now: it is
-	// recorded here and replayed by the driver, together with the pipeline state and the draw
-	// call below, as one batch. Every draw binds and uploads; the "already bound" signature cache
-	// is gone (see docs/RenderThreadPlan.md §8.54).
-	//
-	// The request owns a copy of the drawable: the caller is usually a pass loop that iterates the
-	// frame's drawable list by value, so `&p_drawable` names a stack object that is gone long
-	// before the batch runs (a whole frame later with a render thread) - the material and the
-	// feature override would then be read out of whatever the stack holds by then.
-	::Rendering::Backend::DrawMaterialRequest materialRequest;
-	auto ownedDrawable = std::make_shared<::Rendering::Entities::Drawable>(p_drawable);
-	materialRequest.drawable = ownedDrawable.get();
-	materialRequest.ownedDrawable = ownedDrawable;
-	materialRequest.pipelineState = p_pso;
-	materialRequest.emptyTexture2D = &m_emptyTexture2D;
-	materialRequest.emptyTextureCube = &m_emptyTextureCube;
-	materialRequest.flatNormalTexture = &m_flatNormalTexture;
-	materialRequest.perRenderableSet = m_perRenderableSet;
-	materialRequest.perRenderableBinding = Rendering::Data::kPerRenderableDescriptorSet;
-	m_driver.EnqueueDrawMaterial(materialRequest);
+	// The material binding - program, descriptor sets, parameter block, textures - is recorded
+	// here, as commands: every one of those calls writes into the command stream, and the executor
+	// only runs GL. Recording from inside the executor (the old DrawMaterial command did exactly
+	// that) writes behind the batch being walked and binds nothing (docs/RenderThreadPlan.md §8.72).
+	p_drawable.material->Bind(p_drawable.pass);
+	p_drawable.material->UploadProperties(&m_emptyTexture2D, &m_emptyTextureCube, &m_flatNormalTexture);
+
+	// The per-renderable set (the object UBO of this drawable) is the renderer's, not the
+	// material's. Its mapping is fixed by the engine, so it binds by set index.
+	if (m_perRenderableSet != nullptr)
+	{
+		m_perRenderableSet->BindFixed(Rendering::Data::kPerRenderableDescriptorSet);
+	}
 
 	m_driver.Draw(
 		p_pso,

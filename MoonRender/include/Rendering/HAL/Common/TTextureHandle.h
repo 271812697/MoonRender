@@ -35,8 +35,8 @@ namespace Rendering::HAL
 		uint32_t GetHandleId() const;
 
 		/** Whether this object carries a GL name of its own - i.e. it is the backend object, or
-		 * there is no render thread and the name was made inline. False for the front end with a
-		 * render thread, whose operations have to be recorded. */
+		 * there is no driver to record into and the name was made inline. False for the front end,
+		 * whose operations are recorded and whose name only exists on the executor. */
 		bool HasBackendName() const;
 
 		/**

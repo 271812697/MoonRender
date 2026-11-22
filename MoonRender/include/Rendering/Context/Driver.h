@@ -38,7 +38,6 @@ namespace Rendering::Backend
 	class CommandBufferQueue;
 	class CommandStream;
 	class OpenGLDriver;
-	struct DrawMaterialRequest;
 	struct DrawMeshRequest;
 	struct BindFramebufferRequest;
 }
@@ -139,10 +138,8 @@ namespace Rendering::Context
 		void UpdateTexture(Rendering::Backend::UpdateTextureRequest p_request);
 		/** Binds p_target as the render target (null: the default framebuffer).
 		 *
-		 * Recorded as a command and executed immediately after, like SetPipelineState: a pass
-		 * binds its target and then keeps issuing immediate GL (texture and uniform work that is
-		 * not commandized yet), so the bind has to land before that starts. The drain goes away
-		 * with the rest of them, when a frame becomes one batch. */
+		 * Recorded like every other command: the bind lands in the batch's order, before the draws
+		 * that follow it (docs/RenderThreadPlan.md §8.72). */
 		void BindFramebuffer(const HAL::Framebuffer* p_target);
 
 		/** Reads pixels on the side that owns the context (Filament's readPixels). */
@@ -164,9 +161,6 @@ namespace Rendering::Context
 
 		/** Declares a program's descriptor slots to GL, on the side that owns the context. */
 		void DeclareProgramBindings(::Rendering::Backend::DeclareProgramBindingsRequest p_request);
-
-		/** Declares a loose sampler's texture unit on the side that owns the context. */
-		void SetSamplerUnit(uint32_t p_programId, std::string p_samplerName, uint32_t p_unit);
 
 		/** Writes bytes into a GL buffer on the side that owns the context. The data is copied into
 		 * the command, so it does not have to outlive this call (Filament's updateBufferObject). */
@@ -209,8 +203,8 @@ namespace Rendering::Context
 		std::thread::id GetRenderThreadId() const { return m_renderThreadId; }
 		/** Whether the calling thread may issue GL for this module: the thread the batches run on,
 		 * or - without a render thread - whichever thread is calling (Filament's
-		 * DriverBase::isDriverThread, which the HAL uses to decide between doing an operation and
-		 * recording the command that does it). */
+		 * DriverBase::isDriverThread). Only the context-owning checks use it now; whether an
+		 * operation is recorded no longer depends on the mode (docs/RenderThreadPlan.md §8.72). */
 		bool IsDriverThread() const;
 		/** Asks the command queue to stop handing out work: the render thread's loop then ends. */
 		/** Makes the module context current on the thread that runs the batches, and re-applies the
@@ -223,9 +217,9 @@ namespace Rendering::Context
 
 		void RequestExit();
 		/** Back end: runs the batches that are waiting, on the calling thread, and gives the ring
-		 * space back. This is what the render thread's loop calls (Filament's FEngine::execute:
-		 * waitForCommands -> driver.execute -> releaseBuffer); executing it from the recording
-		 * thread is what the single-threaded build does until the frame moves. */
+		 * space back. This is the body of the render thread's loop (Filament's FEngine::execute:
+		 * waitForCommands -> driver.execute -> releaseBuffer); without a render thread it runs on
+		 * the recording thread, at Driver::Execute. */
 		void ExecuteAll();
 		/** Back end, blocking: waits for the next published batch, runs it, gives the ring back.
 		 * False means the queue was asked to exit (Filament's FEngine::execute, which returns
@@ -283,13 +277,9 @@ namespace Rendering::Context
 		std::unique_ptr<Backend::CommandBufferQueue> m_commandQueue;
 		std::unique_ptr<Backend::CommandStream> m_commandStream;
 		std::unique_ptr<Backend::OpenGLDriver> m_openGLDriver;
-		/** True while a batch is being executed: a driver call made from inside it runs right
-		 * there instead of being recorded (see ExecutePendingCommands and the recording stubs). */
-		bool m_executing = false;
 		bool m_renderThreadActive = false;
-		/** The thread the batches run on. ExecutePendingCommands has to tell it apart from the
-		 * recording side: inside a command it must run inline, or it would wait for itself
-		 * (Filament's isThisThreadTheDriverThread). */
+		/** The thread the batches run on. Execute() compares against it to decide whether this call
+		 * is the driver loop or a publish-and-wait (Filament's isThisThreadTheDriverThread). */
 		std::thread::id m_renderThreadId{};
 		/** Frames the executor has finished drawing, and the lock the consumer waits under. The
 		 * executor counts a frame only after its GPU fence, so this is "drawn", not "issued". */

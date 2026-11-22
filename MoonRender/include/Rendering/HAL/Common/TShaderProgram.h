@@ -85,14 +85,6 @@ namespace Rendering::HAL
 		uint32_t GetID() const;
 
 		/**
-		* Sends a uniform value associated with the given name to the GPU.
-		* @param p_name
-		* @param p_value
-		*/
-		template<SupportedUniformType T>
-		void SetUniform(const std::string& p_name, const T& p_value);
-
-		/**
 		* Returns the value of a uniform associated with the given name.
 		* @param p_name
 		* @param p_value

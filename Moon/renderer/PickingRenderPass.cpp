@@ -444,7 +444,9 @@ void Editor::Rendering::PickingRenderPass::DrawPickableModels(
 	const auto& filteredDrawables = m_renderer.GetDescriptor<::Core::Rendering::SceneRenderer::SceneFilteredDrawablesDescriptor>();
 	// The vertex dots are drawn into the picking target as point sprites: their
 	// size comes from the shader, which the driver only honours while this is on.
-	glEnable(GL_PROGRAM_POINT_SIZE);
+	// Recorded like every other pipeline capability (docs/RenderThreadPlan.md §8.72).
+	m_renderer.GetDriver().EnqueueCapability(
+		::Rendering::Settings::ERenderingCapability::PROGRAM_POINT_SIZE, true);
 	auto drawPickableModels = [&](auto drawables) {
 		for (auto& drawable : drawables)
 		{			

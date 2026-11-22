@@ -9,6 +9,7 @@
 #include "Rendering/Context/Driver.h"
 
 namespace Rendering::Data { class DescriptorSet; }
+namespace Core::Resources { class MaterialAsset; }
 namespace Rendering::Core
 {
 	class ABaseRenderer : public IRenderer
@@ -169,8 +170,13 @@ namespace Rendering::Core
 		
 		Rendering::Data::PipelineState m_basePipelineState;
 		bool m_isDrawing;
-		Rendering::Data::Material* m_presentShader;
-		Rendering::Data::Material m_presentMaterial;
+		Rendering::Data::Material* m_presentShader = nullptr;
+		/** The present quad's material: the `Materials/Blit.mat` asset, whose package is the MatC
+		 * `PostProcess/Blit.shader`. A MatC package declares `_InputTexture` as a parameter, so the
+		 * texture travels in the per-material descriptor set; a source-built shader left it as a
+		 * loose uniform that had to be bound to a texture unit with GL calls on the recording side
+		 * (docs/RenderThreadPlan.md §8.72). */
+		::Core::Resources::MaterialAsset* m_presentMaterial = nullptr;
 		Rendering::Data::DescriptorSet* m_perViewSet = nullptr;
 		Rendering::Data::DescriptorSet* m_perRenderableSet = nullptr;
 	private:

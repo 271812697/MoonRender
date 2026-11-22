@@ -132,8 +132,11 @@ namespace
 
 			// Not every drawable of this pass is a line: the topology vertices are
 			// point sprites, and their size comes from the shader (gl_PointSize),
-			// which the driver only honours while this is enabled.
-			glEnable(GL_PROGRAM_POINT_SIZE);
+			// which the driver only honours while this is enabled. A capability is
+			// GL on the executor's state machine, so it is recorded, not issued:
+			// issuing it here left it off on the context that draws (docs §8.72).
+			m_renderer.GetDriver().EnqueueCapability(
+				::Rendering::Settings::ERenderingCapability::PROGRAM_POINT_SIZE, true);
 
 			const auto& drawables = m_renderer.GetDescriptor<SceneRenderer::SceneFilteredDrawablesDescriptor>();
 
@@ -455,36 +458,13 @@ namespace
 			depthTexture->SetBorderColor(Maths::FVector4::Zero);
 			mBlendFbo.Attach<::Rendering::HAL::Texture>(renderTexture, ::Rendering::Settings::EFramebufferAttachment::COLOR);
 			mBlendFbo.Attach<::Rendering::HAL::Texture>(depthTexture, ::Rendering::Settings::EFramebufferAttachment::DEPTH);
-			std::string v = R"(
-#version 450 core
 
-layout(location = 0) in vec2 geo_Pos;
-layout(location = 1) in vec2 geo_TexCoords;
-
-out vec2 TexCoords;
-
-void main()
-{
-    TexCoords = geo_TexCoords;
-    gl_Position = vec4(geo_Pos, 0.0, 1.0);
-}
-)";
-			std::string f = R"(
-#version 450 core
-
-in vec2 TexCoords;
-out vec4 FRAGMENT_COLOR;
-
-uniform sampler2D colorLayer;
-
-void main()
-{
-	FRAGMENT_COLOR = texture(colorLayer, TexCoords);
-}
-
-)";
-			mBlendColorShader = ::Rendering::Resources::Loaders::ShaderLoader::CreateFromSource(v, f);
-			mBlendColorMat.SetMaterial(mBlendColorShader);
+			// Blending the peel layers back to front is a full-screen copy, and the copy material is
+			// the MatC one (same package as the present): its layer texture is a declared parameter,
+			// so it binds through the per-material descriptor set. A source-built copy left the
+			// sampler outside every set, and the calls that fed it were GL on the recording side
+			// (docs/RenderThreadPlan.md §8.72).
+			mBlendColorMat.SetMaterial(GetShaderService[":Shaders\\PostProcess\\Blit.shader"]);
 		}
 
 	protected:
@@ -569,7 +549,7 @@ void main()
 				m_renderer.BindFramebuffer(&mBlendFbo);
 				for (int i = mLayerFbo.size() - 1; i >= 0; i--) {
 					const auto& color = mLayerFbo[i].GetAttachment<::Rendering::HAL::GLTexture>(::Rendering::Settings::EFramebufferAttachment::COLOR, 0);
-					mBlendColorMat.SetProperty("colorLayer",&color.value());
+					mBlendColorMat.SetProperty("_InputTexture",&color.value());
 					Rendering::Entities::Drawable blit;
 					blit.mesh = m_renderer.m_unitQuad;
 					blit.material = mBlendColorMat.DefaultInstance();
@@ -589,7 +569,6 @@ void main()
 			}
 		}
 	private:
-		::Rendering::Resources::Shader* mBlendColorShader;
 		::Rendering::Data::Material mBlendColorMat;
 		std::vector<::Rendering::HAL::Framebuffer>mLayerFbo ;
 		::Rendering::HAL::Framebuffer mBlendFbo;

@@ -66,8 +66,9 @@ void Rendering::HAL::GLBuffer::Bind(std::optional<uint32_t> p_index) const
 	// A binding point only means something on the side that owns the context: record it, so the
 	// executor binds it before the draws that read it run. Binding it here left the light SSBO
 	// unbound on the render thread and every lit surface read an empty light list (docs §8.67).
+	// Recorded in both configurations for the same reason (§8.72).
 	if (::Rendering::Context::Driver* const driver = ::Rendering::HAL::CurrentDriver();
-		driver != nullptr && driver->IsRenderThreadActive())
+		driver != nullptr)
 	{
 		::Rendering::Backend::BindBufferRequest request;
 		request.handleId = m_buffer.handle.GetId();

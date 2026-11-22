@@ -84,11 +84,27 @@ namespace Rendering::Backend
 			return;
 		}
 
+		// MOON_CMD_TRACE: name the command that raised a GL error. The error queue is per context,
+		// so one command's failure surfaces at whatever the next check is; this attributes it to the
+		// command that caused it instead of to the draw that happened to look next.
+		static const bool traceCommands = std::getenv("MOON_CMD_TRACE") != nullptr;
+
 		const intptr_t end = reinterpret_cast<intptr_t>(p_end);
 		CommandBase* command = static_cast<CommandBase*>(p_begin);
 		while (command != nullptr && reinterpret_cast<intptr_t>(command) < end)
 		{
-			command = command->Run(*this);
+			CommandBase* const current = command;
+			command = current->Run(*this);
+			if (traceCommands)
+			{
+				const GLenum error = glGetError();
+				if (error != GL_NO_ERROR)
+				{
+					std::fprintf(stderr, "[cmd] %s -> 0x%04x\n", current->GetName(),
+						static_cast<unsigned>(error));
+					std::fflush(stderr);
+				}
+			}
 		}
 	}
 
@@ -353,18 +369,6 @@ namespace Rendering::Backend
 		if (name != 0)
 		{
 			glUseProgram(name);
-		}
-	}
-
-	void OpenGLDriver::SetSamplerUnit(uint32_t p_programId, std::string p_samplerName, uint32_t p_unit)
-	{
-		// glUniform1i applies to the program in use: make it current, and the frame's own bind will
-		// set it again before the draw.
-		glUseProgram(p_programId);
-		const GLint location = glGetUniformLocation(p_programId, p_samplerName.c_str());
-		if (location >= 0)
-		{
-			glUniform1i(location, static_cast<GLint>(p_unit));
 		}
 	}
 
@@ -1156,8 +1160,8 @@ namespace Rendering::Backend
 		}
 
 		// The draw call itself. The array and the program are already bound and the state already
-		// applied (the PipelineState and DrawMaterial commands ran before this one), so nothing is
-		// left here but instancing the indices.
+		// applied (the material's bind commands and the PipelineState command ran before this one),
+		// so nothing is left here but instancing the indices.
 		glDrawElementsInstanced(static_cast<GLenum>(p_request.primitiveMode),
 			static_cast<GLsizei>(indexCount), GL_UNSIGNED_INT, nullptr,
 			static_cast<GLsizei>(p_request.instances));
@@ -1231,33 +1235,5 @@ namespace Rendering::Backend
 	void OpenGLDriver::Clear(bool p_colorBuffer, bool p_depthBuffer, bool p_stencilBuffer)
 	{
 		m_backend.Clear(p_colorBuffer, p_depthBuffer, p_stencilBuffer);
-	}
-
-	/** The material half of a draw: program, descriptor sets, parameter block and the loose
-	 * textures. The state and the draw call are separate commands, so this is only the binding -
-	 * exactly what the recording side used to do inline before the batch split. */
-	void OpenGLDriver::DrawMaterial(const ::Rendering::Backend::DrawMaterialRequest& p_request)
-	{
-		if (p_request.drawable == nullptr || !p_request.drawable->material.has_value())
-		{
-			return;
-		}
-
-		const ::Rendering::Entities::Drawable& drawable = *p_request.drawable;
-		::Rendering::Data::MaterialInstance& material = drawable.material.value();
-
-		// The pass only: the variant is the material's own (the drawable's feature set is the
-		// renderer's hint for materials that declare several, and passing it here selected a
-		// fallback variant instead of the one the material compiles for its default pass).
-		material.Bind(drawable.pass);
-		material.UploadProperties(p_request.emptyTexture2D, p_request.emptyTextureCube,
-			p_request.flatNormalTexture);
-
-		// The per-renderable set (the object UBO of this drawable) is the renderer's, not the
-		// material's. Its mapping is fixed by the engine, so it binds by set index.
-		if (p_request.perRenderableSet != nullptr)
-		{
-			p_request.perRenderableSet->BindFixed(p_request.perRenderableBinding);
-		}
 	}
 }

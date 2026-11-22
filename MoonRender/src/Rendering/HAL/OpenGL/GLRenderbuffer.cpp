@@ -10,10 +10,12 @@
 template<>
 Rendering::HAL::GLRenderbuffer::TRenderbuffer(bool flag)
 {
-	// createRenderbufferS/createRenderbufferR: the handle here, the name where the context is.
+	// createRenderbufferS/createRenderbufferR: the handle here, the name where the context is. The
+	// create is synchronous for the caller and the same with or without a render thread
+	// (docs/RenderThreadPlan.md §8.72).
 	m_context.handle = ::Rendering::Backend::GetHandleAllocator().Allocate<::Rendering::Backend::HwRenderbuffer>();
 	::Rendering::Context::Driver* const driver = ::Rendering::HAL::CurrentDriver();
-	if (driver != nullptr && driver->IsRenderThreadActive())
+	if (driver != nullptr)
 	{
 		driver->EnqueueCreateRenderbuffer(m_context.handle.GetId());
 		driver->ExecutePendingCommands();
@@ -67,7 +69,7 @@ void Rendering::HAL::GLRenderbuffer::Allocate(uint16_t p_width, uint16_t p_heigh
 	m_context.format = p_format;
 
 	::Rendering::Context::Driver* const driver = ::Rendering::HAL::CurrentDriver();
-	if (driver != nullptr && !driver->IsDriverThread())
+	if (driver != nullptr)
 	{
 		// The storage is GL, so it is recorded (Filament's allocateRenderbufferStorage); the size
 		// stays here, because GetSize and the framebuffer's own size report read it.

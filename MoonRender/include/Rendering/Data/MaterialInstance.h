@@ -178,12 +178,7 @@ namespace Rendering::Data
 
 		const Rendering::Data::StateMask GenerateStateMask() const;
 
-		/** Every parameter of the definition, in declaration order (the instance's override is
-		 * reported when it has one). */
-		Rendering::HAL::Texture* TextureOf(const std::string& p_name) const;
-
 	protected:
-		struct LooseUniform;
 		/** The feature set this instance draws with: its own, seeded from the definition. */
 		const Data::FeatureSet& FeaturesOf() const { return m_features; }
 
@@ -197,9 +192,6 @@ namespace Rendering::Data
 		void ReleaseDescriptorSet();
 		void ResetBlockToDefinition();
 		void InitializeDefaultState();
-		LooseUniform* FindLooseUniform(const std::string& p_name);
-		const LooseUniform* FindLooseUniform(const std::string& p_name) const;
-		void SetLooseUniform(const std::string& p_name, const MaterialPropertyType& p_value);
 
 	protected:
 		Material* m_material = nullptr;
@@ -215,14 +207,6 @@ namespace Rendering::Data
 		 * happens once per dirty commit into the descriptor's GL buffer range. */
 		mutable std::vector<uint8_t> m_uniformData;
 		mutable UniformBufferPool::Slice m_uniformSlice;
-		struct LooseUniform
-		{
-			std::string name;
-			MaterialPropertyType value;
-		};
-		/** Source-built shaders have no package block; these uniforms are uploaded through the
-		 * program's reflected uniform locations instead of a UBO range. */
-		std::vector<LooseUniform> m_looseUniforms;
 
 		// Render state, Filament's way: the definition holds the values its material block declared
 		// (and the engine defaults for the rest); a plain instance stores only the fields it

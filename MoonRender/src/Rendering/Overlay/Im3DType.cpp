@@ -23,10 +23,10 @@ namespace
 	/** Creates or re-allocates the overlay's texture buffers (the per-face edge values and the
 	 * widget block colours).
 	 *
-	 * The storage is GL, so with a render thread it is a command: the descriptor's data pointer
-	 * stays valid because it points into the mesh's own vectors, and the drain makes the object
-	 * exist before the material that samples it is bound. Without a render thread there is no
-	 * other side to run it on and it is done here, which is what this always did. */
+	 * The storage is GL, so it is a command: the descriptor's data pointer stays valid because it
+	 * points into the mesh's own vectors, and the drain makes the object exist before the material
+	 * that samples it is bound. Without a driver at all there is no other side to run it on and it
+	 * is done here (docs/RenderThreadPlan.md §8.72). */
 	void EnsureTextureBuffer(
 		Rendering::Resources::Texture*& p_texture,
 		const char* p_name,
@@ -40,7 +40,7 @@ namespace
 		}
 
 		Rendering::Context::Driver* const driver = ::Rendering::HAL::CurrentDriver();
-		if (driver != nullptr && !driver->IsDriverThread())
+		if (driver != nullptr)
 		{
 			Rendering::Backend::CreateTextureRequest request;
 			request.handleId = p_texture->GetHandle().GetId();

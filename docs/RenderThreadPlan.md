@@ -2108,3 +2108,148 @@ m_backend.SetCapability(ERenderingCapability::POLYGON_OFFSET_FILL, p_state.polyg
 代价：主线程真的等这一帧的 GPU 时间（单缓冲呈现的固有代价）；要拿回重叠，需要 present 目标双缓冲 + fence（UI 不阻塞），这是后续项。
 
 **验证**：两种模式均正常出图、`GL_INVALID` 0；用户实测线程模式下拖拽旋转已跟手。
+
+### 8.69 present 改成 3 槽交换链，呈现不再等"正在画的这一帧"（2026-11-22）
+
+**背景**：§8.68 的 fence 修好了"相机不跟手"，但呈现仍是"渲染线程画完这一帧 → 主线程贴这一帧"，
+主线程必然等当前帧的 GPU 时间，等于单缓冲。
+
+**做法**（照 Qt/Filament demo 的 `PlatformGlfwGL`：`RING_COUNT = 3`、`waitFrameCompleted`、
+`getTextureId(slot % 3)` 与 `paintGL` 的次序）：
+
+- 第 F 帧画到 `F % 3` 那一槽（`PresentTarget`）；
+- 窗口贴 `(F - kPresentLatencyFrames) % 3` 那一槽（`PresentedTarget`），贴前
+  `WaitForPresentedFrame()` 只等**上一帧**已画完，不再等正在画的当前帧；
+- 每帧把三个槽都 resize：之前只 resize 写入槽，窗口 resize 后读取槽还是旧尺寸，贴图把一个
+  旧尺寸的帧拉伸上去、且没盖满 widget，边缘残留上一帧 —— 就是当时看到的重影。
+
+`kPresentLatencyFrames` 取 1（demo 是 2）：三槽下延迟一帧已足够安全，可见滞后少一帧。
+单线程行为不变（帧完成计数在无渲染线程时直接返回）。
+
+**验证**：两种模式出图正常、无重影；单/多线程像素差 0.062%（已知的悬停抖动）；`GL_INVALID` 0。
+
+### 8.70 拾取失效：世界坐标附件必须用可变纹理，否则整个拾取目标被裁成 1×1（2026-11-22）
+
+**现象**：拾取读回全是 0，鼠标点不到东西。
+
+**根因**：拾取目标在构造时按 1×1 创建，每次拾取前 `ResizeFramebuffer` 到帧大小。世界坐标附件用
+的是 `glTextureStorage2D`（不可变存储），重新指定存储是 `GL_INVALID_OPERATION`，实际存储永远停在
+1×1；而 framebuffer 的渲染区域取**所有附件的最小值**，于是连 id 附件也被裁到一个像素，读回自然全 0。
+
+**修法**：给这个附件的 `TextureDesc` 加 `mutableDesc`，走 `glTexImage2D`（可变纹理，可重新指定
+存储）。颜色附件本来就是这个原因由 `FramebufferUtil` 按可变纹理创建的。
+
+**验证**：resize 生效后 id 与世界坐标都能正确读回。
+
+### 8.71 IBL 绑定改执行期解析：录制期不许读执行结果（2026-11-22）
+
+**根因**：`ABaseRenderer::SetEnvironmentTextures` 原来先用 `IsValid()` 判断 irradiance/prefilter
+立方体是否已分配，再 `SetTexture`。这两个立方体由 `SkyboxRenderPass` 每帧捕获生成，GL 存储是命令，
+"是否有效"只有执行过才成立 —— 典型的录制期读执行结果，也是渲染路径里几处
+`ExecutePendingCommands` 存在的依赖之一。
+
+**修法**：无条件把纹理记进描述符。描述符里存的是 **handle**，真正解析发生在执行器绑定这一帧的
+descriptor set 时：那时同批次里的捕获命令已经跑过，名字有效。
+
+**当时没做完的部分**：只改这一处时，把渲染路径里的 `ExecutePendingCommands` 删掉仍然崩
+（两种模式都 0xC0000005），说明还有别的录制期读结果的地方。那一轮排查的结论指向 §8.72。
+
+### 8.72 最终一步：录制纯追加，执行只发生在 `Execute()`（2026-11-22 晚）
+
+**目标一句话**：主线程只录命令，命令环装得下一帧，执行只发生在 `Execute()`；单线程与多线程的
+录制代码完全一致（不再有 `IsRenderThreadActive()` 决定"就地执行还是入队"，也不再有
+`m_executing`）。
+
+**改了什么**
+
+1. **命令环按帧定尺寸、录制纯追加**（`Driver.cpp`）：`kRequiredCommandBytes` 8 KB → 1 MB、
+   `kCommandRingBytes` 64 KB → 8 MB；`Record()` 删掉"环满就执行"的分支。一批帧命令永远装得下，
+   录制中途不会再触发执行。
+2. **present 材质改 MatC**：新增 `Resource/Moon/Data/Engine/Materials/Blit.mat`，包是已有的
+   `:Shaders\PostProcess\Blit.shader`（它生成的 postProcess 顶点阶段与原来源码构建的那份逐行等价，
+   没有再加一份重复的 `.shader`）。`ABaseRenderer::m_presentMaterial` 变成 `MaterialAsset*`，
+   `_InputTexture` 是**声明过的参数**，走 PerMaterial 描述符集。
+3. **深剥离的合成材质同样改 MatC**（`SceneRenderer` 的 `TransparentRenderPass`）：它的
+   `colorLayer` 松散采样器改成同一个 Blit 包的 `_InputTexture`。
+4. **删掉松散采样器路径**：`SetSamplerUnit` 命令、`OpenGLDriver::SetSamplerUnit`、
+   `m_boundProgram`、`MaterialInstance` 的 `BindTexture` 与按名绑定分支全部删除。
+   `SetProperty` 收到未声明的采样器时：engine 的 PerView 采样器（`_BRDFLut` / `_IrradianceCube` /
+   `_PrefilterCube`）静默忽略，其余按"材质+名字"打印一次警告。
+5. **HAL 前端一律入队**（`GLShaderStage` / `GLShaderProgram` / `GLFramebuffer` / `GLRenderbuffer` /
+   `GLTexture` / `GLBuffer` / `Descriptor` / `ResourceOps` / `Im3DType`）：只要有 driver 就记录，
+   只有"没有 driver"的独立工具路径才直接调 GL。资源创建处保留 `ExecutePendingCommands()`
+   （句柄要先在记录侧可见），这是规则允许的同步点。
+6. **执行器里不能调前端 —— 本轮真正的根因**：删掉 `DrawMaterial` 命令。它原来在**批内**调用
+   `MaterialInstance::Bind` / `UploadProperties` / `DescriptorSet::BindFixed`；前端改成"只入队"
+   之后，这些调用会把命令写到**正在被执行的批的后面**（写指针在批尾之后），材质从未真正绑上：
+   整片实体消失，只剩天空和叠加层。材质绑定移回录制侧（`ABaseRenderer::DrawEntity`），
+   于是"program + 描述符集 + 块 + 纹理 + 状态 + draw"是一串按序记录的命令。
+7. **删掉渲染路径里的 6 处同步执行**：`BindFramebuffer` / `SetViewport` / `SetScissor` / `Clear` /
+   `Draw` / `SetPipelineState` 不再 `ExecutePendingCommands()`；`Driver.h` 的 `m_executing` 与其
+   全部分支删除。`ExecutePendingCommands` 只留给资源创建、`Link`/`Validate`、读回、`AView`
+   构造里初始化目标。
+8. **两处直接 `glEnable(GL_PROGRAM_POINT_SIZE)` 改命令**（`SceneRenderer` 的 line pass、
+   `PickingRenderPass`）：它们是录制线程发出的 GL，执行侧上下文里根本没开。
+9. **HZB 两种模式都关**：它自带 fence + PBO 异步读回，是渲染路径里最后一块直接 GL。线程模式下
+   本来就关着；单线程也关掉，两边录制才一致。要恢复遮挡裁剪，先把那段读回做成命令。
+10. **保留一个诊断开关**：`MOON_CMD_TRACE` 在 `OpenGLDriver::Execute` 里逐条命令查 `glGetError`，
+    把错误归因到具体命令（本轮定位"画不出来"就是靠它：错误只出现在 `DrawMesh` 上，而材质绑定
+    在批内被写坏了）。
+
+**验证**（`1954×812`，`hezi.step`）：
+
+| 对比 | 结果 |
+|---|---|
+| 单线程 vs 渲染线程 | **0.000% 逐像素相同** |
+| 本次渲染线程 vs 改造前基准 | 仅 CAD 拓扑红点（1125 px，双稳态） |
+| 本次单线程 vs 改造前基准 | 同上 |
+| 崩溃 / `GL_INVALID` | 无 / 0 |
+
+> 红点是**双稳态**：同一份构建连跑两次也会在两个状态之间翻（点与黑线共面、谁后画谁赢），
+> 与渲染模式无关。对比脚本 `Build/refactor-shots/compare-dots.py` 会把"只差红点"判为通过。
+
+**已知遗留（后续项）**
+
+- **HZB 需要命令化**：PBO 读回 + fence + 层级 down-sample，完成后才能把第 9 条恢复。
+- **松散标量 uniform 现在两种模式都无效**（如 include 里的 `u_ReceiveShadows`）：机制已在 §8.73
+  整段删除，要恢复的应声明成材质参数、走参数块。
+- **路径追踪的 source-built 材质**（`PathTraceRenderPass` 的 `_InputTexture`）不再能绑采样器。
+  它在渲染线程模式下本来就绑不上（录制线程无上下文），属于"源码构建材质永久例外"的后续改造。
+- **`Validate()` 在有 driver 时直接返回 true**：附件在执行侧才挂上，这一侧查不到；原来线程模式
+  就是这样，现在两边一致。依赖它自愈的路径（Gbuffer/PostProcess ping-pong）不再触发。
+
+### 8.73 删除松散 uniform 机制（2026-11-23 凌晨）
+
+**背景**：§8.72 之后材质只剩"PerMaterial 描述符集"一条路。`m_looseUniforms` 是给源码构建材质
+（没有包、没有参数块）按名字上传 uniform 的表，而它唯一的出口 `GLShaderProgram::SetUniform` 在有
+driver 时已经是空操作 —— 这张表已经什么都不做。
+
+**删掉的内容**
+
+- `MaterialInstance`：`LooseUniform` 结构、`m_looseUniforms`、`FindLooseUniform`（两个重载）、
+  `SetLooseUniform`、`UploadProperties` 里的按名上传循环，以及 `SnapshotProperties` /
+  `GetProperty` / `ResetPropertyToDefault` / `HasProperty` / `ResetProperties` 里的松散分支；
+- `Material` 上那个从未实现的 `TextureOf` 转发；
+- `GLShaderProgram::SetUniform`：唯一的调用者就是上面那个循环，留一个"永远不生效"的写入接口比
+  没有更糟。
+
+**行为上唯一的变化**：未声明的属性不再被保存。`SetProperty` 收到不是材质参数的属性时，按
+"材质 + 名字"打一次警告：
+
+```
+[material] :Shaders\ssaoblur.shader: '_InputTexture' is not a parameter of the material: the value is ignored
+```
+
+警告正好把还依赖松散 uniform 的地方暴露出来，也是本条的**遗留**：
+
+- **路径追踪**（`PathTraceRenderPass`）：`PathTrace.shader` 由 pass 注入 define 后源码编译，
+  `camera.position` / `resolution` / `maxDepth` / `uniformLightCol` 等二十余个属性全是松散标量；
+- **`DebugShapeRenderFeature`** 的调试线材质（`viewProjection` / `start` / `end` / `color`）。
+
+两者在本轮之前就已经拿不到这些值（`SetUniform` 在有 driver 时是空操作），所以这不是回归，是把
+既有缺口显性化。要恢复它们，得把参数声明进材质（走 MatC 参数块），或者给驱动补一族"给当前程序
+设 uniform"的命令（2D 叠加层的 `SetProgramMatrix4` 就是这个形状）。
+
+**验证**：`1800×901`（窗口随桌面尺寸变了，和旧基准不是同一尺寸，不能直接比历史图）。单线程 vs
+渲染线程 **0.000% 逐像素相同**；同模式重跑只差 CAD 拓扑红点（双稳态）；无崩溃、`GL_INVALID` 0；
+出图正常（实体面、边线、红点、导航方块都在）。

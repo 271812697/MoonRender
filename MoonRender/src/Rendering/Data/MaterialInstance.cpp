@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <format>
@@ -12,9 +13,6 @@
 #include <vector>
 
 #include <tracy/Tracy.hpp>
-#include <Rendering/Backend/DescriptorRequests.h>
-#include <Rendering/Context/Driver.h>
-#include <Rendering/HAL/Common/HALDriverAccess.h>
 #include <Rendering/Data/Material.h>
 #include <Rendering/Data/EngineDescriptorSets.h>
 #include <Rendering/Data/MaterialBuilder.h>
@@ -245,40 +243,6 @@ namespace
 			else if constexpr (std::same_as<T, Resources::Texture*>) { return static_cast<Resources::Texture*>(nullptr); }
 			else { return std::monostate{}; }
 		}, p_value);
-	}
-
-	void BindTexture(
-		Rendering::HAL::ShaderProgram& p_shader,
-		const std::string& p_uniformName,
-		Rendering::HAL::TextureHandle* p_texture,
-		Rendering::HAL::TextureHandle* p_fallback,
-		int& p_textureSlot
-	)
-	{
-		if (auto target = p_texture ? p_texture : p_fallback)
-		{
-			const uint32_t slot = static_cast<uint32_t>(p_textureSlot);
-			if (::Rendering::Context::Driver* const driver = ::Rendering::HAL::CurrentDriver();
-				driver != nullptr && driver->IsRenderThreadActive())
-			{
-				// Both halves are GL, so they belong to the executor: the texture goes to its unit
-				// (BindDescriptor) and the sampler is told that unit (SetSamplerUnit). This is the
-				// loose-sampler path - a sampler that lives in the material's descriptor set needs
-				// neither, it is bound from the set at draw time.
-				::Rendering::Backend::BindDescriptorRequest request;
-				request.kind = ::Rendering::Backend::BindDescriptorRequest::Kind::Texture;
-				request.objectId = target->GetID();
-				request.slot = slot;
-				driver->BindDescriptor(request);
-				driver->SetSamplerUnit(p_shader.GetID(), p_uniformName, slot);
-			}
-			else
-			{
-				target->Bind(p_textureSlot);
-				p_shader.SetUniform<int>(p_uniformName, p_textureSlot);
-			}
-			++p_textureSlot;
-		}
 	}
 
 	/** Writes a typed value at a std140 offset. Returns false for a type/value mismatch. */
@@ -550,34 +514,6 @@ Rendering::Data::MaterialInstance::~MaterialInstance()
 }
 
 
-Rendering::Data::MaterialInstance::LooseUniform*
-Rendering::Data::MaterialInstance::FindLooseUniform(const std::string& p_name)
-{
-	for (LooseUniform& uniform : m_looseUniforms)
-	{
-		if (uniform.name == p_name)
-		{
-			return &uniform;
-		}
-	}
-	return nullptr;
-}
-
-
-const Rendering::Data::MaterialInstance::LooseUniform*
-Rendering::Data::MaterialInstance::FindLooseUniform(const std::string& p_name) const
-{
-	for (const LooseUniform& uniform : m_looseUniforms)
-	{
-		if (uniform.name == p_name)
-		{
-			return &uniform;
-		}
-	}
-	return nullptr;
-}
-
-
 std::map<std::string, Rendering::Data::MaterialProperty>
 Rendering::Data::MaterialInstance::SnapshotProperties() const
 {
@@ -609,11 +545,6 @@ Rendering::Data::MaterialInstance::SnapshotProperties() const
 		{
 			snapshot.emplace(parameter.name, std::move(*value));
 		}
-	}
-
-	for (const LooseUniform& uniform : m_looseUniforms)
-	{
-		snapshot.emplace(uniform.name, MaterialProperty{ uniform.value });
 	}
 
 	return snapshot;
@@ -659,10 +590,6 @@ Rendering::Data::MaterialInstance::GetProperty(const std::string p_key) const
 		}
 	}
 
-	if (const LooseUniform* uniform = FindLooseUniform(p_key))
-	{
-		return MaterialProperty{ uniform->value };
-	}
 	return std::nullopt;
 }
 
@@ -682,130 +609,13 @@ void Rendering::Data::MaterialInstance::UploadProperties(Rendering::HAL::Texture
 
 	// Packaged shaders carry their parameters as one std140 block (the per-material descriptor):
 	// write the values by offset into it and bind it once, instead of resolving each name
-	// against the program's reflected uniforms.
+	// against the program's reflected uniforms. A material without a definition has nothing to
+	// upload: every value it can carry is a declared parameter of a package - the loose-uniform
+	// path for source-built shaders is gone (docs/RenderThreadPlan.md §8.73).
 	const MaterialDefinition* definition = Definition();
-	const bool hasDefinitionParameters = definition != nullptr && definition->HasParameterTable();
-	if (hasDefinitionParameters)
+	if (definition != nullptr && definition->HasParameterTable())
 	{
 		UploadParameterBlock(p_emptyTexture2D, p_emptyTextureCube, p_flatNormalTexture);
-	}
-
-	/** The 1x1 texture a sampler gets when the material instance has none: the material's own
-	 * `fallback :` kind when the package declared one, the engine's defaults otherwise. */
-	const auto fallbackTexture = [definition, p_emptyTexture2D, p_emptyTextureCube, p_flatNormalTexture](
-		const std::string& p_name, bool p_isCube) -> Rendering::HAL::Texture*
-	{
-		if (definition != nullptr)
-		{
-			const MaterialDefinition::SamplerField* sampler = definition->FindSampler(p_name);
-			if (sampler != nullptr
-				&& sampler->fallback == static_cast<uint8_t>(Rendering::Data::MaterialParser::SamplerFallback::FlatNormal)
-				&& p_flatNormalTexture != nullptr)
-			{
-				return p_flatNormalTexture;
-			}
-		}
-		return p_isCube ? p_emptyTextureCube : p_emptyTexture2D;
-	};
-
-	// Properties the shader does not declare (an include's own uniforms, like PBR.glsl's
-	// u_ReceiveShadows) are not in the block: they still go through the per-name path below,
-	// while the declared ones were written by UploadParameterBlock.
-	const auto isDeclaredParameter = [definition](const std::string& p_name) {
-		uint32_t index = 0;
-		return definition != nullptr && definition->FindParameter(p_name, index) != nullptr;
-	};
-
-	using namespace Maths;
-	using enum Rendering::Settings::EUniformType;
-	auto& program = m_programInUse.value();
-
-	// Loose uniforms of a source-built shader; the program's reflected uniform locations decide
-	// how each typed value is uploaded. SetLooseUniform keeps one entry per name, so the vector
-	// is walked directly instead of rebuilding a map on every upload.
-	int textureSlot = 0;
-	for (LooseUniform& uniform : m_looseUniforms)
-	{
-		const std::string& name = uniform.name;
-		MaterialPropertyType& value = uniform.value;
-		if (hasDefinitionParameters && isDeclaredParameter(name)) continue;
-
-		const auto uniformData = program.GetUniformInfo(name);
-
-		// Skip this property if the current program isn't using its associated uniform
-		if (!uniformData)
-		{
-			continue;
-		}
-
-		auto uniformType = uniformData.value().type;
-
-		// Iterating over the properties to set them in the shader.
-		// This could have been cleaner with a visitor, but the performance impact
-		// is not worth it. This is a critical path in the rendering pipeline.
-
-		if (uniformType == BOOL)
-		{
-			program.SetUniform<int>(name, static_cast<int>(std::get<bool>(value)));
-		}
-		else if (uniformType == INT)
-		{
-			program.SetUniform<int>(name, std::get<int>(value));
-		}
-		else if (uniformType == FLOAT)
-		{
-			program.SetUniform<float>(name, std::get<float>(value));
-		}
-		else if (uniformType == FLOAT_VEC2)
-		{
-			program.SetUniform<FVector2>(name,std::get<FVector2>(value));
-		}
-		else if (uniformType == FLOAT_VEC3)
-		{
-			program.SetUniform<FVector3>(name, std::get<FVector3>(value));
-		}
-		else if (uniformType == FLOAT_VEC4)
-		{
-			program.SetUniform<FVector4>(name, std::get<FVector4>(value));
-		}
-		else if (uniformType == FLOAT_MAT3)
-		{
-			// No transpose here: SetUniform<FMatrix4/3> uploads with the
-			// "transpose" flag set, i.e. it already expects row-major data,
-			// which is exactly how Maths::FMatrix4 stores it. Transposing again
-			// would flip every matrix property.
-			program.SetUniform<FMatrix3>(name, std::get<FMatrix3>(value));
-		}
-		else if (uniformType == FLOAT_MAT4)
-		{
-			program.SetUniform<FMatrix4>(name, std::get<FMatrix4>(value));
-		}
-		else if (
-			uniformType == SAMPLER_2D || uniformType == SAMPLER_CUBE
-			|| uniformType == SAMPLER_BUFFER || uniformType == UINTSAMPLER_BUFFER
-			|| uniformType == SAMPLER_2DARRAY || uniformType == INTSAMPLER_BUFFER
-			)
-		{
-			HAL::TextureHandle* handle = nullptr;
-			if (auto textureHandle = std::get_if<HAL::TextureHandle*>(&value))
-			{
-				handle = *textureHandle;
-			}
-			else if (auto texture = std::get_if<Resources::Texture*>(&value))
-			{
-				if (*texture != nullptr)
-				{
-					// Still the eager path: creation runs where the context is, so the backend
-					// object exists by now. Binding through the handle is what this becomes once
-					// creation is a command (see docs/RenderThreadPlan.md §7).
-					handle = &(*texture)->GetTexture();
-				}
-			}
-			BindTexture(program, name, handle,
-				fallbackTexture(name, uniformType != SAMPLER_2D && uniformType != SAMPLER_BUFFER),
-				textureSlot);
-		}
-
 	}
 }
 
@@ -1023,34 +833,11 @@ void Rendering::Data::MaterialInstance::UploadParameterBlock(
 }
 
 
-void Rendering::Data::MaterialInstance::SetLooseUniform(
-	const std::string& p_name,
-	const MaterialPropertyType& p_value)
-{
-	if (LooseUniform* uniform = FindLooseUniform(p_name))
-	{
-		uniform->value = p_value;
-	}
-	else
-	{
-		m_looseUniforms.push_back(LooseUniform{ p_name, p_value });
-	}
-}
-
-
 bool Rendering::Data::MaterialInstance::ResetPropertyToDefault(const std::string& p_name)
 {
 	const MaterialDefinition* definition = Definition();
 	if (definition == nullptr)
 	{
-		if (FindLooseUniform(p_name) != nullptr)
-		{
-			std::erase_if(m_looseUniforms, [&p_name](const LooseUniform& p_uniform) {
-				return p_uniform.name == p_name;
-			});
-			++m_revision;
-			return true;
-		}
 		return false;
 	}
 
@@ -1058,14 +845,6 @@ bool Rendering::Data::MaterialInstance::ResetPropertyToDefault(const std::string
 	const MaterialDefinition::Parameter* parameter = definition->FindParameter(p_name, index);
 	if (parameter == nullptr)
 	{
-		if (FindLooseUniform(p_name) != nullptr)
-		{
-			std::erase_if(m_looseUniforms, [&p_name](const LooseUniform& p_uniform) {
-				return p_uniform.name == p_name;
-			});
-			++m_revision;
-			return true;
-		}
 		return false;
 	}
 
@@ -1119,7 +898,6 @@ bool Rendering::Data::MaterialInstance::ResetPropertyToDefault(const std::string
 
 void Rendering::Data::MaterialInstance::ResetProperties()
 {
-	m_looseUniforms.clear();
 	ReleaseDescriptorSet();
 	EnsureDescriptorSet();
 
@@ -1211,8 +989,7 @@ bool Rendering::Data::MaterialInstance::HasProperty(const std::string& p_name) c
 {
 	const MaterialDefinition* definition = Definition();
 	uint32_t index = 0;
-	return (definition != nullptr && definition->FindParameter(p_name, index) != nullptr)
-		|| FindLooseUniform(p_name) != nullptr;
+	return definition != nullptr && definition->FindParameter(p_name, index) != nullptr;
 }
 
 
@@ -1262,9 +1039,30 @@ void Rendering::Data::MaterialInstance::SetProperty(const std::string p_name, co
 	}
 	else
 	{
-		// A shader built without a package has no block slot for this uniform; keep the loose
-		// value and upload it through the program's uniform location.
-		SetLooseUniform(p_name, p_value);
+		// Not a parameter of the material's package: there is nowhere for the value to go. A
+		// declared parameter lives in the per-material descriptor set; an engine view sampler
+		// (_BRDFLut, _IrradianceCube, _PrefilterCube) is bound by the view's own set. The loose
+		// path that used to upload these by name - a per-instance table plus glUniform on the
+		// recording thread - is gone (docs/RenderThreadPlan.md §8.73). Reported once per material
+		// and name, so a source-built shader that still sets its uniforms this way shows up here
+		// instead of silently rendering nothing.
+		if (std::holds_alternative<Rendering::HAL::TextureHandle*>(p_value)
+			|| std::holds_alternative<Rendering::Resources::Texture*>(p_value))
+		{
+			if (Rendering::Data::EngineDescriptorSets::IsGlobalSampler(p_name))
+			{
+				return;
+			}
+		}
+		static std::set<std::string> reported;
+		const std::string materialPath = MaterialOf() != nullptr ? MaterialOf()->path : std::string("?");
+		if (reported.insert(materialPath + "|" + p_name).second)
+		{
+			std::fprintf(stderr,
+				"[material] %s: '%s' is not a parameter of the material: the value is ignored\n",
+				materialPath.c_str(), p_name.c_str());
+			std::fflush(stderr);
+		}
 	}
 
 	++m_revision;

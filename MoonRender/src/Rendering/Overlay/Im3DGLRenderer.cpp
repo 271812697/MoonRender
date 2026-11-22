@@ -153,13 +153,6 @@ void Rendering::Overlay::Im3DGLRenderer::Draw(
 	draw.vertexCount = static_cast<uint32_t>(p_vertexCount);
 	draw.primitiveMode = p_glPrimitive;
 	driver->EnqueueDrawVertexArray(draw);
-
-	// Scaffolding, like Driver::Draw: without a render thread the material binds around this call
-	// are still immediate GL, so the command has to run before the caller does anything else.
-	if (!driver->IsRenderThreadActive())
-	{
-		driver->ExecutePendingCommands();
-	}
 }
 
 void Rendering::Overlay::Im3DGLRenderer::BeginMeshes(::Rendering::Context::Driver& p_driver, bool p_blending)
@@ -202,12 +195,6 @@ void Rendering::Overlay::Im3DGLRenderer::DrawMesh(::Rendering::Context::Driver& 
 	draw.viewportWidth = p_viewportWidth;
 	draw.viewportHeight = p_viewportHeight;
 	p_driver.EnqueueDrawVertexArray(draw);
-
-	// Same scaffold as Draw above: the immediate path around this draw binds its material here.
-	if (!p_driver.IsRenderThreadActive())
-	{
-		p_driver.ExecutePendingCommands();
-	}
 }
 
 void Rendering::Overlay::Im3DGLRenderer::SetViewport(int p_x, int p_y, int p_width, int p_height)

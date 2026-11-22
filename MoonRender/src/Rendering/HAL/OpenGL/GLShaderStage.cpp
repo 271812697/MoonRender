@@ -9,13 +9,13 @@
 
 namespace
 {
-	/** Whether the GL half of a stage has to be recorded instead of done here (a render thread
-	 * owns the context). Then this object carries the source and the create-program command builds
-	 * the shader on that side - Filament's createShader. */
+	/** Whether a driver exists to record into: then the GL half of a stage is built by the
+	 * create-program command, which compiles it on the side that owns the context - Filament's
+	 * createShader. Recording is the same in both configurations: without a render thread the
+	 * batch runs on this thread at the end of the frame (docs/RenderThreadPlan.md §8.72). */
 	bool IsStageRecorded()
 	{
-		::Rendering::Context::Driver* const driver = ::Rendering::HAL::CurrentDriver();
-		return driver != nullptr && driver->IsRenderThreadActive();
+		return ::Rendering::HAL::CurrentDriver() != nullptr;
 	}
 }
 
@@ -58,7 +58,8 @@ Rendering::Settings::ShaderCompilationResult Rendering::HAL::GLShaderStage::Comp
 {
 	if (m_context.id == 0)
 	{
-		// Compiled by the executor, as part of the program's create command.
+		// Compiled by the executor, as part of the program's create command. A failure is reported
+		// there, with the driver's log (OpenGLDriver::CreateProgram).
 		return {
 			.success = true
 		};

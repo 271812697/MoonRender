@@ -809,10 +809,10 @@ void main()
 		Rendering::HAL::ShaderProgram& p_program)
 	{
 		// The check reads the program's blocks and block sizes from GL, which needs the program and
-		// the context. In threaded mode the program is built on the executor (see
-		// GLShaderProgram::Link), so there is nothing to query on this side yet.
+		// the context. The program is built on the executor (see GLShaderProgram::Link), so the only
+		// configuration where this side can query it is the one with no driver at all.
 		if (::Rendering::Context::Driver* const driver = ::Rendering::HAL::CurrentDriver();
-			driver != nullptr && driver->IsRenderThreadActive())
+			driver != nullptr)
 		{
 			return;
 		}
