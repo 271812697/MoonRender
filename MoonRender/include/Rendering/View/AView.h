@@ -55,6 +55,12 @@ namespace Editor {
 			 * its own framebuffer (textures are shared between the two contexts, framebuffers are
 			 * not). 0 when the view has not rendered yet. */
 			uint32_t GetFrameTextureID();
+			/** Blocks until the frame the window is about to paste has been drawn.
+			 *
+			 * That is frame N-1 (or N-2 in the demo's numbering), never the one being drawn, so
+			 * this normally returns at once instead of stalling the window on the frame it just
+			 * submitted (docs/RenderThreadPlan.md §8.68). */
+			void WaitForPresentedFrame();
 			/** Reads the last frame back into p_pixels as RGBA8, top row first.
 			 *
 			 * Needs the module's context current (the frame lives on it). The window layer uses
@@ -64,6 +70,13 @@ namespace Editor {
 			bool ReadFrame(std::vector<uint8_t>& p_pixels, int& p_width, int& p_height);
 			virtual void DrawFrame();
 			virtual ::Rendering::Entities::Camera* GetCamera() = 0;
+
+		/** Frames what this view is focused on, looking along p_direction.
+		 *
+		 * The overlay's navigation cube issues this when a face or arrow is clicked, and the overlay
+		 * is engine-side: framing is a view operation, so the hook lives on the view base. The
+		 * editor's view overrides it with the picking-aware version; a plain view does nothing. */
+		virtual void FitToFocus(const Maths::FVector3& p_direction) { (void)p_direction; }
 			virtual ::Core::SceneSystem::Scene* GetScene() = 0;
 			std::pair<uint16_t, uint16_t> GetSafeSize() const;
 		    ::Core::Rendering::SceneRenderer& GetRenderer() ;
@@ -89,7 +102,23 @@ namespace Editor {
 			 * A blit needs matching formats, and the window's framebuffer is RGBA8 while the
 			 * scene buffers above are RGBA32F - so the module composes the image here and the
 			 * window pastes this one. */
-			::Rendering::HAL::Framebuffer m_presentTarget;
+			/** The present ring, copied from the Qt/Filament demo's PlatformGlfwGL (RING_COUNT = 3):
+			 * frame F is drawn into slot F % 3 and the window pastes slot (F - latency) % 3, so the
+			 * texture being presented is never the one being drawn, and the consumer only has to
+			 * wait for the frame it is about to show. One target could not do this: the paste read a
+			 * texture the executor was still writing. */
+			static constexpr uint32_t kPresentSlotCount = 3;
+			/** How many frames behind the window presents. The demo presents two frames back
+			 * (slot = (submitted - 2) % 3); one is enough with three slots and halves the visible
+			 * latency. */
+			static constexpr uint64_t kPresentLatencyFrames = 1;
+			std::array<std::unique_ptr<::Rendering::HAL::Framebuffer>, kPresentSlotCount> m_presentTargets;
+			/** Frames recorded by this view: the slot of a frame is its index % kPresentSlotCount. */
+			uint64_t m_frameIndex = 0;
+			/** The target the frame being recorded draws into. */
+			::Rendering::HAL::Framebuffer& PresentTarget();
+			/** The target holding the frame the window should paste. */
+			::Rendering::HAL::Framebuffer& PresentedTarget();
 			std::unique_ptr<::Core::Rendering::SceneRenderer> m_renderer;
 			int mWidth = 1;
 			int mHeight = 1;

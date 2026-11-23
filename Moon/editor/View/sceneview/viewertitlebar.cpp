@@ -2,6 +2,8 @@
 #include "Core/Global/ServiceLocator.h"
 #include <Core/Rendering/EngineBufferRenderFeature.h>
 #include "renderer/SceneView.h"
+#include "Sketcher/SketcherObjManager.h"
+#include "Sketcher/SketcherObj.h"
 #include "Core/ECS/Components/CMaterialRenderer.h"
 #include "editor/Command/viewer/CameraFitCommand.h"
 #include "renderer/PointRenderPass.h"
@@ -9,6 +11,10 @@
 #include "core/callbackManager.h"
 #include <QHBoxLayout>
 #include <QVBoxLayout>
+#include <QLabel>
+#include <QSlider>
+#include <QWidgetAction>
+#include <QSignalBlocker>
 #include <QToolButton>
 #include <QMenu>
 #include <QActionGroup>
@@ -23,6 +29,35 @@ namespace MOON {
 
 	namespace
 	{
+		/** Applies the view's perspective strength: the field of view is one control, and 0
+		 * degrees is the orthographic end of it.
+		 *
+		 * Camera::SetFovKeepingFraming keeps the framing by dollying the camera, and it needs the
+		 * focus that framing is measured at: the plane of the sketch being edited (that is what
+		 * the view is aimed at), or the scene's own sphere when nothing is being edited. */
+		void ApplyViewFov(int p_degrees)
+		{
+			auto& view = GetService(Editor::Panels::SceneView);
+			auto* camera = view.GetCamera();
+			if (camera == nullptr) {
+				return;
+			}
+			Maths::FVector3 pivot = camera->GetPosition()
+				+ camera->GetRotation() * Maths::FVector3::Forward * 100.0f;
+			if (SketcherObj* sketch = SketcherObjManager::instance().GetCurrentActiveSketcherObj()) {
+				const Base::Vector3d& origin = sketch->plane().origin;
+				pivot = Maths::FVector3(static_cast<float>(origin.x),
+					static_cast<float>(origin.y), static_cast<float>(origin.z));
+			}
+			else {
+				::Rendering::Geometry::BoundingSphere sphere;
+				if (view.GetSceneSphere(sphere)) {
+					pivot = sphere.position;
+				}
+			}
+			camera->SetFovKeepingFraming(static_cast<float>(p_degrees), pivot);
+		}
+
 		/** Free space between the floating card and the edge of the viewport. */
 		constexpr int kOverlayMargin = 10;
 		/** Icon size of the category rows in the card. The buttons of a category
@@ -220,9 +255,9 @@ namespace MOON {
 			{
 				return;
 			}
-			camera->SetProjectionMode(mMode == Mode::Perspective
-				? ::Rendering::Settings::EProjectionMode::PERSPECTIVE
-				: ::Rendering::Settings::EProjectionMode::ORTHOGRAPHIC);
+			// The two actions are the ends of the field of view control, so they go through the
+			// same path as the slider: the framing has to be kept either way.
+			ApplyViewFov(mMode == Mode::Perspective ? 45 : 0);
 		}
 
 	private:
@@ -446,11 +481,86 @@ namespace MOON {
 					{
 						SyncProjectionMarks();
 					});
+
+				// The field of view itself, as a slider between the two projections: 0 degrees is
+				// the orthographic end, everything above it is the perspective one, and the value
+				// in the middle says where the control currently sits.
+				auto* row = new QWidget(menu);
+				auto* rowLayout = new QVBoxLayout(row);
+				rowLayout->setContentsMargins(10, 4, 10, 6);
+				rowLayout->setSpacing(4);
+
+				auto* captionRow = new QWidget(row);
+				auto* captionLayout = new QHBoxLayout(captionRow);
+				captionLayout->setContentsMargins(0, 0, 0, 0);
+				captionLayout->setSpacing(0);
+				auto* orthographicEnd = new QLabel(QStringLiteral("正交"), captionRow);
+				mFovValue = new QLabel(captionRow);
+				auto* perspectiveEnd = new QLabel(QStringLiteral("透视"), captionRow);
+				// The menu is dark, and a QLabel inside a QWidgetAction does not pick the menu's
+				// text colour up on its own.
+				const QString captionStyle = QStringLiteral("color: rgba(232,236,244,215); font-size: 11px;");
+				orthographicEnd->setStyleSheet(captionStyle);
+				perspectiveEnd->setStyleSheet(captionStyle);
+				mFovValue->setStyleSheet(captionStyle);
+				mFovValue->setAlignment(Qt::AlignCenter);
+				captionLayout->addWidget(orthographicEnd);
+				captionLayout->addStretch(1);
+				captionLayout->addWidget(mFovValue);
+				captionLayout->addStretch(1);
+				captionLayout->addWidget(perspectiveEnd);
+
+				mFovSlider = new QSlider(Qt::Horizontal, row);
+				mFovSlider->setRange(0, 90);
+				mFovSlider->setSingleStep(1);
+				mFovSlider->setMinimumWidth(180);
+				mFovSlider->setValue(45);
+				// A plain QSlider next to the dark menu looks like a different application: this
+				// gives it the same thin groove and round handle the rest of the overlay uses.
+				mFovSlider->setFixedHeight(16);
+				mFovSlider->setStyleSheet(QStringLiteral(
+					"QSlider::groove:horizontal { height: 3px; border-radius: 1px;"
+					" background: rgba(255,255,255,45); }"
+					"QSlider::sub-page:horizontal { height: 3px; border-radius: 1px;"
+					" background: rgb(74,132,240); }"
+					"QSlider::add-page:horizontal { height: 3px; border-radius: 1px;"
+					" background: rgba(255,255,255,45); }"
+					"QSlider::handle:horizontal { width: 8px; height: 8px; margin: -4px 0;"
+					" border-radius: 5px; background: rgb(240,244,252);"
+					" border: 1px solid rgb(74,132,240); }"));
+
+				rowLayout->addWidget(captionRow);
+				rowLayout->addWidget(mFovSlider);
+				auto* sliderAction = new QWidgetAction(mSelf);
+				sliderAction->setDefaultWidget(row);
+				menu->addAction(sliderAction);
+				connect(mFovSlider, &QSlider::valueChanged, mSelf, [this](int p_value)
+					{
+						// Every degree is a real setting: the camera keeps the framing by rolling
+						// back as the angle narrows (with a cap, see SetFovKeepingFraming), so the
+						// low end between the orthographic projection and a narrow perspective one
+						// is continuous rather than snapped over.
+						ApplyViewFov(p_value);
+						UpdateFovValue(p_value);
+					});
+				UpdateFovValue(mFovSlider->value());
 			}
 			// No sync here: the card is built while the view (and the service locator
 			// entry for it) is still being created, so asking for the camera now would
 			// look up a service that does not exist yet. aboutToShow above covers the
 			// first time the menu is opened.
+		}
+
+		/** The number in the middle of the slider row: the degrees, with the orthographic end
+		 * spelled out instead (it has no angle to show). */
+		void UpdateFovValue(int p_degrees)
+		{
+			if (mFovValue == nullptr) {
+				return;
+			}
+			mFovValue->setText(p_degrees <= 0
+				? QStringLiteral("\u6b63\u4ea4")   // 正交
+				: QStringLiteral("%1 \u00b0").arg(p_degrees));
 		}
 
 		/** Shows which projection mode the camera is in. */
@@ -466,6 +576,16 @@ namespace MOON {
 				camera->GetProjectionMode() == ::Rendering::Settings::EProjectionMode::ORTHOGRAPHIC;
 			orthographicProjection->action()->setChecked(orthographic);
 			perspectiveProjection->action()->setChecked(!orthographic);
+			if (mFovSlider != nullptr)
+			{
+				// The mode changes behind our back (entering a sketch switches to the
+				// orthographic end), so the slider follows the camera whenever it opens.
+				const int degrees = std::clamp(
+					static_cast<int>(std::lround(camera->GetFov())), 0, 90);
+				const QSignalBlocker blocker(mFovSlider);
+				mFovSlider->setValue(degrees);
+				UpdateFovValue(degrees);
+			}
 		}
 
 	private:
@@ -488,6 +608,8 @@ namespace MOON {
 		PointsCommand* points = nullptr;
 		MeasureCommand* measure = nullptr;
 		ClipCommand* clip = nullptr;
+		QSlider* mFovSlider = nullptr;
+		QLabel* mFovValue = nullptr;
 		CameraProjectionCommand* perspectiveProjection = nullptr;
 		CameraProjectionCommand* orthographicProjection = nullptr;
 	};

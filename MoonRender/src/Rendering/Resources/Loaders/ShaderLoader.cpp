@@ -12,9 +12,12 @@
 #include <unordered_set>
 #include<assert.h>
 #include <glad/glad.h>
+#include <Rendering/Context/Driver.h>
+#include <Rendering/HAL/Common/HALDriverAccess.h>
 #include <Rendering/HAL/ShaderProgram.h>
 #include <Rendering/HAL/ShaderStage.h>
 #include <Rendering/Data/MaterialBuilder.h>
+#include <Rendering/Data/EngineDescriptorSets.h>
 #include <Rendering/Data/MaterialDefinition.h>
 #include <Rendering/Data/MaterialParser.h>
 #include <Rendering/Resources/Loaders/ShaderLoader.h>
@@ -805,6 +808,16 @@ void main()
 		const Rendering::Data::MaterialParser& p_parser,
 		Rendering::HAL::ShaderProgram& p_program)
 	{
+		// The check reads the program's blocks and block sizes from GL, which needs the program and
+		// the context. The program is built on the executor (see GLShaderProgram::Link), so the only
+		// configuration where this side can query it is the one with no driver at all.
+		if (::Rendering::Context::Driver* const driver = ::Rendering::HAL::CurrentDriver();
+			driver != nullptr)
+		{
+			return;
+		}
+		// Resolve the program's fixed slots and material map before inspecting them.
+		p_program.Bind();
 		const GLuint program = static_cast<GLuint>(p_program.GetID());
 
 		const auto checkBlock = [&](const char* p_name, GLint p_expected) -> GLuint
@@ -825,10 +838,11 @@ void main()
 			return index;
 		};
 
-		checkBlock("EngineUBO", Rendering::Settings::kEngineUBOBinding);
-		checkBlock("ObjectUBO", Rendering::Settings::kObjectUBOBinding);
+		checkBlock("EngineUBO", 0);
+		checkBlock("ReflectionUBO", 1);
+		checkBlock("ObjectUBO", 2);
 		const GLuint materialBlock =
-			checkBlock("MaterialParams", Rendering::Settings::kMaterialParameterBinding);
+			checkBlock("MaterialParams", Rendering::Data::EngineDescriptorSets::kFirstMaterialBufferSlot);
 
 		if (materialBlock != GL_INVALID_INDEX && p_definition.ParameterBlockSize() > 0)
 		{
@@ -871,8 +885,7 @@ void main()
 			}
 		}
 
-		// Samplers: layout(binding = N) should have put each one on the unit the runtime binds
-		// its texture to. The value is what the driver decided at link time.
+		// Samplers: per-view IBL textures use the fixed units; material samplers follow them.
 		for (const Rendering::Data::MaterialParameter& parameter : p_definition.Parameters())
 		{
 			if (!parameter.isSampler)
@@ -886,12 +899,26 @@ void main()
 				continue; // not read by this variant
 			}
 
+			GLint expected = 0;
+			if (Rendering::Data::EngineDescriptorSets::IsGlobalSampler(parameter.name))
+			{
+				if (parameter.name == "_BRDFLut") { expected = 0; }
+				else if (parameter.name == "_IrradianceCube") { expected = 1; }
+				else { expected = 2; }
+			}
+			else
+			{
+				expected = static_cast<GLint>(
+					Rendering::Data::EngineDescriptorSets::kFirstMaterialTextureSlot
+					+ (parameter.binding > 0 ? parameter.binding - 1 : 0));
+			}
+
 			GLint unit = -1;
 			glGetUniformiv(program, location, &unit);
-			if (unit != static_cast<GLint>(parameter.binding))
+			if (unit != expected)
 			{
-				std::cout << std::format("[Shader Binding] {}: sampler {} is on unit {}, the package says {}",
-					p_parser.Name(), parameter.name, unit, parameter.binding) << std::endl;
+				std::cout << std::format("[Shader Binding] {}: sampler {} is on unit {}, expected {}",
+					p_parser.Name(), parameter.name, unit, expected) << std::endl;
 			}
 		}
 	}
@@ -995,7 +1022,8 @@ void main()
 			auto& program = programCache[programKey];
 			if (program == nullptr)
 			{
-				auto candidate = std::make_shared<Rendering::HAL::ShaderProgram>();
+				auto candidate = std::make_shared<Rendering::HAL::ShaderProgram>(
+					p_definition.ProgramBindings());
 				for (const auto& stage : stages)
 				{
 					candidate->Attach(*stage);
@@ -1248,6 +1276,20 @@ namespace Rendering::Resources::Loaders
 						p_parser.Name(), spec.name, p_variant.pass);
 				}
 				return nullptr;
+			}
+
+			if (std::getenv("MOON_UNIFORMS") != nullptr)
+			{
+				// Which variant is being compiled, and a hash of its source: two modes that create a
+				// different set of programs are shading with different code (docs §8.66).
+				uint64_t sourceHash = 1469598103934665603ull;
+				for (const char c : source) { sourceHash = (sourceHash ^ static_cast<uint8_t>(c)) * 1099511628211ull; }
+				std::fprintf(stderr, "[variant] material=%s pass=%s stage=%s len=%zu hash=%016llx features=",
+					p_parser.Name().c_str(), p_variant.pass.c_str(), spec.name, source.size(),
+					static_cast<unsigned long long>(sourceHash));
+				for (const std::string& feature : p_variant.features) { std::fprintf(stderr, "%s;", feature.c_str()); }
+				std::fprintf(stderr, "\n");
+				std::fflush(stderr);
 			}
 
 			auto stage = std::make_shared<Rendering::HAL::ShaderStage>(spec.type);

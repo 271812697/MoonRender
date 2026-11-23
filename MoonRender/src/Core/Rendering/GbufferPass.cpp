@@ -1,4 +1,4 @@
-﻿#include <ranges>
+#include <ranges>
 #include <Core/ECS/Components/CMaterialRenderer.h>
 #include <Core/Global/ServiceLocator.h>
 #include <Core/Rendering/EngineBufferRenderFeature.h>
@@ -174,7 +174,9 @@ void Core::Rendering::GbufferPass::Draw(::Rendering::Data::PipelineState p_pso)
 	using namespace Core::Rendering;
 	//Render to gbuffer
 	{
-		gbuffer.Bind();
+		// Binding is a command: the target's attachments were attached on the executor, so this
+		// side only names it (Framebuffer::Bind() here would be a GL call without a context).
+		m_renderer.BindFramebuffer(&gbuffer);
 		m_renderer.Clear(true, true, false, Maths::FVector4(0, 0, 0, 1.0));
 		const auto& drawables = m_renderer.GetDescriptor<SceneRenderer::SceneFilteredDrawablesDescriptor>();
 		for (auto drawable : drawables.opaques | std::views::values)
@@ -194,7 +196,7 @@ void Core::Rendering::GbufferPass::Draw(::Rendering::Data::PipelineState p_pso)
 			}
 
 		}
-		gbuffer.Unbind();
+		m_renderer.BindDefaultFramebuffer();
 	}
 
 	//Render ssao
@@ -224,10 +226,10 @@ void Core::Rendering::GbufferPass::Draw(::Rendering::Data::PipelineState p_pso)
 		ssaoMaterial.SetProperty("bias", gbufferParam.ssaoParam.bias);
 		ssaoMaterial.SetProperty("screensize",Maths::FVector2(frameDesc.renderWidth,frameDesc.renderHeight));;
 		//compute ssao
-		ssaobuffer.Bind();
+		m_renderer.BindFramebuffer(&ssaobuffer);
 		m_renderer.Clear(true, false, false, Maths::FVector4(1, 1, 1, 1.0));
 		m_renderer.DrawEntity(p_pso, drawable);
-		ssaobuffer.Unbind();
+		m_renderer.BindDefaultFramebuffer();
 		//blur ssao
 		ssaoblurMaterial.SetProperty("ssaoInput", gbufferData.occlusion.get());
 		// Depth tolerance of the bilateral blur, in view-space units. Smaller
@@ -245,8 +247,10 @@ void Core::Rendering::GbufferPass::Draw(::Rendering::Data::PipelineState p_pso)
 
 void Core::Rendering::GbufferPass::ResizeRenderer(int width, int height)
 {
-	gbuffer.Resize(width, height);
-	ssaobuffer.Resize(width,height);
-	ssaoblurbuffer.Resize(width, height);
+	// Through the driver: the attachments live on the side that owns the context.
+	auto& driver = m_renderer.GetDriver();
+	driver.ResizeFramebuffer(gbuffer, static_cast<uint16_t>(width), static_cast<uint16_t>(height));
+	driver.ResizeFramebuffer(ssaobuffer, static_cast<uint16_t>(width), static_cast<uint16_t>(height));
+	driver.ResizeFramebuffer(ssaoblurbuffer, static_cast<uint16_t>(width), static_cast<uint16_t>(height));
 }
 

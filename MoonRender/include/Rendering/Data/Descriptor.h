@@ -2,6 +2,8 @@
 #include <cstdint>
 #include <variant>
 
+#include <Rendering/Backend/ResourceHandle.h>
+#include <Rendering/HAL/Texture.h>
 #include <Rendering/HAL/TextureHandle.h>
 
 namespace Rendering::Resources
@@ -41,11 +43,17 @@ namespace Rendering::Data
 			BufferType type = BufferType::Uniform;
 		};
 
+		/** A texture descriptor, split the way Filament's descriptor sets are: the front end knows
+		 * the *handle* (a texture the render side owns, resolved with
+		 * Backend::GetHandleAllocator().HandleCast), the back end knows the object the draw
+		 * binds. `direct` is for resources that only exist on the backend side - render-target
+		 * attachments and the engine's 1x1 fallbacks - which never come from the asset side.
+		 * `asset` is the serializable object behind the handle (a .mat stores a path, not a GL
+		 * name). */
 		struct TextureInfo
 		{
-			Rendering::HAL::TextureHandle* handle = nullptr;
-			/** The serializable asset behind the handle, when there is one (a .mat stores a
-			 * path, not a GL name). Null for view-owned textures (DFG LUT, shadows, IBL). */
+			Rendering::Backend::ResourceHandle<Rendering::HAL::Texture> handle;
+			Rendering::HAL::TextureHandle* direct = nullptr;
 			Rendering::Resources::Texture* asset = nullptr;
 		};
 
@@ -63,6 +71,10 @@ namespace Rendering::Data
 		static Descriptor MakeTexture(
 			Rendering::HAL::TextureHandle* p_handle,
 			Rendering::Resources::Texture* p_asset = nullptr);
+
+		/** Commit: turns a front-end texture handle into the backend object the draw binds, in
+		 * place. Filament does the same when a descriptor set is committed. */
+		void ResolveTexture();
 
 		Type GetType() const { return static_cast<Type>(m_value.index()); }
 		bool IsValid() const;

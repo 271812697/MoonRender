@@ -124,9 +124,23 @@
 
 **现状差距**
 
-- 已经有**独立的共享 GL 上下文**（`QtGLContextHost`，`ViewerWidget::CreateRenderContext`），但绘制仍在
-  GUI 线程的 `ViewerWidget::paintGL` 里；
-- 没有命令队列，资源是裸指针（`Material*` / `Mesh*` / `Model*`），没有句柄层；
+- 已经有**独立的共享 GL 上下文**（`QtGLContextHost`，由 `Editor::Core::RenderModuleHost` 建立），绘制也在
+  那个上下文里（`ViewportFrame::Render`，窗口只负责粘贴），但仍跑在 GUI 线程上；
+- **M1/M2 已落地**：`Rendering/Backend/` 下的 `CircularBuffer` / `CommandBufferQueue` /
+  `CommandStream`（`CommandBase` = 函数指针 + 就地参数 + next 偏移）/ `DriverAPI.inc`（录音桩与执行体的
+  唯一真源）/ `OpenGLDriver`（执行体）。`Driver` 现在同时是录音机，`ExecutePendingCommands()` 在 M1/M2
+  阶段同线程执行录制内容；已进入命令流：2D 叠加层的帧首尾状态（M1）、整份 `PipelineState`
+  （M2，状态机 diff 搬到了执行体）、`Draw`/`Clear` 与网格 VAO 绑定、**材质绑定**
+  （`DrawMaterialRequest`：program 选择/绑定、per-renderable descriptor set、uniform 上传，
+  签名缓存改由执行体读写）。**一条 draw 现在是一个批次、内部没有任何 immediate GL**；
+  `DriverAPI.inc` 目前 12 条命令；环满先在 `Record` 里 flush-on-full；
+  资源释放走 `Backend::DeferredDeleter`（`Mesh` 的 VAO/IBO 在下一个 drain 里删，不再在释放它的线程上删）；
+- **仍 immediate、挡住"一帧一次 flush"的**（实测计数，HAL/后端之外）：`Moon/renderer`（编辑器 pass）
+  45 处 `gl*` + 146 处后端/驱动状态调用、`MoonRender/src/Core` 14 + 219、`Rendering/Data` 4 + 16、
+  `Rendering/Resources` 7 + 5。主要是 pass 的帧缓冲绑定/切换、后处理的全屏 pass 与纹理绑定、
+  以及资源创建（`glGen*`）。这些逐个命令化之后，`Draw`/`Clear` 里的 per-draw drain 才能删掉，
+  上下文与整帧才能搬到渲染线程；
+- 资源是裸指针（`Material*` / `Mesh*` / `Model*`），没有句柄层（临时口子：`IMesh::GetVertexArrayId`）；
 - 已经存在"跨线程发 GL 调用"的实例：STEP 导入在 JobSystem 工作线程里跑
   `Feature::makeDone()` → `CTopoShape::discretizationShape()` → `new Mesh` → 顶点缓冲上传
   （`Moon/io/io_occ_step.cpp` → `Moon/feature/Feature.cpp`）。这是**第一个要切的口子**：

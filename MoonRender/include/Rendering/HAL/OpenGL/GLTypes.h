@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <glad/glad.h>
 #include <Rendering/Settings/EAccessSpecifier.h>
 #include <Rendering/Settings/EBlendingEquation.h>
@@ -147,7 +147,9 @@ struct Tools::Utils::MappingFor<Rendering::Settings::ERenderingCapability, GLenu
 		EnumValuePair<EnumType::SAMPLE_COVERAGE, GL_SAMPLE_COVERAGE>,
 		EnumValuePair<EnumType::SCISSOR_TEST, GL_SCISSOR_TEST>,
 		EnumValuePair<EnumType::STENCIL_TEST, GL_STENCIL_TEST>,
-		EnumValuePair<EnumType::MULTISAMPLE, GL_MULTISAMPLE>
+		EnumValuePair<EnumType::MULTISAMPLE, GL_MULTISAMPLE>,
+		EnumValuePair<EnumType::PROGRAM_POINT_SIZE, GL_PROGRAM_POINT_SIZE>,
+		EnumValuePair<EnumType::POINT_SPRITE, GL_POINT_SPRITE>
 	>;
 };
 

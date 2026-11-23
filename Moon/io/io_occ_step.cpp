@@ -8,7 +8,7 @@
 #include <Core/ResourceManagement/ShaderManager.h>
 
 #include "core/Global/ServiceLocator.h"
-#include "editor/View/sceneview/viewerwidget.h"
+#include "editor/UI/TreeViewPanel/treesync.h"
 #include <Core/ECS/Components/CMaterialRenderer.h>
 #include <renderer/SceneView.h>
 namespace MOON {
@@ -159,7 +159,7 @@ namespace MOON {
 				return;
 			}
 			auto&parent=scene->CreateActor();
-			GetViewerWidget.addActorToTreeView(&parent);
+			GetTreeViewSync.Add(&parent);
 			if (domains.size() > 0) {
 				auto tempMat = new Core::Resources::MaterialAsset();
 
@@ -222,7 +222,7 @@ namespace MOON {
 					auto& matRender = actor.AddComponent<::Core::ECS::Components::CMaterialRenderer>();
 					matRender.SetMaterialAtIndex(0, tempMat->DefaultInstance());
 					matRender.UpdateMaterialList();
-					GetViewerWidget.addActorToTreeView(&actor);
+					GetTreeViewSync.Add(&actor);
 
 				}
 			}

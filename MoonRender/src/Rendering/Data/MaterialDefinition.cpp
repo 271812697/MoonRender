@@ -5,6 +5,7 @@
 #include <utility>
 
 #include <Rendering/Data/MaterialParser.h>
+#include <Rendering/Data/EngineDescriptorSets.h>
 #include <Rendering/Data/Material.h>
 
 #include <Rendering/Settings/EBindingPoint.h>
@@ -163,6 +164,13 @@ namespace Rendering::Data
 			}
 		}
 
+		// The IBL textures are view descriptors, not material ones; remove them from the
+		// per-material set before normalizing its samplers.
+		std::erase_if(definition->m_samplerFields, [](const SamplerField& p_field)
+		{
+			return EngineDescriptorSets::IsGlobalSampler(p_field.name);
+		});
+
 		// Normalize the per-material set: UBO at binding 0 and samplers at 1..N. The package's
 		// original GLSL bindings are irrelevant once the program binding map assigns slots; a
 		// set cannot have two descriptors at the same array index.
@@ -196,19 +204,8 @@ namespace Rendering::Data
 			}
 		}
 
-		// The complete shader-side binding table (filament's Program::DescriptorSetInfo). Sets
-		// 0 and 1 are the engine's fixed per-view / per-renderable blocks; set 2 is the material
-		// reflection built above.
-		definition->m_programBindings[0] = {
-			{ "EngineUBO", DescriptorSetLayout::Kind::UniformBuffer,
-				Rendering::Settings::kEngineUBOBinding },
-			{ "ReflectionUBO", DescriptorSetLayout::Kind::UniformBuffer,
-				Rendering::Settings::kReflectionUBOBinding },
-		};
-		definition->m_programBindings[1] = {
-			{ "ObjectUBO", DescriptorSetLayout::Kind::UniformBuffer,
-				Rendering::Settings::kObjectUBOBinding },
-		};
+		// Only the per-material set is material-specific. Per-view / per-renderable bindings are
+		// fixed by EngineDescriptorSets.h and never enter the program's material binding map.
 		definition->m_programBindings[2] = definition->m_layout.Bindings();
 		definition->BuildLookupTables();
 
@@ -238,6 +235,10 @@ namespace Rendering::Data
 		{
 			if (parameter.isSampler)
 			{
+				if (EngineDescriptorSets::IsGlobalSampler(parameter.name))
+				{
+					continue;
+				}
 				definition->m_samplerFields.push_back(SamplerField{
 					parameter.name, parameter.type, parameter.binding, parameter.fallback });
 				definition->m_layout.Add(parameter.name, DescriptorSetLayout::Kind::Texture,
@@ -257,16 +258,6 @@ namespace Rendering::Data
 				Rendering::Settings::kMaterialParameterBinding);
 		}
 
-		definition->m_programBindings[0] = {
-			{ "EngineUBO", DescriptorSetLayout::Kind::UniformBuffer,
-				Rendering::Settings::kEngineUBOBinding },
-			{ "ReflectionUBO", DescriptorSetLayout::Kind::UniformBuffer,
-				Rendering::Settings::kReflectionUBOBinding },
-		};
-		definition->m_programBindings[1] = {
-			{ "ObjectUBO", DescriptorSetLayout::Kind::UniformBuffer,
-				Rendering::Settings::kObjectUBOBinding },
-		};
 		definition->m_programBindings[2] = definition->m_layout.Bindings();
 		definition->BuildLookupTables();
 

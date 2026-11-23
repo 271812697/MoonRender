@@ -25,6 +25,11 @@ namespace MOON
 		SelectEdge = 1001,
 		SelectFace,
 		SelectAny,
+		/** The selection was emptied - a click on empty space. It is not "any selection
+		 * changed": nothing is selected any more, and a listener that wants to act on what was
+		 * picked has nothing to act on. Kept separate so that distinction is explicit instead of
+		 * a listener having to check for an empty set. */
+		ClearSelect,
 		None
 	};
 	enum SelectMode

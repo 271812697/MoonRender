@@ -1,7 +1,14 @@
 #include <functional>
 #include <tracy/Tracy.hpp>
 #include <Rendering/Core/ABaseRenderer.h>
+
+#include <cstdio>
+#include <cstdlib>
+#include <Core/Global/ServiceLocator.h>
+#include <Core/ResourceManagement/MaterialManager.h>
+#include <Core/Resources/MaterialAsset.h>
 #include <Rendering/Data/DescriptorSet.h>
+#include <Rendering/Data/EngineDescriptorSets.h>
 #include <Rendering/Data/ProgramDescriptorBindings.h>
 #include <Rendering/HAL/TextureHandle.h>
 #include <Rendering/Resources/Loaders/TextureLoader.h>
@@ -84,6 +91,20 @@ namespace
 	constexpr auto kFlatNormalPixel = std::to_array<uint8_t>({ 128, 128, 255, 255 });
 }
 
+namespace
+{
+	/** MOON_FRAME_TRACE prints BeginFrame's steps: the bring-up tool for finding the one that blocks. */
+	void TraceBase(const char* p_what)
+	{
+		static const bool enabled = std::getenv("MOON_FRAME_TRACE") != nullptr;
+		if (!enabled)
+		{
+			return;
+		}
+		std::fprintf(stderr, "[base] %s\n", p_what);
+		std::fflush(stderr);
+	}
+}
 Rendering::Core::ABaseRenderer::ABaseRenderer(Context::Driver& p_driver) :
 	m_driver(p_driver),
 	m_isDrawing(false),
@@ -112,52 +133,116 @@ Rendering::Core::ABaseRenderer::ABaseRenderer(Context::Driver& p_driver) :
 
 	m_flatNormalTexture.Allocate(kEmptyTextureDesc);
 	m_flatNormalTexture.Upload(kFlatNormalPixel.data(), Settings::EFormat::RGBA, Settings::EPixelDataType::UNSIGNED_BYTE);
-	std::string v = R"(
-#version 450 core
 
-layout(location = 0) in vec2 geo_Pos;
-layout(location = 1) in vec2 geo_TexCoords;
-
-out vec2 TexCoords;
-
-void main()
-{
-    TexCoords = geo_TexCoords;
-    gl_Position = vec4(geo_Pos, 0.0, 1.0);
-}
-)";
-	std::string f = R"(
-#version 450 core
-
-in vec2 TexCoords;
-out vec4 FRAGMENT_COLOR;
-
-uniform sampler2D _InputTexture;
-
-void main()
-{
-    FRAGMENT_COLOR = texture(_InputTexture, TexCoords);
+	// The present quad's material is an asset, not GLSL text built here: a MatC package declares
+	// `_InputTexture` as a material parameter, and the per-material descriptor set binds it on the
+	// side that owns the context. Rebuilding it from source left the sampler outside every set, so
+	// the texture had to be bound to a texture unit with GL calls issued from the recording side
+	// (docs/RenderThreadPlan.md §8.72).
+	if (::Core::Global::ServiceLocator::IsProvided<::Core::ResourceManagement::MaterialManager>())
+	{
+		m_presentMaterial = ::Core::Global::ServiceLocator::Get<::Core::ResourceManagement::MaterialManager>()
+			.GetResource(":Materials\\Blit.mat");
+	}
+	if (m_presentMaterial != nullptr && m_presentMaterial->HasMaterial())
+	{
+		m_presentShader = m_presentMaterial->MaterialOf();
+	}
+	else
+	{
+		m_presentMaterial = nullptr;
+		std::fprintf(stderr, "[renderer] Materials/Blit.mat is missing: the present pass has no material\n");
+		std::fflush(stderr);
+	}
 }
 
-)";
-	//not free the m_presentShader shader?
-	m_presentShader = Rendering::Resources::Loaders::ShaderLoader::CreateFromSource(v, f);
-	m_presentMaterial.SetMaterial(m_presentShader);
+void Rendering::Core::ABaseRenderer::SetBrdfLut(Rendering::HAL::Texture* p_lut)
+{
+	m_brdfLut = p_lut;
+	if (m_perViewSet != nullptr && p_lut != nullptr && p_lut->IsValid())
+	{
+		m_perViewSet->SetTexture(
+			Rendering::Data::EngineDescriptorSets::kBrdfLutBinding, p_lut);
+	}
+}
+
+void Rendering::Core::ABaseRenderer::SetEnvironmentTextures(
+	Rendering::HAL::Texture* p_irradianceCube,
+	Rendering::HAL::Texture* p_prefilterCube)
+{
+	m_irradianceCube = p_irradianceCube;
+	m_prefilterCube = p_prefilterCube;
+	if (std::getenv("MOON_FRAME_TRACE") != nullptr)
+	{
+		// Only when the environment changes: this runs once per frame, and the interesting line is
+		// the first one where the cubemaps stop being null.
+		static const void* lastIrr = nullptr;
+		static const void* lastPre = nullptr;
+		if (static_cast<const void*>(p_irradianceCube) != lastIrr
+			|| static_cast<const void*>(p_prefilterCube) != lastPre)
+		{
+			lastIrr = p_irradianceCube;
+			lastPre = p_prefilterCube;
+			std::fprintf(stderr, "[env] irr=%p id=%u pre=%p id=%u set=%p\n",
+				static_cast<const void*>(p_irradianceCube),
+				p_irradianceCube != nullptr ? p_irradianceCube->GetID() : 0u,
+				static_cast<const void*>(p_prefilterCube),
+				p_prefilterCube != nullptr ? p_prefilterCube->GetID() : 0u,
+				static_cast<void*>(m_perViewSet));
+			std::fflush(stderr);
+		}
+	}
+	if (m_perViewSet == nullptr)
+	{
+		return;
+	}
+	// MOON_NO_IBL: bisect switch - every lit surface reads a flat environment instead of the sky
+	// the capture baked. Two modes that disagree only with the captured cubes in place have their
+	// difference in the capture, not in the shading.
+	static const bool noIbl = std::getenv("MOON_NO_IBL") != nullptr;
+	// Recorded unconditionally: the descriptor names the texture and resolves it when the set is
+	// bound, i.e. on the executor, after the sky capture of this same batch has created it. Asking
+	// IsValid() here was a read of an execution result at record time - with the batch run late it
+	// was false, the bind was skipped, every lit surface lost the environment term and the frame
+	// came out darker (docs/RenderThreadPlan.md §8.71).
+	if (p_irradianceCube != nullptr && m_perViewSet != nullptr)
+	{
+		m_perViewSet->SetTexture(
+			Rendering::Data::EngineDescriptorSets::kIrradianceCubeBinding,
+			noIbl ? &m_emptyTextureCube : p_irradianceCube);
+	}
+	if (p_prefilterCube != nullptr && m_perViewSet != nullptr)
+	{
+		m_perViewSet->SetTexture(
+			Rendering::Data::EngineDescriptorSets::kPrefilterCubeBinding,
+			noIbl ? &m_emptyTextureCube : p_prefilterCube);
+	}
+}
+
+void Rendering::Core::ABaseRenderer::BindPerViewDescriptorSet() const
+{
+	if (m_perViewSet != nullptr)
+	{
+		m_perViewSet->BindFixed(Rendering::Data::kPerViewDescriptorSet);
+	}
 }
 
 void Rendering::Core::ABaseRenderer::BeginFrame(const Data::FrameDescriptor& p_frameDescriptor)
 {
 	ZoneScoped;
 
-	m_previousMaterialSignature.reset();
+	// The "already bound" material cache is the driver's now (it describes GL state) and it is
+	// reset by the frame's MakeCurrent command, on the side that owns the context.
 	m_frameDescriptor = p_frameDescriptor;
 
 	if (p_frameDescriptor.outputMsaaBuffer)
 	{
-		p_frameDescriptor.outputMsaaBuffer.value().Bind();
+		m_driver.BindFramebuffer(&p_frameDescriptor.outputMsaaBuffer.value());
 	}
 
+	TraceBase("base pso");
 	m_basePipelineState = m_driver.CreatePipelineState();
+	TraceBase("pso done");
 	SetViewport(0, 0, p_frameDescriptor.renderWidth, p_frameDescriptor.renderHeight);
 
 	Clear(
@@ -167,7 +252,9 @@ void Rendering::Core::ABaseRenderer::BeginFrame(const Data::FrameDescriptor& p_f
 		{ p_frameDescriptor.camera.value().GetClearColor(), 1.0f }
 	);
 
+	TraceBase("clear done");
 	p_frameDescriptor.camera->CacheMatrices(p_frameDescriptor.renderWidth, p_frameDescriptor.renderHeight);
+	TraceBase("matrices done");
 
 	m_isDrawing = true;
 	s_isDrawing.store(true);
@@ -180,6 +267,14 @@ void Rendering::Core::ABaseRenderer::EndFrame()
 	if (m_frameDescriptor.outputMsaaBuffer)
 	{
 		m_frameDescriptor.outputMsaaBuffer.value().Unbind();
+	}
+
+	if (std::getenv("MOON_FRAME_TRACE") != nullptr)
+	{
+		// How many drawables the frame recorded: a solid that "disappears" between runs shows up
+		// here first (an empty or short list) before it shows up in a screenshot.
+		std::fprintf(stderr, "[frame] entityDraws=%u\n", s_entityDraws.exchange(0));
+		std::fflush(stderr);
 	}
 
 	m_isDrawing = false;
@@ -276,7 +371,7 @@ void Rendering::Core::ABaseRenderer::Blit(
 		blit.stateMask.depthTest = false;
 	}
 
-	p_dst.Bind();
+	m_driver.BindFramebuffer(&p_dst);
 
 	if (Rendering::Settings::IsFlagSet(Rendering::Settings::EBlitFlags::UPDATE_VIEWPORT_SIZE, p_flags))
 	{
@@ -285,12 +380,16 @@ void Rendering::Core::ABaseRenderer::Blit(
 	}
 
 	DrawEntity(p_pso, blit);
-	p_dst.Unbind();
+	m_driver.BindFramebuffer(nullptr);
 }
 
 void Rendering::Core::ABaseRenderer::Present(Rendering::HAL::Framebuffer& p_src)
 {
-	Present(p_src, m_presentMaterial.DefaultInstance());
+	if (m_presentMaterial == nullptr)
+	{
+		return;
+	}
+	Present(p_src, m_presentMaterial->Instance());
 }
 void Rendering::Core::ABaseRenderer::Present(
 	Rendering::HAL::Framebuffer& p_src,
@@ -370,18 +469,22 @@ void Rendering::Core::ABaseRenderer::Present(Rendering::Data::MaterialInstance& 
 			}
 		}
 
-		material->Bind(nullptr);
+		material->Bind();
 		// Bind() only selects the program now; callers that do not go through
 		// DrawEntity have to push the uniforms themselves, otherwise the
 		// samplers keep their default value and the blit samples garbage.
-		material->UploadProperties(true);
+		material->UploadProperties();
 		m_driver.Draw(pso, mesh.value(), blit.primitiveMode, gpuInstances);
 		material->Unbind();
 	}
 }
 void Rendering::Core::ABaseRenderer::Present(Rendering::HAL::Texture& p_src)
 {	
-	Present(p_src, m_presentMaterial);
+	if (m_presentMaterial == nullptr)
+	{
+		return;
+	}
+	Present(p_src, m_presentMaterial->Instance());
 }
 bool Rendering::Core::ABaseRenderer::IsDrawable(const Entities::Drawable& p_drawable) const
 {
@@ -399,6 +502,7 @@ void Rendering::Core::ABaseRenderer::DrawEntity(
 )
 {
 	ZoneScoped;
+	++s_entityDraws;
 	p_pso.depthWriting = p_drawable.stateMask.depthWriting;
 	p_pso.colorWriting.mask = p_drawable.stateMask.colorWriting ? 0xFF : 0x00;
 	p_pso.blending = p_drawable.stateMask.blendable;
@@ -454,46 +558,19 @@ void Rendering::Core::ABaseRenderer::DrawEntity(
 		}
 	}
 
-	// View-owned textures must be in the per-material set before BindParameterBlock binds it;
-	// setting them there used to force a full descriptor-set bind per global texture.
-	p_drawable.material->BindGlobalTexture("_BRDFLut", m_brdfLut);
-	p_drawable.material->BindGlobalTexture("_IrradianceCube", m_irradianceCube);
-	p_drawable.material->BindGlobalTexture("_PrefilterCube", m_prefilterCube);
+	// The material binding - program, descriptor sets, parameter block, textures - is recorded
+	// here, as commands: every one of those calls writes into the command stream, and the executor
+	// only runs GL. Recording from inside the executor (the old DrawMaterial command did exactly
+	// that) writes behind the batch being walked and binds nothing (docs/RenderThreadPlan.md §8.72).
+	p_drawable.material->Bind(p_drawable.pass);
+	p_drawable.material->UploadProperties(&m_emptyTexture2D, &m_emptyTextureCube, &m_flatNormalTexture);
 
-	const auto signature=p_drawable.material->Bind(
-		&m_emptyTexture2D,
-		&m_emptyTextureCube,
-		p_drawable.pass,
-		p_drawable.featureSetOverride.has_value() ?
-		Tools::Utils::OptRef<const Data::FeatureSet>(p_drawable.featureSetOverride.value()) :
-		std::nullopt,
-		m_previousMaterialSignature
-	);
-
-	if (Rendering::HAL::ShaderProgram* program = p_drawable.material->BoundProgram())
+	// The per-renderable set (the object UBO of this drawable) is the renderer's, not the
+	// material's. Its mapping is fixed by the engine, so it binds by set index.
+	if (m_perRenderableSet != nullptr)
 	{
-		if (m_perViewSet != nullptr)
-		{
-			m_perViewSet->Bind(*program, Rendering::Data::kPerViewDescriptorSet);
-		}
-		if (m_perRenderableSet != nullptr)
-		{
-			m_perRenderableSet->Bind(*program, Rendering::Data::kPerRenderableDescriptorSet);
-		}
+		m_perRenderableSet->BindFixed(Rendering::Data::kPerRenderableDescriptorSet);
 	}
-	const bool uploadStableProperties = !m_previousMaterialSignature.has_value() || signature.stablePropertySignature != m_previousMaterialSignature->stablePropertySignature;
-
-	if (uploadStableProperties)
-	{
-		p_drawable.material->UploadProperties(
-			true,
-			&m_emptyTexture2D,
-			&m_emptyTextureCube,
-			&m_flatNormalTexture
-		);
-	}
-
-	m_previousMaterialSignature = signature;
 
 	m_driver.Draw(
 		p_pso,
@@ -503,5 +580,7 @@ void Rendering::Core::ABaseRenderer::DrawEntity(
 		p_drawable.material->GetGPUInstances()
 	);
 
+	// Unbind() only clears the instance's "program in use" bookkeeping; the GL side is the
+	// executor's business.
 	p_drawable.material->Unbind();
 }

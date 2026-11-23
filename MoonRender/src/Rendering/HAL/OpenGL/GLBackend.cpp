@@ -1,6 +1,8 @@
-﻿#pragma once
+#pragma once
 #include <format>
 #include <glad/glad.h>
+#include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <iostream>
 // Needs to be included after OpenGL headers
@@ -215,14 +217,27 @@ namespace Rendering::HAL
 	template<>
 	std::optional<Data::PipelineState> GLBackend::Init(bool debug)
 	{
-		const int error = gladLoadGL();
-
-		if (error == 0)
+		// Load once. glad's table is process-wide, and a second load from another context (the
+		// known-good context with whatever that call returns - including null for entry points the
+		// loader cannot resolve there. The addresses are the same for every context of the same
+		// driver, so the first load is the one to keep.
+		static const bool gladReady = [] {
+			const int loaded = gladLoadGL();
+			if (loaded == 0)
+			{
+				std::cout << ("GLAD failed to initialize") << std::endl;
+				return false;
+			}
+			return true;
+		}();
+		if (!gladReady)
 		{
-			std::cout << ("GLAD failed to initialize") << std::endl;;
 			return std::nullopt;
 		}
 
+		// Tracy's GPU context is thread-local: remember which thread made it, so the frame's Collect
+		// only runs where that context exists (see OnFrameCompleted).
+		m_context.initThreadId = std::this_thread::get_id();
 		TracyGpuContext;
 
 		if (debug)
@@ -244,12 +259,30 @@ namespace Rendering::HAL
 		glDepthRange(1.0, 0.0);
 		glClearDepth(0.0);
 
+		if (std::getenv("MOON_FRAME_TRACE") != nullptr)
+		{
+			GLint depthFunc = 0;
+			glGetIntegerv(GL_DEPTH_FUNC, &depthFunc);
+			std::fprintf(stderr, "[gl] init context=%s depthFunc=0x%04x\n",
+				glGetString(GL_VERSION) != nullptr ? "current" : "NONE",
+				static_cast<unsigned>(depthFunc));
+			std::fflush(stderr);
+		}
+
 		return RetrieveOpenGLPipelineState();
 	}
 
 	template<>
 	void GLBackend::OnFrameCompleted()
 	{
+		// Tracy's GPU context belongs to the thread that created it - Init, which runs on the
+		// module's render thread when it has one. Collecting from anywhere else dereferences a null
+		// context (that is the crash this guard removes): the zones are simply not collected from
+		// the recording side.
+		if (std::this_thread::get_id() != m_context.initThreadId)
+		{
+			return;
+		}
 		TracyGpuCollect;
 	}
 
@@ -292,6 +325,28 @@ namespace Rendering::HAL
 	}
 
 	template<>
+	void GLBackend::BindVertexArray(uint32_t p_vertexArray)
+	{
+		glBindVertexArray(p_vertexArray);
+	}
+
+	template<>
+	void GLBackend::BindFramebuffer(uint32_t p_framebuffer)
+	{
+		glBindFramebuffer(GL_FRAMEBUFFER, p_framebuffer);
+
+		// MOON_FRAME_TRACE: the HAL's own binds (Framebuffer::Bind and friends) bypass the driver
+		// command, so they are checked here too - otherwise an incomplete target bound this way is
+		// invisible in the trace and only shows up as GL_INVALID_FRAMEBUFFER_OPERATION later.
+		if (p_framebuffer != 0 && std::getenv("MOON_FRAME_TRACE") != nullptr)
+		{
+			const GLenum status = glCheckNamedFramebufferStatus(p_framebuffer, GL_FRAMEBUFFER);
+			std::fprintf(stderr, "[fbo] hal bind %u status=0x%04x\n", p_framebuffer, status);
+			std::fflush(stderr);
+		}
+	}
+
+	template<>
 	void GLBackend::SetClearColor(float p_red, float p_green, float p_blue, float p_alpha)
 	{
 		glClearColor(p_red, p_green, p_blue, p_alpha);
@@ -331,6 +386,19 @@ namespace Rendering::HAL
 	void GLBackend::SetDepthAlgorithm(Settings::EComparaisonAlgorithm p_algorithm)
 	{
 		glDepthFunc(EnumToValue<GLenum>(p_algorithm));
+
+		// MOON_FRAME_TRACE: the depth comparison is the one piece of state whose reversal
+		// (reversed-Z, glDepthRange(1,0)) makes a wrong value silently discard every fragment -
+		// so every change is logged with what GL ended up in, and whether a context was current.
+		if (std::getenv("MOON_FRAME_TRACE") != nullptr)
+		{
+			GLint actual = 0;
+			glGetIntegerv(GL_DEPTH_FUNC, &actual);
+			std::fprintf(stderr, "[gl] depthFunc wanted=0x%04x actual=0x%04x context=%s\n",
+				EnumToValue<GLenum>(p_algorithm), static_cast<unsigned>(actual),
+				glGetString(GL_VERSION) != nullptr ? "current" : "NONE");
+			std::fflush(stderr);
+		}
 	}
 
 	template<>

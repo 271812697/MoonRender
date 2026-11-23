@@ -61,12 +61,14 @@ Im2DRender             GL 提交：自己的 program/VAO/VBO/EBO + 1x1 白纹理
 ### 2.3 Im2DRender（GL 提交）
 
 - 每帧：`NewFrame()` 重置 draw list（并上传脏图集）；调用方通过 `GetDrawList()` / `GetFont()`
-  追加几何；`EndFrame(driver, w, h)` 里补一条命令、上传缓冲、按命令 `glScissor` + 绑纹理 + 绘制。
+  追加几何；`EndFrame(w, h)` 里补一条命令、上传缓冲、按命令 `glScissor` + 绑纹理 + 绘制
+  （只需要 view 尺寸，不再要 driver：旧签名收 `Driver&` 但从未读过）。
 - 着色器：`Position/Uv/Color` 顶点，`FragColor * texture(Texture, FragUv)`；未贴图的图元
   （`textureId == 0`）绑 1x1 白纹理，所以着色器只有一条路径。
 - 状态：混合开、深度测试关、剔除关、裁剪开；进入/退出时保存并恢复 GL 状态。
 - 上下文：`NewFrame`/`EndFrame` 必须在**渲染模块自己的上下文**里调用（现在由
-  `ViewerWidget::paintGL` 在模块上下文中、帧内回调里调用）。
+  `ViewportOverlay::BeginFrame` / `ViewportFrame::Render` 的帧内回调调用，见
+  [viewportframe.cpp](../Moon/editor/View/sceneview/viewportframe.cpp)）。
 
 ## 3. 与 ImGui 的 API 对照（迁移用）
 
@@ -127,14 +129,14 @@ Im2DRender             GL 提交：自己的 program/VAO/VBO/EBO + 1x1 白纹理
 | `Moon/Interactive/Widgets/SmartDimensionWidget.cpp` | 智能尺寸预览（箭头/弧/旋转文字） | 已迁移 |
 | `Moon/Interactive/Gizmo/PointHandleGizmo.cpp` 的 `lineSplit` | gizmo 手柄圆点与连线 | 已迁移 |
 | `Moon/Interactive/Widgets/RotateCenter.cpp` | `if (drawRect && false)` 死分支 | 已删除 |
-| `Moon/editor/View/sceneview/viewerwidget.cpp` 的 FPS 文字 | 调试覆盖层 | **保留 ImGui** |
+| `Moon/editor/View/sceneview/viewportoverlay.cpp` 的 FPS 文字 | 调试覆盖层 | **保留 ImGui** |
 
 `Moon/Interactive/Im2DType.{h,cpp}`（早先那版半成品克隆）已删除，由本目录的实现取代。
 
 ## 6. 验证方式
 
 - 编译：`cmake --build Build --target Moon --config Release -- /nologo /m:1`。
-- 视觉：临时在 `ViewerWidget::paintGL` 的 `NewFrame()` 之后加一段探针绘制（圆角矩形、线、圆、
+- 视觉：临时在 `ViewportOverlay::BeginFrame` 的 `NewFrame()` 之后加一段探针绘制（圆角矩形、线、圆、
   三角、两行中英文），用 `MOON_SHOT` 存图检查 AA、混合、字形；验证完删掉探针。
 - 迁移后要检查的地方：文字基线与 `CalcTextSize` 的高度是否与原 ImGui 布局一致（标签框大小、
   悬停命中区域），以及 `PushClipRect` 的裁剪是否和原来的 ImGui 窗口裁剪等价。

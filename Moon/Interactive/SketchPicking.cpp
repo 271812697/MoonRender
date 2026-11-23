@@ -5,6 +5,9 @@
 
 #include <cmath>
 
+// The plane's normal is a cross product, which lives in Eigen's geometry module.
+#include <Eigen/Geometry>
+
 namespace MOON {
 	namespace SketchPicking {
     static double pointToSegmentDist(const Base::Vector3d& p, const Base::Vector3d& s, const Base::Vector3d& e, double& u) {
@@ -25,11 +28,13 @@ namespace MOON {
         return (p - proj).Length();
     };
 
-    int pickGeoIndex(SketcherObj& sketch, const Base::Vector2d& pos, const Base::Matrix4D& mat)
+    int pickGeoIndex(SketcherObj& sketch, const Base::Vector2d& pos, const Maths::FMatrix4& p_viewPortMatrix)
     {
-
-        Base::Matrix4D trans = mat * sketch.getplaneTransform();
-        Base::Vector3d p1 = trans * Base::Vector3d(pos.x, pos.y, 0);
+        // The same projection as testSelect, for the same reason: it has to divide out the
+        // homogeneous w, or a perspective view measures every distance in a space the plane is
+        // not in.
+        const SketchProjector p_screen(p_viewPortMatrix, sketch.plane());
+        const Base::Vector3d p1 = p_screen(pos.x, pos.y);
 
         int ret = -1;
         double deltaTole = 15.0;
@@ -51,7 +56,7 @@ namespace MOON {
                     Base::Vector3d e = segment.point[k + 1];
                     // ✅ 使用 Lambda 计算真正的点到线段距离
                     double u;
-                    double dist = pointToSegmentDist(p1, trans * s, trans * e, u);
+                    double dist = pointToSegmentDist(p1, p_screen(s), p_screen(e), u);
 
                     if (dist < deltaTole && dist < minDist) {
                         minDist = dist;
@@ -65,15 +70,8 @@ namespace MOON {
 
     SelectGeoId testSelect(SketcherObj& sketch, Editor::Panels::SceneView& view, const Base::Vector2d& pos)
     {
-        Maths::FMatrix4 mat = view.GetCamera()->GetViewPortMatrix();
-        Base::Matrix4D viewPortMat(
-            mat.data[0], mat.data[1], mat.data[2], mat.data[3],
-            mat.data[4], mat.data[5], mat.data[6], mat.data[7],
-            mat.data[8], mat.data[9], mat.data[10], mat.data[11],
-            mat.data[12], mat.data[13], mat.data[14], mat.data[15]
-        );
-        Base::Matrix4D trans = viewPortMat * sketch.getplaneTransform();
-        Base::Vector3d p1 = trans * Base::Vector3d{ pos.x,pos.y,0.0 };
+        const SketchProjector screen(view.GetCamera()->GetViewPortMatrix(), sketch.plane());
+        const Base::Vector3d p1 = screen(pos.x, pos.y);
        double deltaTole = 5.0;
        double minDist = 10000.0;
        SelectGeoId ret = { NoGeoId,PointPos::none };
@@ -89,7 +87,7 @@ namespace MOON {
         // coincident element can still be reached by clicking again: the selection
         // cycles through the points that lie on top of each other.
         const double originTole = 10.0;
-        if ((p1 - trans * Base::Vector3d(0.0, 0.0, 0.0)).Length() < originTole) {
+        if ((p1 - screen(0.0, 0.0)).Length() < originTole) {
             ret.GeoId = Sketcher::GeoEnum::HAxis;
             ret.pointPos = PointPos::start;
             return ret;
@@ -135,7 +133,7 @@ namespace MOON {
             }
             auto& segment = sketch.segmentOf(geo);
             for (int j = 0; j < segment.sepoints.size(); j++) {
-                double dist = (p1 - trans * segment.sepoints[j].coord).Length();
+                double dist = (p1 - screen(segment.sepoints[j].coord)).Length();
                 if (dist < deltaTole && dist < minDist) {
                     minDist = dist;
                     ret.GeoId = geoId;
@@ -158,8 +156,8 @@ namespace MOON {
                         double u = 0.0;
                         double dist = pointToSegmentDist(
                             p1,
-                            trans * segment.point[j],
-                            trans * segment.point[j + 1],
+                            screen(segment.point[j]),
+                            screen(segment.point[j + 1]),
                             u);
 
                         if (dist < deltaTole && dist < minDist) {
@@ -171,7 +169,7 @@ namespace MOON {
                 else if (geo->is<Part::GeomPoint>())
                 {
                     Base::Vector3d pp = static_cast<Part::GeomPoint*>(geo)->getPoint();
-                    double dist = (p1 - trans * pp).Length();
+                    double dist = (p1 - screen(pp)).Length();
                     if (dist < deltaTole && dist < minDist) {
                         minDist = dist;
                         ret.GeoId = geoId;
@@ -194,10 +192,10 @@ namespace MOON {
                 if (!sketch.isAxisCurve(geoId)) {
                     continue;
                 }
-                const Base::Vector3d origin = trans * Base::Vector3d(0.0, 0.0, 0.0);
-                const Base::Vector3d tip = trans * (geoId == Sketcher::GeoEnum::VAxis
-                    ? Base::Vector3d(0.0, 1.0, 0.0)
-                    : Base::Vector3d(1.0, 0.0, 0.0));
+                const Base::Vector3d origin = screen(0.0, 0.0);
+                const Base::Vector3d tip = geoId == Sketcher::GeoEnum::VAxis
+                    ? screen(0.0, 1.0)
+                    : screen(1.0, 0.0);
                 const Base::Vector3d dir = tip - origin;
                 const double len = dir.Length();
                 if (len > 1e-12) {
@@ -216,16 +214,9 @@ namespace MOON {
 
     bool snapPoint(SketcherObj& sketch, Editor::Panels::SceneView& view, ImRenderer& renderer, Base::Vector2d& pos, const std::set<int>& avoid)
     {
-        Maths::FMatrix4 mat = view.GetCamera()->GetViewPortMatrix();
-        Base::Matrix4D pla(
-            mat.data[0], mat.data[1], mat.data[2], mat.data[3],
-            mat.data[4], mat.data[5], mat.data[6], mat.data[7],
-            mat.data[8], mat.data[9], mat.data[10], mat.data[11],
-            mat.data[12], mat.data[13], mat.data[14], mat.data[15]
-        );
-        Base::Matrix4D trans = pla * sketch.getplaneTransform();
+        const SketchProjector screen(view.GetCamera()->GetViewPortMatrix(), sketch.plane());
         //get the screen pos
-        Base::Vector3d screenpPos = trans * Base::Vector3d{ pos.x,pos.y,0.0 };
+        const Base::Vector3d screenpPos = screen(pos.x, pos.y);
         double deltaTole = 10.0;
         double minDist = 10000.0;
         bool ret = false;
@@ -248,7 +239,7 @@ namespace MOON {
                     continue;  // not sampled: nothing to snap to yet
                 }
                 for (const SegPoint& segPoint : segment->sepoints) {
-                    const double dist = (screenpPos - trans * segPoint.coord).Length();
+                    const double dist = (screenpPos - screen(segPoint.coord)).Length();
                     if (dist < deltaTole && dist < minDist) {
                         minDist = dist;
                         ret = true;
@@ -269,7 +260,7 @@ namespace MOON {
                 Part::Geometry* geo = sketch.geometries()[i].get();
                 auto& segment = sketch.segmentOf(geo);
                 for (int j = 0;j < segment.sepoints.size();j++) {
-                    double dist = (screenpPos - trans * segment.sepoints[j].coord).Length();
+                    double dist = (screenpPos - screen(segment.sepoints[j].coord)).Length();
                     if (dist < deltaTole && dist < minDist) {
                         minDist = dist;
                         ret = true;
@@ -282,7 +273,7 @@ namespace MOON {
         snapToExternalPoints();
         if (!ret) {
             //snap to orgin or XAxis or YAxis
-            Base::Vector3d screenOrigin = trans * Base::Vector3d(0, 0, 0);
+            Base::Vector3d screenOrigin = screen(0.0, 0.0);
             double dist = (screenpPos - screenOrigin).Length();
             if (dist < deltaTole) {
                 pos = { 0.0, 0.0 };
@@ -314,8 +305,8 @@ namespace MOON {
                             double u = 0.0;
                             double dist = pointToSegmentDist(
                                 screenpPos,
-                                trans * segment.point[j],
-                                trans * segment.point[j + 1],
+                                screen(segment.point[j]),
+                                screen(segment.point[j + 1]),
                                 u);
                             if (dist < deltaTole && dist < minDist) {
                                 minDist = dist;
@@ -346,8 +337,8 @@ namespace MOON {
                     double u = 0.0;
                     const double dist = pointToSegmentDist(
                         screenpPos,
-                        trans * segment->point[j],
-                        trans * segment->point[j + 1],
+                        screen(segment->point[j]),
+                        screen(segment->point[j + 1]),
                         u);
                     if (dist < deltaTole && dist < minDist) {
                         minDist = dist;
@@ -366,6 +357,33 @@ namespace MOON {
             ret = snapToGridPoint(sketch, view, renderer, pos);
         }
         return ret;
+    }
+
+    float gridStepForScale(float p_targetPx, float p_pixelsPerUnit)
+    {
+        // The step ladder is 1 / 2 x 10^n and nothing else: consecutive zoom levels divide the
+        // cell by 2, then by 5, so the cell side runs
+        //     1, 0.2, 0.1, 0.02, 0.01, 0.002, ...
+        // - every value a round decimal. The 1 / 2 / 5 ladder this replaced also stepped through
+        // 0.5 and 0.05, i.e. half values, which is what made the cells look irregular.
+        //
+        // The rung taken is the one closest to the target, not the first one above it: snapping
+        // up left the cells at up to five times the target for the zooms that fall between 2 and
+        // 10, so the grid visibly thinned out for a moment while zooming. Nearest keeps the
+        // on-screen spacing within about 1.6x of the target at every zoom.
+        const float targetStep = p_targetPx / std::max(p_pixelsPerUnit, 1.0e-6f);
+        const float mag = std::pow(
+            10.0f,
+            std::floor(std::log10(std::max(targetStep, 1.0e-6f)))
+        );
+        float step = mag;
+        if (std::abs(2.0f * mag - targetStep) < std::abs(step - targetStep)) {
+            step = 2.0f * mag;
+        }
+        if (std::abs(10.0f * mag - targetStep) < std::abs(step - targetStep)) {
+            step = 10.0f * mag;
+        }
+        return step;
     }
 
     bool gridView(SketcherObj& sketch, Editor::Panels::SceneView& view, GridView& p_out)
@@ -441,28 +459,59 @@ namespace MOON {
         const float scaleU = std::sqrt(uX * uX + uY * uY);
         const float scaleV = std::sqrt(vX * vX + vY * vY);
         const float scale = std::max(std::max(scaleU, scaleV), 1.0e-6f);
-        // The spacing the sketch asks for, in screen pixels (the panel sets it); the
-        // same number drawBackground() draws its lattice with.
-        const float targetStep = sketch.gridTargetPx() * 2.0f * halfH / (screenH * scale);
-        // The step ladder is 1 / 2 x 10^n and nothing else: consecutive zoom levels
-        // divide the cell by 2, then by 5, so the cell side runs
-        //     1, 0.2, 0.1, 0.02, 0.01, 0.002, ...
-        // - every value a round decimal. The 1 / 2 / 5 ladder this replaced also
-        // stepped through 0.5 and 0.05, i.e. half values, which is what made the
-        // cells look irregular. The price of dropping them is that the coarsest jump
-        // is 5x, so the spacing on screen swings between the target and ~5x it.
-        const float mag = std::pow(
-            10.0f,
-            std::floor(std::log10(std::max(targetStep, 1.0e-6f)))
-        );
-        float step = mag;
-        if (step < targetStep) {
-            step = 2.0f * mag;
+        // The spacing the sketch asks for, in screen pixels (the panel sets it); the same number
+        // drawBackground() draws its lattice with.
+        const float pixelsPerUnit = screenH * scale / (2.0f * halfH);
+        p_out.step = gridStepForScale(sketch.gridTargetPx(), pixelsPerUnit);
+        return true;
+    }
+
+    bool gridStep(SketcherObj& sketch, Editor::Panels::SceneView& view, ImRenderer& renderer, float& p_step)
+    {
+        GridView grid;
+        if (gridView(sketch, view, grid))
+        {
+            p_step = grid.step;
+            return true;
         }
-        if (step < targetStep) {
-            step = 10.0f * mag;
+        // A perspective camera has no view-space rectangle to read the scale from, so it is taken
+        // where the view looks: at the point of the plane under the centre of the viewport.
+        const auto* camera = view.GetCamera();
+        if (camera == nullptr)
+        {
+            return false;
         }
-        p_out.step = step;
+        const auto& fd = view.GetRenderer().GetFrameDescriptor();
+        const float width = static_cast<float>(fd.renderWidth);
+        const float height = static_cast<float>(fd.renderHeight);
+        if (width <= 0.0f || height <= 0.0f)
+        {
+            return false;
+        }
+        const Eigen::Vector3f origin = sketch.plane().valueEigen(0.0, 0.0);
+        const Eigen::Vector3f axisU = sketch.plane().valueEigen(1.0, 0.0) - origin;
+        const Eigen::Vector3f axisV = sketch.plane().valueEigen(0.0, 1.0) - origin;
+        const Eigen::Vector3f normal = axisU.cross(axisV).normalized();
+        const Maths::FVector3 eyeV = camera->GetPosition();
+        const Eigen::Vector3f eye(eyeV.x, eyeV.y, eyeV.z);
+        const Eigen::Vector3f ray = renderer.screenToWorld({ width * 0.5f, height * 0.5f });
+        const Eigen::Vector3f dir = ray - eye;
+        const float denom = dir.dot(normal);
+        if (std::abs(denom) < 1.0e-9f)
+        {
+            return false;
+        }
+        const float t = (origin - ray).dot(normal) / denom;
+        if (t <= 0.0f)
+        {
+            return false;
+        }
+        const Eigen::Vector3f hit = ray + dir * t;
+        const Eigen::Vector2f screenHit = renderer.worldToScreen(hit);
+        const float scaleU = (renderer.worldToScreen(hit + axisU) - screenHit).norm();
+        const float scaleV = (renderer.worldToScreen(hit + axisV) - screenHit).norm();
+        p_step = gridStepForScale(sketch.gridTargetPx(),
+            std::max(std::max(scaleU, scaleV), 1.0e-6f));
         return true;
     }
 
@@ -472,12 +521,12 @@ namespace MOON {
             return false;
         }
         // The very step drawBackground() draws its lattice with: the cursor has to
-        // land on the intersections the user sees, whatever the camera does.
-        GridView grid;
-        if (!gridView(sketch, view, grid)) {
+        // land on the intersections the user sees, whatever the camera does - and a perspective
+        // view snaps to the grid as well, which is what gridStep() is for.
+        float step = 0.0f;
+        if (!gridStep(sketch, view, renderer, step)) {
             return false;
         }
-        const float step = grid.step;
         const double gx = std::round(pos.x / step) * step;
         const double gy = std::round(pos.y / step) * step;
         const auto worldOf = [&sketch](const Base::Vector2d& sk) {

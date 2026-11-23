@@ -1,0 +1,8 @@
+// The executable's own icon.
+//
+// QApplication::setWindowIcon only covers the windows the process creates. Everything the
+// Windows shell draws from the file itself - Explorer, the taskbar button before the window
+// exists, jump lists, Alt-Tab - reads this resource instead, so without it those places show
+// the generic application icon.
+#define IDI_ICON1 101
+IDI_ICON1 ICON "resource/icons/app/moon.ico"

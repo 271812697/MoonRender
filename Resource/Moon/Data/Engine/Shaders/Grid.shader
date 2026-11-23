@@ -126,10 +126,27 @@ fragment {
 
 
         vec2 reflectUV = gl_FragCoord.xy / textureSize(u_MirrorTex, 0);
-        vec3 reflectColor = texture(u_MirrorTex, reflectUV).rgb;
+        vec4 mirror = texture(u_MirrorTex, reflectUV);
         float shadow=texture(u_MirrorShadowTex,reflectUV).r;
+
+        // The plane only exists where the mirror holds something. The mirror pass clears its
+        // alpha to 0 and every object writes its own alpha where it draws, so that channel is
+        // the coverage mask: the floor used to be painted as a whole plate, and the pixels with
+        // no reflection in them read as a floor that differs from the background. Where there
+        // is neither a reflection nor a contact shadow there is nothing to draw at all.
+        if (mirror.a <= 0.0f) {
+            if (shadow <= 0.02f) {
+                discard;
+            }
+            // Only the contact shadow reaches this pixel: darken what is already behind it
+            // instead of laying a floor colour over it (the pass blends with straight alpha).
+            float shadowAlpha = clamp(shadow * 0.8f, 0.0f, 1.0f);
+            FRAGMENT_COLOR = vec4(vec3(0.10f), shadowAlpha);
+            return;
+        }
+
+        vec3 reflectColor = mirror.rgb;
         reflectColor *= mix(0.2, 1.0, angleFactor) ;
-        float alpha = grid * u_GridOpacity * horizonFade * fadeFactor;
         vec3 finalColor = reflectColor;
         finalColor = mix(reflectColor, u_Color, 0.3);
         finalColor = mix(finalColor,vec3(0.10,0.10,0.10),(shadow*0.8));

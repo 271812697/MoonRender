@@ -14,9 +14,27 @@ namespace Core::Rendering
 	struct SkyBoxSetting
 	{
 		SkyMode mode = SkyMode::Gradient;
-		Maths::FVector4 topColor{ 0.211f,0.211f,0.211f,1.0f };
-		Maths::FVector4 bottomColor{ 0.811f,0.811f,0.811f,1.0f };
+		/** The two ends of the gradient, as the shader receives them. The tonemap compresses the
+		 * bright end, so what reaches the screen is a few percent darker than these; the
+		 * defaults are picked to land on a light studio backdrop (#E8EEF2 above, #CFD5DE below)
+		 * once it has been through it. */
+		Maths::FVector4 topColor{ 0.960f,0.972f,0.985f,1.0f };     // renders as ~#E8EBEE
+		Maths::FVector4 bottomColor{ 0.830f,0.851f,0.892f,1.0f };  // renders as ~#CED3DE
 		Maths::FVector4 clearColor{1,1,1,1};
+
+		/** The gradient is fixed to the screen: the colour is a ramp in the pixel's height, so
+		 * the backdrop stays exactly the same no matter where the camera looks. Taking the ramp
+		 * from the view direction instead turns it with the camera, which is what made the
+		 * background move (and its fixed dither pattern slide) while the view was dragged. */
+		/** Where on the screen the two colours meet: 0 = the bottom row, 1 = the top one. */
+		float gradientCenter = 0.5f;
+		/** How much of the screen height the whole ramp covers: 1 runs from the top row to the
+		 * bottom one, less keeps both colours flat over the rest of the screen. */
+		float gradientSpread = 1.0f;
+		/** > 1 keeps the dark end around longer and pushes the bright end towards the top. */
+		float gradientCurve = 1.0f;
+		/** Screen-space corner darkening, 0 = none; it is what gives the flat backdrop depth. */
+		float gradientVignette = 0.06f;
 	};
 	class SkyboxRenderPass : public ::Rendering::Core::ARenderPass
 	{

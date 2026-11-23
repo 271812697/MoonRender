@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include "Interactive/EventWidget.h"
 #include "Interactive/MathUtil/MathUtil.h"
 #include <Eigen/Core>
@@ -10,7 +10,7 @@ namespace MOON
 	 * inherited ImmediateInvoke flag (see AxisTranslationWidget, which uses the same pattern). */
 	enum Gizmo3DEvent
 	{
-		TransformChange = 1101,
+		Gizmo3DTransformChange = 1101,
 		Gizmo3DEventNone
 	};
 
@@ -88,6 +88,7 @@ namespace MOON
 		void setRotate(float p_angleDegree, float x, float y, float z);
 
 		IntersectiveState GetState() const { return mState; }
+		bool IsUsingMouse() const override { return mState != Stop; }
 		int GetHoveredHandle() const { return mPickHandle; }
 
 	private:

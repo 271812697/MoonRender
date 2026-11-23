@@ -13,7 +13,7 @@
 #include "core/callbackManager.h"
 #include "TopoShape.h"
 #include "Core/Global/ServiceLocator.h"
-#include "editor/View/sceneview/viewerwidget.h"
+#include "editor/UI/TreeViewPanel/treesync.h"
 #include "renderer/Context.h"
 #include <Core/SceneSystem/Scene.h>
 #include <algorithm>
@@ -141,7 +141,7 @@ namespace MOON {
 						body->m_anchor = &scene->CreateActor(body->m_name, "Body");
 						// It joins the tree here rather than where the body was made: the
 						// tree shows a body by its node, and until now there was none.
-						GetViewerWidget.refreshTreeView();
+						GetTreeViewSync.Refresh();
 					}
 				}
 				break;
@@ -459,7 +459,7 @@ namespace MOON {
 			rebuildFeature(mInternal->featureList[i]);
 		}
 		// The tree shows the chain in this order, so it is redrawn from it.
-		GetService(::MOON::ViewerWidget).refreshTreeView();
+		GetTreeViewSync.Refresh();
 		return true;
 	}
 

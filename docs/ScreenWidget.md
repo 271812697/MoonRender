@@ -120,7 +120,7 @@
 
 ```
 Qt 鼠标事件
-  └─ ViewerWidget::event(QEvent*)
+  └─ ViewerWidget::event(QEvent*)                → 转发给 ViewportFrame::HandleEvent()
        ├─ SceneView::ReceiveEvent()            → 写 InputState（3D 拾取/相机读这个）
        └─ RenderWindowInteractor::ReceiveEvent()
             ├─ SetEventInformationFlipY()       ← 先记下本次事件的光标

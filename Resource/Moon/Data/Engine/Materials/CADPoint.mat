@@ -19,7 +19,6 @@
         <polygon_offset>false</polygon_offset>
         <line_width>1</line_width>
     </settings>
-    <features>CLIP_PLANE</features>
     <uniforms>
         <uniform>
             <name>color</name>

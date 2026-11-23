@@ -1,7 +1,7 @@
 #include "bodyCommand.h"
 #include "editor/Language.h"
 #include "Core/Global/ServiceLocator.h"
-#include "editor/View/sceneview/viewerwidget.h"
+#include "editor/UI/TreeViewPanel/treesync.h"
 #include "feature/Feature.h"
 #include "feature/FeatureBody.h"
 #include "core/log.h"
@@ -31,7 +31,7 @@ namespace MOON
 		}
 		// The body is the active one from here on, so the next feature the user makes
 		// lands in it (see FeatureBody::Active and the Feature constructor).
-		GetViewerWidget.refreshTreeView();
+		GetTreeViewSync.Refresh();
 		CORE_INFO(
 			"[Body] '{0}' was made and is now the body new features go into",
 			body->GetName());

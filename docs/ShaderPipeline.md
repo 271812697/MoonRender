@@ -483,7 +483,7 @@ Start-Process Build\bin\Release\Moon.exe -ArgumentList '"D:\Project\UseQt\Sketch
 ```
 正常日志只有 `[Shader] sources are read from the embedded archive (58 files packed)`，
 不应有 `[Shader Package]`（变体缺源）/ `[Shader Compile]`（编译失败）/ `[Shader Linking]`。
-`Moon.exe <工程路径>` 是这一轮加的小功能（`Moon/main.cpp`，200 ms 后 `onReadFile`），就是为了让
+`Moon.exe <工程路径>` 是这一轮加的小功能（`Moon/main.cpp`，200 ms 后 `DocumentSession::Open`），就是为了让
 这件事能脚本化——以前只能手点首页。
 
 想单独验证某个 shader（构建期没开校验、或想手工看 dump）：

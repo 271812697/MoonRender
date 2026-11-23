@@ -112,7 +112,10 @@ Editor::Rendering::DebugSceneRenderer::DebugSceneRenderer(::Rendering::Context::
 
 	AddPass<PointRenderPass>("PointDraw", ::Rendering::Settings::ERenderPassOrder::Opaque).SetEnabled(false);	
 	AddPass<GridRenderPass>("Grid", ::Rendering::Settings::ERenderPassOrder::Opaque);
-	AddPass<PathTraceRenderPass>("Path Tracing", ::Rendering::Settings::ERenderPassOrder::PathTrace).SetEnabled(false);
+	// Path tracing is disabled: its constructor still built render targets and buffers (an enabled
+	// flag stops the draw, not the construction), and the pass is going to be rewritten. Nothing
+	// else references it, so it is simply not created.
+	// AddPass<PathTraceRenderPass>("Path Tracing", ::Rendering::Settings::ERenderPassOrder::PathTrace).SetEnabled(false);
 	AddPass<GizmoRenderPass>("ImRenderer", ::Rendering::Settings::ERenderPassOrder::Last);
 	AddPass<PickingRenderPass>("Picking", ::Rendering::Settings::ERenderPassOrder::Last);
 }

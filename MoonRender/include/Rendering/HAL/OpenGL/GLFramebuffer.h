@@ -1,8 +1,14 @@
-﻿#pragma once
+#pragma once
 #include <unordered_map>
+#include <Rendering/Backend/ResourceHandle.h>
 #include <Rendering/HAL/Common/TFramebuffer.h>
 #include <Rendering/HAL/OpenGL/GLTexture.h>
 #include <Rendering/HAL/OpenGL/GLRenderbuffer.h>
+
+namespace Rendering::Backend
+{
+	struct HwFramebuffer;
+}
 
 namespace Rendering::HAL
 {
@@ -11,7 +17,9 @@ namespace Rendering::HAL
 	{
 		using Attachment = TFramebufferAttachment<Backend, GLTextureContext, GLTextureHandleContext, GLRenderbufferContext>;
 
-		uint32_t id = 0;
+		/** A handle; the name is in the record it names (Backend::HwFramebuffer), on the side that
+		 * owns the context. */
+		Rendering::Backend::ResourceHandle<Rendering::Backend::HwFramebuffer> handle;
 		bool valid = false;
 		std::string debugName;
 		std::unordered_map<uint32_t, Attachment> attachments;

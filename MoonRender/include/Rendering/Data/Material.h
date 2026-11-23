@@ -113,32 +113,23 @@ namespace Rendering::Data
 		{
 			m_defaultInstance->LateUpdateTexture(p_name, p_path);
 		}
-		void BindGlobalTexture(const std::string& p_name, Rendering::HAL::Texture* p_texture)
-		{
-			m_defaultInstance->BindGlobalTexture(p_name, p_texture);
-		}
 
 		// ---- variant / draw API ---------------------------------------------------------
 		uint64_t Revision() const { return m_defaultInstance->Revision(); }
-		MaterialSignatureSet Bind(
-			Rendering::HAL::Texture* p_emptyTexture2D = nullptr,
-			Rendering::HAL::Texture* p_emptyTextureCube = nullptr,
+		void Bind(
 			std::optional<const std::string_view> p_pass = std::nullopt,
-			Tools::Utils::OptRef<const Data::FeatureSet> p_featureSetOverride = std::nullopt,
-			const std::optional<MaterialSignatureSet>& p_previousMaterialSignature = std::nullopt)
+			Tools::Utils::OptRef<const Data::FeatureSet> p_featureSetOverride = std::nullopt)
 		{
-			return m_defaultInstance->Bind(p_emptyTexture2D, p_emptyTextureCube, p_pass,
-				p_featureSetOverride, p_previousMaterialSignature);
+			m_defaultInstance->Bind(p_pass, p_featureSetOverride);
 		}
 		void Unbind(bool p_resetBoundProgram = false) { m_defaultInstance->Unbind(p_resetBoundProgram); }
 		void UploadProperties(
-			bool uploadStableProperties,
 			Rendering::HAL::Texture* p_emptyTexture2D = nullptr,
 			Rendering::HAL::Texture* p_emptyTextureCube = nullptr,
 			Rendering::HAL::Texture* p_flatNormalTexture = nullptr)
 		{
-			m_defaultInstance->UploadProperties(uploadStableProperties,
-				p_emptyTexture2D, p_emptyTextureCube, p_flatNormalTexture);
+			m_defaultInstance->UploadProperties(p_emptyTexture2D, p_emptyTextureCube,
+				p_flatNormalTexture);
 		}
 
 		// ---- features -------------------------------------------------------------------
@@ -177,7 +168,6 @@ namespace Rendering::Data
 			return m_defaultInstance->SupportsProjectionMode(p_mode);
 		}
 		Rendering::Data::StateMask GenerateStateMask() const { return m_defaultInstance->GenerateStateMask(); }
-		Rendering::HAL::Texture* TextureOf(const std::string& p_name) const { return m_defaultInstance->TextureOf(p_name); }
 
 		void SetBlendable(bool p_blendable) { m_defaultInstance->SetBlendable(p_blendable); }
 		void SetBlendMode(Rendering::Settings::EBlendMode p_blendMode) { m_defaultInstance->SetBlendMode(p_blendMode); }

@@ -1,6 +1,5 @@
 #include "editor/Command/menubar/exportFile.h"
 #include "editor/Language.h"
-#include "editor/View/sceneview/viewerwidget.h"
 #include "renderer/SceneView.h"
 #include "Core/Global/ServiceLocator.h"
 #include "core/component/CTopoShape.h"

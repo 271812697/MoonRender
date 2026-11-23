@@ -34,7 +34,7 @@
 #include "Command/menubar/projectCommand.h"
 #include "UI/HomePanel/HomePanel.h"
 #include "UI/HomePanel/RecentProjects.h"
-#include "editor/View/sceneview/viewerwidget.h"
+#include "editor/DocumentSession.h"
 #include "core/Global/ServiceLocator.h"
 #include "editor/UI/TreeViewPanel/treeViewpanel.h"
 #include "editor/UI/TaskPanel/TaskViewWidget.h"
@@ -46,10 +46,24 @@ namespace MOON {
 		{
 
 		}
+		/** The document session, before the panels: opening a document is asked for by the
+		 * File menu, the start page and the command line, and all of those reach it through
+		 * the service locator - a session that is missing when one of them asks throws, and
+		 * in a release build that is an uncaught exception that takes the process down. */
+		void createDocumentSession() {
+			auto* session = new DocumentSession(self);
+			// The session knows nothing about pages: showing the workspace is what the
+			// editor does for it, because a viewport that is not shown never paints and the
+			// read happens in a paint.
+			session->SetRevealWorkspace([] {
+				::Core::Global::ServiceLocator::Get<HomePanel>().ShowWorkspace();
+				});
+			::Core::Global::ServiceLocator::Provide<DocumentSession>(*session);
+		}
 		void initPanels() {
-			QIcon icon;
-			icon.addFile(QString::fromUtf8(":/widgets/icons/awesomeface.png"), QSize(), QIcon::Normal, QIcon::Off);
-			self->setWindowIcon(icon);
+			// The window icon is the crescent moon, the same one the application icon uses
+			// (set in main). It replaces the awesome-face placeholder that used to be here.
+			self->setWindowIcon(MOON::Theme::Icon(":/icons/app/moon.svg"));
 			// The window is two pages: the start page the application opens on (make or
 			// open a project, and the ones that were open last) and the workspace - the
 			// viewport with the panels around it. Choosing a project is what brings the
@@ -182,12 +196,13 @@ namespace MOON {
 				openFileCommand->action(), &QAction::trigger);
 			connect(&home, &HomePanel::projectRequested, self, [](const QString& p_path) {
 				// The same road the Open command takes, once it has a file.
-				GetViewerWidget.onReadFile(p_path);
+				::Core::Global::ServiceLocator::Get<DocumentSession>().Open(p_path);
 				});
 			// A document that came up (opened from the page, the menu, or a drop) is one
 			// of the recent projects from then on.
 			connect(
-				&GetViewerWidget, &ViewerWidget::documentOpened, self,
+				&::Core::Global::ServiceLocator::Get<DocumentSession>(),
+				&DocumentSession::documentOpened, self,
 				[](const QString& p_path) {
 					if (!p_path.isEmpty()) {
 						RecentProjects::Remember(p_path);
@@ -383,6 +398,7 @@ namespace MOON {
 	};
 	Editor::Editor() :mInternal(new EditorInternal(this))
 	{
+		mInternal->createDocumentSession();
 		mInternal->initPanels();
 		mInternal->buildMenu();
 		mInternal->buildToolBar();

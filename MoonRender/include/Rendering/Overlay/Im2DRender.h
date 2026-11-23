@@ -11,7 +11,8 @@ namespace Rendering::Overlay::Im2D
 	class Font;
 }
 
-namespace Rendering::Context {
+namespace Rendering::Context
+{
 	class Driver;
 }
 
@@ -33,7 +34,11 @@ namespace Rendering::Overlay
 
 		void NewFrame();
 		/** Draws what was collected. p_viewWidth/Height are the view's size in pixels: the
-		 * projection is built from them, screen space to clip space. */
+		 * projection is built from them, screen space to clip space.
+		 *
+		 * p_driver is the command recorder: the state the overlay sets up around its draw is
+		 * recorded on it and executed where the GL calls used to be (the first real user of the
+		 * command queue). The draws themselves are still immediate. */
 		void EndFrame(::Rendering::Context::Driver& p_driver, uint16_t p_viewWidth, uint16_t p_viewHeight);
 
 	private:

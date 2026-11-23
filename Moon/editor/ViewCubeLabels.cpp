@@ -1,5 +1,9 @@
 #include "editor/ViewCubeLabels.h"
 
+#include <Rendering/Overlay/ViewCubeLabels.h>
+
+#include <vector>
+
 #include "editor/Language.h"
 
 #include <algorithm>
@@ -120,26 +124,9 @@ QImage MOON::ViewCubeLabels::BuildAtlas(int p_cellPixels)
 
 void MOON::ViewCubeLabels::FaceUvRect(int p_face, float& p_x, float& p_y, float& p_w, float& p_h)
 {
-	// One cell per face, inset by the same margin the labels are drawn with, so the text sits in
-	// the middle of the rectangle the face samples.
-	const float inset = 0.08f;
-	const float cw = 1.0f / 3.0f;
-	const float ch = 0.5f;
-	const int face = (p_face < 0 || p_face > 5) ? 0 : p_face;
-	const bool chinese = MOON::Language::Current() == MOON::Language::ELanguage::Chinese;
-	(void)chinese;
-	// Front, down, back, up, right, left - the atlas rows are (Left,Down,Back)/(Right,Up,Front)
-	// in image space, and the cube's v axis points up, hence the row flip.
-	const int colOf[6] = { 2, 1, 2, 1, 0, 0 };
-	const int rowOf[6] = { 1, 0, 0, 1, 1, 0 };
-	const int col = colOf[face];
-	const int row = rowOf[face];
-	p_x = col * cw + cw * inset;
-	p_y = (1.0f - (row + 1) * ch) + ch * inset;
-	p_w = cw * (1.0f - 2.0f * inset);
-	p_h = ch * (1.0f - 2.0f * inset);
+	// The numbers live in the engine now (the overlay geometry reads them too); this forwards.
+	::Rendering::Overlay::ViewCubeLabels::FaceUvRect(p_face, p_x, p_y, p_w, p_h);
 }
-
 void MOON::ViewCubeLabels::Invalidate()
 {
 	gDirty = true;
@@ -153,4 +140,32 @@ bool MOON::ViewCubeLabels::IsDirty()
 void MOON::ViewCubeLabels::MarkClean()
 {
 	gDirty = false;
+}
+
+namespace
+{
+	/** Hands the engine the painter it cannot have: the overlay asks for the atlas pixels through
+	 * Rendering::Overlay::ViewCubeLabels (see BuildAtlas there), and the editor is the side that knows
+	 * how to draw text. */
+	struct AtlasBuilderRegistration
+	{
+		AtlasBuilderRegistration()
+		{
+			::Rendering::Overlay::ViewCubeLabels::SetAtlasBuilder(
+				[](int p_cellPixels, std::vector<uint8_t>& p_rgba, uint32_t& p_width, uint32_t& p_height)
+				{
+					QImage atlas = MOON::ViewCubeLabels::BuildAtlas(p_cellPixels);
+					// The file textures go through stb_image with a vertical flip, so the generated
+					// one is flipped the same way for the cube's UVs to line up.
+					atlas = atlas.mirrored(false, true);
+					atlas = atlas.convertToFormat(QImage::Format_RGBA8888);
+					p_width = static_cast<uint32_t>(atlas.width());
+					p_height = static_cast<uint32_t>(atlas.height());
+					const auto* bits = static_cast<const uint8_t*>(atlas.constBits());
+					p_rgba.assign(bits, bits + static_cast<size_t>(p_width) * p_height * 4);
+				});
+		}
+	};
+
+	const AtlasBuilderRegistration g_atlasBuilderRegistration;
 }

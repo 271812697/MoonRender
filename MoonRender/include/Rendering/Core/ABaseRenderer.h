@@ -9,6 +9,7 @@
 #include "Rendering/Context/Driver.h"
 
 namespace Rendering::Data { class DescriptorSet; }
+namespace Core::Resources { class MaterialAsset; }
 namespace Rendering::Core
 {
 	class ABaseRenderer : public IRenderer
@@ -132,7 +133,7 @@ namespace Rendering::Core
 		Rendering::Resources::Mesh m_unitCube;
 		/** The view's split-sum DFG LUT: global, bound for every material that declares
 		 * _BRDFLut (see Material::UploadParameterBlock). Set by CompositeRenderer each frame. */
-		void SetBrdfLut(Rendering::HAL::Texture* p_lut) { m_brdfLut = p_lut; }
+		void SetBrdfLut(Rendering::HAL::Texture* p_lut);
 		void SetEngineDescriptorSets(
 			Rendering::Data::DescriptorSet* p_perView,
 			Rendering::Data::DescriptorSet* p_perRenderable)
@@ -141,17 +142,23 @@ namespace Rendering::Core
 			m_perRenderableSet = p_perRenderable;
 		}
 		/** The view's environment (filament's IndirectLight): the irradiance cube (diffuse) and
-		 * the prefiltered cube (specular). Bound per draw like the DFG LUT, so a material
-		 * instance created before the sky pass baked them still samples the view's environment
-		 * instead of the empty black cube. */
-		void SetEnvironmentTextures(Rendering::HAL::Texture* p_irradianceCube, Rendering::HAL::Texture* p_prefilterCube)
-		{
-			m_irradianceCube = p_irradianceCube;
-			m_prefilterCube = p_prefilterCube;
-		}
+		 * the prefiltered cube (specular). These are view descriptors, not material properties. */
+		void SetEnvironmentTextures(
+			Rendering::HAL::Texture* p_irradianceCube,
+			Rendering::HAL::Texture* p_prefilterCube);
+		/** Binds the per-view set once, after its view textures have been assigned. */
+		void BindPerViewDescriptorSet() const;
 	protected:
 		Data::FrameDescriptor m_frameDescriptor;
 		Context::Driver& m_driver;
+
+	public:
+		/** The driver the pass records on. Passes bind their targets through it instead of calling
+		 * HAL::Framebuffer::Bind(): a bind is a command, and the pass runs on the recording side. */
+		Context::Driver& GetDriver() const { return m_driver; }
+
+		void BindFramebuffer(HAL::Framebuffer* p_target) { m_driver.BindFramebuffer(p_target); }
+		void BindDefaultFramebuffer() { m_driver.BindFramebuffer(nullptr); }
 		Rendering::HAL::Texture m_emptyTexture2D;
 		Rendering::HAL::Texture m_emptyTextureCube;
 		/** The neutral tangent-space normal (0.5, 0.5, 1.0), bound for a sampler declared
@@ -163,12 +170,18 @@ namespace Rendering::Core
 		
 		Rendering::Data::PipelineState m_basePipelineState;
 		bool m_isDrawing;
-		std::optional<Rendering::Data::MaterialSignatureSet> m_previousMaterialSignature = std::nullopt;
-		Rendering::Data::Material* m_presentShader;
-		Rendering::Data::Material m_presentMaterial;
+		Rendering::Data::Material* m_presentShader = nullptr;
+		/** The present quad's material: the `Materials/Blit.mat` asset, whose package is the MatC
+		 * `PostProcess/Blit.shader`. A MatC package declares `_InputTexture` as a parameter, so the
+		 * texture travels in the per-material descriptor set; a source-built shader left it as a
+		 * loose uniform that had to be bound to a texture unit with GL calls on the recording side
+		 * (docs/RenderThreadPlan.md §8.72). */
+		::Core::Resources::MaterialAsset* m_presentMaterial = nullptr;
 		Rendering::Data::DescriptorSet* m_perViewSet = nullptr;
 		Rendering::Data::DescriptorSet* m_perRenderableSet = nullptr;
 	private:
 		static std::atomic_bool s_isDrawing;
+		/** Drawables recorded since the last frame end (a diagnostic for the debug overlay). */
+		static inline std::atomic<uint32_t> s_entityDraws{ 0 };
 	};
 }

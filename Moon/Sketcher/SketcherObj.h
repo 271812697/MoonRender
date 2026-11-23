@@ -344,6 +344,13 @@ namespace MOON {
 		void makeDone();
 		Part::TopoShape getDoneFaceShape() const { return doneFaceShape; }
 		Part::TopoShape getDoneWireShape() const { return doneWireShape; }
+		/** The curves of the sketch that the faces do not cover - the open wires, and every
+		 * wire when no face could be made at all.
+		 *
+		 * The face maker refuses the whole set as soon as one wire is open, so these are never
+		 * part of getDoneFaceShape(). A consumer that wants the whole sketch (its shape, see
+		 * SketcherFeature::execute) puts them beside the faces. */
+		std::vector<Part::TopoShape> getDoneFreeWires() const;
 
 		/** --- the plane the sketch lies on ---------------------------------------- */
 		void setPlane(const SketcherPlane2D& plane);
@@ -422,7 +429,7 @@ namespace MOON {
 		 * the one number the drawing (SketcherObjWidget) and the snapping
 		 * (SketchPicking) both read, so the lattice seen and the lattice snapped to
 		 * stay the same at any zoom. */
-		void setGridTargetPx(float v) { m_gridTargetPx = v > 0.0f ? v : 20.0f; }
+		void setGridTargetPx(float v) { m_gridTargetPx = v > 0.0f ? v : 22.0f; }
 		float gridTargetPx() const { return m_gridTargetPx; }
 		void setGeometryVisible(int geoId, bool visible);
 		bool isGeometryVisible(int geoId) const
@@ -480,6 +487,9 @@ namespace MOON {
 		std::vector<int> lastPartiallyRedundant;
 		std::vector<int> lastMalformedConstraints;
 	private:
+		/** The wires doneWireShape is made of, with their names. A sketch with one closed wire
+		 * hands that wire over on its own instead of a compound of one (see makeElementWires). */
+		std::vector<Part::TopoShape> doneWires() const;
 		Part::TopoShape doneWireShape;
 		Part::TopoShape doneFaceShape;
 		/** What the sketch calls itself in its messages (see getName). */
@@ -488,7 +498,7 @@ namespace MOON {
 		Base::Matrix4D planeTransform;
 		bool m_drawGrid = true;
 		bool m_snapToGrid = false;
-		float m_gridTargetPx = 20.0f;
+		float m_gridTargetPx = 22.0f;
 		std::set<int> mConstructionGeoIds;
 		std::set<int> mHiddenGeoIds;
 		Sketcher::Sketch solvedSketch;

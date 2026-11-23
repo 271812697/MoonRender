@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <Rendering/Settings/EGraphicsBackend.h>
 #include <Rendering/Settings/EShaderType.h>
 #include <Rendering/Settings/ShaderCompilationResult.h>
@@ -40,6 +40,17 @@ namespace Rendering::HAL
 		* Returns the ID of the shader stage.
 		*/
 		uint32_t GetID() const;
+
+		/**
+		* Returns the type of the stage.
+		*/
+		Settings::EShaderType GetShaderType() const;
+
+		/**
+		* The source this stage was given. Kept because the build moves to the side that owns the
+		* context (the program's create command carries the sources - see ProgramRequests.h).
+		*/
+		const std::string& GetSource() const;
 
 	private:
 		Context m_context;

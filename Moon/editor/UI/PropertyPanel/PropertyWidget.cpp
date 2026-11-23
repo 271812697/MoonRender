@@ -1025,7 +1025,6 @@ namespace MOON {
 				return;
 			}
 			m_renderer->RemoveMaterialAtIndex(static_cast<uint8_t>(p_index));
-			GetService(::Editor::Panels::SceneView).GetRenderer().InvalidateParsedDrawables();
 		}
 		/** p_path is either a resource key (what the slot's drop-down hands over) or a file path
 		 * (what a drag from the content browser hands over); both have to end up as the same key. */
@@ -1055,8 +1054,6 @@ namespace MOON {
 				mat = m_renderer->GetMaterialAtIndex(0);
 			}
 
-			// The drawables were parsed against the old material list.
-			GetService(::Editor::Panels::SceneView).GetRenderer().InvalidateParsedDrawables();
 			CORE_INFO("[Material] {} assigned to slot {} of {}", key, p_index, m_renderer->owner.GetName());
 		}
 

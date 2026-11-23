@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <optional>
 
 #include <Rendering/Settings/EGraphicsBackend.h>
@@ -29,6 +29,15 @@ namespace Rendering::HAL
 		* @return The texture ID.
 		*/
 		uint32_t GetID() const;
+
+		/** The handle that names the backend object (Filament's HwTexture handle), or 0 when this
+		 * object has no handle of its own. */
+		uint32_t GetHandleId() const;
+
+		/** Whether this object carries a GL name of its own - i.e. it is the backend object, or
+		 * there is no driver to record into and the name was made inline. False for the front end,
+		 * whose operations are recorded and whose name only exists on the executor. */
+		bool HasBackendName() const;
 
 		/**
 		* Returns the texture type

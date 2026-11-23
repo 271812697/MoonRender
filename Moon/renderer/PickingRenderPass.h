@@ -1,4 +1,5 @@
-﻿#pragma once
+#pragma once
+#include <atomic>
 #include <Core/ECS/Actor.h>
 #include <Core/Resources/MaterialAsset.h>
 #include "GizmoBehaviour.h"
@@ -97,20 +98,34 @@ namespace Editor::Rendering
 		::Core::Resources::MaterialAsset m_TopoShapePickingFallbackMaterial;
 		PickPassOption mPickOption;
 
-		/** One in flight asynchronous picking readback (RGBA8, 1 pixel). */
+		/** One in flight picking readback: the id pixel and the world-position pixel of the same
+		 * spot, read by two read-pixels commands on the side that owns the context. */
+		struct PickReadback
+		{
+			PickReadback()
+				: idBytes(std::make_shared<std::vector<uint8_t>>(kPickReadbackIdBytes))
+				, positionBytes(std::make_shared<std::vector<uint8_t>>(kPickReadbackPositionBytes))
+			{
+			}
+
+			std::shared_ptr<std::vector<uint8_t>> idBytes;
+			std::shared_ptr<std::vector<uint8_t>> positionBytes;
+			/** Bumped by the two completion callbacks; when it reaches 2 both reads are on the CPU
+			 * and the recording side may look (the frame after, see TryConsumePick). */
+			std::shared_ptr<std::atomic<uint32_t>> arrived = std::make_shared<std::atomic<uint32_t>>(0);
+		};
 		struct PickReadbackSlot
 		{
-			std::shared_ptr<::Rendering::HAL::Buffer> buffer;
+			std::shared_ptr<PickReadback> readback;
 			uint32_t x = 0;
 			uint32_t y = 0;
 			bool pending = false;
 		};
 		static constexpr uint32_t kPickReadbackSlotCount = 3;
-		/** One pixel of the id attachment (4 bytes) and one of the world position
-		 * attachment (4 floats), which is read at the next 16-byte boundary. */
+		/** One pixel of the id attachment (RGBA8) and one of the world position attachment
+		 * (RGBA32F). */
 		static constexpr uint64_t kPickReadbackIdBytes = 4;
-		static constexpr uint64_t kPickReadbackPositionOffset = 16;
-		static constexpr uint64_t kPickReadbackBytes = 32;
+		static constexpr uint64_t kPickReadbackPositionBytes = 16;
 
 		std::vector<PickReadbackSlot> m_pickReadbackSlots;
 		uint32_t m_pickWriteIndex = 0;

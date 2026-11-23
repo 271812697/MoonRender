@@ -1,13 +1,10 @@
 #pragma once
 #include "Interactive/Screen/ScreenWidget.h"
 
-#include <memory>
 #include <vector>
 
 namespace MOON
 {
-	struct ScreenPath;
-
 	/** Rotate buttons drawn as a 2D overlay around the navigation cube.
 	 *
 	 * The widget does not draw the cube itself (ImRenderer::drawSort() owns the
@@ -17,11 +14,10 @@ namespace MOON
 	 * test, the state machine and telling the scene that the cursor is taken -
 	 * comes from ScreenWidget.
 	 *
-	 * The buttons are curves, not polygons: each one is an arc slot - a band of
-	 * constant width around the cube with a rounded cap at each end - authored
-	 * with ShapeBuilder (OCCT arcs), connected into a wire and turned into a
-	 * face, exactly like a finished sketch would be. Editing the look of a
-	 * button means editing the numbers below, no asset file involved.
+	 * A button is its icon: the glyph is drawn on a ring around the cube and the
+	 * click target is a circle under it (see BuildShapes), so there is no outline
+	 * to author and no geometry kernel involved. Editing the look of a button means
+	 * editing the numbers below.
 	 */
 	class ViewCubeWidget : public ScreenWidget
 	{
@@ -50,7 +46,7 @@ namespace MOON
 	protected:
 		ScreenLayout BuildLayout() const override;
 		void BuildShapes(std::vector<HitShape>& p_outShapes) const override;
-		/** Draws the six button icons on top of their slots. */
+		/** Draws the six button icons, on the ring their click targets sit on. */
 	void DrawIcons(::Rendering::Overlay::Im2D::DrawList& p_drawList, const ScreenRect& p_rect);
 
 	void DrawContent(::Rendering::Overlay::Im2D::DrawList& p_drawList, const ScreenRect& p_rect) override;
@@ -59,24 +55,9 @@ namespace MOON
 		bool IsInteractionEnabled() const override;
 
 	private:
-		/** One rotate button: the outline that is drawn and hit tested, plus the
-		 * action a click on it triggers. */
-		struct ArrowShape
-		{
-			EAction action = EAction::None;
-			std::shared_ptr<const ScreenPath> path;
-		};
-
-		/** Builds the arc slot of every button from OCCT curves, once. */
-		void BuildArrowShapes();
-		/** Used when the curves could not be built: plain arrow head triangles. */
-		void BuildFallbackShapes(std::vector<HitShape>& p_outShapes) const;
-
 		void ApplyRotation(EAction p_action);
 
 	private:
-		/** Outline of the four buttons; built once, the shapes never change. */
-		std::vector<ArrowShape> mArrows;
 		/** Turn applied by one click. The buttons fit the view afterwards, the
 		 * same way a click on a face of the cube does. */
 		float mStepDegrees = 45.0f;

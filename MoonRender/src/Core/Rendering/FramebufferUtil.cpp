@@ -1,5 +1,10 @@
-﻿#include<format>
+#include<format>
+#include <cstdio>
+#include <functional>
+#include <thread>
 #include <Core/Rendering/FramebufferUtil.h>
+#include <Rendering/HAL/Common/HALDriverAccess.h>
+#include <Rendering/Context/Driver.h>
 #include <Rendering/HAL/Framebuffer.h>
 #include <Rendering/HAL/Renderbuffer.h>
 #include <Rendering/HAL/Texture.h>
@@ -32,6 +37,19 @@ namespace Core::Rendering::FramebufferUtil
 	{
 		using namespace ::Rendering::HAL;
 		using namespace ::Rendering::Settings;
+
+		if (std::getenv("MOON_FRAME_TRACE") != nullptr)
+		{
+			// Which thread is attaching, and is a context current there at all? An FBO name only
+			// means something in the context that made it, so a mismatch shows up as tex=0 and a 0
+			// status in the [fbo] attach trace.
+			std::fprintf(stderr, "[fbo] setup name=%s id=%u ctx=%s driver=%s thread=%llu\n",
+				p_framebuffer.GetDebugName().c_str(), p_framebuffer.GetID(),
+				glGetString(GL_VERSION) != nullptr ? "current" : "NONE",
+				::Rendering::HAL::CurrentDriver() != nullptr ? "yes" : "no",
+				static_cast<unsigned long long>(std::hash<std::thread::id>{}(std::this_thread::get_id())));
+			std::fflush(stderr);
+		}
 
 		const auto renderTexture = std::make_shared<Texture>(
 			useMulSample? ETextureType::TEXTURE_2DMULSAMPLE:ETextureType::TEXTURE_2D,
@@ -103,5 +121,47 @@ namespace Core::Rendering::FramebufferUtil
 			p_useStencil,
 			useMulSample
 		);
+	}
+
+	void SetupFramebufferWithDriver(
+		::Rendering::HAL::Framebuffer& p_framebuffer,
+		const ::Rendering::Settings::TextureDesc& p_textureDesc,
+		bool p_useDepth,
+		bool p_useStencil,
+		bool p_useMultiSample)
+	{
+		// Setup is a driver command and nothing else (Filament's createRenderTargetR): the target's
+		// attachments are made and attached on the side that owns the context. Without a module
+		// there is no such side, and building the target here would produce a name with no
+		// attachments - so it is reported instead of half-done.
+		::Rendering::Context::Driver* const driver = ::Rendering::HAL::CurrentDriver();
+		if (driver == nullptr)
+		{
+			std::fprintf(stderr, "[fbo] SetupFramebuffer(%s) without a render module\n",
+				p_framebuffer.GetDebugName().c_str());
+			std::fflush(stderr);
+			return;
+		}
+		driver->SetupFramebuffer(p_framebuffer, p_textureDesc, p_useDepth, p_useStencil, p_useMultiSample);
+	}
+
+	void SetupFramebufferWithDriver(
+		::Rendering::HAL::Framebuffer& p_framebuffer,
+		uint32_t p_width,
+		uint32_t p_height,
+		bool p_useDepth,
+		bool p_useStencil,
+		bool p_useMipMaps,
+		bool p_useMultiSample)
+	{
+		::Rendering::Context::Driver* const driver = ::Rendering::HAL::CurrentDriver();
+		if (driver == nullptr)
+		{
+			std::fprintf(stderr, "[fbo] SetupFramebuffer(%s) without a render module\n",
+				p_framebuffer.GetDebugName().c_str());
+			std::fflush(stderr);
+			return;
+		}
+		driver->SetupFramebuffer(p_framebuffer, p_width, p_height, p_useDepth, p_useStencil, p_useMipMaps, p_useMultiSample);
 	}
 }

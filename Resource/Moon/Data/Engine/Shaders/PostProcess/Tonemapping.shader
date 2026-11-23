@@ -206,6 +206,10 @@ fragment {
 
     // Filament's default dithering operator (triangle noise, inline_dithering.fs). The
     // output is 8 bit, so a smooth tonemapped gradient (the sky) bands without it.
+    //
+    // It has to be evaluated per pixel: fed the screen-normalized position it varies over
+    // hundreds of pixels instead of one, which is a soft blotch rather than dither and leaves
+    // the banding it was meant to hide in place.
     float triangleNoise(vec2 n)
     {
         n = fract(n * vec2(5.3987, 5.4421));
@@ -232,10 +236,7 @@ fragment {
             color = applyGammaCorrection(color);
         }
 
-        const vec2 screen = vec2(
-            max(float(ubo_ScreenWidth), 1.0),
-            max(float(ubo_ScreenHeight), 1.0));
-        color += vec3(triangleNoise(gl_FragCoord.xy / screen) / 255.0);
+        color += vec3(triangleNoise(gl_FragCoord.xy) / 255.0);
 
         m.baseColor = vec4(color, 1.0);
     }

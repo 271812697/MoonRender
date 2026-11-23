@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <variant>
 #include <Rendering/Settings/DriverSettings.h>
 #include <Rendering/Settings/ERenderingCapability.h>
@@ -63,6 +63,16 @@ namespace Rendering::HAL
 			Rendering::Settings::EFramebufferAttachment p_attachment,
 			uint32_t p_index = 0
 		) ;
+
+		/** The same attachment, kept alive: a pass that also samples its target's colour or depth
+		 * (the gbuffer, the mirror plane) owns the texture through this, and hands it to materials
+		 * as a property. Empty when the target has no such attachment (yet). */
+		template<class T>
+			requires IsSupportedAttachmentType<T>
+		std::shared_ptr<T> GetAttachmentShared(
+			Rendering::Settings::EFramebufferAttachment p_attachment,
+			uint32_t p_index = 0
+		) const;
 		void SetDrawBuffers(const std::vector<uint32_t>&p_index);
 		void SetTargetDrawBuffer(std::optional<uint32_t> p_index);
 		void SetTargetReadBuffer(std::optional<uint32_t> p_index);

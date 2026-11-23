@@ -27,9 +27,9 @@ namespace MOON
 		void BuildShapes(std::vector<HitShape>& p_outShapes) const override;
 		void DrawContent(::Rendering::Overlay::Im2D::DrawList& p_drawList, const ScreenRect& p_rect) override;
 		bool WantsCapture() const override { return true; }
-		void OnDragBegin(const ImVec2& p_localCursor) override;
-		void OnDrag(const ImVec2& p_localCursor) override;
-		void OnDragEnd(const ImVec2& p_localCursor) override;
+		void OnDragBegin(const ScreenPoint& p_localCursor) override;
+		void OnDrag(const ScreenPoint& p_localCursor) override;
+		void OnDragEnd(const ScreenPoint& p_localCursor) override;
 
 	private:
 		enum class EHandle
@@ -39,20 +39,20 @@ namespace MOON
 			Middle = 2
 		};
 
-		ImVec2 Middle() const;
-		ImVec2 ClampToViewport(const ImVec2& p_local) const;
-		void MoveHandle(int p_handle, const ImVec2& p_localCursor);
+		ScreenPoint Middle() const;
+		ScreenPoint ClampToViewport(const ScreenPoint& p_local) const;
+		void MoveHandle(int p_handle, const ScreenPoint& p_localCursor);
 
 	private:
 		/** Handles, in top-left screen pixels (the widget rectangle starts at the
 		 * viewport origin, so local and screen coordinates are the same). */
-		ImVec2 mStart{ 0.0f, 0.0f };
-		ImVec2 mEnd{ 0.0f, 100.0f };
+		ScreenPoint mStart{ 0.0f, 0.0f };
+		ScreenPoint mEnd{ 0.0f, 100.0f };
 		/** Grab offset between the handle and the cursor when the drag started. */
-		ImVec2 mGrabOffset{ 0.0f, 0.0f };
+		ScreenPoint mGrabOffset{ 0.0f, 0.0f };
 		/** Half vector of the line captured when the middle handle was grabbed;
 		 * the middle moves the line rigidly instead of re-scaling it. */
-		ImVec2 mHalfVector{ 0.0f, 0.0f };
+		ScreenPoint mHalfVector{ 0.0f, 0.0f };
 		int mDraggedHandle = -1;
 	};
 }

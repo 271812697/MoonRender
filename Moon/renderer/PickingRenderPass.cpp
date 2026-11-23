@@ -11,7 +11,6 @@
 #include "DebugSceneRenderer.h"
 #include "PickingRenderPass.h"
 #include "Interactive/Im3DRenderer.h"
-#include <ThirdParty/imgui/imgui/imgui.h>
 #include "core/log.h"
 #include <Rendering/HAL/Profiling.h>
 #include <Rendering/Settings/EAccessSpecifier.h>
@@ -41,45 +40,49 @@ Editor::Rendering::PickingRenderPass::PickingRenderPass(::Rendering::Core::Compo
 	::Rendering::Core::ARenderPass(p_renderer),
 	m_actorPickingFramebuffer("ActorPicking")
 {
-	::Core::Rendering::FramebufferUtil::SetupFramebuffer(
-		m_actorPickingFramebuffer, 1, 1, true, false, false
-	);
 
-	// A second color attachment holds the world position of whatever is drawn: the pixel
-	// the user picks carries both the id of what is under it and where on that geometry it
-	// is. The camera turns around that point when the right button is pressed, so it comes
-	// from the very pixel that is on screen - no ray through the scene.
-	{
-		using namespace ::Rendering::Settings;
-		TextureDesc worldPositionDesc{
-			.width = 1,
-			.height = 1,
-			.minFilter = ETextureFilteringMode::LINEAR,
-			.magFilter = ETextureFilteringMode::LINEAR,
-			.horizontalWrap = ETextureWrapMode::CLAMP_TO_BORDER,
-			.verticalWrap = ETextureWrapMode::CLAMP_TO_BORDER,
-			.internalFormat = EInternalFormat::RGBA32F,
-			.mutableDesc = MutableTextureDesc{
-				.format = EFormat::RGBA,
-				.type = EPixelDataType::FLOAT,
-			},
-		};
-		auto worldPositionTexture = std::make_shared<::Rendering::HAL::Texture>(
-			ETextureType::TEXTURE_2D,
-			std::format("{}/WorldPosition", m_actorPickingFramebuffer.GetDebugName())
-		);
-		worldPositionTexture->Allocate(worldPositionDesc);
-		m_actorPickingFramebuffer.Attach(
-			worldPositionTexture, EFramebufferAttachment::COLOR, 1
-		);
-		// Every pick shader writes layout(location = 0) (the id) and location = 1 (the
-		// position), so both attachments are drawn to.
-		m_actorPickingFramebuffer.SetDrawBuffers({ 0, 1 });
-		m_actorPickingFramebuffer.Validate();
-	}
+	// Through the driver: the attachments are GL, and with a render thread they are built on the
+	// side that owns the context (see Driver::SetupFramebuffer).
+	m_renderer.GetDriver().SetupFramebuffer(m_actorPickingFramebuffer, 1u, 1u, true, false, false, false);
+
+	// user picks carries both the id of what is under it and where on that geometry it is. It is a
+	// texture of its own format; its creation and its attach are commands like everything else on
+	// this target, so they are recorded here and built where the context is.
+	//
+	// Mutable on purpose. The target is created 1x1 here and resized to the frame before every
+	// pick, and only a mutable texture can be re-specified (glTexImage2D) - an immutable one
+	// (glTextureStorage2D) keeps its 1x1 storage, and because a framebuffer's render area is the
+	// smallest of its attachments, that clipped *both* attachments to one pixel and every pick read
+	// back zeros. The colour attachment is created mutable by FramebufferUtil for the same reason.
+	using namespace ::Rendering::Settings;
+	TextureDesc worldPositionDesc{
+		.width = 1,
+		.height = 1,
+		.minFilter = ETextureFilteringMode::LINEAR,
+		.magFilter = ETextureFilteringMode::LINEAR,
+		.horizontalWrap = ETextureWrapMode::CLAMP_TO_BORDER,
+		.verticalWrap = ETextureWrapMode::CLAMP_TO_BORDER,
+		.internalFormat = EInternalFormat::RGBA32F,
+		.mutableDesc = MutableTextureDesc{
+			.format = EFormat::RGBA,
+			.type = EPixelDataType::FLOAT
+		}
+	};
+	auto worldPositionTexture = std::make_shared<::Rendering::HAL::Texture>(
+		ETextureType::TEXTURE_2D,
+		std::format("{}/WorldPosition", m_actorPickingFramebuffer.GetDebugName())
+	);
+	worldPositionTexture->Allocate(worldPositionDesc);
+	m_actorPickingFramebuffer.Attach(
+		worldPositionTexture, EFramebufferAttachment::COLOR, 1
+	);
+	// Every pick shader writes layout(location = 0) (the id) and location = 1 (the
+	// position), so both attachments are drawn to.
+	m_actorPickingFramebuffer.SetDrawBuffers({ 0, 1 });
+	m_actorPickingFramebuffer.Validate();
 
 	SetupPickReadbacks();
-	/* Picking Material */
+
 	m_actorPickingFallbackMaterial.SetMaterial(GetShaderService[":Shaders/PickingFallback.shader"]);
 	m_TopoShapePickingFallbackMaterial.SetMaterial(GetShaderService[":Shaders\\GeomertySurfacePick.shader"]);
 	m_TopoShapePickingFallbackMaterial.SetBackfaceCulling(false);
@@ -189,14 +192,9 @@ void Editor::Rendering::PickingRenderPass::SetupPickReadbacks()
 
 	for (PickReadbackSlot& slot : m_pickReadbackSlots)
 	{
-		// PIXEL_PACK buffer: destination of the asynchronous glReadPixels.
-		slot.buffer = std::make_shared<::Rendering::HAL::Buffer>(
-			::Rendering::Settings::EBufferType::PIXEL_PACK
-		);
-		slot.buffer->Allocate(
-			kPickReadbackBytes,
-			::Rendering::Settings::EAccessSpecifier::STREAM_READ
-		);
+		// No GL objects here: a slot is the CPU side of two read-pixels commands, and the bytes are
+		// filled where the context is (see IssuePickReadback).
+		slot.readback = std::make_shared<PickReadback>();
 	}
 }
 
@@ -240,28 +238,34 @@ void Editor::Rendering::PickingRenderPass::IssuePickReadback()
 		return;
 	}
 
-	m_actorPickingFramebuffer.ReadPixelsToBuffer(
-		*freeSlot->buffer,
-		0,
-		m_pickRequestX,
-		m_pickRequestY,
-		1, 1,
-		::Rendering::Settings::EPixelDataFormat::RGBA,
-		::Rendering::Settings::EPixelDataType::UNSIGNED_BYTE
-	);
-	// The world position of the same pixel, right behind the id in the same buffer.
-	m_actorPickingFramebuffer.SetTargetReadBuffer(1);
-	m_actorPickingFramebuffer.ReadPixelsToBuffer(
-		*freeSlot->buffer,
-		static_cast<uint32_t>(kPickReadbackPositionOffset),
-		m_pickRequestX,
-		m_pickRequestY,
-		1, 1,
-		::Rendering::Settings::EPixelDataFormat::RGBA,
-		::Rendering::Settings::EPixelDataType::FLOAT
-	);
-	m_actorPickingFramebuffer.SetTargetReadBuffer(0);
-	freeSlot->buffer->InsertFence();
+	// Two read-pixels commands, one per attachment: they run where the context is (the render
+	// thread, or this thread in the single-threaded configuration), and each one bumps the slot's
+	// counter when its bytes are on the CPU. Nothing here touches GL, so the frame never waits for
+	// the readback: TryConsumePick picks it up on a later frame.
+	::Rendering::Backend::ReadPixelsRequest idRequest;
+	idRequest.framebufferId = m_actorPickingFramebuffer.GetID();
+	idRequest.readBufferIndex = 0;
+	idRequest.x = m_pickRequestX;
+	idRequest.y = m_pickRequestY;
+	idRequest.width = 1;
+	idRequest.height = 1;
+	idRequest.format = ::Rendering::Settings::EPixelDataFormat::RGBA;
+	idRequest.type = ::Rendering::Settings::EPixelDataType::UNSIGNED_BYTE;
+	idRequest.data = freeSlot->readback->idBytes;
+	idRequest.onDone = [readback = freeSlot->readback] {
+		readback->arrived->fetch_add(1, std::memory_order_release);
+	};
+	m_renderer.GetDriver().ReadPixels(idRequest);
+
+	::Rendering::Backend::ReadPixelsRequest positionRequest = idRequest;
+	positionRequest.readBufferIndex = 1;
+	positionRequest.type = ::Rendering::Settings::EPixelDataType::FLOAT;
+	positionRequest.data = freeSlot->readback->positionBytes;
+	positionRequest.onDone = [readback = freeSlot->readback] {
+		readback->arrived->fetch_add(1, std::memory_order_release);
+	};
+	m_renderer.GetDriver().ReadPixels(positionRequest);
+
 	freeSlot->x = m_pickRequestX;
 	freeSlot->y = m_pickRequestY;
 	freeSlot->pending = true;
@@ -284,28 +288,18 @@ bool Editor::Rendering::PickingRenderPass::TryConsumePick(
 		PickReadbackSlot& slot = m_pickReadbackSlots[
 			(m_pickWriteIndex + i) % kPickReadbackSlotCount
 		];
-		if (!slot.pending || !slot.buffer->IsFenceSignaled())
+		const PickReadback& readback = *slot.readback;
+		if (!slot.pending || readback.arrived->load(std::memory_order_acquire) < 2)
 		{
 			continue;
 		}
 
-		void* mapped = slot.buffer->MapRead(0, kPickReadbackBytes);
-		if (mapped == nullptr)
-		{
-			// Still used by the GPU: retry on the next frame.
-			continue;
-		}
-
+		// Both reads are on the CPU (the callbacks ran on the side that owns the context), so the
+		// bytes can be decoded right here - no fence, no mapping, no GL on this thread.
 		uint8_t pixel[4];
-		std::memcpy(pixel, mapped, kPickReadbackIdBytes);
+		std::memcpy(pixel, readback.idBytes->data(), kPickReadbackIdBytes);
 		float position[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
-		std::memcpy(
-			position,
-			static_cast<const uint8_t*>(mapped) + kPickReadbackPositionOffset,
-			sizeof(position)
-		);
-		slot.buffer->Unmap();
-		slot.buffer->ClearFence();
+		std::memcpy(position, readback.positionBytes->data(), sizeof(position));
 		slot.pending = false;
 
 		p_outX = slot.x;
@@ -320,7 +314,6 @@ bool Editor::Rendering::PickingRenderPass::TryConsumePick(
 		}
 		return true;
 	}
-
 	return false;
 }
 
@@ -353,9 +346,10 @@ void Editor::Rendering::PickingRenderPass::Draw(::Rendering::Data::PipelineState
 		return;
 	}
 
-	m_actorPickingFramebuffer.Resize(frameDescriptor.renderWidth, frameDescriptor.renderHeight);
+	m_renderer.GetDriver().ResizeFramebuffer(m_actorPickingFramebuffer,
+		static_cast<uint16_t>(frameDescriptor.renderWidth), static_cast<uint16_t>(frameDescriptor.renderHeight));
 
-	m_actorPickingFramebuffer.Bind();
+	m_renderer.BindFramebuffer(&m_actorPickingFramebuffer);
 
 	// Only the pixel under the cursor is read back, so clip the whole pass to a
 	// small region around it: the draw calls are still submitted, but almost all
@@ -405,8 +399,9 @@ void Editor::Rendering::PickingRenderPass::Draw(::Rendering::Data::PipelineState
 	//DrawPickableCameras(pso, scene);
 	//DrawPickableReflectionProbes(pso, scene);
 	//DrawPickableLights(pso, scene);
-	auto& gizmoInstance = MOON::ImRenderer::instance();
-	gizmoInstance.drawMeshPick();
+	// The gizmo's pick geometry: ImRenderer records it into the same batch (its materials and draws
+	// are commands now, like everything else here), so it is pickable in both modes.
+	MOON::ImRenderer::instance().drawMeshPick();
 
 	// Restore a full target rectangle: the scissor test may still be enabled
 	// until the next pipeline state is applied, and a full-screen box never clips.
@@ -427,22 +422,17 @@ void Editor::Rendering::PickingRenderPass::Draw(::Rendering::Data::PipelineState
 	//	);
 	//}
 
-	m_actorPickingFramebuffer.Unbind();
-
-	// Serve a queued hover request: the picking target just finished, so the
-	// pixel can be copied into the PBO ring without waiting for the GPU.
+	m_renderer.BindDefaultFramebuffer();
+	// Serve a queued hover request: the picking target just finished, so the pixel can be read.
+	// The read is a command (two of them, one per attachment) and the result arrives on a later
+	// frame, so the frame never waits for the GPU here.
 	IssuePickReadback();
-	
-	//the following code is for debug, it will display the picking framebuffer
-	if (mPickOption.debug) {
-		ImVec2 a = { 0,1 }, b = { 1,0 };
-		ImVec2 size = ImVec2(frameDescriptor.renderWidth, frameDescriptor.renderHeight);
-		auto resid=m_actorPickingFramebuffer.GetAttachment<::Rendering::HAL::GLTexture>(::Rendering::Settings::EFramebufferAttachment::COLOR,0);
-		ImGui::Image(resid->GetID(), size, a, b);
-	}
+
+	// The picking framebuffer has no debug preview any more: it was an ImGui image and the
+	// window-side ImGui is gone (see docs/RenderThreadPlan.md §8.56).
 	if (auto output = frameDescriptor.outputMsaaBuffer)
 	{
-		output.value().Bind();
+		m_renderer.BindFramebuffer(&output.value());
 	}
 }
 
@@ -454,7 +444,9 @@ void Editor::Rendering::PickingRenderPass::DrawPickableModels(
 	const auto& filteredDrawables = m_renderer.GetDescriptor<::Core::Rendering::SceneRenderer::SceneFilteredDrawablesDescriptor>();
 	// The vertex dots are drawn into the picking target as point sprites: their
 	// size comes from the shader, which the driver only honours while this is on.
-	glEnable(GL_PROGRAM_POINT_SIZE);
+	// Recorded like every other pipeline capability (docs/RenderThreadPlan.md §8.72).
+	m_renderer.GetDriver().EnqueueCapability(
+		::Rendering::Settings::ERenderingCapability::PROGRAM_POINT_SIZE, true);
 	auto drawPickableModels = [&](auto drawables) {
 		for (auto& drawable : drawables)
 		{			

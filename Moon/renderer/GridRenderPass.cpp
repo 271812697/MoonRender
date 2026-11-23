@@ -1,3 +1,4 @@
+#include <Core/Rendering/FramebufferUtil.h>
 #include "DebugModelRenderFeature.h"
 #include "GridRenderPass.h"
 #include "Core/Global/ServiceLocator.h"
@@ -84,10 +85,11 @@ Editor::Rendering::GridRenderPass::GridRenderPass(::Rendering::Core::CompositeRe
 	depthTexture->SetBorderColor(Maths::FVector4::One);
 	m_mirroFbo.Attach<::Rendering::HAL::Texture>(renderTexture, ::Rendering::Settings::EFramebufferAttachment::COLOR);
 	m_mirroFbo.Attach<::Rendering::HAL::Texture>(depthTexture, ::Rendering::Settings::EFramebufferAttachment::DEPTH);
+	// The shadow pair's attachments are made and attached on the side that owns the context, like
+	// every other target (the manual Attach path built them on this thread, which produced names
+	// with no attachments there - see the [fbo] attach trace).
 	for (auto& mirroShadowFbo : m_mirroShadowFbo.GetFramebuffers()) {
-		auto shadowTexture = std::make_shared<::Rendering::HAL::Texture>(::Rendering::Settings::ETextureType::TEXTURE_2D, "color");
-		shadowTexture->Allocate(shadowDesc);
-		mirroShadowFbo.Attach<::Rendering::HAL::Texture>(shadowTexture, ::Rendering::Settings::EFramebufferAttachment::COLOR);
+		::Core::Rendering::FramebufferUtil::SetupFramebufferWithDriver(mirroShadowFbo, shadowDesc, false, false, false);
 	}
 
 }
@@ -134,14 +136,17 @@ void Editor::Rendering::GridRenderPass::Draw(::Rendering::Data::PipelineState p_
 			m_renderer.DrawEntity(p_pso, drawableCopy);
 		}
 	};
-	m_mirroFbo.Bind();
-	m_renderer.Clear(true, true, false, Maths::FVector4(1.0, 1.0, 1.0 ,0.2));
+	m_renderer.BindFramebuffer(&m_mirroFbo);
+	// The alpha is the coverage mask the floor shader reads: an object writes its own alpha
+	// where it draws, everything else keeps the 0 cleared here, and the floor uses that to
+	// draw itself only where the mirror actually holds something (see Grid.shader).
+	m_renderer.Clear(true, true, false, Maths::FVector4(1.0, 1.0, 1.0, 0.0));
 	drawMirroModels(filteredDrawables.opaques | std::views::values,false);
 	drawMirroModels(filteredDrawables.lines | std::views::values, false);
 	drawMirroModels(filteredDrawables.transparents | std::views::values,true);
-	m_mirroFbo.Unbind();
+	m_renderer.BindDefaultFramebuffer(); /* m_mirroFbo */
 
-	m_mirroShadowFbo[0].Bind();
+	m_renderer.BindFramebuffer(&m_mirroShadowFbo[0]);
 	m_renderer.Clear(true, true, false, Maths::FVector4(0, 0, 0, 1));
 	m_ShadowMaterial.SetProperty("uMirroPlane", plane);
 	drawMirroShadowModels(filteredDrawables.opaques | std::views::values);
@@ -153,7 +158,7 @@ void Editor::Rendering::GridRenderPass::Draw(::Rendering::Data::PipelineState p_
 		++m_mirroShadowFbo;
 	}
 	
-	m_mirroShadowFbo[0].Unbind();
+	m_renderer.BindDefaultFramebuffer(); /* m_mirroShadowFbo[0] */
 
 	/*
 	Step 2.
@@ -161,7 +166,7 @@ void Editor::Rendering::GridRenderPass::Draw(::Rendering::Data::PipelineState p_
 	*/
 	engineBufferRenderFeature.SetCamera(frameDesc.camera.value());
 	auto& msaaframebuffer = frameDesc.outputMsaaBuffer.value();
-	msaaframebuffer.Bind();
+	m_renderer.BindFramebuffer(&msaaframebuffer);
 	auto pso = m_renderer.CreatePipelineState();
 	// Size the mirror plane so it stays visible in large scenes: cover the
 	// scene footprint and the camera's view at the plane instead of a fixed
@@ -192,7 +197,7 @@ void Editor::Rendering::GridRenderPass::Draw(::Rendering::Data::PipelineState p_
 	model = Maths::FMatrix4::Transpose(model);
 	const auto& color = m_mirroFbo.GetAttachment<::Rendering::HAL::GLTexture>(::Rendering::Settings::EFramebufferAttachment::COLOR, 0);
 	const auto& shadow = m_mirroShadowFbo[0].GetAttachment<::Rendering::HAL::GLTexture>(::Rendering::Settings::EFramebufferAttachment::COLOR, 0);
-	m_gridMaterial.SetProperty("u_Color", gridDescriptor.gridColor*0.7);
+	m_gridMaterial.SetProperty("u_Color", gridDescriptor.gridColor*0.7f);
 	m_gridMaterial.SetProperty("u_PlaneTransform", model);
 	m_gridMaterial.SetProperty("u_MirrorTex", &color.value());
 	m_gridMaterial.SetProperty("u_MirrorShadowTex", &shadow.value());
@@ -210,7 +215,11 @@ void Editor::Rendering::GridRenderPass::Draw(::Rendering::Data::PipelineState p_
 
 void Editor::Rendering::GridRenderPass::ResizeRenderer(int width, int height)
 {
-	m_mirroFbo.Resize(width,height);
-	m_mirroShadowFbo[0].Resize(width, height);
-	m_mirroShadowFbo[1].Resize(width, height);
+	// Through the driver: the attachments live on the side that owns the context.
+	auto& driver = m_renderer.GetDriver();
+	driver.ResizeFramebuffer(m_mirroFbo, static_cast<uint16_t>(width), static_cast<uint16_t>(height));
+	for (auto& mirroShadowFbo : m_mirroShadowFbo.GetFramebuffers())
+	{
+		driver.ResizeFramebuffer(mirroShadowFbo, static_cast<uint16_t>(width), static_cast<uint16_t>(height));
+	}
 }

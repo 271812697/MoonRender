@@ -7,6 +7,9 @@
 #include <cctype>
 #include <regex>
 #include <sstream>
+#include <string>
+
+#include <Rendering/Data/EngineDescriptorSets.h>
 
 #include "FileUtils.h"
 #include "Includes.h"
@@ -94,9 +97,9 @@ namespace Moon::Matc
 
 	std::string ShaderGenerator::BuildPrelude() const
 	{
-		// The two headers every stage gets, then the MaterialInputs struct and its defines.
 		std::string prelude;
-		for (const std::string& relative : { "Common/Buffers/EngineUBO.glsl", "Common/Utils.glsl" })
+
+		const auto appendFile = [this, &prelude](const std::string& relative)
 		{
 			std::string content;
 			bool found = false;
@@ -120,7 +123,29 @@ namespace Moon::Matc
 			{
 				prelude += "\n#line 1 \"" + relative + "\"\n" + content + "\n";
 			}
-		}
+		};
+
+		const auto appendEngineSet = [this, &prelude, &appendFile](
+			const auto& p_bindings)
+		{
+			for (const auto& binding : p_bindings)
+			{
+				if (binding.include != nullptr)
+				{
+					appendFile(binding.include);
+				}
+				else if (binding.kind == Rendering::Data::DescriptorSetLayout::Kind::Texture)
+				{
+					prelude += "\nlayout(binding = " + std::to_string(binding.slot)
+						+ ") uniform " + binding.glslType + " " + binding.name + ";\n";
+				}
+			}
+		};
+
+		// Generate every descriptor set from the engine's table: per-view then per-renderable.
+		appendEngineSet(Rendering::Data::EngineDescriptorSets::kPerViewBindings);
+		appendEngineSet(Rendering::Data::EngineDescriptorSets::kPerRenderableBindings);
+		appendFile("Common/Utils.glsl");
 
 		prelude += "\n#line 1 \"<material inputs>\"\n" + MaterialInputsPrelude();
 		return prelude;

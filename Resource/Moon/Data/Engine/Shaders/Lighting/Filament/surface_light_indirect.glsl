@@ -4,7 +4,7 @@
 // The prefiltered cube is baked with Filament's LOD-to-perceptualRoughness mapping (see
 // SkyboxRenderPass), so the sample LOD is Filament's p * (2 - p) curve.
 
-#include ":Shaders/Common/Buffers/ReflectionUBO.glsl"
+
 
 // Filament has no separate irradiance map: it samples the roughness-one level of the prefiltered
 // specular cube and averages four taps around `n` (diffuseIrradianceRoughnessOne below). That is

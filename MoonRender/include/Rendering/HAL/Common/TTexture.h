@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <string>
 
 #include <Maths/FVector4.h>
@@ -9,6 +9,11 @@
 
 namespace Rendering::HAL
 {
+	/** Marks the construction of the *backend* object: the one that makes the GL name, in the slot
+	 * a handle names (Filament's createTextureR). The plain constructor is the front end, and with
+	 * a render thread it only takes a handle and records the creation. */
+	struct BackendConstructionTag {};
+
 	/**
 	* Represents a texture, used to store image data for the graphics backend to use.
 	*/
@@ -22,6 +27,11 @@ namespace Rendering::HAL
 		* @param p_debugName A name used to identify the texture for debugging purposes
 		*/
 		TTexture(Settings::ETextureType p_type, std::string_view p_debugName = std::string_view{});
+
+		/** Creates the backend object: the GL name is made here, so this runs where the context
+		 * is (the executor of a create-texture command). */
+		TTexture(Settings::ETextureType p_type, std::string_view p_debugName,
+			BackendConstructionTag);
 
 		/**
 		* Destroys the texture.
@@ -51,6 +61,17 @@ namespace Rendering::HAL
 		* @param p_type Type of the pixel data.
 		*/
 		void Upload(const void* p_data, Settings::EFormat p_format, Settings::EPixelDataType p_type);
+
+		/** Uploads a sub-rectangle into storage that already exists (Filament's update2DImage on a
+		 * mutable texture). */
+		void UploadSubImage(
+			const void* p_data,
+			Settings::EFormat p_format,
+			Settings::EPixelDataType p_type,
+			uint32_t p_x,
+			uint32_t p_y,
+			uint32_t p_width,
+			uint32_t p_height);
 
 		/**
 		* Resizes the texture.

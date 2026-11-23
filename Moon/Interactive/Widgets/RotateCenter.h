@@ -1,20 +1,19 @@
-﻿#pragma once
+#pragma once
 #include "Interactive/EventWidget.h"
 namespace MOON
 {
-
-	class RotateCenter: public EventWidget
+	/** The rotate centre marker: drawn while the right mouse button is held.
+	 *
+	 * Selection used to live here too; it is in SelectWidget now, which is where a click in the
+	 * viewport becomes a selection event.
+	 */
+	class RotateCenter : public EventWidget
 	{
 	public:
 		RotateCenter(const std::string& name);
 		virtual ~RotateCenter();
 		virtual void onUpdate()override;
-		virtual void onLeftMousePressed()override;
-		virtual void onLeftMouseReleased()override;
 		virtual void onRightMousePressed()override;
 		virtual void onRightMouseReleased()override;
-		virtual void onMouseMove()override;
-		virtual void onKeyPress(const std::string& key)override;
-		virtual void onKeyRelease(const std::string& key)override;
 	};
 }

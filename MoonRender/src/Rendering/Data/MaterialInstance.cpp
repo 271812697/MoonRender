@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <format>
@@ -13,11 +14,13 @@
 
 #include <tracy/Tracy.hpp>
 #include <Rendering/Data/Material.h>
+#include <Rendering/Data/EngineDescriptorSets.h>
 #include <Rendering/Data/MaterialBuilder.h>
 #include <Rendering/HAL/UniformBuffer.h>
 #include <Rendering/HAL/TextureHandle.h>
 #include <Rendering/Data/MaterialParser.h>
 #include <Rendering/Resources/Texture.h>
+#include <Rendering/Backend/BackendResources.h>
 
 #include <Tools/Utils/OptRef.h>
 #include "Core/Global/ServiceLocator.h"
@@ -25,21 +28,6 @@
 
 namespace
 {
-	template<typename T>
-	inline void HashCombine(std::size_t& seed, const T& value)
-	{
-		// A large odd constant derived from the golden ratio (64-bit variant).
-		// It helps distribute bits more uniformly and reduce clustering/collisions.
-		constexpr std::size_t kHashCombineConstant = 0x9e3779b97f4a7c15ULL;
-
-		seed ^= std::hash<T>{}(value)
-			+kHashCombineConstant
-			// Bit mixing. They spread entropy from earlier values so order matters
-			// and nearby hashes don't collapse into similar outputs.
-			+ (seed << 6)
-			+ (seed >> 2);
-	}
-
 	Rendering::Data::MaterialPropertyType UniformToPropertyValue(const std::any& p_uniformValue)
 	{
 		using namespace Maths;
@@ -257,21 +245,6 @@ namespace
 		}, p_value);
 	}
 
-	void BindTexture(
-		Rendering::HAL::ShaderProgram& p_shader,
-		const std::string& p_uniformName,
-		Rendering::HAL::TextureHandle* p_texture,
-		Rendering::HAL::TextureHandle* p_fallback,
-		int& p_textureSlot
-	)
-	{
-		if (auto target = p_texture ? p_texture : p_fallback)
-		{
-			target->Bind(p_textureSlot);
-			p_shader.SetUniform<int>(p_uniformName, p_textureSlot++);
-		}
-	}
-
 	/** Writes a typed value at a std140 offset. Returns false for a type/value mismatch. */
 	bool WriteBlockValue(
 		std::vector<uint8_t>& p_data,
@@ -470,6 +443,9 @@ Rendering::Data::MaterialInstance::MaterialInstance(Material& p_definition, bool
 	}
 	else if (m_material != nullptr)
 	{
+		// A plain instance inherits the material default's feature selection; a per-shape
+		// instance must see the same feature set as the .mat it was created from.
+		m_features = m_material->Features();
 		ResetProperties();
 	}
 }
@@ -538,34 +514,6 @@ Rendering::Data::MaterialInstance::~MaterialInstance()
 }
 
 
-Rendering::Data::MaterialInstance::LooseUniform*
-Rendering::Data::MaterialInstance::FindLooseUniform(const std::string& p_name)
-{
-	for (LooseUniform& uniform : m_looseUniforms)
-	{
-		if (uniform.name == p_name)
-		{
-			return &uniform;
-		}
-	}
-	return nullptr;
-}
-
-
-const Rendering::Data::MaterialInstance::LooseUniform*
-Rendering::Data::MaterialInstance::FindLooseUniform(const std::string& p_name) const
-{
-	for (const LooseUniform& uniform : m_looseUniforms)
-	{
-		if (uniform.name == p_name)
-		{
-			return &uniform;
-		}
-	}
-	return nullptr;
-}
-
-
 std::map<std::string, Rendering::Data::MaterialProperty>
 Rendering::Data::MaterialInstance::SnapshotProperties() const
 {
@@ -578,6 +526,10 @@ Rendering::Data::MaterialInstance::SnapshotProperties() const
 
 	for (const MaterialDefinition::Parameter& parameter : definition->Parameters())
 	{
+		if (parameter.isSampler && EngineDescriptorSets::IsGlobalSampler(parameter.name))
+		{
+			continue;
+		}
 		if (parameter.count > 1 && !parameter.isSampler)
 		{
 			for (uint32_t i = 0; i < parameter.count; ++i)
@@ -593,11 +545,6 @@ Rendering::Data::MaterialInstance::SnapshotProperties() const
 		{
 			snapshot.emplace(parameter.name, std::move(*value));
 		}
-	}
-
-	for (const LooseUniform& uniform : m_looseUniforms)
-	{
-		snapshot.emplace(uniform.name, MaterialProperty{ uniform.value });
 	}
 
 	return snapshot;
@@ -643,10 +590,6 @@ Rendering::Data::MaterialInstance::GetProperty(const std::string p_key) const
 		}
 	}
 
-	if (const LooseUniform* uniform = FindLooseUniform(p_key))
-	{
-		return MaterialProperty{ uniform->value };
-	}
 	return std::nullopt;
 }
 
@@ -660,134 +603,19 @@ const Rendering::Data::MaterialDefinition* Rendering::Data::MaterialInstance::De
 {
 	return m_material != nullptr ? m_material->Definition() : nullptr;
 }
-void Rendering::Data::MaterialInstance::UploadProperties(bool uploadStableProperties, Rendering::HAL::Texture* p_emptyTexture2D, Rendering::HAL::Texture* p_emptyTextureCube, Rendering::HAL::Texture* p_flatNormalTexture)
+void Rendering::Data::MaterialInstance::UploadProperties(Rendering::HAL::Texture* p_emptyTexture2D, Rendering::HAL::Texture* p_emptyTextureCube, Rendering::HAL::Texture* p_flatNormalTexture)
 {
 	ZoneScoped;
 
 	// Packaged shaders carry their parameters as one std140 block (the per-material descriptor):
 	// write the values by offset into it and bind it once, instead of resolving each name
-	// against the program's reflected uniforms.
+	// against the program's reflected uniforms. A material without a definition has nothing to
+	// upload: every value it can carry is a declared parameter of a package - the loose-uniform
+	// path for source-built shaders is gone (docs/RenderThreadPlan.md §8.73).
 	const MaterialDefinition* definition = Definition();
-	const bool hasDefinitionParameters = definition != nullptr && definition->HasParameterTable();
-	if (hasDefinitionParameters)
+	if (definition != nullptr && definition->HasParameterTable())
 	{
-		UploadParameterBlock(uploadStableProperties, p_emptyTexture2D, p_emptyTextureCube, p_flatNormalTexture);
-	}
-
-	/** The 1x1 texture a sampler gets when the material instance has none: the material's own
-	 * `fallback :` kind when the package declared one, the engine's defaults otherwise. */
-	const auto fallbackTexture = [definition, p_emptyTexture2D, p_emptyTextureCube, p_flatNormalTexture](
-		const std::string& p_name, bool p_isCube) -> Rendering::HAL::Texture*
-	{
-		if (definition != nullptr)
-		{
-			const MaterialDefinition::SamplerField* sampler = definition->FindSampler(p_name);
-			if (sampler != nullptr
-				&& sampler->fallback == static_cast<uint8_t>(Rendering::Data::MaterialParser::SamplerFallback::FlatNormal)
-				&& p_flatNormalTexture != nullptr)
-			{
-				return p_flatNormalTexture;
-			}
-		}
-		return p_isCube ? p_emptyTextureCube : p_emptyTexture2D;
-	};
-
-	// Properties the shader does not declare (an include's own uniforms, like PBR.glsl's
-	// u_ReceiveShadows) are not in the block: they still go through the per-name path below,
-	// while the declared ones were written by UploadParameterBlock.
-	const auto isDeclaredParameter = [definition](const std::string& p_name) {
-		uint32_t index = 0;
-		return definition != nullptr && definition->FindParameter(p_name, index) != nullptr;
-	};
-
-	using namespace Maths;
-	using enum Rendering::Settings::EUniformType;
-	auto& program = m_programInUse.value();
-
-	// Loose uniforms of a source-built shader; the program's reflected uniform locations decide
-	// how each typed value is uploaded. SetLooseUniform keeps one entry per name, so the vector
-	// is walked directly instead of rebuilding a map on every upload.
-	int textureSlot = 0;
-	for (LooseUniform& uniform : m_looseUniforms)
-	{
-		const std::string& name = uniform.name;
-		MaterialPropertyType& value = uniform.value;
-		if (!uploadStableProperties) continue;
-		if (hasDefinitionParameters && isDeclaredParameter(name)) continue;
-
-		const auto uniformData = program.GetUniformInfo(name);
-
-		// Skip this property if the current program isn't using its associated uniform
-		if (!uniformData)
-		{
-			continue;
-		}
-
-		auto uniformType = uniformData.value().type;
-
-		// Iterating over the properties to set them in the shader.
-		// This could have been cleaner with a visitor, but the performance impact
-		// is not worth it. This is a critical path in the rendering pipeline.
-
-		if (uniformType == BOOL)
-		{
-			program.SetUniform<int>(name, static_cast<int>(std::get<bool>(value)));
-		}
-		else if (uniformType == INT)
-		{
-			program.SetUniform<int>(name, std::get<int>(value));
-		}
-		else if (uniformType == FLOAT)
-		{
-			program.SetUniform<float>(name, std::get<float>(value));
-		}
-		else if (uniformType == FLOAT_VEC2)
-		{
-			program.SetUniform<FVector2>(name,std::get<FVector2>(value));
-		}
-		else if (uniformType == FLOAT_VEC3)
-		{
-			program.SetUniform<FVector3>(name, std::get<FVector3>(value));
-		}
-		else if (uniformType == FLOAT_VEC4)
-		{
-			program.SetUniform<FVector4>(name, std::get<FVector4>(value));
-		}
-		else if (uniformType == FLOAT_MAT3)
-		{
-			// No transpose here: SetUniform<FMatrix4/3> uploads with the
-			// "transpose" flag set, i.e. it already expects row-major data,
-			// which is exactly how Maths::FMatrix4 stores it. Transposing again
-			// would flip every matrix property.
-			program.SetUniform<FMatrix3>(name, std::get<FMatrix3>(value));
-		}
-		else if (uniformType == FLOAT_MAT4)
-		{
-			program.SetUniform<FMatrix4>(name, std::get<FMatrix4>(value));
-		}
-		else if (
-			uniformType == SAMPLER_2D || uniformType == SAMPLER_CUBE
-			|| uniformType == SAMPLER_BUFFER || uniformType == UINTSAMPLER_BUFFER
-			|| uniformType == SAMPLER_2DARRAY || uniformType == INTSAMPLER_BUFFER
-			)
-		{
-			HAL::TextureHandle* handle = nullptr;
-			if (auto textureHandle = std::get_if<HAL::TextureHandle*>(&value))
-			{
-				handle = *textureHandle;
-			}
-			else if (auto texture = std::get_if<Resources::Texture*>(&value))
-			{
-				if (*texture != nullptr)
-				{
-					handle = &(*texture)->GetTexture();
-				}
-			}
-			BindTexture(program, name, handle,
-				fallbackTexture(name, uniformType != SAMPLER_2D && uniformType != SAMPLER_BUFFER),
-				textureSlot);
-		}
-
+		UploadParameterBlock(p_emptyTexture2D, p_emptyTextureCube, p_flatNormalTexture);
 	}
 }
 
@@ -914,7 +742,6 @@ void Rendering::Data::MaterialInstance::ResetBlockToDefinition()
 
 
 void Rendering::Data::MaterialInstance::UploadParameterBlock(
-	bool p_uploadStableProperties,
 	Rendering::HAL::Texture* p_emptyTexture2D,
 	Rendering::HAL::Texture* p_emptyTextureCube,
 	Rendering::HAL::Texture* p_flatNormalTexture)
@@ -947,9 +774,18 @@ void Rendering::Data::MaterialInstance::UploadParameterBlock(
 	// across uploads; rewriting them here on every upload was redundant.
 	for (const MaterialDefinition::SamplerField& field : definition->SamplerFields())
 	{
+		// Late binding: a sampler that was given an asset is resolved to its backend object *here*,
+		// at upload time, through the front-end handle - not to whatever pointer happened to exist
+		// when the property was set. That is the prerequisite for the backend object being owned by
+		// the side that owns the context (see docs/RenderThreadPlan.md §7).
+		if (Rendering::Resources::Texture* asset = m_descriptorSet.GetTextureAsset(field.binding))
+		{
+			m_descriptorSet.SetTexture(field.binding, &asset->GetTexture(), asset);
+			continue;
+		}
+
 		Rendering::HAL::TextureHandle* handle = m_descriptorSet.GetTexture(field.binding);
-		Rendering::Resources::Texture* asset = m_descriptorSet.GetTextureAsset(field.binding);
-		if (handle != nullptr || asset != nullptr)
+		if (handle != nullptr)
 		{
 			continue;
 		}
@@ -997,85 +833,11 @@ void Rendering::Data::MaterialInstance::UploadParameterBlock(
 }
 
 
-void Rendering::Data::MaterialInstance::BindGlobalTexture(const std::string& p_name, Rendering::HAL::Texture* p_texture)
-{
-	// A view-owned texture (the DFG LUT, the environment cubes) is allocated by an earlier
-	// pass; on the first frames it may not exist yet, and binding an unallocated name is a GL
-	// error rather than a no-op.
-	if (Definition() == nullptr || p_texture == nullptr || !p_texture->IsValid())
-	{
-		return;
-	}
-
-	// On the first draw the set may not exist yet; initialize it before writing the view
-	// texture, otherwise EnsureDescriptorSet would reset the layout and drop it.
-	if (m_descriptorSet.Layout() != &Definition()->Layout())
-	{
-		EnsureDescriptorSet();
-	}
-
-	if (const MaterialDefinition::SamplerField* field = Definition()->FindSampler(p_name))
-	{
-		// The same view texture is bound every draw; only touch the set when the pointer
-		// actually changed or the slot was rebuilt.
-		if (m_descriptorSet.GetTexture(field->binding) == p_texture)
-		{
-			return;
-		}
-
-		m_descriptorSet.SetTexture(field->binding, p_texture);
-
-		// The descriptor set is bound once by BindParameterBlock after the per-view textures
-		// have been filled; binding it here for every global texture meant 3 extra full-set
-		// binds per draw.
-
-		// MOON_DEBUG_SAMPLERS also reports the per-draw bindings: the ones in UploadParameterBlock
-		// happen once (and may have run before the sky pass baked the environment), while these
-		// happen on every draw and are what the shader really samples.
-		if (std::getenv("MOON_DEBUG_SAMPLERS") != nullptr)
-		{
-			static std::set<std::string> reported;
-			const std::string materialPath = MaterialOf() != nullptr ? MaterialOf()->path : std::string("?");
-			const std::string key = materialPath + "|draw|" + field->name;
-			if (reported.insert(key).second)
-			{
-				std::cout << "[Sampler] " << materialPath << " " << field->name << " unit "
-					<< field->binding << " <- view texture (per draw)" << std::endl;
-			}
-		}
-	}
-}
-
-
-void Rendering::Data::MaterialInstance::SetLooseUniform(
-	const std::string& p_name,
-	const MaterialPropertyType& p_value)
-{
-	if (LooseUniform* uniform = FindLooseUniform(p_name))
-	{
-		uniform->value = p_value;
-	}
-	else
-	{
-		m_looseUniforms.push_back(LooseUniform{ p_name, p_value });
-	}
-}
-
-
 bool Rendering::Data::MaterialInstance::ResetPropertyToDefault(const std::string& p_name)
 {
 	const MaterialDefinition* definition = Definition();
 	if (definition == nullptr)
 	{
-		if (FindLooseUniform(p_name) != nullptr)
-		{
-			std::erase_if(m_looseUniforms, [&p_name](const LooseUniform& p_uniform) {
-				return p_uniform.name == p_name;
-			});
-			++m_revision;
-			InvalidatePropertySignature();
-			return true;
-		}
 		return false;
 	}
 
@@ -1083,15 +845,6 @@ bool Rendering::Data::MaterialInstance::ResetPropertyToDefault(const std::string
 	const MaterialDefinition::Parameter* parameter = definition->FindParameter(p_name, index);
 	if (parameter == nullptr)
 	{
-		if (FindLooseUniform(p_name) != nullptr)
-		{
-			std::erase_if(m_looseUniforms, [&p_name](const LooseUniform& p_uniform) {
-				return p_uniform.name == p_name;
-			});
-			++m_revision;
-			InvalidatePropertySignature();
-			return true;
-		}
 		return false;
 	}
 
@@ -1107,7 +860,6 @@ bool Rendering::Data::MaterialInstance::ResetPropertyToDefault(const std::string
 		}
 		m_descriptorSet.SetTexture(parameter->binding, handle, asset);
 		++m_revision;
-		InvalidatePropertySignature();
 		return true;
 	}
 
@@ -1129,7 +881,6 @@ bool Rendering::Data::MaterialInstance::ResetPropertyToDefault(const std::string
 		{
 			std::memcpy(block.data() + offset, inherited.data() + offset, size);
 			++m_revision;
-			InvalidatePropertySignature();
 			return true;
 		}
 	}
@@ -1141,15 +892,12 @@ bool Rendering::Data::MaterialInstance::ResetPropertyToDefault(const std::string
 	}
 	WriteBlockValue(block, parameter->type, value, offset);
 	++m_revision;
-	InvalidatePropertySignature();
 	return true;
 }
 
 
 void Rendering::Data::MaterialInstance::ResetProperties()
 {
-	InvalidatePropertySignature();
-	m_looseUniforms.clear();
 	ReleaseDescriptorSet();
 	EnsureDescriptorSet();
 
@@ -1181,35 +929,40 @@ void Rendering::Data::MaterialInstance::UpdateProperties()
 }
 
 
-Rendering::Data::MaterialSignatureSet Rendering::Data::MaterialInstance::Bind(
-	HAL::Texture* p_emptyTexture,
-	HAL::Texture* p_emptyTextureCube,
+void Rendering::Data::MaterialInstance::Bind(
 	std::optional<const std::string_view> p_pass,
-	Tools::Utils::OptRef<const Data::FeatureSet> p_featureSetOverride,
-	const std::optional<MaterialSignatureSet>& p_previousMaterialSignature
+	Tools::Utils::OptRef<const Data::FeatureSet> p_featureSetOverride
 )
 {
 	ZoneScoped;
 	Material* material = MaterialOf();
 	if (material == nullptr)
 	{
-		return {};
+		return;
 	}
+	if (std::getenv("MOON_UNIFORMS") != nullptr)
+	{
+		// Which variant this bind asks for: the feature set decides the shader, and a set that
+		// differs between runs explains "same draw state, different pixels" (docs §8.65).
+		static int binds = 0;
+		const auto& features = p_featureSetOverride.value_or(FeaturesOf());
+		if (binds < 400 && !features.empty())
+		{
+			++binds;
+			std::fprintf(stderr, "[mi] pass=%s features=",
+				p_pass.has_value() ? std::string(p_pass.value()).c_str() : "<any>");
+			for (const auto& feature : features) { std::fprintf(stderr, "%s;", feature.c_str()); }
+			std::fprintf(stderr, "\n");
+			std::fflush(stderr);
+		}
+	}
+
 	auto& program = material->GetVariant(
 		p_pass,
 		p_featureSetOverride.value_or(FeaturesOf())
 	);
 
-	const auto signature = CalculateSignature(
-		program,
-		p_emptyTexture,
-		p_emptyTextureCube
-	);
-
-	if (!p_previousMaterialSignature || signature.bindSignature != p_previousMaterialSignature->bindSignature)
-	{
-		program.Bind();
-	}
+	program.Bind();
 
 	m_programInUse = program;
 
@@ -1218,8 +971,6 @@ Rendering::Data::MaterialSignatureSet Rendering::Data::MaterialInstance::Bind(
 	// Loose uniforms are uploaded by UploadProperties(), which the renderer calls after this
 	// method selected and bound the program.
 	BindParameterBlock(program);
-
-	return signature;
 }
 
 
@@ -1238,8 +989,7 @@ bool Rendering::Data::MaterialInstance::HasProperty(const std::string& p_name) c
 {
 	const MaterialDefinition* definition = Definition();
 	uint32_t index = 0;
-	return (definition != nullptr && definition->FindParameter(p_name, index) != nullptr)
-		|| FindLooseUniform(p_name) != nullptr;
+	return definition != nullptr && definition->FindParameter(p_name, index) != nullptr;
 }
 
 
@@ -1252,6 +1002,11 @@ void Rendering::Data::MaterialInstance::SetProperty(const std::string p_name, co
 
 	if (parameter != nullptr)
 	{
+		if (parameter->isSampler && EngineDescriptorSets::IsGlobalSampler(parameter->name))
+		{
+			// View-owned IBL textures are bound through the per-view set, not by materials.
+			return;
+		}
 		EnsureDescriptorSet();
 		if (parameter->isSampler)
 		{
@@ -1284,13 +1039,33 @@ void Rendering::Data::MaterialInstance::SetProperty(const std::string p_name, co
 	}
 	else
 	{
-		// A shader built without a package has no block slot for this uniform; keep the loose
-		// value and upload it through the program's uniform location.
-		SetLooseUniform(p_name, p_value);
+		// Not a parameter of the material's package: there is nowhere for the value to go. A
+		// declared parameter lives in the per-material descriptor set; an engine view sampler
+		// (_BRDFLut, _IrradianceCube, _PrefilterCube) is bound by the view's own set. The loose
+		// path that used to upload these by name - a per-instance table plus glUniform on the
+		// recording thread - is gone (docs/RenderThreadPlan.md §8.73). Reported once per material
+		// and name, so a source-built shader that still sets its uniforms this way shows up here
+		// instead of silently rendering nothing.
+		if (std::holds_alternative<Rendering::HAL::TextureHandle*>(p_value)
+			|| std::holds_alternative<Rendering::Resources::Texture*>(p_value))
+		{
+			if (Rendering::Data::EngineDescriptorSets::IsGlobalSampler(p_name))
+			{
+				return;
+			}
+		}
+		static std::set<std::string> reported;
+		const std::string materialPath = MaterialOf() != nullptr ? MaterialOf()->path : std::string("?");
+		if (reported.insert(materialPath + "|" + p_name).second)
+		{
+			std::fprintf(stderr,
+				"[material] %s: '%s' is not a parameter of the material: the value is ignored\n",
+				materialPath.c_str(), p_name.c_str());
+			std::fflush(stderr);
+		}
 	}
 
 	++m_revision;
-	++m_stablePropertySignatureVersion;
 }
 
 
@@ -1594,6 +1369,7 @@ void Rendering::Data::MaterialInstance::CopyStateFrom(const MaterialInstance& p_
 	m_gpuInstances = p_other.m_gpuInstances;
 	m_drawOrder = p_other.m_drawOrder;
 	m_lineWidth = p_other.m_lineWidth;
+	m_features = p_other.m_features;
 }
 
 
@@ -1672,28 +1448,4 @@ void Rendering::Data::MaterialInstance::SetTransparent(bool transparent)
 	}
 }
 
-
-void Rendering::Data::MaterialInstance::InvalidatePropertySignature()
-{
-	++m_stablePropertySignatureVersion;
-}
-
-
-Rendering::Data::MaterialSignatureSet Rendering::Data::MaterialInstance::CalculateSignature(Rendering::HAL::ShaderProgram& p_selectedProgram, Rendering::HAL::Texture* p_emptyTexture2D, Rendering::HAL::Texture* p_emptyTextureCube)
-{
-	ZoneScoped;
-
-	MaterialSignatureSet signature;
-
-	// Bind
-	HashCombine(signature.bindSignature, this);
-	HashCombine(signature.bindSignature, &p_selectedProgram);
-
-	// Stable Properties
-	signature.stablePropertySignature = signature.bindSignature;
-	HashCombine(signature.stablePropertySignature, m_stablePropertySignatureVersion);
-	HashCombine(signature.stablePropertySignature, p_emptyTexture2D);
-	HashCombine(signature.stablePropertySignature, p_emptyTextureCube);
-
-	return signature;
-}
+

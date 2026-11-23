@@ -4,6 +4,7 @@
 #include <Core/Rendering/EngineDrawableDescriptor.h>
 #include <Core/Rendering/EngineUBO.h>
 #include <Rendering/Core/CompositeRenderer.h>
+#include <Rendering/Data/EngineDescriptorSets.h>
 
 namespace Core::Rendering
 {
@@ -49,6 +50,12 @@ Core::Rendering::EngineBufferRenderFeature::EngineBufferRenderFeature(
 		::Rendering::Settings::kEngineUBOBinding);
 	m_perViewLayout.Add("ReflectionUBO", ::Rendering::Data::DescriptorSetLayout::Kind::UniformBuffer,
 		::Rendering::Settings::kReflectionUBOBinding);
+	m_perViewLayout.Add("_BRDFLut", ::Rendering::Data::DescriptorSetLayout::Kind::Texture,
+		::Rendering::Data::EngineDescriptorSets::kBrdfLutBinding);
+	m_perViewLayout.Add("_IrradianceCube", ::Rendering::Data::DescriptorSetLayout::Kind::Texture,
+		::Rendering::Data::EngineDescriptorSets::kIrradianceCubeBinding);
+	m_perViewLayout.Add("_PrefilterCube", ::Rendering::Data::DescriptorSetLayout::Kind::Texture,
+		::Rendering::Data::EngineDescriptorSets::kPrefilterCubeBinding);
 	m_perRenderableLayout.Add("ObjectUBO",
 		::Rendering::Data::DescriptorSetLayout::Kind::UniformBuffer,
 		::Rendering::Settings::kObjectUBOBinding);

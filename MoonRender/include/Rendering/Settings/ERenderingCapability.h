@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <cstdint>
 
 namespace Rendering::Settings
@@ -18,6 +18,12 @@ namespace Rendering::Settings
 		SAMPLE_COVERAGE,			// The fragment's coverage is ANDed with the temporary coverage value. If GL_SAMPLE_COVERAGE_INVERT is set to GL_TRUE, invert the coverage value.
 		SCISSOR_TEST,				// Discard fragments that are outside the scissor rectangle.
 		STENCIL_TEST,				// Do stencil testing and update the stencil buffer.
-		MULTISAMPLE					// Use multiple fragment samples in computing the final color of a pixel.	
+		MULTISAMPLE,				// Use multiple fragment samples in computing the final color of a pixel.	
+		/** gl_PointSize from the shader: the overlay's point sprites (Im3D's points and its text
+		 * runs) size themselves per vertex. */
+		PROGRAM_POINT_SIZE,
+		/** The pre-core switch for the same thing: a compatibility profile needs it on as well, and
+		 * a core profile rejects it (the overlay keeps it for the context the editor runs on). */
+		POINT_SPRITE
 	};
 }

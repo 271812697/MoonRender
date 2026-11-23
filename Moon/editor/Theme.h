@@ -19,6 +19,10 @@ namespace MOON
 	{
 		QColor window;
 		QColor surface;
+		/** Dock/panel headers: surface lifted (dark) or dipped (light) by about a third, which
+		 * is the step Inviwo's title bars use. Kept as a token because the step has to follow
+		 * the scheme, not a fixed grey. */
+		QColor header;
 		QColor well;
 		QColor border;
 		QColor text;

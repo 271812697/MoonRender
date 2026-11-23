@@ -10,6 +10,11 @@ file(GLOB_RECURSE Moon_HEAD CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/*.h ${
 file(GLOB_RECURSE Moon_SOURCE CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/*.cpp)
 source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}" FILES ${Moon_HEAD} ${Moon_SOURCE})
 add_executable(${TARGET_NAME} ${Moon_HEAD} ${Moon_SOURCE} ${RESOURCES})
+# The executable icon (Moon.rc -> resource/icons/app/moon.ico): the Windows shell draws
+# Explorer, the taskbar and jump lists from the file resource, not from setWindowIcon().
+if(MSVC)
+  target_sources(${TARGET_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/Moon.rc)
+endif()
 set_target_properties(${TARGET_NAME}
   PROPERTIES
     ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib

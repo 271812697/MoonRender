@@ -43,8 +43,8 @@ namespace MOON {
 			mIconMaps["TopoVertex"] = QIcon(":/widgets/icons/Geomerty.png");
 			mIconMaps["PointLight"] = QIcon(":/widgets/icons/PointLight.png");
 			mIconMaps["DirectionalLight"] = QIcon(":/widgets/icons/DirectionalLight.png");
-			mIconMaps["SkyBox"] = QIcon(":/widgets/icons/awesomeface.png");
-			mIconMaps["PostProcessStack"] = QIcon(":/widgets/icons/awesomeface.png");
+			mIconMaps["SkyBox"] = QIcon(":/widgets/icons/SkyBox.svg");
+			mIconMaps["PostProcessStack"] = QIcon(":/widgets/icons/PostProcessStack.svg");
 			mIconMaps[""]= QIcon(":/widgets/icons/Model.png");
 			mIconMaps["Sketcher"] = QIcon(":/widgets/icons/Sketcher_NewSketch.svg");
 

@@ -14,7 +14,7 @@
 #include "feature/MoonDocument.h"
 #include "feature/SketcherFeature.h"
 #include "editor/UI/TaskPanel/TaskViewWidget.h"
-#include "editor/View/sceneview/viewerwidget.h"
+#include "editor/UI/TreeViewPanel/treesync.h"
 #include "core/SelectionManager.h"
 #include "core/JobSystem.h"
 #include "core/log.h"
@@ -426,7 +426,7 @@ namespace MOON {
 		}
 		if (chosen == pasteBody && !g_copiedBody.empty()) {
 			if (MoonDocument::pasteBody(g_copiedBody) != nullptr) {
-				GetViewerWidget.refreshTreeView();
+				GetTreeViewSync.Refresh();
 			}
 			return;
 		}
@@ -493,7 +493,7 @@ namespace MOON {
 		// it goes on its own. What hangs under it goes with it: the scene removes the
 		// actors below a removed one.
 		auto scene = GetService(Editor::Panels::SceneView).GetScene();
-		GetViewerWidget.removeActorFromTreeView(p_actor);
+		GetTreeViewSync.Remove(p_actor);
 		if (auto* topo = dynamic_cast<TopoActor*>(p_actor)) {
 			topo->RemoveFromScene();
 		}
@@ -553,7 +553,7 @@ namespace MOON {
 		}
 		for (Feature* feature : victims) {
 			feature->RemoveFromScene();
-			GetViewerWidget.removeActorFromTreeView(feature);
+			GetTreeViewSync.Remove(feature);
 		}
 		// From the top of the chain down, so a feature never outlives the one it was
 		// built on.
@@ -570,7 +570,7 @@ namespace MOON {
 				const bool visible = feature == tip;
 				if (feature->IsActive() != visible) {
 					feature->SetActive(visible);
-					GetViewerWidget.modifyActorInTreeView(feature);
+					GetTreeViewSync.Update(feature);
 				}
 			}
 		}

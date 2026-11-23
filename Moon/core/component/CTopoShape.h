@@ -47,6 +47,7 @@ namespace Core::ECS::Components
 		 * exists. */
 		void ApplyColor();
 		virtual void OnUpdate(float p_deltaTime) override;
+		virtual void OnStart() override;
 		void updateChildBuffer();
 		std::vector<std::pair<int, int>>GetChildMeshInfo();
 		void setChildsMeshTransParent(const std::vector<int>& childs,bool updateBuffer=true);

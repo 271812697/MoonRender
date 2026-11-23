@@ -69,14 +69,10 @@ namespace MOON {
 	{
 		auto sketchObj = SketcherObjManager::instance().GetCurrentActiveSketcherObj();
 		if (sketchObj) {
-			Maths::FMatrix4 mat = m_sceneView->GetCamera()->GetViewPortMatrix();
-			Base::Matrix4D pla(
-				mat.data[0], mat.data[1], mat.data[2], mat.data[3],
-				mat.data[4], mat.data[5], mat.data[6], mat.data[7],
-				mat.data[8], mat.data[9], mat.data[10], mat.data[11],
-				mat.data[12], mat.data[13], mat.data[14], mat.data[15]
-			);
-			int GeoId = SketchPicking::pickGeoIndex(*sketchObj, onSketchPos, pla);
+			// The picker projects the sketch through the very matrix the camera renders with, so
+			// a perspective view picks where the curves actually are.
+			const Maths::FMatrix4 mat = m_sceneView->GetCamera()->GetViewPortMatrix();
+			int GeoId = SketchPicking::pickGeoIndex(*sketchObj, onSketchPos, mat);
 		
 			if (GeoId != -1) {
 				CORE_DEBUG("DrawSketchHandlerTrimming::onMouseMove PickGeo")

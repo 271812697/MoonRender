@@ -480,7 +480,7 @@ Interactor->GetControlKey() / GetShiftKey() / GetAltKey();
 
 1. **按下位置是精确的**：Qt 事件进入 `ReceiveEvent()` 时先 `SetEventInformationFlipY()` 再 `InvokeEvent()`，所以 `onLeftMousePressed()` 里读到的是按下那一刻的光标，不存在"用上一帧光标"的问题；
 2. **hover、press、drag 共用一份数据**，不会出现两个来源不一致；
-3. **翻转和布局用同一个 `Size`**（`ViewerWidget::resizeEvent` 同时更新 `SceneView` 和交互器），不会出现"光标按交互器尺寸翻、布局按 SceneView 尺寸算"的错配。
+3. **翻转和布局用同一个 `Size`**（`ViewportFrame::SetSurfaceSize` 同时更新 `SceneView` 和交互器），不会出现"光标按交互器尺寸翻、布局按 SceneView 尺寸算"的错配。
 
 `Enter` / `Leave` 事件用来维护 `CursorInsideViewport`：鼠标移出视口后控件必须退出 hover，否则光标停在最后位置、按钮一直亮着。
 

@@ -24,7 +24,7 @@
 | **SSAO** | `GbufferPass` 的 SSAO 变体与材质面板开关；改为深度感知采样、7×7 模糊；缓解边缘变钝；当前 SSAO / Reflect feature 暂时整体禁用（commit `2cb9fc7c`） | `GbufferPass.*`、`ssao.shader`、`ssaoblur.shader` |
 | **路径追踪** | 场景 mesh → 顶点/索引 TBO + BVH TBO，`PathTraceRenderPass` 做光追；新增低分辨率变体 `PathTraceLowRes.shader`；正交/透视切换时重建累积与变体；每个 solid 一种配色（修正 domainId → solidId 的映射） | `renderer/PathTraceRenderPass.*`、`PathTrace/*.shader` |
 | **拓扑与网格可视化** | `TopoShape` 离散化时按拓扑结构建 Actor（Solid/Shell/Face/Edge），并加 `AllFaces` / `AllEdges` 锚点；支持从祖先节点整体显隐、边隐藏、相机 fit 与拾取 | `core/component/CTopoShape.*`、`TopoShapeActor.*`、`TreeViewPanel` |
-| **反射平面 / 其它** | `GridRenderPass` 固定尺寸反射平面；编辑器叠加层（FPS、帧吞吐、Gbuffer 调试视图） | `renderer/GridRenderPass.*`、`viewerwidget.cpp` |
+| **反射平面 / 其它** | `GridRenderPass` 固定尺寸反射平面；编辑器叠加层（FPS、帧吞吐、Gbuffer 调试视图） | `renderer/GridRenderPass.*`、`viewportoverlay.cpp` |
 | **GPU id 拾取** | `PickingRenderPass` 把 actor id 编码进颜色缓冲：`(r,g,b) = actorID`、`a = 255`；gizmo 方向用 `(255,255,252..254)`，gizmo 多边形选择用 `a = 254`；线和面共面时用多边形偏移 + `GeomertySurfacePick.shader` 保证**线的 id 优先于面**；悬停 / 选中 / gizmo 拖拽都基于这张 id 缓冲（性能优化见 §1.2.4） | `renderer/PickingRenderPass.*`、`renderer/SceneView.cpp` |
 
 ---
@@ -276,6 +276,48 @@ pick pass 里：`SetScissor(光标 ±24px)` → `pso.scissorTest = true` → sci
 ---
 
 ## 3. 文档与工程
+
+### 3.1 ViewerWidget 解耦（窗口层 / 帧编排分离）
+
+`viewerwidget.cpp` 曾是 826 行的「上帝类」：GL 上下文、编辑器 Context 生命周期、每帧编排、文档打开、
+场景树同步、取景状态机、调试叠加层、Qt 输入翻译、帧粘贴全在一个类里。现按职责拆开，公共接口从
+`ViewerWidget` 迁到各自的服务：
+
+| 新单元 | 职责 | 取代了 |
+|---|---|---|
+| `editor/View/sceneview/viewerwidget.*` | 纯 Qt 外壳：尺寸、事件转发、`FramePaster` 粘贴（约 170 行） | 旧 `ViewerWidget` 全部 |
+| `editor/View/sceneview/viewportframe.*` | 一帧的编排（模块上下文里）：读文档、`Update`、取景、树同步、`Render`、OCCT 事件/尺寸 | `paintGL` 主体、`event`/`resizeEvent` 内部实现 |
+| `editor/View/sceneview/viewportoverlay.*` | G-buffer 调试视图、FPS/HZB 统计、`MOON_CLIP_DEMO` 探针 | `debugImgui` / `drawFpsOverlay` / `applyClipDemo` |
+| `editor/View/sceneview/qtinputtranslator.*` | Qt 事件 → `InputEvent` 翻译（自由函数） | `ViewerWindowInternal::TranslateQtEvent` |
+| `editor/DocumentSession.*` | 打开请求、当前文档路径、`.moon` 与解析分流、`documentOpened` | `onReadFile`/`getDocumentPath`/`clearDocumentPath` |
+| `editor/UI/TreeViewPanel/treesync.*` | 场景树增删改队列 + 每帧 `Flush`（`GetTreeViewSync`） | `addActorToTreeView` 等三个队列 |
+| `renderer/RenderModuleHost.*` | **单例**：模块 GL 上下文 + `Editor::Core::Context` + ImGui 初始化（不再持有 `SceneView`） | `CreateRenderContext`/`initializeEditorContext` |
+| `renderer/SceneView`（由 `ViewportFrame` 持有） | 视口自己拥有它的 `SceneView`，在模块上下文里创建/销毁；新增 `RequestFitWhenReady` | `initializeView`、取景状态机 |
+
+分工的边界：全编辑器只有一个渲染模块（上下文 + Context），`RenderModuleHost` 是它的单例；
+`SceneView` 属于**某个视口**，由 `ViewportFrame` 持有并在模块上下文里创建，所以视图的
+render target 归视口，资源管理器归模块。
+
+顺带修掉的问题：
+
+- `parser` 从未创建，非 `.moon` 文件是在空指针上调用 `ParseScene::ParseFile`（UB）→ 改为自由函数
+  `OpenSceneFile`，`ParseScene` 这个只有两个空 slot 的 QObject 一并删除；
+- 析构顺序：先删 `Editor::Core::Context` 再删 `SceneView`（view 持有 sceneManager 引用，use-after-free）→
+  改为先删 view；且销毁时**先 makeCurrent**，GL 对象不再在无上下文状态被删除；
+- `SceneView` 挂在 **static 的** `Actor::DestroyedEvent` 上、捕获 `this` 却从不摘除：视图先于场景销毁时，
+  场景析构每个 actor 都会调用到已释放的视图（`m_highlightedActor.GetID()` 读 `0xFEEEFEEE`，约 1/3
+  概率在退出时 AV）→ 记下 `ListenerID`，`~SceneView` 里摘除；
+- `m_pasteFramebuffer` 从不释放、粘贴逻辑是 `FramePaster::Paste` 的逐行复制 → 改用 `FramePaster`；
+- `leaveEvent` 为空导致鼠标移出视口后 hover 高亮残留 → `ViewportFrame::ClearHover`；
+- `clearDocumentPath()` 清路径却没清待读请求，会拿空路径去读 → `DocumentSession::Clear` 一并取消；
+- 6 个空事件覆盖（`mousePressEvent` 等）删除，输入只走 `event()`；
+- `ServiceLocator` 新增 `Remove<T>()`，`ViewerWidget`/`SceneView` 销毁时撤销自身注册。
+
+验证：`cmake --build Build --target Moon --config Release -- /nologo /m:1` 通过；
+`MOON_SHOT` 无头截图对 `SketchExample/3.moon`（特征链）和 `material_sphere.obj`（解析路径）与重构前
+**逐像素一致**；重构后连跑 8 次退出全绿（修复前 6 次里崩 2 次）。
+
+---
 
 - `docs/` 下按主题维护架构文档（见 README「架构文档」索引），插图统一放在 `docs/images/*.svg`；
 - README 补齐功能清单、架构文档链接、构建说明与截图标注；

@@ -50,9 +50,25 @@ namespace Rendering::Entities
 		Rendering::Settings::EProjectionMode GetProjectionMode() const;
 		void SetPosition(const Maths::FVector3& p_position);
 		void SetRotation(const Maths::FQuaternion& p_rotation);
+		/** Sets the field of view the way the view control does: 0 degrees is the orthographic end
+		 * of it, and the framing - how large a world height at p_focus appears - is held constant by
+		 * rolling the camera along its own view axis (d * tan(fov / 2) stays put). That is the whole
+		 * of "change the projection without changing the zoom", and it belongs here: the camera is
+		 * what owns the projection, the framing it is asked to keep, and the offset its own depth
+		 * range has to be corrected by afterwards.
+		 *
+		 * p_focus is the point the framing is measured at: the view's focus, normally the centre of
+		 * what is being looked at. */
+		void SetFovKeepingFraming(float p_value, const Maths::FVector3& p_focus);
 		void SetFov(float p_value);
 		void SetSize(float p_value);
-		void SetNear(float p_value);
+		void SetNear(float p_value);		/** How far the camera has been rolled back to hold the framing while the field of view
+		 * changes (see SetFovKeepingFraming). The depth range is worked out from the distance this
+		 * offset is removed from, and then shifted by it again, so that changing the field of
+		 * view moves the eye but not the near and far planes: their z is a property of the
+		 * frustum, not of how far back the eye had to go. */
+		void SetDollyOffset(float p_value);
+		float GetDollyOffset() const;
 		void SetFar(float p_value);
 		void SetClearColor(const Maths::FVector3& p_clearColor);
 		void SetClearColorBuffer(bool p_value);
@@ -79,7 +95,7 @@ namespace Rendering::Entities
 		float m_ratio;
 		int m_windowHeight;
 		int m_windowWidth;
-		float m_fov;
+		float m_fov;		float m_dollyOffset;
 		float m_size;
 		float m_near;
 		float m_far;

@@ -13,9 +13,6 @@ material {
     culling      : none,
     depthWrite   : false,
 
-    // The clip-plane variant the viewport draws; without it the pass does not clip.
-    features : [ CLIP_PLANE ],
-
     parameters : [
         { type : float,  name : u_PointSize },
         { type : float4, name : color }
@@ -33,14 +30,12 @@ vertex {
 
 fragment {
     void material(inout MaterialInputs m) {
-    #if defined(CLIP_PLANE)
         if (ubo_enableClip == 1) {
             float offsetw = dot(ubo_plane.xyz, fs_in.FragPos) + ubo_plane.w;
             if (offsetw > 0) {
                 discard;
             }
         }
-    #endif
 
         // A round dot, softly cut at the border: the square a point sprite is would
         // otherwise read as a tiny quad at the corner of the body.

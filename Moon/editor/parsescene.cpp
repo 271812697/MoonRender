@@ -1,6 +1,6 @@
-﻿#include "parsescene.h"
+#include "parsescene.h"
 #include "renderer/Context.h"
-#include "editor/View/sceneview/viewerwidget.h"
+#include "editor/UI/TreeViewPanel/treesync.h"
 #include "renderer/SceneView.h"
 #include "Core/Global/ServiceLocator.h"
 #include "Core/ECS/Components/CMaterialRenderer.h"
@@ -113,11 +113,11 @@ namespace MOON {
 		//pointLight.SetLinear(0.0);
 
 		pointLight5.SetQuadratic(0.0);
-		GetViewerWidget.addActorToTreeView(&ac1);
-		GetViewerWidget.addActorToTreeView(&ac2);
-		GetViewerWidget.addActorToTreeView(&ac3);
-		GetViewerWidget.addActorToTreeView(&ac4);
-		GetViewerWidget.addActorToTreeView(&ac5);
+		GetTreeViewSync.Add(&ac1);
+		GetTreeViewSync.Add(&ac2);
+		GetTreeViewSync.Add(&ac3);
+		GetTreeViewSync.Add(&ac4);
+		GetTreeViewSync.Add(&ac5);
 	}
 
 
@@ -125,7 +125,7 @@ namespace MOON {
 
 	bool LoadSceneFromFile(const std::string& filename, Core::SceneSystem::Scene* scene);
 	bool LoadGLTF(const std::string& filename, Core::SceneSystem::Scene* scene, bool binary);
-	void ParseScene::ParseFile(const std::string& path) {
+	void OpenSceneFile(const std::string& path) {
 		Core::SceneSystem::Scene* scene = GetService(Editor::Core::Context).sceneManager.GetCurrentScene();
 		if (scene == nullptr) {
 			return;
@@ -138,7 +138,7 @@ namespace MOON {
 			scene->FindActorByName("Directional Light")->GetComponent<Core::ECS::Components::CDirectionalLight>()->SetIntensity(1.0f);
 		    scene->FindActorByName("Directional Light")->GetComponent<Core::ECS::Components::CDirectionalLight>()->GetData().castShadows = true;
 			EnsureViewportLights(scene);
-			GetViewerWidget.addActorToTreeView(scene->FindActorByName("Post Process Stack"));
+			GetTreeViewSync.Add(scene->FindActorByName("Post Process Stack"));
 		}
 
 		std::string sceneName = path;
@@ -172,8 +172,6 @@ namespace MOON {
 					tempMat->SetBackfaceCulling(false);
 					tempMat->SetCastShadows(false);
 					tempMat->SetReceiveShadows(false);
-					// Enable the clip plane discard in Standard.shader.
-					tempMat->AddFeature("CLIP_PLANE");
 					// IBL: the three pieces Filament's standard model reads - irradiance
 					// (diffuse), prefiltered radiance (specular) and the DFG lookup table.
 					tempMat->SetProperty("_IrradianceCube", GetSceneView.GetRenderer().GetIrradianceCube());
@@ -192,7 +190,7 @@ namespace MOON {
 			
 		
 				auto& actor = scene->CreateActor(sceneName);
-				GetViewerWidget.addActorToTreeView(&actor);
+				GetTreeViewSync.Add(&actor);
 				actor.AddComponent<Core::ECS::Components::CModelRenderer>().SetModel(model);
 				//actor.GetComponent<Core::ECS::Components::CTransform>()->SetMatrix(xform.data);
 				auto& materilaRener = actor.AddComponent<Core::ECS::Components::CMaterialRenderer>();
@@ -202,19 +200,6 @@ namespace MOON {
 
 		}
 		//scene->BuildSceneBvh();
-	}
-
-	void ParseScene::updateTreeViewSceneRoot()
-	{
-
-	}
-
-	void ParseScene::updateTreeViewPathRoot()
-	{
-	}
-
-	ParseScene::ParseScene(QObject* parent) :QObject(parent)
-	{
 	}
 
 	//bool LoadSceneFromFile(const std::string& filename, Core::SceneSystem::Scene* scene)
@@ -774,7 +759,6 @@ namespace MOON {
 				Core::Resources::MaterialAsset* tempMat = new Core::Resources::MaterialAsset();
 				Core::Global::ServiceLocator::Get<Core::ResourceManagement::MaterialManager>().RegisterResource(materilaMap[i], tempMat);
 				tempMat->AddFeature("NORMAL_MAPPING");
-				tempMat->AddFeature("CLIP_PLANE");
 				tempMat->SetMaterial(Core::Global::ServiceLocator::Get<Editor::Core::Context>().shaderManager[":Shaders\\Standard.shader"]);
 				// Overrides after the shader: SetShader now takes the state from the material block.
 				tempMat->SetBackfaceCulling(false);
@@ -829,7 +813,7 @@ namespace MOON {
 			for (int rootIdx = 0; rootIdx < gltfScene.nodes.size(); rootIdx++)
 			{
 				auto& rootActor = scene->CreateActor();
-				GetViewerWidget.addActorToTreeView(&rootActor);
+				GetTreeViewSync.Add(&rootActor);
 				rootActor.SetName("Root " + std::to_string(rootIdx));
 				std::vector<int>indexStack;
 				//std::vector<Mat4>transformStack;
@@ -911,7 +895,7 @@ namespace MOON {
 							if (strcmp(name.c_str(), "") == 0)
 								name = "Mesh " + std::to_string(gltfNode.mesh) + " Prim" + prims[i].path;
 							auto& actor = scene->CreateActor();
-							GetViewerWidget.addActorToTreeView(&actor);
+							GetTreeViewSync.Add(&actor);
 							actor.SetParent(*scene->FindActorByID(parentActorIdx));
 							actor.SetName(name);
 
@@ -936,7 +920,7 @@ namespace MOON {
 						if (strcmp(name.c_str(), "") == 0)
 							name = "Mesh #";
 						auto& actor = scene->CreateActor();
-						GetViewerWidget.addActorToTreeView(&actor);
+						GetTreeViewSync.Add(&actor);
 						actor.SetParent(*scene->FindActorByID(parentActorIdx));
 						actor.SetName(name);
 						actor.GetComponent<Core::ECS::Components::CTransform>()->SetMatrix(localMat.data);

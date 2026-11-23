@@ -4,6 +4,14 @@
 #include <assert.h>
 #include <iostream>
 
+#include <Rendering/Backend/BackendResources.h>
+#include <Rendering/Backend/CreateTextureRequest.h>
+#include <Rendering/Backend/TextureRequests.h>
+#include <Rendering/Backend/TextureUploadRequest.h>
+#include <Rendering/Backend/UpdateTextureRequest.h>
+#include <Rendering/Context/Driver.h>
+#include <Rendering/HAL/Common/HALDriverAccess.h>
+
 Tools::Eventing::Event<::Rendering::HAL::GLTexture&> Rendering::HAL::GLTexture::CreationEvent;
 Tools::Eventing::Event<::Rendering::HAL::GLTexture&> Rendering::HAL::GLTexture::DestructionEvent;
 
@@ -29,6 +37,39 @@ namespace
 template<>
 Rendering::HAL::GLTexture::TTexture(Settings::ETextureType p_type, std::string_view p_debugName) : GLTextureHandle(p_type)
 {
+	m_textureContext.debugName = p_debugName;
+
+	::Rendering::Context::Driver* const driver = ::Rendering::HAL::CurrentDriver();
+	if (driver != nullptr)
+	{
+		// Front end: the GL name belongs to the side that owns the context, so this object is only
+		// the handle that names the slot there (Filament's Texture, and its createTextureS).
+		// Everything below - allocate, upload, attach, bind - is recorded, and the create is
+		// drained so what names this texture next records into the same batch after it. The same
+		// code with or without a render thread (docs/RenderThreadPlan.md §8.72).
+		m_context.handleId = ::Rendering::Backend::GetHandleAllocator()
+			.Allocate<::Rendering::HAL::Texture>().GetId();
+
+		::Rendering::Backend::CreateTextureRequest request;
+		request.handleId = m_context.handleId;
+		request.type = p_type;
+		request.debugName = std::string(p_debugName);
+		driver->CreateTexture(std::move(request));
+		driver->ExecutePendingCommands();
+	}
+	else
+	{
+		glCreateTextures(m_context.type, 1, &m_context.id);
+	}
+
+	CreationEvent.Invoke(*this);
+}
+
+template<>
+Rendering::HAL::GLTexture::TTexture(Settings::ETextureType p_type,
+	std::string_view p_debugName, BackendConstructionTag) : GLTextureHandle(p_type)
+{
+	// The backend object: the context is current on this thread, so the name is made here.
 	glCreateTextures(m_context.type, 1, &m_context.id);
 	m_textureContext.debugName = p_debugName;
 	CreationEvent.Invoke(*this);
@@ -37,10 +78,20 @@ Rendering::HAL::GLTexture::TTexture(Settings::ETextureType p_type, std::string_v
 template<>
 Rendering::HAL::GLTexture::~TTexture()
 {
-	if (m_textureContext.desc.isTextureBuffer&& m_textureContext.desc.texBufferId!=0) {
-		glDeleteBuffers(1, &m_textureContext.desc.texBufferId);
+	if (m_context.id != 0)
+	{
+		if (m_textureContext.desc.isTextureBuffer&& m_textureContext.desc.texBufferId!=0) {
+			glDeleteBuffers(1, &m_textureContext.desc.texBufferId);
+		}
+		glDeleteTextures(1, &m_context.id);
 	}
-	glDeleteTextures(1, &m_context.id);
+	else if (m_context.handleId != 0)
+	{
+		// The name lives in the slot: freeing it is the backend object's destructor, which runs on
+		// the side that owns the context (see Records::DestroyTexture).
+		::Rendering::Backend::Records::DestroyTexture(
+			::Rendering::Backend::ResourceHandle<::Rendering::HAL::Texture>{ m_context.handleId });
+	}
 	DestructionEvent.Invoke(*this);
 }
 
@@ -48,7 +99,40 @@ template<>
 void Rendering::HAL::GLTexture::Allocate(const Settings::TextureDesc& p_desc)
 {
 	auto& desc = m_textureContext.desc;
-	
+
+	if (m_context.id == 0 && m_context.handleId != 0
+		&& ::Rendering::HAL::CurrentDriver() != nullptr)
+	{
+		// Recorded: the executor allocates the storage. This side only remembers the description,
+		// which is what GetDesc() and the material descriptors read.
+		desc = p_desc;
+		desc.width = std::max(1u, desc.width);
+		desc.height = std::max(1u, desc.height);
+
+		::Rendering::Backend::CreateTextureRequest request;
+		request.handleId = m_context.handleId;
+		request.type = GetType();
+		request.debugName = m_textureContext.debugName;
+		request.allocate = true;
+		request.descriptor = desc;
+
+		// The descriptor's data pointer names the caller's memory - a local vector of domain
+		// colours (CTopoShape's faces), the sketch's edge values, a temporary image. By the time the
+		// command runs that memory is gone, and a texture buffer allocated from it holds whatever
+		// was written there next, which is how a face ends up with another face's colour. Carry the
+		// bytes with the command (Filament's BufferDescriptor owns its copy for the same reason) and
+		// the executor points the descriptor at them.
+		if (desc.mutableDesc.has_value() && desc.mutableDesc->data != nullptr && desc.buffetLen > 0)
+		{
+			const auto* const begin = static_cast<const uint8_t*>(desc.mutableDesc->data);
+			request.pixels.assign(begin, begin + desc.buffetLen);
+		}
+
+		::Rendering::HAL::CurrentDriver()->CreateTexture(std::move(request));
+		m_textureContext.allocated = true;
+		return;
+	}
+
 	if (!p_desc.isTextureBuffer) {
 		desc = p_desc;
 		desc.width = std::max(1u, desc.width);
@@ -175,6 +259,29 @@ void Rendering::HAL::GLTexture::Upload(const void* p_data, Settings::EFormat p_f
 	assert(IsValid()&&"Cannot upload data to a texture before it has been allocated");
 	assert(p_data&&"Cannot upload texture data from a null pointer");
 
+	if (m_context.id == 0 && m_context.handleId != 0 && ::Rendering::HAL::CurrentDriver() != nullptr)
+	{
+		// Recorded: the bytes travel with the command (Filament's PixelBufferDescriptor), so the
+		// caller's buffer is free the moment this returns. The executor allocates and uploads.
+		const auto& desc = m_textureContext.desc;
+		const size_t components = p_format == Settings::EFormat::RGBA ? 4u : 1u;
+		const size_t bytesPerComponent = p_type == Settings::EPixelDataType::FLOAT ? 4u
+			: p_type == Settings::EPixelDataType::UNSIGNED_BYTE ? 1u : 2u;
+		const size_t faces = GetType() == Settings::ETextureType::TEXTURE_CUBE ? 6u : 1u;
+		const size_t size = static_cast<size_t>(desc.width) * desc.height * faces
+			* components * bytesPerComponent;
+
+		::Rendering::Backend::TextureUploadRequest request;
+		request.handleId = m_context.handleId;
+		request.descriptor = desc;
+		request.format = p_format;
+		request.type = p_type;
+		request.pixels.assign(static_cast<const uint8_t*>(p_data),
+			static_cast<const uint8_t*>(p_data) + size);
+		::Rendering::HAL::CurrentDriver()->UploadTexture(std::move(request));
+		return;
+	}
+
 	//currently only support for rbga with float and byte
 	if (p_format == Settings::EFormat::RGBA) {
 		int size = 0;
@@ -264,6 +371,16 @@ void Rendering::HAL::GLTexture::GenerateMipmaps() const
     assert(IsValid()&&"Cannot generate mipmaps for a texture before it has been allocated");
 	assert(m_textureContext.desc.useMipMaps&&"Cannot generate mipmaps for a texture that doesn't use them");
 
+	if (m_context.id == 0 && m_context.handleId != 0
+		&& ::Rendering::HAL::CurrentDriver() != nullptr)
+	{
+		// Recorded: glGenerateTextureMipmap needs the name, i.e. the executor.
+		::Rendering::Backend::GenerateTextureMipmapsRequest request;
+		request.handleId = m_context.handleId;
+		::Rendering::HAL::CurrentDriver()->EnqueueGenerateTextureMipmaps(request);
+		return;
+	}
+
 	if (IsValidMipMapFilter(m_textureContext.desc.minFilter))
 	{
 		glGenerateTextureMipmap(m_context.id);
@@ -279,6 +396,17 @@ template<>
 void Rendering::HAL::GLTexture::SetBorderColor(const Maths::FVector4& p_color)
 {
 	assert(IsValid()&&"Cannot set border color for a texture before it has been allocated");
+
+	if (m_context.id == 0 && m_context.handleId != 0
+		&& ::Rendering::HAL::CurrentDriver() != nullptr)
+	{
+		::Rendering::Backend::SetTextureBorderColorRequest request;
+		request.handleId = m_context.handleId;
+		request.color = p_color;
+		::Rendering::HAL::CurrentDriver()->EnqueueSetTextureBorderColor(request);
+		return;
+	}
+
 	glTextureParameterfv(m_context.id, GL_TEXTURE_BORDER_COLOR, &p_color.x);
 }
 
@@ -296,4 +424,51 @@ template<>
 const std::string& Rendering::HAL::GLTexture::GetDebugName() const
 {
 	return m_textureContext.debugName;
+}
+
+void Rendering::HAL::GLTexture::UploadSubImage(
+	const void* p_data,
+	Settings::EFormat p_format,
+	Settings::EPixelDataType p_type,
+	uint32_t p_x,
+	uint32_t p_y,
+	uint32_t p_width,
+	uint32_t p_height)
+{
+	assert(IsValid() && "Cannot upload data to a texture before it has been allocated");
+	assert(p_data && "Cannot upload texture data from a null pointer");
+
+	// A rectangle inside storage that already exists: this is the update path for runtime-generated
+	// images (the view cube's atlas after a language or theme switch), not a re-allocation.
+	if (m_context.id == 0 && m_context.handleId != 0 && ::Rendering::HAL::CurrentDriver() != nullptr)
+	{
+		const size_t components = p_format == Settings::EFormat::RGBA ? 4u : 1u;
+		const size_t bytesPerComponent = p_type == Settings::EPixelDataType::FLOAT ? 4u
+			: p_type == Settings::EPixelDataType::UNSIGNED_BYTE ? 1u : 2u;
+		const size_t size = static_cast<size_t>(p_width) * p_height * components * bytesPerComponent;
+
+		::Rendering::Backend::UpdateTextureRequest request;
+		request.handleId = m_context.handleId;
+		request.x = p_x;
+		request.y = p_y;
+		request.width = p_width;
+		request.height = p_height;
+		request.format = p_format;
+		request.type = p_type;
+		request.pixels.assign(static_cast<const uint8_t*>(p_data),
+			static_cast<const uint8_t*>(p_data) + size);
+		::Rendering::HAL::CurrentDriver()->UpdateTexture(std::move(request));
+		return;
+	}
+
+	glTextureSubImage2D(
+		m_context.id,
+		0,
+		static_cast<GLint>(p_x),
+		static_cast<GLint>(p_y),
+		static_cast<GLsizei>(p_width),
+		static_cast<GLsizei>(p_height),
+		EnumToValue<GLenum>(p_format),
+		EnumToValue<GLenum>(p_type),
+		p_data);
 }

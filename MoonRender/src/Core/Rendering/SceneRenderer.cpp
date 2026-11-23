@@ -36,40 +36,6 @@ namespace
 {
 	using namespace Core::Rendering;
 
-	/** Cheap 64-bit content signature used to cache the parsed drawables. */
-	void HashCombine(uint64_t& p_seed, uint64_t p_value)
-	{
-		p_seed ^= p_value + 0x9e3779b97f4a7c15ULL + (p_seed << 6) + (p_seed >> 2);
-	}
-
-	uint64_t HashPointer(const void* p_pointer)
-	{
-		return static_cast<uint64_t>(reinterpret_cast<uintptr_t>(p_pointer));
-	}
-
-	uint64_t HashFloat(float p_value)
-	{
-		uint32_t bits = 0;
-		std::memcpy(&bits, &p_value, sizeof(bits));
-		return static_cast<uint64_t>(bits);
-	}
-
-	void HashMatrix(uint64_t& p_seed, const Maths::FMatrix4& p_matrix)
-	{
-		for (int i = 0; i < 16; ++i)
-		{
-			HashCombine(p_seed, HashFloat(p_matrix.data[i]));
-		}
-	}
-
-	void HashSphere(uint64_t& p_seed, const ::Rendering::Geometry::BoundingSphere& p_sphere)
-	{
-		HashCombine(p_seed, HashFloat(p_sphere.position.x));
-		HashCombine(p_seed, HashFloat(p_sphere.position.y));
-		HashCombine(p_seed, HashFloat(p_sphere.position.z));
-		HashCombine(p_seed, HashFloat(p_sphere.radius));
-	}
-
 	/** Diagnostic switch for the section passes (see docs/SectionRendering.md):
 	 * MOON_SECTION_DEBUG=always  - the cap ignores the stencil (fills the whole plane)
 	 * MOON_SECTION_DEBUG=nodepth - the cap ignores the depth buffer
@@ -166,8 +132,11 @@ namespace
 
 			// Not every drawable of this pass is a line: the topology vertices are
 			// point sprites, and their size comes from the shader (gl_PointSize),
-			// which the driver only honours while this is enabled.
-			glEnable(GL_PROGRAM_POINT_SIZE);
+			// which the driver only honours while this is enabled. A capability is
+			// GL on the executor's state machine, so it is recorded, not issued:
+			// issuing it here left it off on the context that draws (docs §8.72).
+			m_renderer.GetDriver().EnqueueCapability(
+				::Rendering::Settings::ERenderingCapability::PROGRAM_POINT_SIZE, true);
 
 			const auto& drawables = m_renderer.GetDescriptor<SceneRenderer::SceneFilteredDrawablesDescriptor>();
 
@@ -298,11 +267,10 @@ namespace
 						m_capMaterial.SetProperty(p_property, static_cast<float>(std::atof(p_value)));
 					}
 				};
-				hatchFromEnv("MOON_HATCH_PERIOD", "u_HatchPeriodPx");
-				hatchFromEnv("MOON_HATCH_BAND", "u_HatchBandPx");
+				hatchFromEnv("MOON_HATCH_PERIOD", "u_HatchPeriod");
+				hatchFromEnv("MOON_HATCH_BAND", "u_HatchBand");
 				hatchFromEnv("MOON_HATCH_CONTRAST", "u_HatchContrast");
 				hatchFromEnv("MOON_HATCH_ANGLE", "u_HatchAngleDeg");
-				hatchFromEnv("MOON_HATCH_PLANE", "u_HatchScreenFixed");
 				p_pso.stencilFuncOp = ::Rendering::Settings::EComparaisonAlgorithm::NOTEQUAL;
 				p_pso.stencilFuncRef = 0;
 				p_pso.stencilFuncMask = 0xFF;
@@ -490,36 +458,13 @@ namespace
 			depthTexture->SetBorderColor(Maths::FVector4::Zero);
 			mBlendFbo.Attach<::Rendering::HAL::Texture>(renderTexture, ::Rendering::Settings::EFramebufferAttachment::COLOR);
 			mBlendFbo.Attach<::Rendering::HAL::Texture>(depthTexture, ::Rendering::Settings::EFramebufferAttachment::DEPTH);
-			std::string v = R"(
-#version 450 core
 
-layout(location = 0) in vec2 geo_Pos;
-layout(location = 1) in vec2 geo_TexCoords;
-
-out vec2 TexCoords;
-
-void main()
-{
-    TexCoords = geo_TexCoords;
-    gl_Position = vec4(geo_Pos, 0.0, 1.0);
-}
-)";
-			std::string f = R"(
-#version 450 core
-
-in vec2 TexCoords;
-out vec4 FRAGMENT_COLOR;
-
-uniform sampler2D colorLayer;
-
-void main()
-{
-	FRAGMENT_COLOR = texture(colorLayer, TexCoords);
-}
-
-)";
-			mBlendColorShader = ::Rendering::Resources::Loaders::ShaderLoader::CreateFromSource(v, f);
-			mBlendColorMat.SetMaterial(mBlendColorShader);
+			// Blending the peel layers back to front is a full-screen copy, and the copy material is
+			// the MatC one (same package as the present): its layer texture is a declared parameter,
+			// so it binds through the per-material descriptor set. A source-built copy left the
+			// sampler outside every set, and the calls that fed it were GL on the recording side
+			// (docs/RenderThreadPlan.md §8.72).
+			mBlendColorMat.SetMaterial(GetShaderService[":Shaders\\PostProcess\\Blit.shader"]);
 		}
 
 	protected:
@@ -537,19 +482,19 @@ void main()
 			const auto& drawables = m_renderer.GetDescriptor<SceneRenderer::SceneFilteredDrawablesDescriptor>();
 			if (drawables.transparents.size()>0) {
 				auto& msaaframebuffer = m_renderer.GetFrameDescriptor().outputMsaaBuffer.value();
-				Core::Rendering::FramebufferUtil::CopyFramebufferColor(msaaframebuffer, 0, mBlendFbo, 0);
-				Core::Rendering::FramebufferUtil::CopyFramebufferDepth(msaaframebuffer, mBlendFbo); 
+				m_renderer.GetDriver().CopyFramebufferColor(msaaframebuffer, 0, mBlendFbo, 0);
+				m_renderer.GetDriver().CopyFramebufferDepth(msaaframebuffer, mBlendFbo);
 			
 				//peel 0 layers, use the depth buffer copied from opaque pass to peel the first layer of transparent
 				//we can have better method to optimize the copy like that
 				//we prepare a empty(value of depth is 0) depth texture,then we can unify the shader and (step1 and step2) for peeling all layers,
 				//but for now we just want to get it working
-				Core::Rendering::FramebufferUtil::CopyFramebufferDepth(mBlendFbo, mLayerFbo[0]);
+				m_renderer.GetDriver().CopyFramebufferDepth(mBlendFbo, mLayerFbo[0]);
 				PrepareStencilBuffer(p_pso);
 				/*
 				1.the first step: peel the first layer of transparent and write the depth to layerfbo0, then we can use this depth to peel the second layer and so on
 				*/
-				mLayerFbo[0].Bind();
+				m_renderer.BindFramebuffer(&mLayerFbo[0]);
 				m_renderer.Clear(true,false,false,Maths::FVector4(0,0,0,0));
 
 				for ( auto drawable : drawables.transparents | std::views::values)
@@ -563,7 +508,7 @@ void main()
 					drawable.stateMask.depthTest = true;
 					m_renderer.DrawEntity(p_pso, drawable);
 				}
-				mLayerFbo[0].Unbind();
+				m_renderer.BindDefaultFramebuffer();
 				/*
 				* 2.the second step: peel the second layer and the others, 
 				we use the depth texture of previous layer to peel the next layer, 
@@ -579,7 +524,7 @@ void main()
 					int prevFbo = (layer - 1) ;
 
 					// ???? FBO
-					mLayerFbo[currFbo].Bind();
+					m_renderer.BindFramebuffer(&mLayerFbo[currFbo]);
 					m_renderer.Clear(true, true, false, Maths::FVector4(0, 0, 0, 0));
 					const auto& depth=mLayerFbo[prevFbo].GetAttachment<::Rendering::HAL::GLTexture>(::Rendering::Settings::EFramebufferAttachment::DEPTH,0);
 					const auto& opaquedepth = mBlendFbo.GetAttachment<::Rendering::HAL::GLTexture>(::Rendering::Settings::EFramebufferAttachment::DEPTH, 0);
@@ -595,16 +540,16 @@ void main()
 						drawable.material->TrySetProperty("OpaqueDepthTex", &opaquedepth.value());
 						m_renderer.DrawEntity(p_pso, drawable);
 					}
-					mLayerFbo[currFbo].Unbind();
+					m_renderer.BindDefaultFramebuffer();
 				}
 				/*
 				 * 3.the third step: blend the peeled layers back to front,
 				 * we can also do it in one pass by binding all the peeled color textures to shader, but for now we just do it one by one
 				 */
-				mBlendFbo.Bind();
+				m_renderer.BindFramebuffer(&mBlendFbo);
 				for (int i = mLayerFbo.size() - 1; i >= 0; i--) {
 					const auto& color = mLayerFbo[i].GetAttachment<::Rendering::HAL::GLTexture>(::Rendering::Settings::EFramebufferAttachment::COLOR, 0);
-					mBlendColorMat.SetProperty("colorLayer",&color.value());
+					mBlendColorMat.SetProperty("_InputTexture",&color.value());
 					Rendering::Entities::Drawable blit;
 					blit.mesh = m_renderer.m_unitQuad;
 					blit.material = mBlendColorMat.DefaultInstance();
@@ -616,15 +561,14 @@ void main()
 					blit.stateMask.depthTest = false;
 					m_renderer.DrawEntity(p_pso,blit);
 				}
-				mBlendFbo.Unbind();
+				m_renderer.BindDefaultFramebuffer();
 				
-				msaaframebuffer.Bind();
+				m_renderer.BindFramebuffer(&msaaframebuffer);
 				const auto& content = mBlendFbo.GetAttachment<::Rendering::HAL::GLTexture>(::Rendering::Settings::EFramebufferAttachment::COLOR, 0);
 				m_renderer.Present(content.value());
 			}
 		}
 	private:
-		::Rendering::Resources::Shader* mBlendColorShader;
 		::Rendering::Data::Material mBlendColorMat;
 		std::vector<::Rendering::HAL::Framebuffer>mLayerFbo ;
 		::Rendering::HAL::Framebuffer mBlendFbo;
@@ -787,13 +731,8 @@ void Core::Rendering::SceneRenderer::Resize(int width, int height)
 void Core::Rendering::SceneRenderer::SetExcludedFeatures(::Rendering::Data::FeatureSet p_features)
 {
 	m_excludedFeatures = std::move(p_features);
-	// The cached drawables were parsed with the previous exclusions.
-	m_parsedDrawablesValid = false;
 }
-void Core::Rendering::SceneRenderer::InvalidateParsedDrawables()
-{
-	m_parsedDrawablesValid = false;
-}
+
 void Core::Rendering::SceneRenderer::DrawModelWithSingleMaterial(::Rendering::Data::PipelineState p_pso, ::Rendering::Resources::Model& p_model, ::Rendering::Data::Material& p_material, const Maths::FMatrix4& p_modelMatrix)
 {
 	DrawModelWithSingleMaterial(p_pso, p_model, p_material.DefaultInstance(), p_modelMatrix);
@@ -910,113 +849,11 @@ void Core::Rendering::SceneRenderer::UpdateParsedDrawables(Core::SceneSystem::Sc
 {
 	ZoneScoped;
 
-	using namespace Core::ECS::Components;
-
-	const auto& renderers = p_scene.GetFastAccessComponents().modelRenderers;
-
-	// Signature over everything ParseScene reads. It avoids the per Drawable
-	// allocations, so on an unchanged scene the whole parse step is skipped.
-	uint64_t signature = 0xcbf29ce484222325ULL;
-	HashCombine(signature, renderers.size());
-
-	for (const auto modelRenderer : renderers)
-	{
-		const auto& owner = modelRenderer->owner;
-		const auto model = modelRenderer->GetModel();
-		const auto materialRenderer = owner.GetComponent<CMaterialRenderer>();
-
-		HashCombine(signature, HashPointer(modelRenderer));
-		HashCombine(signature, static_cast<uint64_t>(owner.GetID()));
-		HashCombine(signature, owner.IsActive() ? 1ULL : 0ULL);
-		HashCombine(signature, HashPointer(model));
-		HashCombine(signature, HashPointer(materialRenderer));
-
-		if (!owner.IsActive() || model == nullptr || materialRenderer == nullptr)
-		{
-			continue;
-		}
-
-		HashMatrix(signature, owner.transform.GetFTransform().GetWorldMatrix());
-		HashMatrix(signature, materialRenderer->GetUserMatrix());
-		HashCombine(signature, static_cast<uint64_t>(materialRenderer->GetVisibilityFlags()));
-
-		const auto frustumBehaviour = modelRenderer->GetFrustumBehaviour();
-		HashCombine(signature, static_cast<uint64_t>(frustumBehaviour));
-		if (frustumBehaviour == CModelRenderer::EFrustumBehaviour::CUSTOM_BOUNDS)
-		{
-			HashSphere(signature, modelRenderer->GetCustomBoundingSphere());
-		}
-
-		const auto& materials = materialRenderer->GetMaterials();
-		HashCombine(signature, materials.size());
-		for (const auto material : materials)
-		{
-			HashCombine(signature, HashPointer(material));
-			if (material == nullptr)
-			{
-				continue;
-			}
-
-			// The designer swaps a material's shader when its feature set is recompiled, and
-			// the variant key of a keyed shader is part of the drawable's feature override.
-			// Both have to re-run ParseScene, otherwise the cached drawables keep the old
-			// (feature-only) override and the draw falls back to a variant without the key.
-			HashCombine(signature, HashPointer(material->MaterialOf()));
-			for (const std::string& feature : material->GetFeatures())
-			{
-				for (const char c : feature)
-				{
-					HashCombine(signature, static_cast<uint64_t>(static_cast<unsigned char>(c)));
-				}
-				HashCombine(signature, 0xFFULL);
-			}
-		}
-
-		for (const auto mesh : model->GetMeshes())
-		{
-			HashCombine(signature, HashPointer(mesh));
-			if (mesh == nullptr)
-			{
-				continue;
-			}
-
-			const auto& materialIndices = mesh->GetMaterialIndex();
-			const auto& rangeIndices = mesh->GetSubRangeBufferIndex();
-			HashCombine(signature, materialIndices.size());
-			HashCombine(signature, rangeIndices.size());
-			for (const auto materialIndex : materialIndices)
-			{
-				HashCombine(signature, materialIndex);
-			}
-			for (const auto rangeIndex : rangeIndices)
-			{
-				HashCombine(signature, rangeIndex);
-			}
-			HashCombine(signature, static_cast<uint64_t>(mesh->GetPrimitiveMode()));
-
-			const size_t rangeCount = std::min(materialIndices.size(), rangeIndices.size());
-			for (size_t i = 0; i < rangeCount; ++i)
-			{
-				HashCombine(signature, static_cast<uint64_t>(mesh->GetIndexCount(rangeIndices[i])));
-			}
-
-			// Bounds stored in the drawable, depending on the frustum behaviour.
-			if (frustumBehaviour == CModelRenderer::EFrustumBehaviour::MESH_BOUNDS)
-			{
-				HashSphere(signature, mesh->GetBoundingSphere());
-			}
-			else if (frustumBehaviour == CModelRenderer::EFrustumBehaviour::DEPRECATED_MODEL_BOUNDS)
-			{
-				HashSphere(signature, model->GetBoundingSphere());
-			}
-		}
-	}
-
-	if (m_parsedDrawablesValid && signature == m_parsedDrawablesHash)
-	{
-		return; // Scene unchanged: reuse the cached drawables.
-	}
-
+	// Re-parsed every frame on purpose. It used to be cached behind a content signature over
+	// everything ParseScene reads, and that cache was the expensive, fragile part: it hashed the
+	// whole scene each frame (transforms, materials, meshes, bounds) and a stale entry was a
+	// silent wrong frame. The parse itself is the thing to make cheap (see ParseScene), and the
+	// stress test - many draw calls per frame - is what should decide how.
 	m_parsedDrawables = ParseScene(SceneParsingInput{ .scene = p_scene });
 
 	// A view can strip features that make no sense for what it renders. The material preview
@@ -1049,8 +886,6 @@ void Core::Rendering::SceneRenderer::UpdateParsedDrawables(Core::SceneSystem::Sc
 		}
 	}
 
-	m_parsedDrawablesHash = signature;
-	m_parsedDrawablesValid = true;
 }
 
 SceneRenderer::SceneFilteredDrawablesDescriptor Core::Rendering::SceneRenderer::FilterDrawables(
@@ -1215,6 +1050,14 @@ SceneRenderer::SceneFilteredDrawablesDescriptor Core::Rendering::SceneRenderer::
 					.distance = distanceToCamera
 			}, std::move(drawableCopy));
 		}
+	}
+	if (std::getenv("MOON_FRAME_TRACE") != nullptr)
+	{
+		// How the frame's drawables were split: a body that lands in `opaques` in one mode and in
+		// `transparents` in the other is shaded by a different variant and lighter (docs §8.66).
+		std::fprintf(stderr, "[filter] opaque=%zu transparent=%zu lines=%zu ui=%zu\n",
+			output.opaques.size(), output.transparents.size(), output.lines.size(), output.ui.size());
+		std::fflush(stderr);
 	}
 	return output;
 }

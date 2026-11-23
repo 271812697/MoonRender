@@ -13,12 +13,3 @@ layout (std140, binding = 0) uniform EngineUBO
     vec4    ubo_plane;
     mat4    ubo_MirroPlaneMatrix;
 };
-
-// The per-renderable block (filament's set 1): the matrices that change from one drawable to
-// the next, uploaded before each draw. GL binding point 3 - the per-material block owns 2 and
-// the reflection block owns 1, so the three do not collide.
-layout (std140, binding = 3) uniform ObjectUBO
-{
-    mat4    ubo_Model;
-    mat4    ubo_UserMatrix;
-};

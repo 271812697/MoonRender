@@ -31,22 +31,42 @@ namespace
 		const float length = bvh->m_bounds.extents().Length();
 		return std::isfinite(length) ? length : 0.0f;
 	}
+
+	/** How far outside the scene the mirror plane is taken, as a share of the scene's bounding
+	 * box diagonal (with a floor for a scene a couple of units across).
+	 *
+	 * The plane has to miss the model. A sketch is a zero-thickness face, so the bounding box
+	 * face it defines *is* its own plane: a circle picked up by the grid used to be reflected
+	 * onto itself and overlapped it at some camera angles. The same margin also keeps the whole
+	 * scene on one side of a plane picked at a side of the box, where the model used to straddle
+	 * it.
+	 */
+	constexpr float kMirrorPlaneMarginShare = 0.05f;
+	constexpr float kMirrorPlaneMarginMin = 0.1f;
 }
 
 
 Editor::Core::MirrorPlane ComputeMirrorPlane(const Maths::FVector3& CameraPos, const Maths::FVector3& CameraForward, const Maths::FVector3& BBoxMin, const Maths::FVector3& BBoxMax)
 {
-	Maths::FVector3 Center = (BBoxMin + BBoxMax) * 0.5f;
-	Maths::FVector3 Extent = (BBoxMax - BBoxMin) * 0.5f;
+	// The candidate faces are taken a margin outside the scene (see kMirrorPlaneMarginShare):
+	// a plane that touches the model reflects what lies on it onto itself, and a flat sketch is
+	// exactly the case - its bounding box has no thickness and its face is the sketch's plane.
+	const float diagonal = (BBoxMax - BBoxMin).Length();
+	const float gap = std::max(kMirrorPlaneMarginMin, diagonal * kMirrorPlaneMarginShare);
+	const Maths::FVector3 Min(BBoxMin.x - gap, BBoxMin.y - gap, BBoxMin.z - gap);
+	const Maths::FVector3 Max(BBoxMax.x + gap, BBoxMax.y + gap, BBoxMax.z + gap);
+
+	Maths::FVector3 Center = (Min + Max) * 0.5f;
+	Maths::FVector3 Extent = (Max - Min) * 0.5f;
 
 	Editor::Core::MirrorPlane Faces[6];
 
-	Faces[0] = { Maths::FVector3(-1,0,0), Maths::FVector3(BBoxMin.x, Center.y, Center.z), 0.0f };
-	Faces[1] = { Maths::FVector3(1,0,0), Maths::FVector3(BBoxMax.x, Center.y, Center.z), 0.0f };
-	Faces[2] = { Maths::FVector3(0,-1,0), Maths::FVector3(Center.x, BBoxMin.y, Center.z), 0.0f };
-	Faces[3] = { Maths::FVector3(0,1,0), Maths::FVector3(Center.x, BBoxMax.y, Center.z), 0.0f };
-	Faces[4] = { Maths::FVector3(0,0,-1), Maths::FVector3(Center.x, Center.y, BBoxMin.z), 0.0f };
-	Faces[5] = { Maths::FVector3(0,0,1), Maths::FVector3(Center.x, Center.y, BBoxMax.z), 0.0f };
+	Faces[0] = { Maths::FVector3(-1,0,0), Maths::FVector3(Min.x, Center.y, Center.z), 0.0f };
+	Faces[1] = { Maths::FVector3(1,0,0), Maths::FVector3(Max.x, Center.y, Center.z), 0.0f };
+	Faces[2] = { Maths::FVector3(0,-1,0), Maths::FVector3(Center.x, Min.y, Center.z), 0.0f };
+	Faces[3] = { Maths::FVector3(0,1,0), Maths::FVector3(Center.x, Max.y, Center.z), 0.0f };
+	Faces[4] = { Maths::FVector3(0,0,-1), Maths::FVector3(Center.x, Center.y, Min.z), 0.0f };
+	Faces[5] = { Maths::FVector3(0,0,1), Maths::FVector3(Center.x, Center.y, Max.z), 0.0f };
 
 	float totalArea = (Extent.x * Extent.y + Extent.y * Extent.z + Extent.x * Extent.z) * 2.0f;
 
@@ -335,12 +355,24 @@ void ::Editor::Core::CameraController::UpdateDepthRange()
 			sceneRadius = Maths::FVector3::Length(b.pmax - b.pmin) * 0.5f;
 		}
 	}
-	const float dist = Maths::FVector3::Length(m_camera.GetPosition() - sceneCenter);
+	// The distance the range is sized from is the one the camera would be at without the
+	// dolly that holds the framing (Camera::SetFovKeepingFraming): the planes have to stay where they
+	// are while the field of view moves the eye past them.
+	const float dolly = m_camera.GetDollyOffset();
+	const float dist = std::max(
+		Maths::FVector3::Length(m_camera.GetPosition() - sceneCenter) - dolly, 0.0f);
 	const float near = std::max(dist * 0.01f, 0.001f);
 	if (!std::isfinite(near)) {
 		return;
 	}
-	m_camera.SetNear(near);
+	// Shifting the planes by the dolly keeps them where they are in the world, but a wide field of
+	// view moves the eye *forwards*, and the shift can then drag the near plane past it - a near
+	// plane at or behind the eye is not a projection at all, and the whole scene drops out of the
+	// frustum at once (that is what a field of view over 60 degrees used to do). It stops a hair
+	// in front of the eye instead, scaled with the scene so the depth range keeps its precision.
+	const float sceneScale = std::max(dist, 1.0f);
+	const float nearShifted = std::max(near + dolly, sceneScale * 1.0e-4f);
+	m_camera.SetNear(nearShifted);
 
 	// A perspective view gets no far plane at all - the projection takes the limit of
 	// the finite one (FMatrix4::CreateFrustum), so nothing is ever cut off for being
@@ -362,8 +394,9 @@ void ::Editor::Core::CameraController::UpdateDepthRange()
 	const float far = std::max(dist + sceneRadius * 2.0f, 1200.0f);
 	// Whatever the bounds were, a degenerate plane pair is not something the camera
 	// should be given: the previous values are kept instead.
-	if (std::isfinite(far) && near < far) {
-		m_camera.SetFar(far);
+	const float farShifted = far + dolly;
+	if (std::isfinite(farShifted) && nearShifted < farShifted) {
+		m_camera.SetFar(farShifted);
 	}
 }
 void Editor::Core::CameraController::HandleFirstMouse()
@@ -651,7 +684,8 @@ void Editor::Core::CameraController::HandleMouseReleased()
 		m_firstMouse = true;
 		auto box = m_view.GetScene()->GetSceneBoundingBox();
 		if (box.isValid() ) {
-			box = box.addgap(0.1);
+			// The margin that keeps the plane off the model is the mirror plane's own business:
+			// it scales with the scene (see ComputeMirrorPlane).
 			Maths::FVector3 cameraForward = m_camera.GetTransform().GetWorldForward();
 			Maths::FVector3 cameraPos = m_camera.GetPosition();
 			mirrorPlane = ComputeMirrorPlane(cameraPos, cameraForward, box.pmin, box.pmax);

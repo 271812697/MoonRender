@@ -9,7 +9,8 @@
 #include "editor/Command/menubar/saveFile.h"
 #include "editor/UI/HomePanel/HomePanel.h"
 #include "editor/UI/HomePanel/RecentProjects.h"
-#include "editor/View/sceneview/viewerwidget.h"
+#include "editor/DocumentSession.h"
+#include "editor/UI/TreeViewPanel/treesync.h"
 #include "feature/FeatureBody.h"
 #include "feature/MoonDocument.h"
 
@@ -44,7 +45,7 @@ namespace MOON
 			// One body to start from: a feature has to belong to a body, and the body is
 			// what the first one joins.
 			FeatureBody::Create(FeatureBody::UniqueName("Body"));
-			GetViewerWidget.refreshTreeView();
+			GetTreeViewSync.Refresh();
 			CORE_INFO("[Project] a new project was started");
 			});
 	}
@@ -73,8 +74,8 @@ namespace MOON
 		// The document that was open goes with it, so the file the viewport was read from
 		// is forgotten here too: whoever looks at it next - the picture taken on the way
 		// out, for one - has to be able to tell that nothing is open right now.
-		GetViewerWidget.clearDocumentPath();
-		GetViewerWidget.refreshTreeView();
+		GetService(DocumentSession).Clear();
+		GetTreeViewSync.Refresh();
 		GetService(HomePanel).ShowStartPage();
 		CORE_INFO(
 			"[Project] '{0}' was closed",

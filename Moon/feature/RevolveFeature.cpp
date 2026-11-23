@@ -6,7 +6,6 @@
 #include "Core/ECS/Components/CBatchMeshTriangle.h"
 #include "Core/ECS/Components/CBatchMeshLine.h"
 #include "Core/ResourceManagement/ModelManager.h"
-#include "editor/View/sceneview/viewerwidget.h"
 #include "core/component/CTopoShape.h"
 #include <Core/Global/ServiceLocator.h>
 #include <Core/SceneSystem/Scene.h>
@@ -53,7 +52,7 @@ namespace MOON {
         try {
             Part::TopoShape face = getProfileFace();
             Part::TopoShape baseShape;
-            if (m_baseFeature) {
+            if (dynamic_cast<Feature3D*>(m_baseFeature)) {
                 baseShape = getBaseTopoShape();
             }
             gp_Ax1 raxis = axis;

@@ -19,6 +19,7 @@
 #include <cstdlib>
 #include <editor/editor.h>
 #include "Core/Global/ServiceLocator.h"
+#include "editor/DocumentSession.h"
 #include "editor/UI/HomePanel/RecentProjects.h"
 #include "editor/View/sceneview/viewerwidget.h"
 #include "feature/MoonDocument.h"
@@ -30,7 +31,7 @@ int main(int argc, char* argv[])
 	// frame texture into a widget - a texture name only means something in the group that
 	// created it. This attribute is what makes Qt's QOpenGLWidget contexts (the viewport, the
 	// material preview) share Qt's global context, and the render module is created in that
-	// group too (see ViewerWidget::CreateRenderContext). It has to be set before the
+	// group too (see Editor::Core::RenderModuleHost). It has to be set before the
 	// application exists.
 	QCoreApplication::setAttribute(Qt::AA_ShareOpenGLContexts);
 	QApplication app(argc, argv);
@@ -79,6 +80,10 @@ int main(int argc, char* argv[])
 	MOON::System::JobSystem::OnInit(2);
 	
 	QApplication::setFont(font);
+	// The window/taskbar icon: a crescent moon, after the project's name. Every top-level
+	// window without an icon of its own picks this up - the editor, the dialogs, and the
+	// floating dock panels.
+	QApplication::setWindowIcon(MOON::Theme::Icon(":/icons/app/moon.svg"));
 	// The editor is scoped on purpose. Its destructor is what takes the viewport, the
 	// renderer, the GL context and every panel down, and all of that has to happen while
 	// the logger and the job system are still up: a widget that logs on the way out, or
@@ -91,6 +96,9 @@ int main(int argc, char* argv[])
 		MOON::Editor editor;
 		editor.setWindowTitle("MOON");
 		editor.resize(1920, 1080);
+		// Starts maximized: the viewport is the thing being looked at, and a window that opens at
+		// 1920x1080 on a smaller desktop is not the same picture (docs/RenderThreadPlan.md §8.69).
+		editor.setWindowState(editor.windowState() | Qt::WindowMaximized);
 		editor.show();
 		// A project named on the command line is opened as soon as the event loop runs: the
 		// viewport builds its GL context on the first show, and a document is only loaded
@@ -102,11 +110,13 @@ int main(int argc, char* argv[])
 		const QStringList arguments = QApplication::arguments();
 		if (arguments.size() > 1 && QFileInfo::exists(arguments[1])) {
 			const QString project = arguments[1];
-			QTimer::singleShot(200, &app, [project] { GetViewerWidget.onReadFile(project); });
+			QTimer::singleShot(200, &app, [project] {
+				GetService(MOON::DocumentSession).Open(project);
+				});
 		}
 		// TEMPORARY PROBE: a run that saves its frame (MOON_SHOT) closes itself, so the save on
 		// the way out happens without anyone clicking. Delay is the time the read and the frame
-		// get; see applyClipDemo in viewerwidget.cpp.
+		// get; see ViewportOverlay::ApplyClipDemo.
 		if (std::getenv("MOON_SHOT") != nullptr) {
 			const char* p_delay = std::getenv("MOON_SHOT_DELAY_MS");
 			const int delay = p_delay != nullptr ? std::atoi(p_delay) : 8000;
@@ -118,11 +128,11 @@ int main(int argc, char* argv[])
 		// A document that was only ever opened has no picture otherwise - the one its card is
 		// shown by is written when a document is written or closed - and it would come back as
 		// a card with a name and nothing on it.
-		const QString document = GetViewerWidget.getDocumentPath();
+		const QString document = GetService(MOON::DocumentSession).Path();
 		if (!document.isEmpty()) {
 			MOON::RecentProjects::Remember(document, MOON::RecentProjects::GrabViewportPreview());
 		}
-		// TEMPORARY PROBE (see applyClipDemo in viewerwidget.cpp): MOON_SHOT=<png> saves the
+		// TEMPORARY PROBE (see ViewportOverlay::ApplyClipDemo): MOON_SHOT=<png> saves the
 		// viewport's frame on the way out, so two headless runs (a section with and without
 		// something) can be compared pixel by pixel. Remove with the rest of the probe.
 		if (const char* p_windowShot = std::getenv("MOON_WINDOW_SHOT"); p_windowShot != nullptr && *p_windowShot != '\0') {
