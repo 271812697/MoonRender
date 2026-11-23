@@ -1,4 +1,4 @@
-#include <functional>
+﻿#include <functional>
 #include <tracy/Tracy.hpp>
 #include <Rendering/Core/ABaseRenderer.h>
 
@@ -141,8 +141,8 @@ Rendering::Core::ABaseRenderer::ABaseRenderer(Context::Driver& p_driver) :
 	// (docs/RenderThreadPlan.md §8.72).
 	if (::Core::Global::ServiceLocator::IsProvided<::Core::ResourceManagement::MaterialManager>())
 	{
-		m_presentMaterial = ::Core::Global::ServiceLocator::Get<::Core::ResourceManagement::MaterialManager>()
-			.GetResource(":Materials\\Blit.mat");
+		auto&mat=::Core::Global::ServiceLocator::Get<::Core::ResourceManagement::MaterialManager>();
+		m_presentMaterial = mat.GetResource(":Materials\\Blit.mat");
 	}
 	if (m_presentMaterial != nullptr && m_presentMaterial->HasMaterial())
 	{

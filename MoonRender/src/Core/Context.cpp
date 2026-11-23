@@ -1,4 +1,4 @@
-#include <Core/Global/ServiceLocator.h>
+﻿#include <Core/Global/ServiceLocator.h>
 #include <Core/Context.h>
 #include <Tools/Utils/PathParser.h>
 
@@ -24,15 +24,15 @@ Core::Context::Context(const std::string& p_projectPath, const std::string& p_pr
 Core::Context::Context(std::unique_ptr<::Rendering::Context::Driver> p_driver)
 {
 	engineAssetsPath = Tools::Utils::PathParser::GetExeDirectory() + "/Moon/Data/Engine/";
-	ModelManager::ProvideAssetPaths("", engineAssetsPath);
-	TextureManager::ProvideAssetPaths("", engineAssetsPath);
-	ShaderManager::ProvideAssetPaths("", engineAssetsPath);
-	MaterialManager::ProvideAssetPaths("", engineAssetsPath);
+	::Core::ResourceManagement::ModelManager::ProvideAssetPaths("", engineAssetsPath);
+	::Core::ResourceManagement::TextureManager::ProvideAssetPaths("", engineAssetsPath);
+	::Core::ResourceManagement::ShaderManager::ProvideAssetPaths("", engineAssetsPath);
+	::Core::ResourceManagement::MaterialManager::ProvideAssetPaths("", engineAssetsPath);
 	driver = std::move(p_driver);
-	ServiceLocator::Provide<ModelManager>(modelManager);
-	ServiceLocator::Provide<TextureManager>(textureManager);
-	ServiceLocator::Provide<ShaderManager>(shaderManager);
-	ServiceLocator::Provide<MaterialManager>(materialManager);
+	ServiceLocator::Provide<::Core::ResourceManagement::ModelManager>(modelManager);
+	ServiceLocator::Provide<::Core::ResourceManagement::TextureManager>(textureManager);
+	ServiceLocator::Provide<::Core::ResourceManagement::ShaderManager>(shaderManager);
+	ServiceLocator::Provide<::Core::ResourceManagement::MaterialManager>(materialManager);
 	ServiceLocator::Provide<::Core::SceneSystem::SceneManager>(sceneManager);
 	ServiceLocator::Provide<::Core::Context>(*this);
 }

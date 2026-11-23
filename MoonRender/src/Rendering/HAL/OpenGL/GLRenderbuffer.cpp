@@ -1,4 +1,4 @@
-#include <glad/glad.h>
+﻿#include <glad/glad.h>
 
 #include <Rendering/Backend/BackendResources.h>
 #include <Rendering/Backend/FramebufferRequests.h>
@@ -18,7 +18,6 @@ Rendering::HAL::GLRenderbuffer::TRenderbuffer(bool flag)
 	if (driver != nullptr)
 	{
 		driver->EnqueueCreateRenderbuffer(m_context.handle.GetId());
-		driver->ExecutePendingCommands();
 	}
 	else
 	{

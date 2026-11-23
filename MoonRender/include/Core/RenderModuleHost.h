@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <functional>
 #include <condition_variable>
 #include <mutex>
@@ -107,6 +107,7 @@ namespace Core
 		 * recording thread); with one, the batch belongs to the driver thread and this publishes it
 		 * and waits until it has run, because the caller is the frame's consumer - it pastes the
 		 * result. Once per frame, after the recording. */
+		void Flush();
 		void Execute();
 
 		/** The driver, the managers and the scene manager. Null before the module is built. */

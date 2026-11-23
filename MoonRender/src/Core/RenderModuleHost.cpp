@@ -1,4 +1,4 @@
-#include <Core/RenderModuleHost.h>
+﻿#include <Core/RenderModuleHost.h>
 
 #include <cstdio>
 #include <string_view>
@@ -143,7 +143,14 @@ namespace Core
 			m_contextHost->DoneCurrent();
 		}
 	}
+	void RenderModuleHost::Flush() {
+		if (m_context == nullptr || m_context->driver == nullptr)
+		{
+			return;
+		}
 
+		m_context->driver->Flush();
+	}
 	void RenderModuleHost::Execute()
 	{
 		// Filament's Engine::execute. The frame's recording was published by the view (it flushes at
@@ -192,7 +199,7 @@ namespace Core
 			// Queued resource work (resource destruction today; uploads when the render side owns
 			// them) has to run before anything draws: the overlays and the gizmos draw outside the
 			// command path. Draining runs it with the context current.
-			m_context->driver->ExecutePendingCommands();
+			//m_context->driver->ExecutePendingCommands();
 		}
 	}
 }
@@ -313,8 +320,9 @@ void Core::RenderModuleHost::Loop()
 		std::fflush(stderr);
 	}
 
-	while (m_context->driver->WaitAndExecute())
+	while (true)
 	{
+		m_context->driver->Execute();
 	}
 
 	// Teardown lands on this thread too: the Context owns the driver, and the driver owns GL
@@ -347,12 +355,6 @@ void Core::RenderModuleHost::BuildOnDriver(std::unique_ptr<::Rendering::Context:
 	{
 		m_buildCallback();
 	}
-
-	if (m_context->driver != nullptr)
-	{
-		m_context->driver->ExecutePendingCommands();
-	}
-
 	// The build ran with the context the platform created current; the frame binds it per use.
 	if (m_platformContextHost != nullptr)
 	{

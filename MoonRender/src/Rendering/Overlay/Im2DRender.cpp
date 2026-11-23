@@ -1,4 +1,4 @@
-#include <Rendering/Overlay/Im2DRender.h>
+﻿#include <Rendering/Overlay/Im2DRender.h>
 
 // The header only forward declares them; the implementation builds the list and the font.
 #include <Rendering/Overlay/Im2D.h>
@@ -145,7 +145,6 @@ public:
 		programRequest.programHandleId = m_programHandle.GetId();
 		programRequest.stages = std::move(stages);
 		p_driver.EnqueueCreateProgram(std::move(programRequest));
-		p_driver.ExecutePendingCommands();
 		m_programName = Records::ProgramName(m_programHandle);
 
 		// The sampler samples unit 0, which is what a sampler uniform is initialised to: the list's
@@ -166,7 +165,7 @@ public:
 		// (see UploadGeometry): the per-frame path is a sub-data upload, not a reallocation.
 		ResourceOps::AllocateBuffer(m_vertexBuffer, kInitialVertexCapacity, ::Rendering::Settings::EAccessSpecifier::STREAM_DRAW);
 		ResourceOps::AllocateBuffer(m_indexBuffer, kInitialIndexCapacity, ::Rendering::Settings::EAccessSpecifier::STREAM_DRAW);
-		p_driver.ExecutePendingCommands();
+
 
 		// pos (2 floats), uv (2 floats), colour (4 normalised bytes) - the layout of Im2D::DrawVert,
 		// which packs to 20 bytes with no padding.
@@ -176,7 +175,6 @@ public:
 			{ ::Rendering::Settings::EDataType::UNSIGNED_BYTE, 4, true },
 		};
 		ResourceOps::SetVertexArrayLayout(m_vertexArray, m_vertexBuffer, m_indexBuffer, attributes);
-		p_driver.ExecutePendingCommands();
 
 		// 1x1 white: what untextured geometry samples.
 		const uint8_t white[4] = { 255, 255, 255, 255 };
@@ -196,8 +194,6 @@ public:
 		whiteRequest.format = ::Rendering::Settings::EFormat::RGBA;
 		whiteRequest.type = ::Rendering::Settings::EPixelDataType::UNSIGNED_BYTE;
 		whiteRequest.pixels.assign(white, white + 4);
-		p_driver.UploadTexture(std::move(whiteRequest));
-		p_driver.ExecutePendingCommands();
 
 		m_font.Load(FontPaths(), kFontPixelSize);
 		if (!m_font.IsLoaded())
@@ -246,7 +242,6 @@ public:
 		request.type = ::Rendering::Settings::ETextureType::TEXTURE_2D;
 		request.debugName = p_debugName;
 		p_driver.EnqueueCreateTexture(std::move(request));
-		p_driver.ExecutePendingCommands();
 	}
 	/** Makes sure every size atlas the font has so far has a texture, and re-uploads the ones that
 	 * gained glyphs. One 1 MB upload per touched size is cheap next to the per-glyph sub-uploads a
@@ -313,9 +308,6 @@ public:
 			p_driver.UploadTexture(std::move(request));
 		}
 
-		// Synchronous for the caller, like every other resource creation: the draw block below
-		// resolves the handle, so the object has to exist before the batch runs.
-		p_driver.ExecutePendingCommands();
 	}
 
 	/** Pushes the frame's geometry into the two buffers (sub-data uploads into the storage that

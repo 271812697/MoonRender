@@ -1,4 +1,4 @@
-
+﻿
 #include <Rendering/Context/Driver.h>
 
 #include <cstdio>
@@ -350,13 +350,7 @@ bool Rendering::Context::Driver::WaitAndExecute()
 		m_openGLDriver->Execute(batch.tail, batch.head);
 	}
 
-	// The batch is not "done" when its commands have been *issued*: the GPU is still drawing. The
-	// consumer side waits for this batch before it presents (Driver::Execute -> WaitForIdle), and
-	// without a fence that wait means "recorded and issued", so the paste can race the frame it is
-	// showing - which is the display trailing the camera by a frame. Fence first, then hand the ring
-	// back: that makes the consumer's wait mean "this frame is drawn"
-	// (docs/RenderThreadPlan.md §8.69).
-	m_openGLDriver->WaitForFrameCompletion();
+	
 
 	// The frame is drawn now: say so, so the consumer can present it (frame N-1 while N is being
 	// drawn, exactly as the Qt/Filament demo does with its swap chain ring).
@@ -400,30 +394,22 @@ void Rendering::Context::Driver::RequestExit()
 	m_commandQueue->RequestExit();
 }
 
-void Rendering::Context::Driver::Execute()
+bool Rendering::Context::Driver::Execute()
 {
-	// Filament's Engine::execute.
-	Flush();
-
-	// The recording side with a render thread: publishing is all it can do. The batch belongs to
-	// the other thread; waiting is what makes the frame readable right after the call, which is
-	// what the consumer (the paste) needs.
-	if (m_renderThreadActive && std::this_thread::get_id() != m_renderThreadId)
+	Rendering::Backend::DeferredDeleter::Flush();
+	const std::vector<Rendering::Backend::CircularBuffer::Range> batches = m_commandQueue->TakeCommands();
+	if (batches.empty())
 	{
-		m_commandQueue->WaitForIdle();
-		return;
+		return false;
 	}
-
-	// No render thread: this call is the driver loop.
-	ExecuteAll();
+	for (const Rendering::Backend::CircularBuffer::Range& batch : batches)
+	{
+		m_openGLDriver->Execute(batch.tail, batch.head);
+		m_commandQueue->ReleaseBuffer(batch);
+	}
+	return true;
 }
 
-void Rendering::Context::Driver::ExecutePendingCommands()
-{
-	// Flush + wait, the same body: Filament spells the two cases flushAndWait and execute, and the
-	// difference that matters to our callers is whether they read a result back immediately.
-	Execute();
-}
 
 Rendering::Backend::CommandBufferQueue& Rendering::Context::Driver::GetCommandBufferQueue()
 {

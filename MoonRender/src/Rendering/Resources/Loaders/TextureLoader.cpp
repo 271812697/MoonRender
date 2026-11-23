@@ -1,4 +1,4 @@
-#include <array>
+﻿#include <array>
 #include <memory>
 #include <vector>
 
@@ -106,11 +106,6 @@ namespace
 		request.type = Rendering::Settings::ETextureType::TEXTURE_2D;
 		request.debugName = std::move(p_name);
 		driver->CreateTexture(std::move(request));
-
-		// Resource setup is synchronous for the caller (Filament flushes and waits around this for
-		// the same reason): what asks for the object next - the upload below, a material, a gizmo
-		// pass - does so on this side of the frame.
-		driver->ExecutePendingCommands();
 	}
 
 	/** Records the allocate+upload as a driver command (Filament's update2DImage): the command
@@ -157,7 +152,6 @@ namespace
 			static_cast<const uint8_t*>(p_data) + p_size);
 		request.generateMipmaps = p_generateMipmap;
 		driver->UploadTexture(std::move(request));
-		driver->ExecutePendingCommands();
 	}
 }
 
@@ -267,7 +261,6 @@ Rendering::Resources::Texture* Rendering::Resources::Loaders::TextureLoader::Cre
 	if (Rendering::Context::Driver* const driver = GetDriver())
 	{
 		driver->CreateTexture(std::move(request));
-		driver->ExecutePendingCommands();
 	}
 	else
 	{

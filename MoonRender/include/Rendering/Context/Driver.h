@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <string>
 #include <mutex>
 #include <condition_variable>
@@ -250,11 +250,7 @@ namespace Rendering::Context
 		 * The frame is recorded by AView::Render, which only *flushes* (publishes) it; this is
 		 * called once per frame, outside the render call, the way FilamentApp calls
 		 * mEngine->execute() from its loop. */
-		void Execute();
-		/** Flush + wait: everything recorded so far has run when this returns. For the paths that
-		 * read a result back immediately - a program's reflection after Link, a framebuffer's
-		 * completeness, a pick readback (Filament's flushAndWait, minus the GPU fence). */
-		void ExecutePendingCommands();
+		bool Execute();
 		/** The queue the commands are recorded into, for the executor side (and for the debug
 		 * overlay that reports how much of the ring a frame used). */
 		Backend::CommandBufferQueue& GetCommandBufferQueue();

@@ -1,4 +1,4 @@
-#include "editor/Toolbar/ConstraintGroups.h"
+﻿#include "editor/Toolbar/ConstraintGroups.h"
 #include "editor/Toolbar/RibbonGroup.h"
 #include "editor/Language.h"
 #include "editor/Command/command.h"
@@ -317,24 +317,25 @@ namespace MOON {
 			setAction(action);
 			// The widget turns itself off when the sketch closes or another drawing
 			// tool starts, so the button follows it instead of the other way around.
-			auto* poll = new QTimer(this);
-			poll->setInterval(250);
-			QObject::connect(poll, &QTimer::timeout, this, [this]() {
-				// The tool lives on the viewport's renderer, and the viewport is only
-				// there once the workspace is: while the start page is up there is
-				// nothing to ask, and the tool cannot have been turned on either.
-				if (!Core::Global::ServiceLocator::IsProvided<Editor::Panels::SceneView>()) {
-					return;
-				}
-				auto& view = GetService(Editor::Panels::SceneView);
-				auto& gizmoPass = view.GetRenderer()
-					.GetPass<Editor::Rendering::GizmoRenderPass>("ImRenderer");
-				const bool on = gizmoPass.isEnableGizmoWidget("SmartDimension");
-				if (this->action()->isChecked() != on) {
-					this->action()->setChecked(on);
-				}
-			});
-			poll->start();
+			
+			//auto* poll = new QTimer(this);
+			//poll->setInterval(250);
+			//QObject::connect(poll, &QTimer::timeout, this, [this]() {
+			//	// The tool lives on the viewport's renderer, and the viewport is only
+			//	// there once the workspace is: while the start page is up there is
+			//	// nothing to ask, and the tool cannot have been turned on either.
+			//	if (!Core::Global::ServiceLocator::IsProvided<Editor::Panels::SceneView>()) {
+			//		return;
+			//	}
+			//	auto& view = GetService(Editor::Panels::SceneView);
+			//	auto& gizmoPass = view.GetRenderer()
+			//		.GetPass<Editor::Rendering::GizmoRenderPass>("ImRenderer");
+			//	const bool on = gizmoPass.isEnableGizmoWidget("SmartDimension");
+			//	if (this->action()->isChecked() != on) {
+			//		this->action()->setChecked(on);
+			//	}
+			//});
+			//poll->start();
 		}
 	protected:
 		virtual void execute()override {

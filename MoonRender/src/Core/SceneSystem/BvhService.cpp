@@ -68,7 +68,7 @@ namespace Core::SceneSystem
 				static_cast<const uint8_t*>(p_initialData) + p_initialSize);
 		}
 		driver->CreateTexture(std::move(request));
-		driver->ExecutePendingCommands();
+		
 	}
 
 	/** The per-mesh BVH a traversal walks. The ray tracing builds them for its own use

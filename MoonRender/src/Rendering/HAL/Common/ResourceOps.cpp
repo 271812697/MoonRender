@@ -1,4 +1,4 @@
-#include <Rendering/HAL/Common/ResourceOps.h>
+﻿#include <Rendering/HAL/Common/ResourceOps.h>
 
 #include <Rendering/Backend/BufferRequests.h>
 #include <Rendering/Backend/VertexArrayRequests.h>
@@ -59,7 +59,7 @@ namespace Rendering::HAL::ResourceOps
 			// The name is made on the executing side; the drain is what makes it exist before the
 			// caller records anything that names it (the same call the HAL buffer made).
 			driver->EnqueueCreateBuffer(CreateBufferRequest{ p_handle.GetId(), Rendering::Settings::EBufferType::VERTEX });
-			driver->ExecutePendingCommands();
+	
 			return;
 		}
 
@@ -78,7 +78,6 @@ namespace Rendering::HAL::ResourceOps
 		if (Rendering::Context::Driver* const driver = CurrentDriver())
 		{
 			driver->EnqueueCreateVertexArray(p_handle.GetId());
-			driver->ExecutePendingCommands();
 			return;
 		}
 

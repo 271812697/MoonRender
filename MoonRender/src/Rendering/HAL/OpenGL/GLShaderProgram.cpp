@@ -1,4 +1,4 @@
-#include <array>
+﻿#include <array>
 #include <cstdlib>
 #include <iostream>
 #include <glad/glad.h>
@@ -279,9 +279,6 @@ Rendering::Settings::ShaderLinkingResult Rendering::HAL::GLShaderProgram::Link()
 		if (::Rendering::Context::Driver* const driver = ::Rendering::HAL::CurrentDriver())
 		{
 			driver->CreateProgram(std::move(request));
-			// Resource setup is synchronous for the caller, as it is for textures: what runs next -
-			// the binding validation, the first Bind - may need the program on this side.
-			driver->ExecutePendingCommands();
 
 			// The reflection ran with the program (see OpenGLDriver::CreateProgram); take its
 			// result now that the command has. The material's loose uniforms are looked up in it.

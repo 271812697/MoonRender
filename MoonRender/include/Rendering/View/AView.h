@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <Core/Rendering/SceneRenderer.h>
 #include <Rendering/HAL/UniformBuffer.h>
 #include <Rendering/Entities/Camera.h>
@@ -49,6 +49,7 @@ namespace Editor {
 			/** Turns the view's own frame into the image the window pastes: the scene renderer's
 			 * present pass. */
 			void Present();
+			void Commit();
 			/** The GL id of the colour texture holding the last rendered frame.
 			 *
 			 * This is how the frame leaves the render module: the window pastes this texture into
@@ -60,7 +61,7 @@ namespace Editor {
 			 * That is frame N-1 (or N-2 in the demo's numbering), never the one being drawn, so
 			 * this normally returns at once instead of stalling the window on the frame it just
 			 * submitted (docs/RenderThreadPlan.md §8.68). */
-			void WaitForPresentedFrame();
+			void WaitForPresentedFrame(uint64_t frames);
 			/** Reads the last frame back into p_pixels as RGBA8, top row first.
 			 *
 			 * Needs the module's context current (the frame lives on it). The window layer uses
@@ -112,11 +113,12 @@ namespace Editor {
 			 * (slot = (submitted - 2) % 3); one is enough with three slots and halves the visible
 			 * latency. */
 			static constexpr uint64_t kPresentLatencyFrames = 1;
+			std::mutex mMutex;
+			std::condition_variable mCond;
+			uint32_t mDriverSlot = 0;    // 驱动线程的帧序号
+			uint64_t mSubmittedFrames = 0;      // 已提交给 Driver的帧数
 			std::array<std::unique_ptr<::Rendering::HAL::Framebuffer>, kPresentSlotCount> m_presentTargets;
-			/** Frames recorded by this view: the slot of a frame is its index % kPresentSlotCount. */
-			uint64_t m_frameIndex = 0;
-			/** The target the frame being recorded draws into. */
-			::Rendering::HAL::Framebuffer& PresentTarget();
+
 			/** The target holding the frame the window should paste. */
 			::Rendering::HAL::Framebuffer& PresentedTarget();
 			std::unique_ptr<::Core::Rendering::SceneRenderer> m_renderer;

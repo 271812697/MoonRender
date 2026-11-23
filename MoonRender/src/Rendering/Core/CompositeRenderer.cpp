@@ -1,4 +1,4 @@
-#include <cstdio>
+﻿#include <cstdio>
 #include <cstring>
 #include <cstdlib>
 #include <functional>
@@ -189,10 +189,6 @@ void Rendering::Core::CompositeRenderer::DrawFrame()
 				m_driver.ReadPixels(request);
 			}
 
-			if (withDrain)
-			{
-				m_driver.ExecutePendingCommands();
-			}
 		}
 
 		if (dumpThisFrame && m_frameDescriptor.outputMsaaBuffer.has_value()
@@ -228,7 +224,6 @@ void Rendering::Core::CompositeRenderer::DrawFrame()
 				}
 			};
 			m_driver.ReadPixels(request);
-			m_driver.ExecutePendingCommands();
 		}
 
 		m_currentPass.reset();

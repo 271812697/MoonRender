@@ -1,4 +1,4 @@
-#include <glad/glad.h>
+﻿#include <glad/glad.h>
 #include <cstdio>
 #include <cstdlib>
 #include <Rendering/Backend/BackendResources.h>
@@ -154,7 +154,6 @@ Rendering::HAL::GLFramebuffer::TFramebuffer(std::string_view p_debugName) :
 	if (driver != nullptr)
 	{
 		driver->EnqueueCreateFramebuffer(m_context.handle.GetId());
-		driver->ExecutePendingCommands();
 	}
 	else
 	{

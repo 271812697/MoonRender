@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <condition_variable>
 #include <mutex>
 #include <vector>
@@ -45,6 +45,7 @@ namespace Rendering::Backend
 		std::vector<CircularBuffer::Range> WaitForCommands();
 
 		/** Gives the space of executed batches back to the producer and wakes it. */
+		void ReleaseBuffer(const CircularBuffer::Range& p_batches);
 		void ReleaseBuffers(const std::vector<CircularBuffer::Range>& p_batches);
 
 		/** Makes a waiting consumer return (it sees an empty list) so its thread can end. */
@@ -66,8 +67,5 @@ namespace Rendering::Backend
 		size_t m_requiredSize = 0;
 		size_t m_freeSpace = 0;
 		bool m_exitRequested = false;
-		/** Signalled when the last published batch has been released (see WaitForIdle). */
-		mutable std::condition_variable m_idle;
-		int m_outstanding = 0;
 	};
 }

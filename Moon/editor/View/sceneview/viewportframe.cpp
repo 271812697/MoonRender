@@ -1,4 +1,4 @@
-#include "viewportframe.h"
+﻿#include "viewportframe.h"
 
 #include <QOpenGLContext>
 
@@ -233,23 +233,23 @@ namespace
 			// needs the module's context on this thread and runs in both modes.
 			if (!minimalFrame && !m_gizmoReady)
 			{
-				m_gizmoReady = true;
-				MOON::ImRenderer::instance().initGizmoGl();
-				TraceFrame("initGizmoGl");
-				Rendering::Backend::DeferredDeleter::SetUploadsDeferrable(true);
+				//m_gizmoReady = true;
+				//MOON::ImRenderer::instance().initGizmoGl();
+				//TraceFrame("initGizmoGl");
+				//Rendering::Backend::DeferredDeleter::SetUploadsDeferrable(true);
 			}
 
 			if (!overlayOff)
 			{
-				m_overlay->BeginFrame(*view);
+				//m_overlay->BeginFrame(*view);
 			}
 			else if (!minimalFrame)
 			{
 				// With a render thread only the command-recorded overlay layers run: the 3D one
 				// (gizmos, view cube) and the 2D draw list (the widgets' icons and lines). ImGui
 				// still issues its own GL, so its frame stays closed.
-				m_overlay->BeginGizmoFrame(*view);
-				m_overlay->BeginOverlay2D(*view);
+				//m_overlay->BeginGizmoFrame(*view);
+				//m_overlay->BeginOverlay2D(*view);
 			}
 			TraceFrame("overlay->BeginFrame");
 
@@ -282,11 +282,11 @@ namespace
 				// stream and drains it there (see Im2DRender::EndFrame).
 				if (!overlayOff)
 				{
-					m_overlay->EndFrame(*view, *module->GetContext()->driver);
+					//m_overlay->EndFrame(*view, *module->GetContext()->driver);
 				}
 				else if (!minimalFrame)
 				{
-					m_overlay->EndOverlay2D(*view, *module->GetContext()->driver);
+					//m_overlay->EndOverlay2D(*view, *module->GetContext()->driver);
 				}
 			});
 			if (traceFrame)
@@ -307,11 +307,6 @@ namespace
 			return result;
 		}
 		renderJob();
-		// The frame's one execute point, outside the render call: AView::Render only records and
-		// flushes. The host is the engine here, so its Execute() is Filament's
-		// Engine::execute - the frame runs on this thread when there is no render thread, and on
-		// the driver thread otherwise, where this waits until the frame it is about to paste has run.
-		module->Execute();
 		if (threaded)
 		{
 			// Nothing was made current, so there is nothing to put back.
@@ -336,7 +331,7 @@ namespace
 		const auto [frameWidth, frameHeight] = view->GetSafeSize();
 		// The swap chain's ordering (the Qt/Filament demo's paintGL): the frame about to be pasted
 		// is the last one that was committed, never the one the render thread is drawing right now.
-		view->WaitForPresentedFrame();
+		
 		result.texture = view->GetFrameTextureID();
 		result.width = frameWidth;
 		result.height = frameHeight;

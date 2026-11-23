@@ -1,4 +1,4 @@
-#include <Rendering/Overlay/Im3DType.h>
+﻿#include <Rendering/Overlay/Im3DType.h>
 #include <Rendering/Backend/BackendResources.h>
 #include <Rendering/Backend/CreateTextureRequest.h>
 #include <Rendering/Context/Driver.h>
@@ -61,7 +61,6 @@ namespace
 			}
 
 			driver->CreateTexture(std::move(request));
-			driver->ExecutePendingCommands();
 			return;
 		}
 

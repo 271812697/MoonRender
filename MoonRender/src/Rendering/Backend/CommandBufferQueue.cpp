@@ -1,4 +1,4 @@
-#include <Rendering/Backend/CommandBufferQueue.h>
+﻿#include <Rendering/Backend/CommandBufferQueue.h>
 
 #include <Rendering/Backend/CommandStream.h>
 
@@ -48,9 +48,8 @@ namespace Rendering::Backend
 		std::unique_lock lock(m_lock);
 		assert(used <= m_freeSpace);
 		m_freeSpace -= used;
-		++m_outstanding;
 		m_batches.push_back(batch);
-		m_condition.notify_all();
+		m_condition.notify_one();
 
 		if (m_freeSpace < m_requiredSize)
 		{
@@ -78,6 +77,16 @@ namespace Rendering::Backend
 		return batches;
 	}
 
+	void CommandBufferQueue::ReleaseBuffer(const CircularBuffer::Range& p_batches)
+	{
+		size_t released = RangeSize(p_batches);
+		
+
+		std::lock_guard lock(m_lock);
+		m_freeSpace += released;
+		m_condition.notify_one();
+	}
+
 	void CommandBufferQueue::ReleaseBuffers(const std::vector<CircularBuffer::Range>& p_batches)
 	{
 		size_t released = 0;
@@ -88,18 +97,7 @@ namespace Rendering::Backend
 
 		std::lock_guard lock(m_lock);
 		m_freeSpace += released;
-		m_outstanding -= static_cast<int>(p_batches.size());
-		if (m_outstanding <= 0)
-		{
-			m_idle.notify_all();
-		}
 		m_condition.notify_all();
-	}
-
-	void CommandBufferQueue::WaitForIdle()
-	{
-		std::unique_lock lock(m_lock);
-		m_idle.wait(lock, [this] { return m_outstanding <= 0 || m_exitRequested; });
 	}
 
 	void CommandBufferQueue::RequestExit()

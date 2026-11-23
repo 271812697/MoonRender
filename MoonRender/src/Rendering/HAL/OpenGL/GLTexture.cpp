@@ -1,4 +1,4 @@
-#include <glad/glad.h>
+﻿#include <glad/glad.h>
 #include <Rendering/HAL/OpenGL/GLTexture.h>
 #include <Rendering/HAL/OpenGL/GLTypes.h>
 #include <assert.h>
@@ -55,7 +55,6 @@ Rendering::HAL::GLTexture::TTexture(Settings::ETextureType p_type, std::string_v
 		request.type = p_type;
 		request.debugName = std::string(p_debugName);
 		driver->CreateTexture(std::move(request));
-		driver->ExecutePendingCommands();
 	}
 	else
 	{

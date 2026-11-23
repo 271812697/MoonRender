@@ -1,4 +1,4 @@
-#include "viewerwidget.h"
+﻿#include "viewerwidget.h"
 #include <Rendering/Overlay/Screen/ScreenOverlayRegistry.h>
 #include <unordered_map>
 
@@ -23,15 +23,8 @@ namespace MOON {
 		this->setFocusPolicy(Qt::StrongFocus);
 		this->setMouseTracking(true);
 		QSurfaceFormat format;
-		// Single sample: the frame is pasted into this widget's framebuffer with a blit, and
-		// blitting into a multisampled framebuffer (even with one sample) is invalid. The
-		// render module does its own MSAA on its side (AView::m_msaaframebuffer).
 		format.setSamples(0);
 		this->setFormat(format);
-		// The widget itself is a service: the tools that draw with the module's context
-		// (the view parameters, the picture a project card is shown by) need
-		// the surface they belong to. It is only ever reached for the widget - what is open
-		// and what the scene shows are services of their own now.
 		RegService(ViewerWidget, *this);
 	}
 
@@ -54,7 +47,7 @@ namespace MOON {
 	}
 
 	
-void ViewerWidget::initializeGL()
+	void ViewerWidget::initializeGL()
 	{
 		QOpenGLWidget::initializeGL();
 		// The editor's own GL entry points, resolved from this widget's context - the first
@@ -140,7 +133,7 @@ void ViewerWidget::initializeGL()
 				// is built on the first frame instead (see
 				// ViewportFrame::Render), where the context that owns it is current and the uploads
 				// it causes can travel the same path as the draws that need them.
-				MOON::ImRenderer::instance().init();
+				//MOON::ImRenderer::instance().init();
 			});
 		if (!module.IsReady())
 		{
@@ -165,8 +158,6 @@ void ViewerWidget::initializeGL()
 
 	void ViewerWidget::paintGL()
 	{
-		// Jobs the editor queued for the next frame (see CallBackManager): they run before
-		// the frame is drawn, on the frame loop, which is the only place they are allowed.
 		CallBackManager::instance().exectue();
 
 		if (!m_frame)
@@ -178,16 +169,6 @@ void ViewerWidget::initializeGL()
 		{
 			return;
 		}
-
-		// The frame was drawn on the module's context, which the frame closed again: the
-		// paste's read framebuffer belongs to *this* widget's context, so that one has to be
-		// current before the blit.
-		this->makeCurrent();
-
-		// The window layer's only job on the frame: paste it into its own framebuffer. A blit
-		// of the module's colour texture, because drawing it would need the module's quad VAO
-		// and vertex arrays are per context. The frame is rendered at the widget's logical
-		// size and scaled to the framebuffer here.
 		const qreal pixelRatio = devicePixelRatioF();
 		m_paster.Paste(
 			frame.texture, frame.width, frame.height,
