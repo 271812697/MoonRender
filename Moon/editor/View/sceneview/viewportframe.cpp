@@ -1,5 +1,4 @@
 ﻿#include "viewportframe.h"
-
 #include "viewportoverlay.h"
 #include "qtinputtranslator.h"
 
@@ -176,7 +175,6 @@ namespace
 }
 	ViewportFrame::Result ViewportFrame::Render()
 	{
-	
 		Result result;
 		Editor::Panels::SceneView* view = m_view;
 		Editor::Core::RenderModuleHost* module = Editor::Core::RenderModuleHost::Instance();
@@ -188,62 +186,17 @@ namespace
 
 		SyncViewSize();
 
-		// Minimal closed loop for the render-thread bring-up: with MOON_RENDER_MINIMAL the frame
-		// records nothing and draws nothing on this thread, so all that is exercised is the engine's
-		// own thread - the driver on it, the loop, the teardown. Whatever breaks after this point is
-		// in the frame's content, not in the threading.
-
-		// Minimal frame for the render-thread bring-up: the content is the scene block and the
-		// present, recorded by AView::Render; the overlays and the deferred uploads stay out (they
-		// are the next layer). MOON_RENDER_MINIMAL only has meaning with a render thread.
-		const bool minimalFrame = std::getenv("MOON_RENDER_MINIMAL") != nullptr && module->IsThreaded();
-
-		// The overlays are the last layer that still issues its own GL (Im2D's draw list, ImGui).
-		// With a render thread they would run on the recording side, where there is no context -
-		// so they stay off until their GL is recorded as commands, and the frame is the scene, the
-		// 3D overlay (gizmos, view cube: those are commands now) and the present.
-		const bool overlayOff = minimalFrame || module->IsThreaded();
-
-
-
 		// The frame needs the module's context on the thread that owns it: the render thread when
 		// the module has one, otherwise this (the GUI) thread. Everything the frame does - the
 		// document read that uploads meshes, the update's queries, the render and the overlays -
 		// is inside the job, so it all happens with that context current.
-		auto renderJob = [this, view, module, minimalFrame, overlayOff]
+		auto renderJob = [this, view, module]
 		{
-			// Resource work queued since the last frame - uploads and the destruction of what was
-			// released - runs before anything is drawn: the overlays and the gizmos draw outside
-			// the command path, so they cannot rely on a drain having happened first.
-			if (!overlayOff)
-			{
-				Rendering::Backend::DeferredDeleter::Flush();
-			}
-			TraceFrame("frame: enter");
-
-			// The gizmo's geometry is built here, on the first frame - not during the module build.
-			// It is handles and commands now (Rendering::Overlay::Im3DGLRenderer), so it no longer
-			// needs the module's context on this thread and runs in both modes.
-			if (!minimalFrame && !m_gizmoReady)
-			{
-				m_gizmoReady = true;
-				MOON::ImRenderer::instance().initGizmoGl();
-				TraceFrame("initGizmoGl");
-				Rendering::Backend::DeferredDeleter::SetUploadsDeferrable(true);
-			}
-
-			if (!overlayOff)
-			{
-				m_overlay->BeginFrame(*view);
-			}
-			else if (!minimalFrame)
-			{
-				// With a render thread only the command-recorded overlay layers run: the 3D one
-				// (gizmos, view cube) and the 2D draw list (the widgets' icons and lines). ImGui
-				// still issues its own GL, so its frame stays closed.
-				m_overlay->BeginGizmoFrame(*view);
-				m_overlay->BeginOverlay2D(*view);
-			}
+			// With a render thread only the command-recorded overlay layers run: the 3D one
+			// (gizmos, view cube) and the 2D draw list (the widgets' icons and lines). ImGui
+			// still issues its own GL, so its frame stays closed.
+			m_overlay->BeginGizmoFrame(*view);
+			m_overlay->BeginOverlay2D(*view);
 			TraceFrame("overlay->BeginFrame");
 
 			// The document read is here because it needs everything the frame has: the scene, the
@@ -256,36 +209,15 @@ namespace
 			// this frame rather than the next one (the view ticks its pending fit in Update).
 			view->Update(0.01f);
 
-			const bool traceFrame = m_traceNextFrame || view->ShouldTraceFitFrames();
-			m_traceNextFrame = false;
-			if (traceFrame)
-			{
-				CORE_INFO("[Viewer] drawing a frame ({0} fit frame(s) left)",
-					view->IsFitPending() ? view->PendingFitFrames() : 0);
-			}
-
 			// The overlays are drawn *inside* the frame, into the module's present target: ImGui,
 			// the 2D draw list and the gizmos are part of what the window pastes, not something
 			TraceFrame("view->Render");
 			// the window draws afterwards on its own context. That is what leaves the module
 			// free of the window layer - it draws its overlays wherever it runs.
-			view->Render([this, view, module, minimalFrame, overlayOff]
+			view->Render([this, view, module]
 			{
-				// The 2D overlay records its state setup and its draws on the module's command
-				// stream and drains it there (see Im2DRender::EndFrame).
-				if (!overlayOff)
-				{
-					m_overlay->EndFrame(*view, *module->GetContext()->driver);
-				}
-				else if (!minimalFrame)
-				{
-					m_overlay->EndOverlay2D(*view, *module->GetContext()->driver);
-				}
+				m_overlay->EndOverlay2D(*view, *module->GetContext()->driver);
 			});
-			if (traceFrame)
-			{
-				CORE_INFO("[Viewer] frame drawn");
-			}
 		};
 
 		// Recording only: no context is made current here in either mode. The module's context
@@ -302,20 +234,12 @@ namespace
 			m_treeRefreshPending = false;
 			TreeViewSync::Instance().Refresh();
 		}
-
 		const auto [frameWidth, frameHeight] = view->GetSafeSize();
 		// The swap chain's ordering (the Qt/Filament demo's paintGL): the frame about to be pasted
 		// is the last one that was committed, never the one the render thread is drawing right now.
-		
 		result.texture = view->GetFrameTextureID();
 		result.width = frameWidth;
 		result.height = frameHeight;
-		if (std::getenv("MOON_FRAME_TRACE") != nullptr)
-		{
-			std::fprintf(stderr, "[paste] texture=%u %dx%d threaded=%d\n", result.texture,
-				frameWidth, frameHeight, module->IsThreaded() ? 1 : 0);
-			std::fflush(stderr);
-		}
 		// One frame of input has been consumed: the state the camera controller reads is
 		// cleared here, so a key that is pressed and released between two frames is not
 		// replayed on the next one.

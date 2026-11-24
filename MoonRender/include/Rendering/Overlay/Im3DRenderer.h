@@ -43,10 +43,10 @@ namespace MOON
 
 		/** The gizmo geometry's GL objects (vertex array, vertex buffer, materials).
 		 *
-		 * Separate from init() because of which context each half belongs to: the gizmo pass draws
-		 * inside the render module's frame, on the module's own context, while ImGui draws after
-		 * that frame has been pasted, on the viewport's context. Vertex arrays are per context, so
-		 * this half has to be created on the module's, and init() on the viewport's. */
+		 * Created lazily, on the first frame that draws the overlay (see newFrame): the vertex
+		 * array, the buffers and the pre-store meshes' streams are recorded as commands, so the
+		 * render module - and with it the driver those commands go to - has to exist already.
+		 * Called twice, the second call does nothing. */
 		void initGizmoGl();
 		void preStoreMesh();
 		void prepareGl();
@@ -342,6 +342,8 @@ namespace MOON
 		Rendering::Overlay::FrameInfo m_frameInfo;
 		/** Cell currently highlighted by the navigation cube (-1 = none). */
 		int mViewCubeHoveredCell = -1;
+		/** Set once initGizmoGl() has run (see newFrame). */
+		bool m_gizmoReady = false;
 
 	private:
 		std::vector<std::string> cancelList;

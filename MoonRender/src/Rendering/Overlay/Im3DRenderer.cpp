@@ -117,6 +117,16 @@ namespace MOON
 
 	void ImRenderer::initGizmoGl()
 	{
+		// The gizmo pass draws with these inside the render module's frame, and every one of them
+		// is a command recorded against the module's driver - so this cannot run while the module
+		// is still being built (there the module is not reachable yet and each creation is skipped
+		// without a word). It runs on the first frame instead, from newFrame.
+		if (m_gizmoReady)
+		{
+			return;
+		}
+		m_gizmoReady = true;
+
 		// Vertex array, vertex buffer and the gizmo materials: the gizmo pass draws with them
 		// inside the render module's frame, so they belong to the module's context.
 		prepareGl();
@@ -155,8 +165,6 @@ namespace MOON
 		pushEnableLit(false);
 		pushLayerId(0);
 		pushId(0x811C9DC5u);
-
-		
 	}
 	void ImRenderer::preStoreMesh()
 	{
@@ -1438,6 +1446,12 @@ namespace MOON
 
 	void ImRenderer::newFrame(const Rendering::Overlay::FrameInfo& p_frameInfo)
 	{
+		// The overlay's GL objects are created here, on first use, and not from init(): this is
+		// the first point where the render module exists, and everything they are made of (the
+		// vertex array, the buffers, the pre-store meshes' streams) is a command recorded against
+		// the module's driver. See initGizmoGl.
+		initGizmoGl();
+
 		litVertexArray.clear();
 		drawMeshList.clear();
 		m_frameInfo = p_frameInfo;

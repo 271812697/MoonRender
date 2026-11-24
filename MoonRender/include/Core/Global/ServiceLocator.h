@@ -27,7 +27,6 @@ namespace Core::Global
 		{
 			if (!IsProvided<T>()) {
 				__SERVICES[typeid(T).hash_code()] = std::any(&p_service);
-				std::cout << "type:" << typeid(T).hash_code() << std::endl;
 			}
 		}
 
@@ -37,7 +36,6 @@ namespace Core::Global
 		template<typename T>
 		static T& Get()
 		{
-			std::cout << "type:" << typeid(T).hash_code() << std::endl;
 			return *std::any_cast<T*>(__SERVICES[typeid(T).hash_code()]);
 		}
 
