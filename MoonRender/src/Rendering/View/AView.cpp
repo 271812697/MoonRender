@@ -37,7 +37,7 @@ Editor::Panels::AView::AView
 	::Rendering::Context::Driver& p_driver) :
 	m_driver(&p_driver), m_framebuffer(p_title), name(p_title)
 {
-	m_driver->MakeCurrent();
+	
 	// Built on this side, by recorded commands (see FramebufferUtil::SetupFramebufferWithDriver):
 	// the attachments are front-end textures with handles, so the view can hand its frame texture to
 	// the window at any time. A target whose attachments the executor created would report an empty

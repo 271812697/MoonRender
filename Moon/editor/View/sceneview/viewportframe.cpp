@@ -185,7 +185,6 @@ namespace
 		{
 			return result;
 		}
-		module->GetContext()->driver->MakeCurrent();
 
 		SyncViewSize();
 
