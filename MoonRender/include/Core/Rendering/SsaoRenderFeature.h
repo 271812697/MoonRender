@@ -1,4 +1,5 @@
 ﻿#pragma once
+#include <Rendering/Data/PipelineState.h>
 #include <Rendering/Features/DebugShapeRenderFeature.h>
 namespace Core::Rendering
 {

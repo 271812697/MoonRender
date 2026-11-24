@@ -1,4 +1,5 @@
 ﻿#pragma once
+#include <Rendering/Data/PipelineState.h>
 #include <chrono>
 #include <Core/Rendering/PingPongFramebuffer.h>
 #include <Core/Rendering/PostProcess/AEffect.h>
@@ -42,14 +43,14 @@ namespace Core::Rendering::PostProcess
 		*/
 		virtual void Draw(
 			::Rendering::Data::PipelineState p_pso,
-			::Rendering::HAL::Framebuffer& p_src,
-			::Rendering::HAL::Framebuffer& p_dst,
+			::Rendering::Data::Framebuffer& p_src,
+			::Rendering::Data::Framebuffer& p_dst,
 			const EffectSettings& p_settings
 		) override;
 
 	private:
 		std::optional<std::chrono::high_resolution_clock::time_point> m_previousTime;
-		::Rendering::HAL::Framebuffer m_luminanceBuffer;
+		::Rendering::Data::Framebuffer m_luminanceBuffer;
 		PingPongFramebuffer m_exposurePingPongBuffer;
 		::Rendering::Data::Material m_luminanceMaterial;
 		::Rendering::Data::Material m_exposureMaterial;

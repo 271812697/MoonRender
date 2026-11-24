@@ -1,80 +1,25 @@
 #include <glad/glad.h>
 
-#include <Rendering/Backend/BackendResources.h>
-#include <Rendering/Context/Driver.h>
-#include <Rendering/HAL/Common/HALDriverAccess.h>
-#include <Rendering/HAL/Common/ResourceOps.h>
-#include <Rendering/HAL/OpenGL/GLTypes.h>
 #include <Rendering/HAL/OpenGL/GLVertexArray.h>
+#include <Rendering/HAL/OpenGL/GLTypes.h>
 #include <assert.h>
 
-template<>
-Rendering::HAL::GLVertexArray::TVertexArray()
-{
-	// createVertexArrayS/createVertexArrayR: the handle exists here, the name is made on the side
-	// that owns the context (a vertex array is a container object and is not shared).
-	m_context.handle = ::Rendering::Backend::GetHandleAllocator().Allocate<::Rendering::Backend::HwVertexArray>();
-	::Rendering::HAL::ResourceOps::EnsureVertexArray(m_context.handle);
-}
+// The backend object of a vertex array: everything here runs where the context is, on the object
+// that lives in the handle's slot. The recording side never calls any of it - what a front end
+// (Rendering::Data::VertexArrayObject) does is record the commands whose executors land here.
 
 template<>
-Rendering::HAL::GLVertexArray::~TVertexArray()
+Rendering::HAL::GLVertexArray::TVertexArray(BackendConstructionTag)
 {
-	if (m_context.handle)
-	{
-		::Rendering::HAL::ResourceOps::DestroyVertexArray(m_context.handle);
-		m_context.handle.clear();
-		m_context.attributeCount = 0;
-	}
-}
-
-template<>
-bool Rendering::HAL::GLVertexArray::IsValid() const
-{
-	return m_context.attributeCount > 0;
-}
-
-template<>
-void Rendering::HAL::GLVertexArray::SetLayout(
-	Settings::VertexAttributeLayout p_attributes,
-	VertexBuffer& p_vertexBuffer,
-	IndexBuffer& p_indexBuffer
-)
-{
-	assert(!IsValid()&& "Vertex array layout already set");
-
-	// The layout is GL (glVertexAttribPointer against the array's buffers), so it goes through the
-	// same handle-addressed path every other resource operation uses: recorded when the context
-	// lives on another thread, applied here otherwise (see ResourceOps).
-	::Rendering::HAL::ResourceOps::SetVertexArrayLayout(
-		m_context.handle,
-		p_vertexBuffer.GetHandle(),
-		p_indexBuffer.IsValid() ? p_indexBuffer.GetHandle() : Rendering::Backend::ResourceHandle<Rendering::Backend::HwBufferObject>{},
-		p_attributes);
-
-	for (uint32_t index = 0; index < static_cast<uint32_t>(p_attributes.size()); ++index)
-	{
-		++m_context.attributeCount;
-	}
-}
-template<>
-void Rendering::HAL::GLVertexArray::ResetLayout()
-{
-	assert(IsValid()&&"Vertex array layout not already set");
-
-	Bind();
-	for (uint32_t i = 0; i < m_context.attributeCount; ++i)
-	{
-		glDisableVertexAttribArray(i);
-	}
-	m_context.attributeCount = 0;
-	Unbind();
+	// The backend half of the create: the slot exists (the recording side reserved it) and the
+	// context is current, so the name is made here (Filament's createVertexArrayR).
+	glCreateVertexArrays(1, &m_context.glId);
 }
 
 template<>
 void Rendering::HAL::GLVertexArray::Bind() const
 {
-	glBindVertexArray(GetID());
+	glBindVertexArray(m_context.glId);
 }
 
 template<>
@@ -84,7 +29,42 @@ void Rendering::HAL::GLVertexArray::Unbind() const
 }
 
 template<>
+void Rendering::HAL::GLVertexArray::SetLayout(
+	const std::vector<Rendering::Backend::VertexLayoutAttribute>& p_attributes,
+	uint32_t p_vertexBufferId,
+	uint32_t p_indexBufferId) const
+{
+	glBindVertexArray(m_context.glId);
+
+	// The element buffer binding is part of the array's state; the array buffer binding is not
+	// (the attribute pointers capture the buffer they were described against), so both are set
+	// while the array is bound, which is where the layout is stored.
+	if (p_indexBufferId != 0)
+	{
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, p_indexBufferId);
+	}
+	if (p_vertexBufferId != 0)
+	{
+		glBindBuffer(GL_ARRAY_BUFFER, p_vertexBufferId);
+	}
+
+	for (uint32_t index = 0; index < static_cast<uint32_t>(p_attributes.size()); ++index)
+	{
+		const Rendering::Backend::VertexLayoutAttribute& attribute = p_attributes[index];
+		glEnableVertexAttribArray(index);
+		glVertexAttribPointer(index,
+			static_cast<GLint>(attribute.count),
+			EnumToValue<GLenum>(attribute.type),
+			static_cast<GLboolean>(attribute.normalized),
+			static_cast<GLsizei>(attribute.stride),
+			reinterpret_cast<const void*>(static_cast<uintptr_t>(attribute.offset)));
+	}
+
+	glBindVertexArray(0);
+}
+
+template<>
 uint32_t Rendering::HAL::GLVertexArray::GetID() const
 {
-	return ::Rendering::Backend::Records::VertexArrayName(m_context.handle);
+	return m_context.glId;
 }

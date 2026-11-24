@@ -1,4 +1,5 @@
 ﻿#pragma once
+#include <Rendering/Data/PipelineState.h>
 #include <Rendering/Entities/Camera.h>
 #include <Rendering/Features/DebugShapeRenderFeature.h>
 #include <Core/ECS/Actor.h>

@@ -33,23 +33,23 @@ namespace
 	{
 		uint16_t width;
 		uint16_t height;
-		Rendering::HAL::Framebuffer& target;
+		Rendering::Data::Framebuffer& target;
 	};
 }
 
 Core::Rendering::PostProcess::BloomEffect::BloomEffect(::Rendering::Core::CompositeRenderer& p_renderer) :
 	AEffect(p_renderer),
 	m_bloomSamplingBuffers{
-		::Rendering::HAL::Framebuffer{"BloomSamplingBuffer0"},
-		::Rendering::HAL::Framebuffer{"BloomSamplingBuffer1"},
-		::Rendering::HAL::Framebuffer{"BloomSamplingBuffer2"},
-		::Rendering::HAL::Framebuffer{"BloomSamplingBuffer3"},
-		::Rendering::HAL::Framebuffer{"BloomSamplingBuffer4"},
-		::Rendering::HAL::Framebuffer{"BloomSamplingBuffer5"},
-		::Rendering::HAL::Framebuffer{"BloomSamplingBuffer6"},
-		::Rendering::HAL::Framebuffer{"BloomSamplingBuffer7"},
-		::Rendering::HAL::Framebuffer{"BloomSamplingBuffer8"},
-		::Rendering::HAL::Framebuffer{"BloomSamplingBuffer9"}
+		::Rendering::Data::Framebuffer{"BloomSamplingBuffer0"},
+		::Rendering::Data::Framebuffer{"BloomSamplingBuffer1"},
+		::Rendering::Data::Framebuffer{"BloomSamplingBuffer2"},
+		::Rendering::Data::Framebuffer{"BloomSamplingBuffer3"},
+		::Rendering::Data::Framebuffer{"BloomSamplingBuffer4"},
+		::Rendering::Data::Framebuffer{"BloomSamplingBuffer5"},
+		::Rendering::Data::Framebuffer{"BloomSamplingBuffer6"},
+		::Rendering::Data::Framebuffer{"BloomSamplingBuffer7"},
+		::Rendering::Data::Framebuffer{"BloomSamplingBuffer8"},
+		::Rendering::Data::Framebuffer{"BloomSamplingBuffer9"}
 	},
 	m_bloomOutputBuffer{ "BloomOutputBuffer" }
 {
@@ -91,8 +91,8 @@ bool Core::Rendering::PostProcess::BloomEffect::IsApplicable(const EffectSetting
 
 void Core::Rendering::PostProcess::BloomEffect::Draw(
 	::Rendering::Data::PipelineState p_pso,
-	::Rendering::HAL::Framebuffer& p_src,
-	::Rendering::HAL::Framebuffer& p_dst,
+	::Rendering::Data::Framebuffer& p_src,
+	::Rendering::Data::Framebuffer& p_dst,
 	const EffectSettings& p_settings
 )
 {
@@ -141,8 +141,8 @@ void Core::Rendering::PostProcess::BloomEffect::Draw(
 	m_renderer.Blit(p_pso, p_src, m_bloomOutputBuffer, m_blitMaterial);
 
 	auto downsamplingPass = [&](
-		::Rendering::HAL::Framebuffer& p_src,
-		::Rendering::HAL::Framebuffer& p_dst,
+		::Rendering::Data::Framebuffer& p_src,
+		::Rendering::Data::Framebuffer& p_dst,
 		const Maths::FVector2& p_srcRes 
 	) {
 		m_downsamplingMaterial.SetProperty("_InputResolution", p_srcRes);
@@ -180,8 +180,8 @@ void Core::Rendering::PostProcess::BloomEffect::Draw(
 	m_upsamplingMaterial.SetProperty("_FilterRadius", BloomConstants::kFilterRadius);
 
 	auto upsamplingPass = [&](
-		::Rendering::HAL::Framebuffer& p_src,
-		::Rendering::HAL::Framebuffer& p_dst
+		::Rendering::Data::Framebuffer& p_src,
+		::Rendering::Data::Framebuffer& p_dst
 	) {
 		m_renderer.Blit(upsamplingPSO, p_src, p_dst, m_upsamplingMaterial, (DEFAULT & ~RESIZE_DST_TO_MATCH_SRC) | USE_MATERIAL_STATE_MASK);
 	};

@@ -86,9 +86,10 @@ namespace
 		return light.GenerateMatrix();
 	}
 
-	std::unique_ptr<Rendering::HAL::ShaderStorageBuffer> CreateDebugLightBuffer()
+	std::unique_ptr<Rendering::Data::BufferObject> CreateDebugLightBuffer()
 	{
-		auto lightBuffer = std::make_unique<Rendering::HAL::ShaderStorageBuffer>();
+		auto lightBuffer = std::make_unique<Rendering::Data::BufferObject>(
+			Rendering::Settings::EBufferType::SHADER_STORAGE);
 		Maths::FMatrix4 lightMatrices[2] = {
 			CreateDebugDirectionalLight(),
 			CreateDebugAmbientLight() };

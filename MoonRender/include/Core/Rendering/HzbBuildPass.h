@@ -1,5 +1,7 @@
 #pragma once
+#include <Rendering/Data/PipelineState.h>
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <vector>
@@ -7,8 +9,8 @@
 #include <Core/Rendering/HzbCuller.h>
 #include <Core/Resources/MaterialAsset.h>
 #include <Rendering/Core/ARenderPass.h>
-#include <Rendering/HAL/Buffer.h>
-#include <Rendering/HAL/Framebuffer.h>
+#include <Rendering/Data/BufferObject.h>
+#include <Rendering/Data/Framebuffer.h>
 
 namespace Core::Rendering
 {
@@ -71,7 +73,7 @@ namespace Core::Rendering
 		::Core::Resources::MaterialAsset m_reduceMaterial;
 
 		/** Depth only framebuffer holding the resolved (non MSAA) scene depth. */
-		::Rendering::HAL::Framebuffer m_resolveFbo;
+		::Rendering::Data::Framebuffer m_resolveFbo;
 		std::shared_ptr<::Rendering::HAL::Texture> m_resolveColor;
 		std::shared_ptr<::Rendering::HAL::Texture> m_resolveDepth;
 
@@ -83,19 +85,27 @@ namespace Core::Rendering
 		 * copies destroy the GL names still referenced by the surviving objects
 		 * (surfaces as "Framebuffer name must be generated before being bound").
 		 */
-		std::vector<std::unique_ptr<::Rendering::HAL::Framebuffer>> m_levels;
+		std::vector<std::unique_ptr<::Rendering::Data::Framebuffer>> m_levels;
 		std::vector<Maths::FVector2> m_levelResolutions;
 		std::vector<std::shared_ptr<::Rendering::HAL::Texture>> m_levelTextures;
 
 		/** One entry of the asynchronous readback ring.
 		 *
-		 * The grid is copied into a PBO instead of being read synchronously, and
-		 * fetched a few frames later once its fence is signalled, so the CPU
-		 * never waits for the GPU to finish the frame.
+		 * The grid is copied into a PBO instead of being read synchronously, and fetched a few
+		 * frames later once its fence is signalled, so the CPU never waits for the GPU to finish
+		 * the frame. The fetch itself is a command too (DownloadBuffer): it copies the bytes where
+		 * the context is, only when the fence is already signalled, and leaves them in cpuBytes for
+		 * this side to read - no mapping, no synchronous round trip.
 		 */
 		struct ReadbackSlot
 		{
-			std::shared_ptr<::Rendering::HAL::Buffer> buffer;
+			std::shared_ptr<::Rendering::Data::BufferObject> buffer;
+			/** Where the DownloadBuffer command puts the bytes. */
+			std::shared_ptr<std::vector<uint8_t>> cpuBytes;
+			/** 0: the fetch has not run yet, 1: the bytes are there, 2: the fence was not signalled
+			 * (ask again next frame). Written where the context is, read here. */
+			std::shared_ptr<std::atomic<int>> downloadState;
+			bool downloadIssued = false;
 			bool pending = false;
 			uint64_t issueFrame = 0;
 		};

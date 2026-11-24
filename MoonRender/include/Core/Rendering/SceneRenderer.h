@@ -1,12 +1,11 @@
 #pragma once
+#include <Rendering/Data/PipelineState.h>
 #include <map>
 #include <cstdint>
 #include <Rendering/Core/CompositeRenderer.h>
 #include <Core/Rendering/HzbCuller.h>
 #include <Rendering/Data/Frustum.h>
 #include <Rendering/Entities/Drawable.h>
-#include <Rendering/HAL/UniformBuffer.h>
-#include <Rendering/HAL/ShaderStorageBuffer.h>
 #include <Rendering/Resources/Mesh.h>
 
 #include <Core/ECS/Actor.h>

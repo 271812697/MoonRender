@@ -61,7 +61,8 @@ void Rendering::Overlay::Im3DGLRenderer::Initialize()
 	::Rendering::HAL::ResourceOps::EnsureVertexArray(ResourceHandle<HwVertexArray>{ m_vertexArrayHandle });
 
 	m_vertexBufferHandle = GetHandleAllocator().Allocate<HwBufferObject>().GetId();
-	::Rendering::HAL::ResourceOps::EnsureBuffer(ResourceHandle<HwBufferObject>{ m_vertexBufferHandle });
+	::Rendering::HAL::ResourceOps::EnsureBuffer(ResourceHandle<HwBufferObject>{ m_vertexBufferHandle },
+		::Rendering::Settings::EBufferType::VERTEX);
 
 	if (std::getenv("MOON_FRAME_TRACE") != nullptr)
 	{

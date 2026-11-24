@@ -1,7 +1,11 @@
 #include <Core/Rendering/HzbBuildPass.h>
 
+#include <Rendering/Backend/BufferRequests.h>
+
 #include <algorithm>
 #include <chrono>
+#include <cstdio>
+#include <cstdlib>
 
 #include <Core/Global/ServiceLocator.h>
 #include <Core/Rendering/FramebufferUtil.h>
@@ -143,7 +147,7 @@ void Core::Rendering::HzbBuildPass::SetupTargets(uint32_t p_width, uint32_t p_he
 		);
 		texture->Allocate(MakeGridTextureDesc(levelWidth, levelHeight));
 
-		auto framebuffer = std::make_unique<::Rendering::HAL::Framebuffer>(
+		auto framebuffer = std::make_unique<::Rendering::Data::Framebuffer>(
 			std::format("HzbLevel{}", i)
 		);
 		framebuffer->Attach<::Rendering::HAL::Texture>(
@@ -185,13 +189,18 @@ void Core::Rendering::HzbBuildPass::SetupReadbacks()
 	{
 		// PIXEL_PACK buffer: destination of the asynchronous glReadPixels. The
 		// STREAM_READ hint matches "written once by the GPU, read once by the CPU".
-		slot.buffer = std::make_shared<::Rendering::HAL::Buffer>(
+		slot.buffer = std::make_shared<::Rendering::Data::BufferObject>(
 			::Rendering::Settings::EBufferType::PIXEL_PACK
 		);
 		slot.buffer->Allocate(
 			m_readbackBytes,
 			::Rendering::Settings::EAccessSpecifier::STREAM_READ
 		);
+
+		// Where the fetch (DownloadBuffer) puts the bytes, and the flag it flips when it did.
+		slot.cpuBytes = std::make_shared<std::vector<uint8_t>>(static_cast<size_t>(m_readbackBytes));
+		slot.downloadState = std::make_shared<std::atomic<int>>(0);
+		slot.downloadIssued = false;
 	}
 }
 
@@ -204,6 +213,9 @@ void Core::Rendering::HzbBuildPass::ReleaseReadbacks()
 			slot.buffer->ClearFence();
 		}
 		slot.buffer.reset();
+		slot.cpuBytes.reset();
+		slot.downloadState.reset();
+		slot.downloadIssued = false;
 		slot.pending = false;
 	}
 
@@ -228,33 +240,74 @@ void Core::Rendering::HzbBuildPass::ConsumeReadyReadback()
 		const uint32_t index = (m_readbackWriteIndex + i) % slotCount;
 		ReadbackSlot& slot = m_readbackSlots[index];
 
-		if (!slot.pending || !slot.buffer->IsFenceSignaled())
+		if (!slot.pending || !slot.downloadState)
 		{
 			continue;
 		}
 
-		void* mapped = slot.buffer->MapRead(0, m_readbackBytes);
-		if (mapped == nullptr)
+		if (!slot.downloadIssued)
 		{
-			// Could not map (the GPU is still using the buffer): retry next frame.
+			// Ask for the bytes: the command checks the fence where the context is and copies only
+			// once the GPU is done, so nothing on this side waits for it. The answer comes back
+			// through downloadState on a later frame.
+			slot.downloadState->store(0, std::memory_order_release);
+
+			::Rendering::Backend::DownloadBufferRequest request;
+			request.handleId = slot.buffer->GetHandle().GetId();
+			request.offset = 0;
+			request.size = m_readbackBytes;
+			request.data = slot.cpuBytes;
+			request.onDone = [state = slot.downloadState](bool p_copied)
+				{
+					state->store(p_copied ? 1 : 2, std::memory_order_release);
+				};
+			m_renderer.GetDriver().EnqueueDownloadBuffer(std::move(request));
+			slot.downloadIssued = true;
+
+			if (std::getenv("MOON_HZB_TRACE") != nullptr)
+			{
+				std::fprintf(stderr, "[hzb] asking for the readback (%llu bytes)\n",
+					static_cast<unsigned long long>(m_readbackBytes));
+				std::fflush(stderr);
+			}
 			break;
 		}
 
-		const float* depths = static_cast<const float*>(mapped);
+		const int state = slot.downloadState->load(std::memory_order_acquire);
+		if (state == 2)
+		{
+			// The GPU is still writing: try again next frame.
+			slot.downloadIssued = false;
+			break;
+		}
+		if (state != 1)
+		{
+			// The fetch command has not run yet.
+			break;
+		}
+
+		const float* depths = reinterpret_cast<const float*>(slot.cpuBytes->data());
 		const size_t count = static_cast<size_t>(m_gridWidth) * m_gridHeight;
 
 		// A slot that was never written still holds zeros, which in reversed-Z
 		// means "far": the culler then simply finds nothing occluded.
 		m_culler->SetGrid(m_gridWidth, m_gridHeight, std::vector<float>(depths, depths + count));
 
-		slot.buffer->Unmap();
 		slot.buffer->ClearFence();
+		slot.downloadIssued = false;
 		slot.pending = false;
 		if (m_readbackPendingSlots != 0)
 		{
 			--m_readbackPendingSlots;
 		}
 		m_lastReadbackLatencyFrames = static_cast<uint32_t>(m_frameCounter - slot.issueFrame);
+
+		if (std::getenv("MOON_HZB_TRACE") != nullptr)
+		{
+			std::fprintf(stderr, "[hzb] grid %ux%u on the CPU after %u frame(s), pending %u\n",
+				m_gridWidth, m_gridHeight, m_lastReadbackLatencyFrames, m_readbackPendingSlots);
+			std::fflush(stderr);
+		}
 		break;
 	}
 }
@@ -278,7 +331,7 @@ void Core::Rendering::HzbBuildPass::IssueReadback()
 	else
 	{
 		m_levels.back()->ReadPixelsToBuffer(
-			*slot.buffer,
+			slot.buffer->GetHandle(),
 			0,
 			0,
 			0,
@@ -299,6 +352,9 @@ void Core::Rendering::HzbBuildPass::IssueReadback()
 
 void Core::Rendering::HzbBuildPass::Draw(::Rendering::Data::PipelineState p_pso)
 {
+	// Everything this pass does is recorded: the depth blit, the binds and the reduction blits are
+	// commands (the recording side names their targets), and the readback is the asynchronous
+	// ReadPixelsToBuffer + DownloadBuffer pair below.
 	ZoneScoped;
 	TracyGpuZone("HzbBuildPass");
 
@@ -329,8 +385,9 @@ void Core::Rendering::HzbBuildPass::Draw(::Rendering::Data::PipelineState p_pso)
 
 	// 1) Resolve the MSAA depth into a sampleable depth texture. This is the
 	//    opaque (+ section cap) depth: transparents are depth peeled into their
-	//    own layer framebuffers and never occlude anything.
-	::Core::Rendering::FramebufferUtil::CopyFramebufferDepth(msaaBuffer, m_resolveFbo);
+	//    own layer framebuffers and never occlude anything. Recorded: the blit is
+	//    GL, and this side only names the two targets.
+	m_renderer.GetDriver().CopyFramebufferDepth(msaaBuffer, m_resolveFbo);
 
 	// 2) First reduce: depth texture -> level 0.
 	{
@@ -342,10 +399,11 @@ void Core::Rendering::HzbBuildPass::Draw(::Rendering::Data::PipelineState p_pso)
 				static_cast<float>(m_height)
 			});
 
-		m_levels[0]->Bind();
+		// The bind is a command too: the pass records "draw the reduce quad into level 0" and the
+		// executor binds the target before the draw.
+		m_renderer.GetDriver().BindFramebuffer(m_levels[0].get());
 		m_renderer.SetViewport(0, 0, levelWidth, levelHeight);
 		m_renderer.Present(*m_resolveDepth, m_reduceMaterial);
-		m_levels[0]->Unbind();
 	}
 
 	// 3) Remaining levels: R32F color -> half resolution R32F color.
@@ -371,8 +429,8 @@ void Core::Rendering::HzbBuildPass::Draw(::Rendering::Data::PipelineState p_pso)
 	IssueReadback();
 	++m_frameCounter;
 
-	// Restore the frame's default target for the following passes.
-	msaaBuffer.Bind();
+	// Restore the frame's default target for the following passes (recorded, like the binds above).
+	m_renderer.GetDriver().BindFramebuffer(&msaaBuffer);
 
 	m_lastBuildTimeMs = std::chrono::duration<float, std::milli>(
 		std::chrono::high_resolution_clock::now() - startTime

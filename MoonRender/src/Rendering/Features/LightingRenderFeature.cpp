@@ -10,7 +10,8 @@ Rendering::Features::LightingRenderFeature::LightingRenderFeature(
 	ARenderFeature(p_renderer, p_executionPolicy),
 	m_bufferBindingPoint(p_bufferBindingPoint)
 {
-	m_lightBuffer = std::make_unique<HAL::ShaderStorageBuffer>();
+	m_lightBuffer = std::make_unique<Rendering::Data::BufferObject>(
+		Rendering::Settings::EBufferType::SHADER_STORAGE);
 }
 
 bool IsLightInFrustum(const Rendering::Entities::Light& p_light, const Rendering::Data::Frustum& p_frustum)

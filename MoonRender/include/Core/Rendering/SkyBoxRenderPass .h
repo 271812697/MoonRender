@@ -1,6 +1,8 @@
 #pragma once
+#include <Rendering/Data/PipelineState.h>
 #include <Rendering/Core/ARenderPass.h>
-#include <Rendering/HAL/Framebuffer.h>
+#include <Rendering/Data/Framebuffer.h>
+#include <Rendering/Data/BufferObject.h>
 #include <Core/Rendering/PostProcess/AEffect.h>
 #include <Core/Resources/MaterialAsset.h>
 namespace Core::Rendering
@@ -71,15 +73,15 @@ namespace Core::Rendering
 		::Core::Resources::MaterialAsset m_skyboxPrefilterMaterial;
 		::Core::Resources::MaterialAsset m_brdfMaterial;
 		::Core::Resources::MaterialAsset m_clearMaterial;
-		::Rendering::HAL::Framebuffer skyBoxBuffer;
-		::Rendering::HAL::Framebuffer irradianceBuffer;
-		::Rendering::HAL::Framebuffer prefilterBuffer;
-		::Rendering::HAL::Framebuffer brdfBuffer;
+		::Rendering::Data::Framebuffer skyBoxBuffer;
+		::Rendering::Data::Framebuffer irradianceBuffer;
+		::Rendering::Data::Framebuffer prefilterBuffer;
+		::Rendering::Data::Framebuffer brdfBuffer;
 		::Rendering::Resources::Texture*skyTexture=nullptr;
 		std::shared_ptr<::Rendering::HAL::Texture> skyBoxCube;
 		std::shared_ptr<::Rendering::HAL::Texture> irradianceCube;
 		std::shared_ptr<::Rendering::HAL::Texture> prefilterCube;
-		std::unique_ptr<::Rendering::HAL::UniformBuffer> m_irradianceSHBuffer;
+		std::unique_ptr<::Rendering::Data::BufferObject> m_irradianceSHBuffer;
 		SkyBoxSetting mSetting;
 		// The default environment is the same studio HDR the FilamentPBR material preview
 		// bakes, so a material judged in the viewport and one judged in the preview share

@@ -1,4 +1,5 @@
 #pragma once
+#include <Rendering/Data/PipelineState.h>
 #include <atomic>
 #include "Rendering/Core/IRenderer.h"
 #include "Rendering/Data/FrameInfo.h"
@@ -92,21 +93,21 @@ namespace Rendering::Core
 		*/
 		virtual void Blit(
 			Rendering::Data::PipelineState p_pso,
-			Rendering::HAL::Framebuffer& p_src,
-			Rendering::HAL::Framebuffer& p_dst,
+			Rendering::Data::Framebuffer& p_src,
+			Rendering::Data::Framebuffer& p_dst,
 			Rendering::Data::MaterialInstance& p_material,
 			Rendering::Settings::EBlitFlags p_flags = Rendering::Settings::EBlitFlags::DEFAULT
 		);
 		virtual void Blit(
 			Rendering::Data::PipelineState p_pso,
-			Rendering::HAL::Framebuffer& p_src,
-			Rendering::HAL::Framebuffer& p_dst,
+			Rendering::Data::Framebuffer& p_src,
+			Rendering::Data::Framebuffer& p_dst,
 			Rendering::Data::Material& p_material,
 			Rendering::Settings::EBlitFlags p_flags = Rendering::Settings::EBlitFlags::DEFAULT
 		);
-		void Present(Rendering::HAL::Framebuffer& p_src);
-		void Present(Rendering::HAL::Framebuffer& p_src, Rendering::Data::MaterialInstance& mat);
-		void Present(Rendering::HAL::Framebuffer& p_src, Rendering::Data::Material& mat);
+		void Present(Rendering::Data::Framebuffer& p_src);
+		void Present(Rendering::Data::Framebuffer& p_src, Rendering::Data::MaterialInstance& mat);
+		void Present(Rendering::Data::Framebuffer& p_src, Rendering::Data::Material& mat);
 		void Present(Rendering::HAL::Texture& p_src, Rendering::Data::MaterialInstance& mat);
 		void Present(Rendering::HAL::Texture& p_src, Rendering::Data::Material& mat);
 		void Present(Rendering::Data::MaterialInstance& mat);
@@ -154,10 +155,10 @@ namespace Rendering::Core
 
 	public:
 		/** The driver the pass records on. Passes bind their targets through it instead of calling
-		 * HAL::Framebuffer::Bind(): a bind is a command, and the pass runs on the recording side. */
+		 * Data::Framebuffer::Bind(): a bind is a command, and the pass runs on the recording side. */
 		Context::Driver& GetDriver() const { return m_driver; }
 
-		void BindFramebuffer(HAL::Framebuffer* p_target) { m_driver.BindFramebuffer(p_target); }
+		void BindFramebuffer(Data::Framebuffer* p_target) { m_driver.BindFramebuffer(p_target); }
 		void BindDefaultFramebuffer() { m_driver.BindFramebuffer(nullptr); }
 		Rendering::HAL::Texture m_emptyTexture2D;
 		Rendering::HAL::Texture m_emptyTextureCube;

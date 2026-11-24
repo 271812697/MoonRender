@@ -43,6 +43,21 @@ DECL_DRIVER_COMMAND(GenerateTextureMipmaps, (const ::Rendering::Backend::Generat
 // too are born on the side that owns one (see Backend::Records in BackendResources.h).
 DECL_DRIVER_COMMAND(AllocateBuffer, (::Rendering::Backend::AllocateBufferRequest p_request), (std::move(p_request)))
 DECL_DRIVER_COMMAND(BindBuffer, (const ::Rendering::Backend::BindBufferRequest& p_request), (p_request))
+// A byte range at an indexed binding point: a uniform/storage block inside a shared buffer.
+DECL_DRIVER_COMMAND(BindBufferRange, (const ::Rendering::Backend::BindBufferRangeRequest& p_request), (p_request))
+// Which attachment a readback reads (glNamedFramebufferReadBuffer), and a readback into a
+// pixel-pack buffer: the two recorded halves of an asynchronous readback (picking, HZB).
+DECL_DRIVER_COMMAND(SetFramebufferReadBuffer, (const ::Rendering::Backend::SetFramebufferReadBufferRequest& p_request), (p_request))
+DECL_DRIVER_COMMAND(ReadPixelsToBuffer, (::Rendering::Backend::ReadPixelsToBufferRequest p_request), (std::move(p_request)))
+// The buffer's own GL state that the recording side used to touch directly - a mapped range, the
+// fence that says the GPU finished writing it - and therefore the commands that do it where the
+// context is. Named by handle, resolved by the executor (Filament's unmapBuffer/bindBufferRange).
+DECL_DRIVER_COMMAND(UnmapBuffer, (uint32_t p_handleId), (p_handleId))
+// Copy a buffer range into CPU memory once its fence is signalled: the fetch half of the HZB
+// readback (the GPU wrote the bytes, and the CPU asks for them a frame or two later).
+DECL_DRIVER_COMMAND(DownloadBuffer, (::Rendering::Backend::DownloadBufferRequest p_request), (std::move(p_request)))
+DECL_DRIVER_COMMAND(InsertFence, (uint32_t p_handleId), (p_handleId))
+DECL_DRIVER_COMMAND(ClearFence, (uint32_t p_handleId), (p_handleId))
 DECL_DRIVER_COMMAND(CreateBuffer, (::Rendering::Backend::CreateBufferRequest p_request), (std::move(p_request)))
 DECL_DRIVER_COMMAND(CreateVertexArray, (uint32_t p_handleId), (p_handleId))
 DECL_DRIVER_COMMAND(CreateFramebuffer, (uint32_t p_handleId), (p_handleId))

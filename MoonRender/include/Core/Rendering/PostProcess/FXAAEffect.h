@@ -1,4 +1,5 @@
 ﻿#pragma once
+#include <Rendering/Data/PipelineState.h>
 #include <Core/Rendering/PostProcess/AEffect.h>
 #include <Rendering/Data/Material.h>
 
@@ -13,8 +14,8 @@ namespace Core::Rendering::PostProcess
 
 		virtual void Draw(
 			::Rendering::Data::PipelineState p_pso,
-			::Rendering::HAL::Framebuffer& p_src,
-			::Rendering::HAL::Framebuffer& p_dst,
+			::Rendering::Data::Framebuffer& p_src,
+			::Rendering::Data::Framebuffer& p_dst,
 			const EffectSettings& p_settings
 		) override;
 

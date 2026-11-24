@@ -111,7 +111,8 @@ namespace Rendering::Data
 
 		if (m_buffer == nullptr)
 		{
-			m_buffer = std::make_unique<Rendering::HAL::UniformBuffer>();
+			m_buffer = std::make_unique<Rendering::Data::BufferObject>(
+				Rendering::Settings::EBufferType::UNIFORM);
 		}
 
 		// Re-specifying the storage discards it: put the live region back from the CPU mirror.

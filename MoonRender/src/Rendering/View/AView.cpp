@@ -64,7 +64,7 @@ Editor::Panels::AView::AView
 	// The present ring (see kPresentSlotCount): each slot is a complete frame target of its own.
 	for (uint32_t slot = 0; slot < kPresentSlotCount; ++slot)
 	{
-		m_presentTargets[slot] = std::make_unique<::Rendering::HAL::Framebuffer>(
+		m_presentTargets[slot] = std::make_unique<::Rendering::Data::Framebuffer>(
 			p_title + "/Present" + std::to_string(slot));
 		::Core::Rendering::FramebufferUtil::SetupFramebuffer(
 			*m_presentTargets[slot], presentDesc, false, false, false);
@@ -116,11 +116,9 @@ void Editor::Panels::AView::Render(const std::function<void()>& p_drawOverlays)
 		{
 			m_driver->ResizeFramebuffer(*presentSlot, winWidth, winHeight);
 		}
-		// HZB issues its own GL - fences and an asynchronous readback through a PBO ring - so it
-		// cannot run on the recording side yet. It stays off in both configurations, because the
-		// frame is recorded the same way in both; it comes back when that readback becomes a
-		// command (docs/RenderThreadPlan.md §8.72).
-		m_renderer->GetPass<::Core::Rendering::HzbBuildPass>("HZB").SetEnabled(false);
+		// HZB runs in both configurations now: its depth blit, binds and readback are all commands
+		// (the readback is ReadPixelsToBuffer + a DownloadBuffer fetch once the fence is signalled,
+		// so the frame never waits for the GPU).
 		TraceView("BeginFrame");
 		m_renderer->BeginFrame(frameDescriptor);
 		TraceView("DrawFrame");
@@ -170,7 +168,7 @@ uint32_t Editor::Panels::AView::GetFrameTextureID()
 	return color.has_value() ? static_cast<uint32_t>(color.value().GetID()) : 0u;
 }
 
-::Rendering::HAL::Framebuffer& Editor::Panels::AView::PresentedTarget()
+::Rendering::Data::Framebuffer& Editor::Panels::AView::PresentedTarget()
 {
 	const uint32_t slot = mPresentedSlot.load(std::memory_order_acquire) % kPresentSlotCount;
 	return *m_presentTargets[static_cast<size_t>(slot)];

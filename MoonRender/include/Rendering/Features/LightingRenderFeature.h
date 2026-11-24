@@ -3,7 +3,7 @@
 #include "Rendering/Features/ARenderFeature.h"
 #include "Rendering/Data/FrameInfo.h"
 #include "Rendering/Entities/Light.h"
-#include "Rendering/HAL/ShaderStorageBuffer.h"
+#include "Rendering/Data/BufferObject.h"
 #include "Rendering/Data/Frustum.h"
 
 namespace Rendering::Features
@@ -48,6 +48,6 @@ namespace Rendering::Features
 
 	private:
 		uint32_t m_bufferBindingPoint;
-		std::unique_ptr<Rendering::HAL::ShaderStorageBuffer> m_lightBuffer;
+		std::unique_ptr<Rendering::Data::BufferObject> m_lightBuffer;
 	};
 }

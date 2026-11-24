@@ -6,7 +6,7 @@
 #include <Rendering/Data/FrameDescriptor.h>
 #include <Rendering/Entities/Camera.h>
 #include <Rendering/Entities/Entity.h>
-#include <Rendering/HAL/Framebuffer.h>
+#include <Rendering/Data/Framebuffer.h>
 #include <Rendering/Resources/Texture.h>
 #include <Rendering/Settings/ELightType.h>
 
@@ -31,7 +31,7 @@ namespace Rendering::Entities
 		bool shadowFollowCamera = true;
 		int16_t shadowMapResolution = 8192;
 
-		std::unique_ptr<Rendering::HAL::Framebuffer> shadowBuffer;
+		std::unique_ptr<Rendering::Data::Framebuffer> shadowBuffer;
 		std::optional<Rendering::Entities::Camera> shadowCamera;
 		std::optional<Maths::FMatrix4> lightSpaceMatrix;
 

@@ -2299,3 +2299,115 @@ driver 时已经是空操作 —— 这张表已经什么都不做。
 - `Driver::ResizeFramebuffer` 在前端立即更新尺寸（否则 `GetSize()` 整帧还是 1×1，Bloom 的 `clamp` 断言）；
 - `RenderModuleHost::Loop()` 改用已有的 `Driver::WaitAndExecute()`：阻塞等批次 + 能看见 `RequestExit()`（修掉空转和退出挂死）；
 - `Moon/main.cpp` 增加未捕获 C++ 异常与致命错误的符号化栈打印，`CommandStream.h` 在命令体抛异常时打印命令名（定位上述崩溃用的）。
+
+### 8.75 buffer 改成"后端对象 + 前端持句柄"（2026-11-24 下午）
+
+**目标分层（用户确认）**：
+
+```
+前端对象 Data::BufferObject ──持有──> ResourceHandle<HwBufferObject> ──指向──> HAL::Buffer（槽里的后端对象）
+                                     （glId / fence；type / size 在 HwBufferObject 基类里）
+```
+
+与 `HAL::Texture` / `Resources::Texture` 的现有分工一致：HAL 对象是槽里的后端对象（构造时拿 GL 名、方法是后端操作），前端对象只持句柄、只录命令。这也补上了之前那半边：buffer 的 "record" 不再是 `{uint32_t name}`，而是真正的 HAL 对象。
+
+**改了什么**
+
+1. `Backend::HwResource` + `Backend::HwBufferObject`（`BackendResources.h`）：`HwBufferObject : HwResource` 带 `type` 与 `size`（持句柄也能读）；`HwResource` 只提供虚析构。
+2. `HAL::TBuffer` 变成后端对象：继承 `Backend::HwBufferObject`，构造函数收 `BackendConstructionTag`（照 `HAL::Texture` 的做法）并在里面 `glCreateBuffers`；`GLBufferContext` 只剩 `{glId, fence}`，**不再有 handle**。析构不碰 GL —— 名字和 fence 由 `Records::DestroyBuffer` 取出，经 `DeferredDeleter` 排到持上下文的线程删。
+3. `Records::CreateBuffer(handle, type)` 用 `Construct<HAL::Buffer, HwBufferObject>` 在槽里构造；幂等（已存在就返回，不再像以前那样换掉记录、漏掉旧 GL 名）。`Records::BufferName` 改成 `handle_cast<HAL::Buffer>` 取 `glId`。
+4. **顺手修掉真 bug**：`ResourceOps::EnsureBuffer` 以前写死 `EBufferType::VERTEX`，index / uniform / SSBO 全被记成 VERTEX；现在按调用方传的类型创建（`EnsureBuffer(handle, type)`）。`BindBuffer` 命令也改成解析后端对象、用它自己的 type 当 target（以前用请求里带的 type）。
+5. 新增前端 `Rendering::Data::BufferObject`（`MoonRender/{include,src}/Rendering/Data/BufferObject.*`）：只有 handle + type + size，方法全部转调 `HAL::ResourceOps` 录命令；可移动、不可拷贝，析构时 `DestroyBuffer`。`Mesh`、`UniformBufferPool`、`EngineBufferRenderFeature`、`SkyboxRenderPass`、`ReflectionRenderFeature`、`CReflectionProbe`、`LightingRenderFeature`、`HzbBuildPass` 全部改用它；`Im2DRender` / `Im3DGLRenderer` / `Im3DType` 本来就只持句柄，只补了 buffer 类型。`Descriptor` / `MaterialInstance` 不用改（本来就只存 `ResourceHandle<HwBufferObject>`）。
+6. 新增命令（`DriverAPI.inc` + `OpenGLDriver`）：`BindBufferRange`（uniform block 的 range bind，之前 `UniformBufferPool::Bind` 是录制期直接 GL；这个接口目前没有调用点）、`UnmapBuffer`、`InsertFence`、`ClearFence`。`MapRead` / `IsFenceSignaled` 是同步 API（Filament 里是 `DECL_DRIVER_API_RETURN`），现在只能"没有 driver 或正在 driver 线程"时内联执行；其余情况 Debug 断言 + Release 打一次警告并返回 nullptr/false，TODO 写在 `ResourceOps.cpp` 里。
+7. 删掉前端那套 `HAL::UniformBuffer` / `VertexBuffer` / `IndexBuffer` / `ShaderStorageBuffer`（含 `T*Buffer` / `GL*Buffer` 头与实现共 16 个文件）；`TVertexArray::SetLayout` 改成吃两个 buffer 句柄，`HAL::Buffer` 这个名字现在就是后端对象本身。
+
+**验证**（Release，`1254×416`，`hezi.step`，13 s 截图，等 fit 动画跑完）：
+
+| 对比 | 结果 |
+|---|---|
+| 单线程 改前 vs 改后 | **0.000% 逐像素相同**（`IDENTICAL`，max delta 0） |
+| 单线程 vs 渲染线程（改后） | **0.000% 逐像素相同** |
+| Release 单线程 vs Debug 单线程 | **0.000% 逐像素相同** |
+| Debug 单线程 vs Debug 渲染线程 | **0.000% 逐像素相同**（断言全部开启，没有一条触发） |
+| 运行时日志 | 与改前逐行一致（仅时间戳与输出路径不同），无 `GL_INVALID`、无新警告 |
+| 构建 | Release / Debug 都通过 |
+
+另外两种模式各跑了一次 `MOON_CMD_TRACE=1`（逐条命令 `glGetError`）：单线程与渲染线程都是 **0 条命令报错**，说明新的 create / allocate / upload / bind 命令在批里的顺序是对的。截图留在 `Build/refactor-shots/{base-before,final,debug}-*.png`。
+
+**遗留**
+
+- `MapRead` / `IsFenceSignaled` 要真正的同步 driver API（`DECL_DRIVER_API_RETURN` 形状：命令在 driver 线程跑、结果回传给录制侧），HZB 的异步读回才能重新打开。HZB 仍按 §8.72 第 9 条关着，`Framebuffer::ReadPixelsToBuffer` 还是录制侧直接 GL（这一轮只把参数从 HAL 对象改成句柄）。
+- 其余记录（framebuffer / renderbuffer / vertex array / program）已在 §8.76 里按同一步骤做完。
+
+
+### 8.76 第二批：framebuffer / renderbuffer / vertex array / program 也改成"Data 前端 + HAL 后端对象"（2026-11-24 傍晚）
+
+和 §8.75 完全同一套形状：**HAL 里的是后端对象**（住在 `HandleAllocator` 的槽里、持 GL 名、GL 操作是它的方法），**`Rendering::Data::*` 里的是前端对象**（只持 `ResourceHandle<Hw*>`、只录命令）。这一批一开始把方向搞反过一次（HAL 当前端、`Backend::GL*` 当后端），按用户要求改成了现在这个形状。
+
+**改了什么**
+
+1. `HwVertexArray` / `HwFramebuffer` / `HwRenderbuffer` / `HwProgram` 都变成 `: HwResource` 的基类。
+2. HAL 的四个类变成槽里的后端对象，构造用 `BackendConstructionTag`（照 `TBuffer`）：
+   - `TVertexArray`（= `GLVertexArray`）：`glId` + `Bind` / `Unbind` / `SetLayout` / `GetID`，构造里 `glCreateVertexArrays`；
+   - `TRenderbuffer`（= `GLRenderbuffer`）：`glId` + `Bind` / `Allocate` / `GetID`，构造里 `glCreateRenderbuffers`；
+   - `TFramebuffer`（= `GLFramebuffer`）：`glId` + `Bind` / `Unbind` / `Attach{Texture,TextureLayer,Renderbuffer}` / `SetDraw{,Read}Buffer(s)` / `CheckStatus` / `GetStatus` / `BlitTo` / `Clear` / `ReadPixels` / `ReadPixelsToBuffer` / `GetID`，构造里 `glCreateFramebuffers`；
+   - `TShaderProgram`（= `GLShaderProgram`）：`glId` + `Build`（编译/链接/反射）/ `Bind` / `Unbind` / `DeclareBindings` / `GetID`，构造里 `glCreateProgram`；反射表仍存在 `HwProgram` 基类上。
+3. 新的前端对象（都在 `Rendering/Data/`，形状照 `BufferObject`，全部 move-only、析构里 `Records::Destroy*`）：
+   - `VertexArrayObject`（handle + 属性个数）；
+   - `Renderbuffer`（handle + 宽高/格式/MSAA/是否 allocated）；
+   - `Framebuffer`（handle + 附件表 `shared_ptr<HAL::Texture>` / `shared_ptr<Data::Renderbuffer>` + debug 名 + valid；`Attach` / `AttachLevel` / `GetAttachment<T>` / `Resize` / `GetSize` / 读回这些都在这边）；
+   - `Program`（handle + 已附加的 stage + 描述符布局与槽位表；`Attach` / `Link` / `Bind` 在这边）。
+4. `Records::Create*` 改成 `Construct<HAL::*, Hw*>`（带 tag、幂等）；`XName` 改成 `handle_cast<HAL::*>` 取 `GetID()`；`Destroy*` 取名字 → `Deallocate` → `DeferredDeleter` 删 GL 名，和 buffer 完全一样。`RegisterProgram(handle, name)` 换成 `CreateProgram(handle)`：程序对象在槽里创建，`Build` 才编译链接。
+5. 执行器只做"解析对象 → 调方法"（`AttachTexture/AttachRenderbuffer`、`AllocateRenderbuffer`、`SetFramebufferDrawBuffers`、`SetVertexArrayLayout`、`CreateProgram`、`BindProgramHandle`、`DeclareProgramBindings`）；前端在没有 driver 时也解析对象再调方法，不再自己发这些 GL。附件表、尺寸、debug 名留在前端（录制侧读）。
+6. 调用点：37 个文件里 `HAL::Framebuffer` → `Data::Framebuffer`（`FramebufferRequests` / `Driver::*Framebuffer` 的签名一起改）；`HAL::Renderbuffer` → `Data::Renderbuffer`（Skybox / CReflectionProbe / FramebufferUtil）；`HAL::ShaderProgram` → `Data::Program`（Material / MaterialInstance / DescriptorSet / ShaderLoader）；`Mesh` 的顶点数组改成 `Data::VertexArrayObject`。
+7. 删掉上一轮临时放在 `Backend/GLResources.*` 的 `Backend::GL*` 类（实现搬进了 HAL 后端对象），那一批的错误方向没有留在代码里。
+
+**验证**（Release / Debug，`1254×416`，`hezi.step`，13 s / 20 s 截图）：
+
+| 对比 | 结果 |
+|---|---|
+| 第二批后 vs 第一批后（Release 单线程） | **0.000% 逐像素相同** |
+| Release 单线程 vs 渲染线程 | **0.000% 逐像素相同** |
+| Release 单线程 vs Debug 单线程 | **0.000% 逐像素相同** |
+| Debug 单线程 vs Debug 渲染线程 | **0.000% 逐像素相同**（断言全开） |
+| `MOON_CMD_TRACE=1`（两模式） | **0 条命令报错** |
+| 构建 | Release / Debug 都通过 |
+
+截图：`Build/refactor-shots/{b2,b3,d,e,f,g,h,i}-*.png`。其中 `f-thread.png` 有一次跑出了模型下方的镜像倒影（之后连跑 5 次都复现不了，单线程与渲染线程都稳定为同一张图），判断是渲染线程起步阶段的一次性时序现象，和这一批的改动无关，留档备查。
+
+**遗留**
+
+- framebuffer 的读回（`SetTargetReadBuffer` + `ReadPixels` / `ReadPixelsToBuffer`）仍是同步直接 GL，要成对命令化；HZB 继续关着（§8.72 第 9 条）。
+- `TShaderProgram` 的反射表现在没有消费者（§8.73 删掉了松散 uniform），留着给诊断和后续"给当前程序设矩阵"那类命令用。
+- texture 仍是双模对象（`TTexture` 里 `id` 或 `handleId`），没有并进这一套 —— 它在 §8.75 之前就是这个形状，`Resources::Texture` 是它的前端。
+
+### 8.77 读回命令化 + HZB 重新打开（2026-11-24 傍晚）
+
+**背景**：§8.76 之后还剩两处"录制侧直接 GL"：framebuffer 的 `SetTargetReadBuffer` + `ReadPixels` / `ReadPixelsToBuffer`，以及因为它们一直关着的 HZB（§8.72 第 9 条）。
+
+**改了什么**
+
+1. **`SetFramebufferReadBuffer` 命令**：picking 的"选读哪个附件"不再就地 GL，而是入队；`ReadPixels` 的 `readBufferIndex = -1` 表示"沿用已经记录的选择"，两条命令按批内顺序执行。
+2. **`ReadPixels` 命令扩成两半**：新增 `framebufferHandleId`（执行期解析目标，不再在录制侧取名字）。`Data::Framebuffer::ReadPixels` 变成"记录 + 等"：记录读回命令，再 `Driver::FlushAndWait()`，把字节拷给调用方。这条**同步 driver 调用**只用于帧与帧之间的调用（拾取、截图读回）。
+3. **`Driver::FlushAndWait()` / `IsExecutorThread()`**：同步调用的公共部分——单线程时 `Flush() + Execute()`（本来就是帧尾的执行点，只是提前到调用时）；渲染线程模式下追加一条 barrier 命令、publish、然后等它跑完。`ResourceOps::MapRead` / `IsFenceSignaled` 也改成这个形状（Filament 的 `DECL_DRIVER_API_RETURN`），不再是"录制侧断言 + 打警告"。
+4. **`ReadPixelsToBuffer` 命令**：HZB 的 PBO 读回不再在录制侧 `glReadPixels`。
+5. **`DownloadBuffer` 命令**：GPU 写完 PBO 之后把字节拷回 CPU（`glGetNamedBufferSubData`，**只在 fence 已 signaled 时**做），回调告诉录制侧"拿到了"还是"再试一次"。HZB 现在是 `ReadPixelsToBuffer` → `InsertFence` → 后续帧 `DownloadBuffer` 三步，帧内完全不等 GPU，也不需要映射。
+6. **HZB 自己的 GL 全部命令化**：`FramebufferUtil::CopyFramebufferDepth` 改走 `Driver::CopyFramebufferDepth`，`m_levels[i]->Bind()` 改走 `Driver::BindFramebuffer`，帧尾还原目标同样；`AView` 里的 `SetEnabled(false)` 删掉（PreviewView 仍关：预览场景没有 BVH，没有可剔除的遮挡）。
+
+**验证**（`1254×416`，`hezi.step`）：
+
+| 对比 | 结果 |
+|---|---|
+| HZB 打开（单线程）vs HZB 关闭基线 | **0.000% 逐像素相同**（这个视角没有可剔除的遮挡物，剔除只去掉不可见的几何） |
+| HZB 打开：单线程 vs 渲染线程 | **0.000% 逐像素相同** |
+| HZB 打开：Release vs Debug 单线程 | **0.000% 逐像素相同**（Debug 断言全开，无触发） |
+| `MOON_HZB_TRACE=1` | 两模式都能看到 `asking for the readback` → `grid 39x13 on the CPU after N frame(s)`（N = 1…6），PBO→fence→下载链在渲染线程上也跑通 |
+| `MOON_CMD_TRACE=1`（两模式） | **0 条命令报错** |
+| 截图读回 | `MOON_SHOT` 走的正是新的同步读回（`AView::ReadFrame` → `Data::Framebuffer::ReadPixels` → `FlushAndWait`），两模式出图一致 |
+| 构建 | Release / Debug 都通过 |
+
+**遗留**
+
+- `MapRead` 的同步形状已经可用，但当前没有调用者（HZB 改用 `DownloadBuffer`）。真要使用，读映射内存要在 Unmap 命令之前完成，和 Filament `mapBuffer` 的约束一致。
+- 拾取的同步读回仍会让录制侧等一次 `FlushAndWait`（拾取 API 本身是同步的）；异步版本 `IssuePickReadback` 已经是命令 + 回调，帧内不等。
+- 调试开关：`MOON_HZB_TRACE` 打印读回的发起与到达。

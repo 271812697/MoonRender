@@ -570,8 +570,8 @@ namespace
 		}
 	private:
 		::Rendering::Data::Material mBlendColorMat;
-		std::vector<::Rendering::HAL::Framebuffer>mLayerFbo ;
-		::Rendering::HAL::Framebuffer mBlendFbo;
+		std::vector<::Rendering::Data::Framebuffer>mLayerFbo ;
+		::Rendering::Data::Framebuffer mBlendFbo;
 		std::shared_ptr<::Rendering::HAL::Texture>mLayerColor;
 	};
 

@@ -1,4 +1,5 @@
 ﻿#pragma once
+#include <Rendering/Data/PipelineState.h>
 #include <set>
 #include <Rendering/Data/FrameDescriptor.h>
 #include <Rendering/Entities/Drawable.h>

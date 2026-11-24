@@ -10,8 +10,8 @@ Core::Rendering::PostProcess::TonemappingEffect::TonemappingEffect(::Rendering::
 
 void Core::Rendering::PostProcess::TonemappingEffect::Draw(
 	::Rendering::Data::PipelineState p_pso,
-	::Rendering::HAL::Framebuffer& p_src,
-	::Rendering::HAL::Framebuffer& p_dst,
+	::Rendering::Data::Framebuffer& p_src,
+	::Rendering::Data::Framebuffer& p_dst,
 	const EffectSettings& p_settings
 )
 {

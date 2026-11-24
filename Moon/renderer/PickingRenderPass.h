@@ -1,9 +1,9 @@
 #pragma once
+#include <Rendering/Data/PipelineState.h>
 #include <atomic>
 #include <Core/ECS/Actor.h>
 #include <Core/Resources/MaterialAsset.h>
 #include "GizmoBehaviour.h"
-#include <Rendering/HAL/Buffer.h>
 #include <cstdint>
 #include <memory>
 #include <vector>
@@ -93,7 +93,7 @@ namespace Editor::Rendering
 		virtual void Draw(::Rendering::Data::PipelineState p_pso) override;
 		void DrawPickableModels(::Rendering::Data::PipelineState p_pso, ::Core::SceneSystem::Scene& p_scene);
 	private:
-		::Rendering::HAL::Framebuffer m_actorPickingFramebuffer;
+		::Rendering::Data::Framebuffer m_actorPickingFramebuffer;
 		::Core::Resources::MaterialAsset m_actorPickingFallbackMaterial;
 		::Core::Resources::MaterialAsset m_TopoShapePickingFallbackMaterial;
 		PickPassOption mPickOption;

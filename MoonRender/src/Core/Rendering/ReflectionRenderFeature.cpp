@@ -137,7 +137,8 @@ Core::Rendering::ReflectionRenderFeature::ReflectionRenderFeature(
 ) :
 	ARenderFeature(p_renderer, p_executionPolicy)
 {
-	m_defaultReflectionUbo = std::make_unique<::Rendering::HAL::UniformBuffer>();
+	m_defaultReflectionUbo = std::make_unique<::Rendering::Data::BufferObject>(
+		::Rendering::Settings::EBufferType::UNIFORM);
 
 	// Neutral probe data used when the scene has no reflection probe:
 	// brightness 1, infinite box, not local, so image-based lighting still

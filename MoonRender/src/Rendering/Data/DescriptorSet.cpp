@@ -117,7 +117,7 @@ namespace Rendering::Data
 	}
 
 	void DescriptorSet::Bind(
-		const Rendering::HAL::ShaderProgram& p_program,
+		const Rendering::Data::Program& p_program,
 		uint32_t p_set) const
 	{
 		for (uint32_t binding = 0; binding < m_descriptors.size(); ++binding)

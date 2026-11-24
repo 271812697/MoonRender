@@ -1,6 +1,6 @@
 ﻿#pragma once
 #include <array>
-#include <Rendering/HAL/Framebuffer.h>
+#include <Rendering/Data/Framebuffer.h>
 #include <Tools/Utils/CircularIterator.h>
 
 namespace Core::Rendering
@@ -8,7 +8,7 @@ namespace Core::Rendering
 	/**
 	* Convenient ping-pong buffer holding two framebuffers
 	*/
-	class PingPongFramebuffer : public Tools::Utils::CircularIterator<::Rendering::HAL::Framebuffer, 2>
+	class PingPongFramebuffer : public Tools::Utils::CircularIterator<::Rendering::Data::Framebuffer, 2>
 	{
 	public:
 		/**
@@ -20,9 +20,9 @@ namespace Core::Rendering
 		/**
 		* Return the two framebuffers
 		*/
-		std::array<::Rendering::HAL::Framebuffer, 2>& GetFramebuffers();
+		std::array<::Rendering::Data::Framebuffer, 2>& GetFramebuffers();
 
 	private:
-		std::array<::Rendering::HAL::Framebuffer, 2> m_framebuffers;
+		std::array<::Rendering::Data::Framebuffer, 2> m_framebuffers;
 	};
 }

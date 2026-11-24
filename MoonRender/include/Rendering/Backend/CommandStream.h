@@ -24,7 +24,7 @@
 #include <Rendering/Backend/TextureUploadRequest.h>
 #include <Rendering/Backend/UpdateTextureRequest.h>
 #include <Rendering/Data/PipelineState.h>
-#include <Rendering/HAL/Framebuffer.h>
+#include <Rendering/Data/Framebuffer.h>
 #include <Rendering/Resources/IMesh.h>
 #include <Rendering/Settings/EBlendingEquation.h>
 #include <Rendering/Settings/EBlendingFactor.h>

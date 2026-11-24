@@ -16,7 +16,6 @@
 #include <Rendering/Data/Material.h>
 #include <Rendering/Data/EngineDescriptorSets.h>
 #include <Rendering/Data/MaterialBuilder.h>
-#include <Rendering/HAL/UniformBuffer.h>
 #include <Rendering/HAL/TextureHandle.h>
 #include <Rendering/Data/MaterialParser.h>
 #include <Rendering/Resources/Texture.h>
@@ -689,7 +688,7 @@ void Rendering::Data::MaterialInstance::ReleaseDescriptorSet()
 }
 
 void Rendering::Data::MaterialInstance::BindParameterBlock(
-	const Rendering::HAL::ShaderProgram& p_program)
+	const Rendering::Data::Program& p_program)
 {
 	EnsureDescriptorSet();
 

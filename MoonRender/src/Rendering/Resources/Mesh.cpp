@@ -22,8 +22,6 @@ Rendering::Resources::Mesh::Mesh(
 	m_indices.resize(m_indicesCount);
 	m_vertices.resize(m_vertexCount);
 	uploadIndicesCount.resize(1);
-	m_vertexArrays.resize(1);
-	m_IndexBuffers.resize(1);
 	CreateResources();
 
 	memcpy(m_indices.data(), p_indices.data(), p_indices.size()*sizeof(uint32_t));
@@ -53,8 +51,6 @@ Rendering::Resources::Mesh::Mesh(const std::vector<Geometry::VertexPositionNorma
 	m_indices.resize(m_indicesCount);
 	m_vertices.resize(m_vertexCount);
 	uploadIndicesCount.resize(1);
-	m_vertexArrays.resize(1);
-	m_IndexBuffers.resize(1);
 	CreateResources();
 	memcpy(m_indices.data(), p_indices.data(), p_indices.size() * sizeof(uint32_t));
 	for (int i = 0; i < m_vertexCount; i++) {
@@ -78,8 +74,6 @@ m_indices(std::move(p_indices))
 {
 	isIndex = m_indicesCount > 0;
 
-	m_vertexArrays.resize(1);
-	m_IndexBuffers.resize(1);
 	CreateResources();
 	uploadIndicesCount.resize(1);
 
@@ -91,19 +85,10 @@ Rendering::Resources::Mesh::~Mesh()
 	delete m_bvh;
 	m_bvh = nullptr;
 
-	// The mesh's GPU resources are records behind handles: the record is freed now and the GL
-	// deletion queued to the side that owns the context (see Records::DestroyBuffer). That side is
-	// not necessarily the thread dropping the last reference - a loader, a feature rebuild on a
-	// job thread, closing a document.
-	for (const Rendering::Backend::ResourceHandle<Rendering::Backend::HwVertexArray>& array : m_vertexArrays)
-	{
-		Rendering::HAL::ResourceOps::DestroyVertexArray(array);
-	}
-	for (const Rendering::Backend::ResourceHandle<Rendering::Backend::HwBufferObject>& indices : m_IndexBuffers)
-	{
-		Rendering::HAL::ResourceOps::DestroyBuffer(indices);
-	}
-	Rendering::HAL::ResourceOps::DestroyBuffer(m_vertexBuffer);
+	// The buffers and the arrays are front-end objects: dropping them frees their records and
+	// queues the GL deletion to the side that owns the context (see Data::BufferObject /
+	// Data::VertexArrayObject and Records::Destroy*). That side is not necessarily the thread
+	// dropping the last reference - a loader, a feature rebuild on a job thread, closing a document.
 }
 	
 void Rendering::Resources::Mesh::Bind(int index) const
@@ -112,7 +97,7 @@ void Rendering::Resources::Mesh::Bind(int index) const
 	{
 		return;
 	}
-	glBindVertexArray(Rendering::Backend::Records::VertexArrayName(m_vertexArrays[index]));
+	m_vertexArrays[index].Bind();
 }
 
 void Rendering::Resources::Mesh::Unbind() const
@@ -127,7 +112,7 @@ uint32_t Rendering::Resources::Mesh::GetVertexArrayId(int p_index) const
 		return 0;
 	}
 	// Resolved from the handle, on the side that owns the context: the name is in the record.
-	return Rendering::Backend::Records::VertexArrayName(m_vertexArrays[p_index]);
+	return m_vertexArrays[p_index].GetID();
 }
 
 uint32_t Rendering::Resources::Mesh::GetVertexCount() const
@@ -178,16 +163,16 @@ void Rendering::Resources::Mesh::AddMaterial(int materialIndex, int subRangeInde
 
 void Rendering::Resources::Mesh::CreateResources()
 {
-	// Filament's VertexBuffer/IndexBuffer/VertexArray front objects keep handles; the GL objects
-	// they name are made by ResourceOps (recorded when the context lives on another thread).
-	Rendering::Backend::HandleAllocator& allocator = Rendering::Backend::GetHandleAllocator();
-	m_vertexBuffer = allocator.Allocate<Rendering::Backend::HwBufferObject>();
-	m_vertexArrays[0] = allocator.Allocate<Rendering::Backend::HwVertexArray>();
-	m_IndexBuffers[0] = allocator.Allocate<Rendering::Backend::HwBufferObject>();
+	// Filament's VertexBuffer/IndexBuffer/VertexArray front objects: each is a front-end object that
+	// owns its handle (see Data::BufferObject / Data::VertexArrayObject), and the create commands
+	// give them their GL objects on the side that owns the context.
+	m_vertexBuffer = Rendering::Data::BufferObject{ Rendering::Settings::EBufferType::VERTEX };
 
-	Rendering::HAL::ResourceOps::EnsureBuffer(m_vertexBuffer);
-	Rendering::HAL::ResourceOps::EnsureVertexArray(m_vertexArrays[0]);
-	Rendering::HAL::ResourceOps::EnsureBuffer(m_IndexBuffers[0]);
+	m_vertexArrays.clear();
+	m_vertexArrays.emplace_back();
+
+	m_IndexBuffers.clear();
+	m_IndexBuffers.emplace_back(Rendering::Settings::EBufferType::INDEX);
 }
 
 const Rendering::Backend::ResourceHandle<Rendering::Backend::HwVertexArray>& Rendering::Resources::Mesh::GetVertexArrayHandle(int p_index) const
@@ -197,7 +182,7 @@ const Rendering::Backend::ResourceHandle<Rendering::Backend::HwVertexArray>& Ren
 	{
 		return nullHandle;
 	}
-	return m_vertexArrays[p_index];
+	return m_vertexArrays[p_index].GetHandle();
 }
 
 const Rendering::Backend::ResourceHandle<Rendering::Backend::HwBufferObject>& Rendering::Resources::Mesh::GetIndexBufferHandle(int p_index) const
@@ -207,7 +192,7 @@ const Rendering::Backend::ResourceHandle<Rendering::Backend::HwBufferObject>& Re
 	{
 		return nullHandle;
 	}
-	return m_IndexBuffers[p_index];
+	return m_IndexBuffers[p_index].GetHandle();
 }
 
 Maths::FVector3 Rendering::Resources::Mesh::GetVertexPosition(int index)
@@ -348,22 +333,20 @@ void Rendering::Resources::Mesh::UploadIndices(const std::vector<uint32_t>& p_in
 		return;
 	}
 
-	Rendering::HAL::ResourceOps::EnsureBuffer(m_IndexBuffers[index]);
-	Rendering::HAL::ResourceOps::AllocateBuffer(m_IndexBuffers[index], indexBytes);
-	Rendering::HAL::ResourceOps::UploadBuffer(m_IndexBuffers[index], p_indices.data(), 0, indexBytes);
+	// The index buffer is a front-end object: every call below is recorded as the command that
+	// does it, and names the buffer's handle (see Data::BufferObject).
+	m_IndexBuffers[index].Allocate(indexBytes);
+	m_IndexBuffers[index].Upload(p_indices.data());
 }
 void Rendering::Resources::Mesh::AddSubRangeBuffer()
 {
-	Rendering::Backend::HandleAllocator& allocator = Rendering::Backend::GetHandleAllocator();
-	m_vertexArrays.push_back(allocator.Allocate<Rendering::Backend::HwVertexArray>());
-	m_IndexBuffers.push_back(allocator.Allocate<Rendering::Backend::HwBufferObject>());
+	m_vertexArrays.emplace_back();
+	m_IndexBuffers.emplace_back(Rendering::Settings::EBufferType::INDEX);
 	uploadIndicesCount.push_back(0);
 
 	const int index = static_cast<int>(m_vertexArrays.size()) - 1;
-	Rendering::HAL::ResourceOps::EnsureVertexArray(m_vertexArrays[index]);
-	Rendering::HAL::ResourceOps::EnsureBuffer(m_IndexBuffers[index]);
-	Rendering::HAL::ResourceOps::SetVertexArrayLayout(
-		m_vertexArrays[index], m_vertexBuffer, m_IndexBuffers[index],
+	m_vertexArrays[index].SetLayout(
+		m_vertexBuffer.GetHandle(), m_IndexBuffers[index].GetHandle(),
 		std::to_array<Settings::VertexAttribute>({
 			{ Settings::EDataType::FLOAT, 3 }, // position
 			{ Settings::EDataType::FLOAT, 2 }, // texCoords
@@ -388,16 +371,14 @@ void Rendering::Resources::Mesh::Upload(const std::vector<Geometry::Vertex>& p_v
 
 	// Every call below is recorded as the command that does it when the context lives on another
 	// thread, and done here otherwise (see HAL::ResourceOps). The work names handles, so it stays
-	// valid even if the front-end object is gone before it runs.
-	Rendering::HAL::ResourceOps::EnsureBuffer(m_vertexBuffer);
-	Rendering::HAL::ResourceOps::AllocateBuffer(m_vertexBuffer, vertexBytes);
-	Rendering::HAL::ResourceOps::UploadBuffer(m_vertexBuffer, p_vertices.data(), 0, vertexBytes);
+	// valid even if the front-end object that recorded it is gone before it runs.
+	m_vertexBuffer.Allocate(vertexBytes);
+	m_vertexBuffer.Upload(p_vertices.data());
 
 	UploadIndices(p_indices);
 
-	Rendering::HAL::ResourceOps::EnsureVertexArray(m_vertexArrays[0]);
-	Rendering::HAL::ResourceOps::SetVertexArrayLayout(
-		m_vertexArrays[0], m_vertexBuffer, m_IndexBuffers[0],
+	m_vertexArrays[0].SetLayout(
+		m_vertexBuffer.GetHandle(), m_IndexBuffers[0].GetHandle(),
 		std::to_array<Settings::VertexAttribute>({
 			{ Settings::EDataType::FLOAT, 3 }, // position
 			{ Settings::EDataType::FLOAT, 2 }, // texCoords
@@ -416,15 +397,13 @@ void Rendering::Resources::Mesh::Upload(const std::vector<Geometry::VertexPositi
 
 	m_vertexStride = sizeof(Geometry::VertexPositionNormal);
 
-	Rendering::HAL::ResourceOps::EnsureBuffer(m_vertexBuffer);
-	Rendering::HAL::ResourceOps::AllocateBuffer(m_vertexBuffer, vertexBytes);
-	Rendering::HAL::ResourceOps::UploadBuffer(m_vertexBuffer, p_vertices.data(), 0, vertexBytes);
+	m_vertexBuffer.Allocate(vertexBytes);
+	m_vertexBuffer.Upload(p_vertices.data());
 
 	UploadIndices(p_indices);
 
-	Rendering::HAL::ResourceOps::EnsureVertexArray(m_vertexArrays[0]);
-	Rendering::HAL::ResourceOps::SetVertexArrayLayout(
-		m_vertexArrays[0], m_vertexBuffer, m_IndexBuffers[0],
+	m_vertexArrays[0].SetLayout(
+		m_vertexBuffer.GetHandle(), m_IndexBuffers[0].GetHandle(),
 		std::to_array<Settings::VertexAttribute>({
 			{ Settings::EDataType::FLOAT, 3 }, // position
 			{ Settings::EDataType::FLOAT, 3 }, // normal
@@ -440,15 +419,13 @@ void Rendering::Resources::Mesh::Upload(const std::vector<Geometry::VertexBVH>& 
 
 	m_vertexStride = sizeof(Geometry::VertexBVH);
 
-	Rendering::HAL::ResourceOps::EnsureBuffer(m_vertexBuffer);
-	Rendering::HAL::ResourceOps::AllocateBuffer(m_vertexBuffer, vertexBytes);
-	Rendering::HAL::ResourceOps::UploadBuffer(m_vertexBuffer, p_vertices.data(), 0, vertexBytes);
+	m_vertexBuffer.Allocate(vertexBytes);
+	m_vertexBuffer.Upload(p_vertices.data());
 
 	UploadIndices(p_indices);
 
-	Rendering::HAL::ResourceOps::EnsureVertexArray(m_vertexArrays[0]);
-	Rendering::HAL::ResourceOps::SetVertexArrayLayout(
-		m_vertexArrays[0], m_vertexBuffer, m_IndexBuffers[0],
+	m_vertexArrays[0].SetLayout(
+		m_vertexBuffer.GetHandle(), m_IndexBuffers[0].GetHandle(),
 		std::to_array<Settings::VertexAttribute>({
 			{ Settings::EDataType::FLOAT, 3 }, // position
 			{ Settings::EDataType::FLOAT, 2 }, // texCoords

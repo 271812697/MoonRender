@@ -1,4 +1,5 @@
 ﻿#pragma once
+#include <Rendering/Data/PipelineState.h>
 #include <typeindex>
 #include <memory>
 #include <Rendering/Core/ABaseRenderer.h>
@@ -25,7 +26,7 @@ namespace Rendering::Core
 
 		/** The present, as the last thing the frame draws: reads p_source's colour attachment and
 		 * writes p_target, with the pass context set explicitly (see PresentPass). */
-		void PresentTo(::Rendering::HAL::Framebuffer& p_source, ::Rendering::HAL::Framebuffer& p_target);
+		void PresentTo(::Rendering::Data::Framebuffer& p_source, ::Rendering::Data::Framebuffer& p_target);
 
 		virtual void EndFrame() override;
 

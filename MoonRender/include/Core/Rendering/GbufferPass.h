@@ -1,6 +1,7 @@
 ﻿#pragma once
+#include <Rendering/Data/PipelineState.h>
 #include <Rendering/Core/ARenderPass.h>
-#include <Rendering/HAL/Framebuffer.h>
+#include <Rendering/Data/Framebuffer.h>
 #include <Core/Resources/MaterialAsset.h>
 #include <Core/Rendering/PingPongFramebuffer.h>
 namespace Core::Rendering
@@ -36,9 +37,9 @@ namespace Core::Rendering
 		::Core::Resources::MaterialAsset ssaoMaterial;
 		::Core::Resources::MaterialAsset ssaoblurMaterial;
 		GbufferTextureData gbufferData;
-		::Rendering::HAL::Framebuffer gbuffer;
-		::Rendering::HAL::Framebuffer ssaobuffer;
-		::Rendering::HAL::Framebuffer ssaoblurbuffer;
+		::Rendering::Data::Framebuffer gbuffer;
+		::Rendering::Data::Framebuffer ssaobuffer;
+		::Rendering::Data::Framebuffer ssaoblurbuffer;
 		GbufferParam gbufferParam;
 	};
 }

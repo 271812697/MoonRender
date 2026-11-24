@@ -1,12 +1,12 @@
 #include <format>
 #include <Rendering/Entities/Light.h>
-#include <Rendering/HAL/Renderbuffer.h>
+#include <Rendering/Data/Renderbuffer.h>
 #include <assert.h>
 
 namespace
 {
 	void SetupFramebufferForShadowMapping(
-		Rendering::HAL::Framebuffer& p_framebuffer,
+		Rendering::Data::Framebuffer& p_framebuffer,
 		uint32_t p_resolution
 	)
 	{
@@ -90,7 +90,7 @@ void Rendering::Entities::Light::PrepareForShadowRendering(const Rendering::Data
 
 	if (!shadowBuffer)
 	{
-		shadowBuffer = std::make_unique<Rendering::HAL::Framebuffer>("DirectionalShadow");
+		shadowBuffer = std::make_unique<Rendering::Data::Framebuffer>("DirectionalShadow");
 		SetupFramebufferForShadowMapping(*shadowBuffer, static_cast<uint32_t>(shadowMapResolution));
 	}
 	else

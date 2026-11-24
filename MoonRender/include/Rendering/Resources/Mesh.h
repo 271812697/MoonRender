@@ -6,12 +6,13 @@
 #include <Rendering/Geometry/bbox.h>
 #include <Rendering/Geometry/bvh.h>
 #include <Rendering/Backend/ResourceHandle.h>
+#include <Rendering/Data/BufferObject.h>
+#include <Rendering/Data/VertexArrayObject.h>
 #include <Rendering/Resources/IMesh.h>
 #include <Rendering/Settings/EPrimitiveMode.h>
 
 namespace Rendering::Backend
 {
-	struct HwBufferObject;
 	struct HwVertexArray;
 }
 
@@ -59,7 +60,7 @@ namespace Rendering::Resources
 		 * VertexArray handles): the GL objects behind them belong to the side that owns the
 		 * context and are reached with Backend::Records or HAL::ResourceOps. */
 		const Rendering::Backend::ResourceHandle<Rendering::Backend::HwVertexArray>& GetVertexArrayHandle(int p_index = 0) const;
-		const Rendering::Backend::ResourceHandle<Rendering::Backend::HwBufferObject>& GetVertexBufferHandle() const { return m_vertexBuffer; }
+		const Rendering::Backend::ResourceHandle<Rendering::Backend::HwBufferObject>& GetVertexBufferHandle() const { return m_vertexBuffer.GetHandle(); }
 		const Rendering::Backend::ResourceHandle<Rendering::Backend::HwBufferObject>& GetIndexBufferHandle(int p_index = 0) const;
 
 		virtual const Rendering::Geometry::BoundingSphere& GetBoundingSphere()  override;
@@ -87,9 +88,9 @@ namespace Rendering::Resources
 		 * when the context lives on another thread - see HAL::ResourceOps). */
 		void CreateResources();
 
-		/** The GPU half of the mesh: fills the buffer named by the handle, uploads the indices and
-		 * applies the layout. Everything it does is a command where the context lives on another
-		 * thread (see HAL::ResourceOps), so it is safe to call from the loader thread. */
+		/** The GPU half of the mesh: fills the vertex buffer, uploads the indices and applies the
+		 * layout. Everything it does is a command where the context lives on the other side (see
+		 * HAL::ResourceOps), so it is safe to call from the loader thread. */
 		void Upload(const std::vector<Geometry::Vertex>& p_vertices, const std::vector<uint32_t>& p_indices);
 		void Upload(const std::vector<Geometry::VertexPositionNormal>&p_vertices, const std::vector<uint32_t>& p_indices);
 		void Upload(const std::vector<Geometry::VertexBVH>& p_vertices, const std::vector<uint32_t>& p_indices);
@@ -109,10 +110,11 @@ namespace Rendering::Resources
 		std::vector<uint32_t> m_materialIndex;
 		std::vector<uint32_t> m_subRangeIndex;
 
-		/** The mesh's GPU resources, as handles (see Backend::HandleAllocator). */
-		Rendering::Backend::ResourceHandle<Rendering::Backend::HwBufferObject> m_vertexBuffer;
-		std::vector<Rendering::Backend::ResourceHandle<Rendering::Backend::HwBufferObject>> m_IndexBuffers;
-		std::vector<Rendering::Backend::ResourceHandle<Rendering::Backend::HwVertexArray>> m_vertexArrays;
+		/** The mesh's GPU resources: the buffers and the arrays are front-end objects that own
+		 * their handles (see Data::BufferObject / Data::VertexArrayObject). */
+		Rendering::Data::BufferObject m_vertexBuffer;
+		std::vector<Rendering::Data::BufferObject> m_IndexBuffers;
+		std::vector<Rendering::Data::VertexArrayObject> m_vertexArrays;
 		bool isIndex = false;
 		std::vector<Geometry::VertexBVH> m_vertices;
 		std::vector<uint32_t> m_indices;

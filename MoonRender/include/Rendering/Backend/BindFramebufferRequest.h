@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Rendering/HAL/Framebuffer.h>
+#include <Rendering/Data/Framebuffer.h>
 
 namespace Rendering::Backend
 {
@@ -11,10 +11,10 @@ namespace Rendering::Backend
 	 * resized between recording and replay still binds the right object.
 	 *
 	 * A null target means "the default framebuffer", which is what a pass unbinding its output
-	 * means (see HAL::Framebuffer::Unbind).
+	 * means (see Data::Framebuffer::Unbind).
 	 */
 	struct BindFramebufferRequest
 	{
-		const ::Rendering::HAL::Framebuffer* target = nullptr;
+		const ::Rendering::Data::Framebuffer* target = nullptr;
 	};
 }

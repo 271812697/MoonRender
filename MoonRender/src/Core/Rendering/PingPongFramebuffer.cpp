@@ -5,10 +5,10 @@
 #include <Core/Rendering/PingPongFramebuffer.h>
 
 Core::Rendering::PingPongFramebuffer::PingPongFramebuffer(std::string_view p_debugName) :
-	CircularIterator<::Rendering::HAL::Framebuffer, 2>(m_framebuffers),
+	CircularIterator<::Rendering::Data::Framebuffer, 2>(m_framebuffers),
 	m_framebuffers{
-		::Rendering::HAL::Framebuffer{std::format("{}PingPong{}", p_debugName, 0)},
-		::Rendering::HAL::Framebuffer{std::format("{}PingPong{}", p_debugName, 1)}
+		::Rendering::Data::Framebuffer{std::format("{}PingPong{}", p_debugName, 0)},
+		::Rendering::Data::Framebuffer{std::format("{}PingPong{}", p_debugName, 1)}
 	}
 {
 
@@ -20,7 +20,7 @@ Core::Rendering::PingPongFramebuffer::PingPongFramebuffer(std::string_view p_deb
 	}
 }
 
-std::array<::Rendering::HAL::Framebuffer, 2>& Core::Rendering::PingPongFramebuffer::GetFramebuffers()
+std::array<::Rendering::Data::Framebuffer, 2>& Core::Rendering::PingPongFramebuffer::GetFramebuffers()
 {
 	return m_framebuffers;
 }

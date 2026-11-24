@@ -1,4 +1,5 @@
 ﻿#pragma once
+#include <Rendering/Data/PipelineState.h>
 #include <Core/ECS/Actor.h>
 
 #include <Core/Resources/MaterialAsset.h>

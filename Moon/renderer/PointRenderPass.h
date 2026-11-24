@@ -1,10 +1,10 @@
 ﻿#pragma once
+#include <Rendering/Data/PipelineState.h>
 #include <Core/ECS/Actor.h>
 
 #include <Core/Resources/MaterialAsset.h>
 #include <Core/Rendering/SceneRenderer.h>
 #include <Core/SceneSystem/SceneManager.h>
-#include <Rendering/HAL/VertexBuffer.h>
 #include "Context.h"
 namespace Editor::Rendering
 {
@@ -16,7 +16,6 @@ namespace Editor::Rendering
 	private:
 		virtual void Draw(::Rendering::Data::PipelineState p_pso) override;
 	private:
-		::Rendering::HAL::VertexBuffer vbo;
 		::Core::Resources::MaterialAsset m_PointMaterial;
 	};
 }

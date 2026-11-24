@@ -1,6 +1,7 @@
 #pragma once
 #include <Rendering/Backend/HandleAllocator.h>
 #include <Rendering/HAL/Texture.h>
+#include <Rendering/Settings/EBufferType.h>
 #include <Rendering/Settings/UniformInfo.h>
 
 #include <string>
@@ -20,41 +21,50 @@ namespace Rendering::Backend
 	 * hold `gl.id` the same way).
 	 *
 	 * A texture's record is HAL::Texture itself (its constructor creates the GL name and its
-	 * methods are the backend operations); the rest are name records for now, because the HAL
-	 * object of a buffer/framebuffer/... is still the front-end object that also caches the name.
-	 */
-	struct HwBufferObject
+	 * methods are the backend operations), and so is a buffer's: it is HAL::Buffer (TBuffer), the
+	 * object the create-buffer command constructs in the slot. The front end of a buffer is
+	 * Rendering::Data::BufferObject, which only holds the handle. The remaining records below are
+	 * still name records for now, because the HAL object of a framebuffer/... is still the
+	 * front-end object that also caches the name.
+	 *
+	 * HwResource is what those records have in common: a virtual destructor, so a slot can hold
+	 * any of them and free it through the destructor stored next to it. */
+	struct HwResource
 	{
-		explicit HwBufferObject(uint32_t p_name = 0) noexcept : name(p_name) {}
-		uint32_t name = 0;
+		virtual ~HwResource() = default;
 	};
 
-	struct HwVertexArray
+	/** A buffer object (Filament's HwBufferObject): the *backend* base of every buffer kind, with
+	 * the kind it was created as and the size its storage was allocated with - the state anything
+	 * holding only the handle can read. The OpenGL object itself (the GL name and the fence) is
+	 * HAL::Buffer, which derives from this and lives in the same slot. */
+	struct HwBufferObject : HwResource
 	{
-		explicit HwVertexArray(uint32_t p_name = 0) noexcept : name(p_name) {}
-		uint32_t name = 0;
+		explicit HwBufferObject(Settings::EBufferType p_type = Settings::EBufferType::UNKNOWN) noexcept
+			: type(p_type) {}
+
+		Settings::EBufferType type = Settings::EBufferType::UNKNOWN;
+		uint64_t size = 0;
 	};
 
-	struct HwFramebuffer
-	{
-		explicit HwFramebuffer(uint32_t p_name = 0) noexcept : name(p_name) {}
-		uint32_t name = 0;
-	};
+	/** A vertex array (Filament's HwVertexArray). The object in the slot is Backend::GLVertexArray,
+	 * which owns the GL name and every operation; nothing about it is shared state. */
+	struct HwVertexArray : HwResource {};
 
-	struct HwRenderbuffer
-	{
-		explicit HwRenderbuffer(uint32_t p_name = 0) noexcept : name(p_name) {}
-		uint32_t name = 0;
-	};
+	/** A render target (Filament's HwFramebuffer); the object in the slot is
+	 * Backend::GLFramebuffer. */
+	struct HwFramebuffer : HwResource {};
 
-	struct HwProgram
+	/** The depth/stencil storage of a render target (Filament's HwRenderbuffer); the object in the
+	 * slot is Backend::GLRenderbuffer. */
+	struct HwRenderbuffer : HwResource {};
+
+	/** A shader program (Filament's HwProgram). The object in the slot is Backend::GLProgram, which
+	 * owns the GL name and the build. The reflection the build found stays here, on the record: it
+	 * is the answer to glGetActiveUniform / glGetUniformLocation - a GL query - and what a front
+	 * end reads back once the create command has run. */
+	struct HwProgram : HwResource
 	{
-		explicit HwProgram(uint32_t p_name = 0) noexcept : name(p_name) {}
-		uint32_t name = 0;
-		/** What the program's reflection found (glGetActiveUniform / glGetUniformLocation), filled
-		 * by the create-program command. The recording side reads it after the drain: the queries
-		 * need the program and the context, so they belong here (Filament keeps the same data on
-		 * the backend program). */
 		std::unordered_map<std::string, Rendering::Settings::UniformInfo> uniforms;
 		std::unordered_map<std::string, uint32_t> uniformLocations;
 	};
@@ -69,13 +79,13 @@ namespace Rendering::Backend
 	 * to the driver thread. */
 	namespace Records
 	{
-		void CreateBuffer(ResourceHandle<HwBufferObject> p_handle);
+		/** Constructs the HAL buffer in its slot - the constructor is what creates the GL name -
+		 * once per handle. A buffer's kind is fixed at creation, because a bind target is derived
+		 * from it (a uniform buffer, an index buffer, ...). */
+		void CreateBuffer(ResourceHandle<HwBufferObject> p_handle, Rendering::Settings::EBufferType p_type);
 		void CreateVertexArray(ResourceHandle<HwVertexArray> p_handle);
 		void CreateFramebuffer(ResourceHandle<HwFramebuffer> p_handle);
 		void CreateRenderbuffer(ResourceHandle<HwRenderbuffer> p_handle);
-
-		/** Registers a program the executor has already built and linked. */
-		void RegisterProgram(ResourceHandle<HwProgram> p_handle, uint32_t p_name);
 
 		/** Constructs the HAL texture in its slot (the constructor is what creates the GL name),
 		 * once per handle. Returns the object, or null for a stale handle. */
@@ -84,6 +94,10 @@ namespace Rendering::Backend
 			Rendering::Settings::ETextureType p_type,
 			std::string_view p_debugName);
 
+		/** Constructs the program in its slot (the constructor makes the GL program object). The
+		 * build - compile, link, reflect - is the executor's next step on the same object. */
+		void CreateProgram(ResourceHandle<HwProgram> p_handle);
+
 		void DestroyBuffer(ResourceHandle<HwBufferObject> p_handle);
 		void DestroyVertexArray(ResourceHandle<HwVertexArray> p_handle);
 		void DestroyFramebuffer(ResourceHandle<HwFramebuffer> p_handle);
@@ -91,38 +105,18 @@ namespace Rendering::Backend
 		void DestroyProgram(ResourceHandle<HwProgram> p_handle);
 		void DestroyTexture(ResourceHandle<Rendering::HAL::Texture> p_handle);
 
-		/** handle_cast + the name field, i.e. Filament's `handle_cast<GLTexture*>(h)->gl.id`.
+		/** handle_cast + the GL name, i.e. Filament's `handle_cast<GLBufferObject*>(h)->gl.id`.
 		 * 0 while the object does not exist (yet), which is what the callers of the old name
-		 * tables did with the same meaning. */
-		inline uint32_t BufferName(ResourceHandle<HwBufferObject> p_handle)
-		{
-			const HwBufferObject* const record = GetHandleAllocator().HandleCast<HwBufferObject>(p_handle);
-			return record != nullptr ? record->name : 0u;
-		}
+		 * tables did with the same meaning. Defined in the .cpp: the record is HAL::Buffer, which
+		 * cannot be named here (it includes this header). */
+		uint32_t BufferName(ResourceHandle<HwBufferObject> p_handle);
 
-		inline uint32_t VertexArrayName(ResourceHandle<HwVertexArray> p_handle)
-		{
-			const HwVertexArray* const record = GetHandleAllocator().HandleCast<HwVertexArray>(p_handle);
-			return record != nullptr ? record->name : 0u;
-		}
-
-		inline uint32_t FramebufferName(ResourceHandle<HwFramebuffer> p_handle)
-		{
-			const HwFramebuffer* const record = GetHandleAllocator().HandleCast<HwFramebuffer>(p_handle);
-			return record != nullptr ? record->name : 0u;
-		}
-
-		inline uint32_t RenderbufferName(ResourceHandle<HwRenderbuffer> p_handle)
-		{
-			const HwRenderbuffer* const record = GetHandleAllocator().HandleCast<HwRenderbuffer>(p_handle);
-			return record != nullptr ? record->name : 0u;
-		}
-
-		inline uint32_t ProgramName(ResourceHandle<HwProgram> p_handle)
-		{
-			const HwProgram* const record = GetHandleAllocator().HandleCast<HwProgram>(p_handle);
-			return record != nullptr ? record->name : 0u;
-		}
+		/** The same for the other backend objects: handle_cast to the OpenGL object and its name.
+		 * 0 while the object does not exist (yet), or when the handle is stale. */
+		uint32_t VertexArrayName(ResourceHandle<HwVertexArray> p_handle);
+		uint32_t FramebufferName(ResourceHandle<HwFramebuffer> p_handle);
+		uint32_t RenderbufferName(ResourceHandle<HwRenderbuffer> p_handle);
+		uint32_t ProgramName(ResourceHandle<HwProgram> p_handle);
 
 		/** The same for a texture, named by the plain id a front-end object carries (the HAL
 		 * header cannot include this one - see GLTextureHandle.h). */

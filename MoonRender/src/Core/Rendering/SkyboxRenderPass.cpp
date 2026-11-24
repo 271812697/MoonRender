@@ -19,7 +19,7 @@
 #include <Core/ResourceManagement/ShaderManager.h>
 #include <Core/ResourceManagement/TextureManager.h>
 #include <Core/Rendering/FramebufferUtil.h>
-#include <Rendering/HAL/Renderbuffer.h>
+#include <Rendering/Data/Renderbuffer.h>
 #include <Rendering/HAL/Profiling.h>
 #include <Rendering/Resources/Loaders/TextureLoader.h>
 
@@ -259,7 +259,8 @@ void Core::Rendering::SkyboxRenderPass::computeIrradianceSH()
 
 	if (!m_irradianceSHBuffer)
 	{
-		m_irradianceSHBuffer = std::make_unique<::Rendering::HAL::UniformBuffer>();
+		m_irradianceSHBuffer = std::make_unique<::Rendering::Data::BufferObject>(
+			::Rendering::Settings::EBufferType::UNIFORM);
 		m_irradianceSHBuffer->Allocate(9 * sizeof(Maths::FVector4), ::Rendering::Settings::EAccessSpecifier::STATIC_DRAW);
 	}
 
@@ -376,7 +377,7 @@ void Core::Rendering::SkyboxRenderPass::computeSkyTexture()
 					);
 				}
 				// Depth buffer
-				const auto renderbuffer = std::make_shared<::Rendering::HAL::Renderbuffer>(false);
+				const auto renderbuffer = std::make_shared<::Rendering::Data::Renderbuffer>(false);
 				const auto internalFormat = ::Rendering::Settings::EInternalFormat::DEPTH_COMPONENT;
 				renderbuffer->Allocate(kEnvironmentResolution, kEnvironmentResolution, internalFormat);
 				skyBoxBuffer.Attach(renderbuffer, ::Rendering::Settings::EFramebufferAttachment::DEPTH);
@@ -396,7 +397,7 @@ void Core::Rendering::SkyboxRenderPass::computeSkyTexture()
 				}
 
 				// Depth buffer (must match the 32x32 irradiance cube size, otherwise the FBO is incomplete)
-				const auto renderbuffer = std::make_shared<::Rendering::HAL::Renderbuffer>(false);
+				const auto renderbuffer = std::make_shared<::Rendering::Data::Renderbuffer>(false);
 				const auto internalFormat = ::Rendering::Settings::EInternalFormat::DEPTH_COMPONENT;
 				renderbuffer->Allocate(
 					static_cast<uint16_t>(irradianceCube->GetDesc().width),
@@ -554,7 +555,7 @@ void Core::Rendering::SkyboxRenderPass::computeSkyTexture()
 				const float roughness = 1.0f - std::sqrt(std::max(0.0f, 1.0f - levelFraction));
 
 				// Depth buffer must match the current mip size, otherwise the FBO is incomplete.
-				const auto renderbuffer = std::make_shared<::Rendering::HAL::Renderbuffer>(false);
+				const auto renderbuffer = std::make_shared<::Rendering::Data::Renderbuffer>(false);
 				renderbuffer->Allocate(
 					static_cast<uint16_t>(mipWidth),
 					static_cast<uint16_t>(mipHeight),

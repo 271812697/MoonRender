@@ -304,7 +304,8 @@ namespace MOON {
 		vaoHandle = GetHandleAllocator().Allocate<HwVertexArray>().GetId();
 		::Rendering::HAL::ResourceOps::EnsureVertexArray(ResourceHandle<HwVertexArray>{ vaoHandle });
 		vboHandle = GetHandleAllocator().Allocate<HwBufferObject>().GetId();
-		::Rendering::HAL::ResourceOps::EnsureBuffer(ResourceHandle<HwBufferObject>{ vboHandle });
+		::Rendering::HAL::ResourceOps::EnsureBuffer(ResourceHandle<HwBufferObject>{ vboHandle },
+			::Rendering::Settings::EBufferType::VERTEX);
 		submit();
 	}
 	int PolygonMesh::hit(const Eigen::Matrix4f& viewProj, float u, float v)

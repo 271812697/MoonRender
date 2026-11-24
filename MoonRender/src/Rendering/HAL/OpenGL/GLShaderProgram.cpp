@@ -1,462 +1,180 @@
-﻿#include <array>
-#include <cstdlib>
-#include <iostream>
-#include <glad/glad.h>
+﻿#include <glad/glad.h>
 
-#include <Rendering/Backend/BackendResources.h>
-#include <Rendering/Backend/HandleAllocator.h>
-#include <Rendering/HAL/OpenGL/GLShaderProgram.h>
+#include <array>
+#include <cstdio>
+#include <string>
+
 #include <Rendering/HAL/OpenGL/GLProgramBindings.h>
-#include <Rendering/HAL/Common/HALDriverAccess.h>
-#include <Rendering/Context/Driver.h>
-#include <Rendering/Data/EngineDescriptorSets.h>
-#include <Rendering/HAL/OpenGL/GLTexture.h>
+#include <Rendering/HAL/OpenGL/GLShaderProgram.h>
 #include <Rendering/HAL/OpenGL/GLTypes.h>
-#include <Rendering/Resources/Texture.h>
+
+// The backend object of a program: everything here runs where the context is, on the object that
+// lives in the handle's slot. The recording side never calls any of it - what a front end
+// (Rendering::Data::Program) does is collect the stages and record the build.
 
 namespace
 {
-	constexpr bool IsReservedUniform(std::string_view p_name)
+	/** Filament keeps a program's uniform reflection on the backend program object: the queries need
+	 * the program and the context, so they run here after the link. The recording side reads the
+	 * result out of the object once the create command has run. */
+	void ReflectUniforms(Rendering::HAL::GLShaderProgram& p_program)
 	{
-		return p_name.starts_with("ubo_") || p_name.starts_with("ReflectionUBO");
-	}
+		p_program.uniforms.clear();
+		p_program.uniformLocations.clear();
 
-	/** Whether a driver exists to record into: then the create-program command builds the program on
-	 * the side that owns the context, and everything GL about it is recorded (Filament's
-	 * ProgramHandle + createProgram/bindProgram). The recording code is the same in both
-	 * configurations: without a render thread the batch runs on this thread at the end of the frame
-	 * (docs/RenderThreadPlan.md §8.72). */
-	bool IsProgramRecorded()
-	{
-		return ::Rendering::HAL::CurrentDriver() != nullptr;
-	}
+		GLint activeUniformCount = 0;
+		glGetProgramiv(p_program.GetID(), GL_ACTIVE_UNIFORMS, &activeUniformCount);
 
-	uint32_t ResolveProgramName(const Rendering::HAL::GLShaderProgramContext& p_context)
-	{
-		return Rendering::Backend::Records::ProgramName(p_context.handle);
-	}
-}
-
-template<>
-Rendering::HAL::GLShaderProgram::TShaderProgram()
-{
-	if (IsProgramRecorded())
-	{
-		// The build happens on the executor (createProgram): this side only reserves the handle.
-		m_context.handle = Rendering::Backend::GetHandleAllocator().Allocate<Rendering::Backend::HwProgram>();
-		return;
-	}
-
-	m_context.id = glCreateProgram();
-}
-
-Rendering::HAL::GLShaderProgram::TShaderProgram(
-	const Rendering::Data::DescriptorSetInfo& p_bindings)
-	: TShaderProgram()
-{
-	m_context.SetDescriptorBindings(p_bindings);
-}
-
-template<>
-Rendering::HAL::GLShaderProgram::~TShaderProgram()
-{
-	if (IsProgramRecorded())
-	{
-		Rendering::Backend::Records::DestroyProgram(m_context.handle);
-		return;
-	}
-
-	glDeleteProgram(m_context.id);
-}
-
-template<>
-void Rendering::HAL::GLShaderProgram::Bind()
-{
-	// Filament's token idea: the program resolves its descriptor slots on first use, inside the
-	// program. Materials only select and bind it.
-	//
-	// Two halves, and they belong to different sides of the command stream:
-	//  - the slot numbers are bookkeeping from the layout (ComputeDescriptorSlots), and the
-	//    material asks for them through GetDescriptorSlot;
-	//  - declaring those numbers to the program is GL (DeclareDescriptorBindings), so it is
-	//    recorded and runs on the executor, once the program is linked there - the program
-	//    creation command (docs/RenderThreadPlan.md 8.44) is what issues it.
-	if (!m_context.descriptorSlotsInitialized && m_context.descriptorBindingsConfigured)
-	{
-		m_context.ComputeDescriptorSlots(m_context.descriptorBindings);
-	}
-
-	::Rendering::Context::Driver* const driver = ::Rendering::HAL::CurrentDriver();
-	const bool contextIsHere = driver == nullptr;
-
-	if (!contextIsHere)
-	{
-		// glUseProgram and the slot declaration belong to the executor. The declaration is lazy,
-		// like the immediate path's: a material's layout can be configured after the link.
-		if (!m_context.descriptorBindingsDeclared && m_context.descriptorBindingsConfigured)
+		std::array<GLchar, 256> nameBuffer{};
+		for (GLint i = 0; i < activeUniformCount; ++i)
 		{
-			Rendering::Backend::DeclareProgramBindingsRequest request;
-			request.programHandleId = m_context.handle.GetId();
-			request.bindings = std::make_shared<const Rendering::Data::DescriptorSetInfo>(m_context.descriptorBindings);
-			driver->DeclareProgramBindings(std::move(request));
-			m_context.descriptorBindingsDeclared = true;
+			GLint arraySize = 0;
+			GLenum type = 0;
+			GLsizei actualLength = 0;
+			glGetActiveUniform(p_program.GetID(), static_cast<GLuint>(i),
+				static_cast<GLsizei>(nameBuffer.size()), &actualLength, &arraySize, &type,
+				nameBuffer.data());
+
+			const std::string name{ nameBuffer.data(), static_cast<size_t>(actualLength) };
+			// The engine's fixed blocks and the material block are written by offset; they have no
+			// individual location, and asking for one is an invalid operation.
+			if (name.starts_with("ubo_") || name.starts_with("ReflectionUBO"))
+			{
+				continue;
+			}
+
+			GLint blockIndex = -1;
+			const GLuint uniformIndex = static_cast<GLuint>(i);
+			glGetActiveUniformsiv(p_program.GetID(), 1, &uniformIndex, GL_UNIFORM_BLOCK_INDEX,
+				&blockIndex);
+			if (blockIndex != -1)
+			{
+				continue;
+			}
+
+			const GLint location = glGetUniformLocation(p_program.GetID(), name.c_str());
+			p_program.uniformLocations.emplace(name, static_cast<uint32_t>(location));
+
+			Rendering::Settings::UniformInfo info{
+				.type = Rendering::HAL::ValueToEnum<Rendering::Settings::EUniformType>(type),
+				.name = name,
+				.defaultValue = std::any{}
+			};
+			p_program.uniforms.emplace(name, std::move(info));
 		}
-
-		// By handle, not by name: the GL name is only known after the create command has run, so
-		// asking for it here gave 0 and recorded "bind nothing" - the pass then drew every material
-		// with whichever program was bound before (docs/RenderThreadPlan.md §8.64).
-		driver->BindProgramHandle(m_context.handle.GetId());
-		return;
 	}
+}
 
-	if (!m_context.descriptorBindingsDeclared && m_context.descriptorBindingsConfigured)
+template<>
+Rendering::HAL::GLShaderProgram::TShaderProgram(BackendConstructionTag)
+{
+	// The backend half of the create: the slot exists (the recording side reserved it) and the
+	// context is current, so the program object is made here (Filament's createProgramR).
+	m_context.glId = glCreateProgram();
+}
+
+template<>
+Rendering::Settings::ShaderLinkingResult Rendering::HAL::GLShaderProgram::Build(
+	const std::vector<Rendering::Backend::ShaderSourceSpec>& p_stages)
+{
+	if (m_context.glId == 0)
 	{
-		m_context.DeclareDescriptorBindings(m_context.id, m_context.descriptorBindings);
-		m_context.descriptorBindingsDeclared = true;
+		return { .success = false, .message = "the GL program object could not be created" };
 	}
 
-	glUseProgram(m_context.id);
+	std::vector<GLuint> shaders;
+	shaders.reserve(p_stages.size());
+	for (const Rendering::Backend::ShaderSourceSpec& spec : p_stages)
+	{
+		if (spec.source == nullptr)
+		{
+			continue;
+		}
+		const GLuint shader = glCreateShader(EnumToValue<GLenum>(spec.type));
+		if (shader == 0)
+		{
+			continue;
+		}
+		const char* source = spec.source->c_str();
+		glShaderSource(shader, 1, &source, nullptr);
+		glCompileShader(shader);
+
+		GLint compileStatus = GL_FALSE;
+		glGetShaderiv(shader, GL_COMPILE_STATUS, &compileStatus);
+		if (compileStatus == GL_FALSE)
+		{
+			GLint length = 0;
+			glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &length);
+			std::string log(static_cast<size_t>(length > 0 ? length : 1), '\0');
+			glGetShaderInfoLog(shader, length, &length, log.data());
+			std::fprintf(stderr, "[program] a stage failed to compile:\n%s\n", log.c_str());
+			std::fflush(stderr);
+		}
+		shaders.push_back(shader);
+	}
+
+	for (const GLuint shader : shaders)
+	{
+		glAttachShader(m_context.glId, shader);
+	}
+	glLinkProgram(m_context.glId);
+
+	GLint linkStatus = GL_FALSE;
+	glGetProgramiv(m_context.glId, GL_LINK_STATUS, &linkStatus);
+
+	std::string linkLog;
+	if (linkStatus == GL_FALSE)
+	{
+		GLint length = 0;
+		glGetProgramiv(m_context.glId, GL_INFO_LOG_LENGTH, &length);
+		linkLog.assign(static_cast<size_t>(length > 0 ? length : 1), '\0');
+		glGetProgramInfoLog(m_context.glId, length, &length, linkLog.data());
+		std::fprintf(stderr, "[program] link failed:\n%s\n", linkLog.c_str());
+		std::fflush(stderr);
+	}
+
+	// The stages are part of the program now: detaching and deleting them keeps only the compiled
+	// program (which is what everything binds).
+	for (const GLuint shader : shaders)
+	{
+		glDetachShader(m_context.glId, shader);
+		glDeleteShader(shader);
+	}
+
+	if (linkStatus == GL_FALSE)
+	{
+		return { .success = false, .message = linkLog };
+	}
+
+	ReflectUniforms(*this);
+	return { .success = true };
+}
+
+template<>
+void Rendering::HAL::GLShaderProgram::Bind() const
+{
+	glUseProgram(m_context.glId);
 }
 
 template<>
 void Rendering::HAL::GLShaderProgram::Unbind() const
 {
-	if (IsProgramRecorded())
+	glUseProgram(0);
+}
+
+template<>
+void Rendering::HAL::GLShaderProgram::DeclareBindings(
+	const Rendering::Data::DescriptorSetInfo& p_bindings) const
+{
+	if (m_context.glId == 0)
 	{
-		if (::Rendering::Context::Driver* const driver = ::Rendering::HAL::CurrentDriver())
-		{
-			driver->BindProgram(0);
-		}
 		return;
 	}
-
-	glUseProgram(0);
+	Rendering::HAL::DeclareProgramBindings(m_context.glId, p_bindings);
 }
 
 template<>
 uint32_t Rendering::HAL::GLShaderProgram::GetID() const
 {
-	if (IsProgramRecorded())
-	{
-		return ResolveProgramName(m_context);
-	}
-
-	return m_context.id;
-}
-
-void Rendering::HAL::GLShaderProgramContext::SetDescriptorBindings(
-	const Rendering::Data::DescriptorSetInfo& p_bindings)
-{
-	descriptorBindings = p_bindings;
-	descriptorBindingsConfigured = true;
-	descriptorSlots.clear();
-	descriptorSlotsInitialized = false;
-	descriptorBindingsDeclared = false;
-}
-
-void Rendering::HAL::GLShaderProgramContext::ComputeDescriptorSlots(
-	const Rendering::Data::DescriptorSetInfo& p_bindings)
-{
-	if (descriptorSlotsInitialized)
-	{
-		return;
-	}
-
-	// Only the per-material set needs a map: the engine's sets use the fixed slot table, which
-	// GetDescriptorSlot reads directly. The numbering here is the same one DeclareDescriptorBindings
-	// hands to GL, and it comes from the layout alone.
-	descriptorSlots.clear();
-	GLuint bufferSlot = Rendering::Data::EngineDescriptorSets::kFirstMaterialBufferSlot;
-	GLuint textureSlot = Rendering::Data::EngineDescriptorSets::kFirstMaterialTextureSlot;
-	for (const Rendering::Data::DescriptorSetLayout::Binding& binding
-		: p_bindings[Rendering::Data::kPerMaterialDescriptorSet])
-	{
-		const bool textureKind =
-			binding.kind == Rendering::Data::DescriptorSetLayout::Kind::Texture;
-		const uint32_t slot = textureKind ? textureSlot++ : bufferSlot++;
-		const uint64_t key =
-			(static_cast<uint64_t>(Rendering::Data::kPerMaterialDescriptorSet) << 32) | binding.binding;
-		descriptorSlots[key] = slot;
-	}
-
-	descriptorSlotsInitialized = true;
-}
-
-void Rendering::HAL::GLShaderProgramContext::DeclareDescriptorBindings(
-	uint32_t p_programId,
-	const Rendering::Data::DescriptorSetInfo& p_bindings)
-{
-	DeclareProgramBindings(p_programId, p_bindings);
-	descriptorBindingsDeclared = true;
-}
-
-uint32_t Rendering::HAL::GLShaderProgramContext::GetDescriptorSlot(
-	uint32_t p_set,
-	uint32_t p_binding) const
-{
-	if (p_set == Rendering::Data::kPerViewDescriptorSet
-		|| p_set == Rendering::Data::kPerRenderableDescriptorSet)
-	{
-		return Rendering::Data::EngineDescriptorSets::SlotOf(p_set, p_binding);
-	}
-
-	const uint64_t key = (static_cast<uint64_t>(p_set) << 32) | p_binding;
-	const auto it = descriptorSlots.find(key);
-	return it != descriptorSlots.end() ? it->second : UINT32_MAX;
-}
-
-template<>
-void Rendering::HAL::GLShaderProgram::Attach(const GLShaderStage& p_shader)
-{
-	// The stage list is kept either way: it is what Link() reads the sources from when the build
-	// travels to the executor. Only the attachment itself is GL.
-	if (!IsProgramRecorded())
-	{
-		glAttachShader(m_context.id, p_shader.GetID());
-	}
-	m_context.attachedShaders.push_back(std::ref(p_shader));
-}
-
-template<>
-void Rendering::HAL::GLShaderProgram::Detach(const GLShaderStage& p_shader)
-{
-	if (!IsProgramRecorded())
-	{
-		glDetachShader(m_context.id, p_shader.GetID());
-	}
-
-	// Compared by address: in threaded mode every stage's GL name is 0, so ids would all match.
-	m_context.attachedShaders.erase(std::remove_if(
-		m_context.attachedShaders.begin(),
-		m_context.attachedShaders.end(),
-		[&p_shader](const std::reference_wrapper<const GLShaderStage> shader) {
-			return &shader.get() == &p_shader;
-		}
-	));
-}
-
-template<>
-void Rendering::HAL::GLShaderProgram::DetachAll()
-{
-	if (!IsProgramRecorded())
-	{
-		for (auto& shader : m_context.attachedShaders)
-		{
-			glDetachShader(m_context.id, shader.get().GetID());
-		}
-	}
-
-	m_context.attachedShaders.clear();
-}
-
-template<>
-Rendering::Settings::ShaderLinkingResult Rendering::HAL::GLShaderProgram::Link()
-{
-	if (IsProgramRecorded())
-	{
-		// Filament's createProgram: the sources and the binding layout travel with the command, and
-		// the executor compiles, links and declares the descriptor slots there.
-		using namespace Rendering::Backend;
-
-		auto stages = std::make_shared<std::vector<ShaderSourceSpec>>();
-		stages->reserve(m_context.attachedShaders.size());
-		for (const std::reference_wrapper<const GLShaderStage>& stage : m_context.attachedShaders)
-		{
-			ShaderSourceSpec spec;
-			spec.type = stage.get().GetShaderType();
-			spec.source = std::make_shared<const std::string>(stage.get().GetSource());
-			stages->push_back(std::move(spec));
-		}
-
-		CreateProgramRequest request;
-		request.programHandleId = m_context.handle.GetId();
-		request.stages = std::move(stages);
-		if (m_context.descriptorBindingsConfigured)
-		{
-			request.bindings = std::make_shared<const Rendering::Data::DescriptorSetInfo>(m_context.descriptorBindings);
-		}
-
-		if (::Rendering::Context::Driver* const driver = ::Rendering::HAL::CurrentDriver())
-		{
-			driver->CreateProgram(std::move(request));
-
-			// The reflection ran with the program (see OpenGLDriver::CreateProgram); take its
-			// result now that the command has. The material's loose uniforms are looked up in it.
-			if (const Rendering::Backend::HwProgram* const record =
-				Rendering::Backend::GetHandleAllocator().HandleCast<Rendering::Backend::HwProgram>(m_context.handle))
-			{
-				m_context.uniforms = record->uniforms;
-				m_context.uniformsLocationCache = record->uniformLocations;
-			}
-		}
-
-		// A new link means a new program: the binding map is rebuilt on first bind. The slots were
-		// declared by the command, so this side does not declare them again.
-		m_context.descriptorSlots.clear();
-		m_context.descriptorSlotsInitialized = false;
-		m_context.descriptorBindingsDeclared = true;
-
-		return {
-			.success = true
-		};
-	}
-
-	glLinkProgram(m_context.id);
-	GLint linkStatus;
-	glGetProgramiv(m_context.id, GL_LINK_STATUS, &linkStatus);
-
-	if (linkStatus == GL_FALSE)
-	{
-		GLint maxLength;
-		glGetProgramiv(m_context.id, GL_INFO_LOG_LENGTH, &maxLength);
-
-		std::string errorLog(maxLength, ' ');
-		glGetProgramInfoLog(m_context.id, maxLength, &maxLength, errorLog.data());
-
-		return {
-			.success = false,
-			.message = errorLog
-		};
-	}
-
-	QueryUniforms();
-	// A new link means a new program: the binding map is rebuilt on first bind, and the slots have
-	// to be declared to this program again (glUniformBlockBinding belongs to the program object).
-	m_context.descriptorSlots.clear();
-	m_context.descriptorSlotsInitialized = false;
-	m_context.descriptorBindingsDeclared = false;
-
-	return {
-		.success = true
-	};
-}
-
-#define DECLARE_GET_UNIFORM_FUNCTION(type, glType, func) \
-template<> \
-template<> \
-type Rendering::HAL::GLShaderProgram::GetUniform<type>(const std::string& p_name) \
-{ \
-	type result{}; \
-	if (m_context.uniformsLocationCache.contains(p_name)) \
-	{ \
-		if (const uint32_t location = m_context.uniformsLocationCache.at(p_name)) \
-		{ \
-			func(m_context.id, location, reinterpret_cast<glType*>(&result)); \
-		} \
-	} \
-	return result; \
-}
-
-DECLARE_GET_UNIFORM_FUNCTION(int, GLint, glGetUniformiv);
-DECLARE_GET_UNIFORM_FUNCTION(float, GLfloat, glGetUniformfv);
-DECLARE_GET_UNIFORM_FUNCTION(Maths::FVector2, GLfloat, glGetUniformfv);
-DECLARE_GET_UNIFORM_FUNCTION(Maths::FVector3, GLfloat, glGetUniformfv);
-DECLARE_GET_UNIFORM_FUNCTION(Maths::FVector4, GLfloat, glGetUniformfv);
-DECLARE_GET_UNIFORM_FUNCTION(Maths::FMatrix3, GLfloat, glGetUniformfv);
-DECLARE_GET_UNIFORM_FUNCTION(Maths::FMatrix4, GLfloat, glGetUniformfv);
-
-template<>
-void Rendering::HAL::GLShaderProgram::QueryUniforms()
-{
-	// Reflection is glGetActiveUniform / glGetUniformLocation: it needs the program and the context,
-	// so in threaded mode it belongs to the executor. Not wired there yet (see
-	// docs/RenderThreadPlan.md), and the recording side must not ask.
-	if (IsProgramRecorded())
-	{
-		return;
-	}
-
-	m_context.uniforms.clear();
-	// A reloaded program has different locations: keeping the old ones would make SetUniform
-	// write through locations that no longer belong to this program.
-	m_context.uniformsLocationCache.clear();
-
-	std::array<GLchar, 256> nameBuffer;
-
-	GLint activeUniformCount = 0;
-	glGetProgramiv(m_context.id, GL_ACTIVE_UNIFORMS, &activeUniformCount);
-
-	for (GLint i = 0; i < activeUniformCount; ++i)
-	{
-		GLint arraySize = 0;
-		GLenum type = 0;
-		GLsizei actualLength = 0;
-
-		glGetActiveUniform(m_context.id, i, static_cast<GLsizei>(nameBuffer.size()), &actualLength, &arraySize, &type, nameBuffer.data());
-
-		const auto name = std::string{ nameBuffer.data(), static_cast<size_t>(actualLength) };
-		const auto uniformType = ValueToEnum<Settings::EUniformType>(type);
-
-		// Skip reserved uniforms (e.g. ubo uniforms)
-		if (IsReservedUniform(name))
-		{
-			continue;
-		}
-
-		// Skip members of a uniform block (the per-material parameter block): they have no
-		// individual location (glGetUniformLocation returns -1), so asking for one - or trying
-		// to set one - is an invalid operation. The runtime writes them by std140 offset.
-		GLint blockIndex = -1;
-		{
-			const GLuint uniformIndex = static_cast<GLuint>(i);
-			glGetActiveUniformsiv(m_context.id, 1, &uniformIndex, GL_UNIFORM_BLOCK_INDEX, &blockIndex);
-		}
-		if (blockIndex != -1)
-		{
-			continue;
-		}
-
-		const auto location = glGetUniformLocation(m_context.id, name.c_str());
-		
-		m_context.uniformsLocationCache.emplace(name, static_cast<uint32_t>(location));
-
-		const std::any uniformValue = [&]() -> std::any {
-			switch (uniformType)
-			{
-				using enum Settings::EUniformType;
-			case BOOL: return static_cast<bool>(GetUniform<int>(name));
-			case INT: return GetUniform<int>(name);
-			case FLOAT: return GetUniform<float>(name);
-			case FLOAT_VEC2: return GetUniform<Maths::FVector2>(name);
-			case FLOAT_VEC3: return GetUniform<Maths::FVector3>(name);
-			case FLOAT_VEC4: return GetUniform<Maths::FVector4>(name);
-			case FLOAT_MAT3: return GetUniform<Maths::FMatrix3>(name);
-			case FLOAT_MAT4: return GetUniform<Maths::FMatrix4>(name);
-			case SAMPLER_2D: return std::make_any<Resources::Texture*>(nullptr);
-			case SAMPLER_CUBE: return std::make_any<Resources::Texture*>(nullptr);
-			case SAMPLER_BUFFER: return std::make_any<Resources::Texture*>(nullptr);
-			case SAMPLER_2DARRAY: return std::make_any<Resources::Texture*>(nullptr);
-			case INTSAMPLER_BUFFER: return std::make_any<Resources::Texture*>(nullptr);
-			case UINTSAMPLER_BUFFER: return std::make_any<Resources::Texture*>(nullptr);
-			default: return std::nullopt;
-			}
-			}();
-
-			// Only add the uniform if it has a value (unsupported uniform types will be ignored)
-			if (uniformValue.has_value())
-			{
-				m_context.uniforms.emplace(name, Settings::UniformInfo{
-					.type = uniformType,
-					.name = name,
-					.defaultValue = uniformValue
-					});
-			}
-	}
-}
-
-template<>
-Tools::Utils::OptRef<const Rendering::Settings::UniformInfo> Rendering::HAL::GLShaderProgram::GetUniformInfo(const std::string& p_name) const
-{
-	if (m_context.uniforms.contains(p_name))
-	{
-		return m_context.uniforms.at(p_name);
-	}
-
-	return std::nullopt;
-}
-
-template<>
-const std::unordered_map<std::string, Rendering::Settings::UniformInfo>& Rendering::HAL::GLShaderProgram::GetUniforms() const
-{
-	return m_context.uniforms;
+	return m_context.glId;
 }

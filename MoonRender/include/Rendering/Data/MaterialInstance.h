@@ -1,4 +1,5 @@
 #pragma once
+#include <Tools/Utils/OptRef.h>
 #include <cstdint>
 #include <map>
 #include <optional>
@@ -10,7 +11,7 @@
 #include <Rendering/Data/StateMask.h>
 #include <Rendering/Data/UniformBufferPool.h>
 #include <Rendering/Data/FeatureSet.h>
-#include <Rendering/HAL/ShaderProgram.h>
+#include <Rendering/Data/Program.h>
 #include <Rendering/HAL/TextureHandle.h>
 #include <Rendering/Resources/Texture.h>
 #include <Rendering/Settings/EBindingPoint.h>
@@ -182,7 +183,7 @@ namespace Rendering::Data
 		/** The feature set this instance draws with: its own, seeded from the definition. */
 		const Data::FeatureSet& FeaturesOf() const { return m_features; }
 
-		void BindParameterBlock(const Rendering::HAL::ShaderProgram& p_program);
+		void BindParameterBlock(const Rendering::Data::Program& p_program);
 		void UploadParameterBlock(
 			Rendering::HAL::Texture* p_emptyTexture2D,
 			Rendering::HAL::Texture* p_emptyTextureCube,
@@ -198,7 +199,7 @@ namespace Rendering::Data
 		bool m_isDefaultInstance = false;
 		Data::FeatureSet m_features;
 		uint64_t m_revision = 0;
-		Tools::Utils::OptRef<Rendering::HAL::ShaderProgram> m_programInUse = std::nullopt;
+		Tools::Utils::OptRef<Rendering::Data::Program> m_programInUse = std::nullopt;
 
 		/** The PerMaterial binding set: one uniform-block range plus a texture per sampler. The
 		 * definition's layout validates every insertion; Bind() binds the whole set. */

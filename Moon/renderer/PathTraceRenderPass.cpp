@@ -136,8 +136,8 @@ namespace Editor::Rendering {
 		pathTraceFBOLowRes("pathTraceLowRes"),
 		accumFBO("accumFBO"),
 		outputFBO{
-		::Rendering::HAL::Framebuffer{"BloomSamplingBuffer0"},
-		::Rendering::HAL::Framebuffer{"BloomSamplingBuffer1"} }
+		::Rendering::Data::Framebuffer{"BloomSamplingBuffer0"},
+		::Rendering::Data::Framebuffer{"BloomSamplingBuffer1"} }
 	{
 		envMap = new EnvironmentMap();
 		std::string enginePath = Tools::Utils::PathParser::GetExeDirectory() + "/Moon/Data/Engine";

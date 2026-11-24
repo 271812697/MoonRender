@@ -5,14 +5,14 @@
 #include <Core/Rendering/FramebufferUtil.h>
 #include <Rendering/HAL/Common/HALDriverAccess.h>
 #include <Rendering/Context/Driver.h>
-#include <Rendering/HAL/Framebuffer.h>
-#include <Rendering/HAL/Renderbuffer.h>
+#include <Rendering/Data/Framebuffer.h>
+#include <Rendering/Data/Renderbuffer.h>
 #include <Rendering/HAL/Texture.h>
 #include <glad/glad.h>
 
 namespace Core::Rendering::FramebufferUtil
 {
-	void CopyFramebufferColor(::Rendering::HAL::Framebuffer& src_framebuffer,int src, ::Rendering::HAL::Framebuffer& dst_framebuffer,int dst) {
+	void CopyFramebufferColor(::Rendering::Data::Framebuffer& src_framebuffer,int src, ::Rendering::Data::Framebuffer& dst_framebuffer,int dst) {
 		auto[sw,sh]=src_framebuffer.GetSize();
 		auto [dw, dh] = dst_framebuffer.GetSize();
 		glNamedFramebufferReadBuffer(src_framebuffer.GetID(), GL_COLOR_ATTACHMENT0 + src);
@@ -20,15 +20,15 @@ namespace Core::Rendering::FramebufferUtil
 		glBlitNamedFramebuffer(src_framebuffer.GetID(), dst_framebuffer.GetID(), 0, 0, sw, sh, 0, 0, dw, dh, GL_COLOR_BUFFER_BIT, GL_NEAREST);
 	}
 	void CopyFramebufferDepth(
-		::Rendering::HAL::Framebuffer& src_framebuffer,
-		::Rendering::HAL::Framebuffer& dst_framebuffer
+		::Rendering::Data::Framebuffer& src_framebuffer,
+		::Rendering::Data::Framebuffer& dst_framebuffer
 	) {
 		auto [sw, sh] = src_framebuffer.GetSize();
 		auto [dw, dh] = dst_framebuffer.GetSize();
 		glBlitNamedFramebuffer(src_framebuffer.GetID(), dst_framebuffer.GetID(), 0, 0, sw, sh, 0, 0, dw, dh, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
 	}
 	void SetupFramebuffer(
-		::Rendering::HAL::Framebuffer& p_framebuffer,
+		::Rendering::Data::Framebuffer& p_framebuffer,
 		const ::Rendering::Settings::TextureDesc& p_textureDesc,
 		bool p_useDepth,
 		bool p_useStencil,
@@ -64,7 +64,7 @@ namespace Core::Rendering::FramebufferUtil
 
 		if (p_useDepth || p_useStencil)
 		{
-			const auto renderbuffer = std::make_shared<Renderbuffer>(useMulSample);
+			const auto renderbuffer = std::make_shared<::Rendering::Data::Renderbuffer>(useMulSample);
 			const auto internalFormat = p_useStencil
 				? (useMulSample ? EInternalFormat::DEPTH32F_STENCIL8 : EInternalFormat::DEPTH_STENCIL)
 				: EInternalFormat::DEPTH_COMPONENT;
@@ -83,7 +83,7 @@ namespace Core::Rendering::FramebufferUtil
 	}
 
 	void SetupFramebuffer(
-		::Rendering::HAL::Framebuffer& p_framebuffer,
+		::Rendering::Data::Framebuffer& p_framebuffer,
 		uint32_t p_width,
 		uint32_t p_height,
 		bool p_useDepth,
@@ -124,7 +124,7 @@ namespace Core::Rendering::FramebufferUtil
 	}
 
 	void SetupFramebufferWithDriver(
-		::Rendering::HAL::Framebuffer& p_framebuffer,
+		::Rendering::Data::Framebuffer& p_framebuffer,
 		const ::Rendering::Settings::TextureDesc& p_textureDesc,
 		bool p_useDepth,
 		bool p_useStencil,
@@ -140,7 +140,7 @@ namespace Core::Rendering::FramebufferUtil
 	}
 
 	void SetupFramebufferWithDriver(
-		::Rendering::HAL::Framebuffer& p_framebuffer,
+		::Rendering::Data::Framebuffer& p_framebuffer,
 		uint32_t p_width,
 		uint32_t p_height,
 		bool p_useDepth,

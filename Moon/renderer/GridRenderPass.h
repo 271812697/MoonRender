@@ -1,4 +1,5 @@
 ﻿#pragma once
+#include <Rendering/Data/PipelineState.h>
 #include <Rendering/Entities/Camera.h>
 #include <Rendering/Features/DebugShapeRenderFeature.h>
 
@@ -38,7 +39,7 @@ namespace Editor::Rendering
 		virtual void Draw(::Rendering::Data::PipelineState p_pso) override;
 		virtual void ResizeRenderer(int width, int height) override;
 	private:
-		::Rendering::HAL::Framebuffer m_mirroFbo;
+		::Rendering::Data::Framebuffer m_mirroFbo;
 		::Core::Rendering::PingPongFramebuffer  m_mirroShadowFbo;
 		::Core::Resources::MaterialAsset m_gridMaterial;
 		::Core::Resources::MaterialAsset m_ShadowMaterial;

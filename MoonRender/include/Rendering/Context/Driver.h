@@ -29,7 +29,7 @@
 #include "Rendering/Settings/EPixelDataType.h"
 #include "Rendering/Data/PipelineState.h"
 #include "Rendering/Resources/IMesh.h"
-#include "Rendering/HAL/Framebuffer.h"
+#include "Rendering/Data/Framebuffer.h"
 #include <Maths/FVector4.h>
 #include <Tools/Utils/OptRef.h>
 #include "Rendering/Context/IGLContextHost.h"
@@ -140,7 +140,7 @@ namespace Rendering::Context
 		 *
 		 * Recorded like every other command: the bind lands in the batch's order, before the draws
 		 * that follow it (docs/RenderThreadPlan.md §8.72). */
-		void BindFramebuffer(const HAL::Framebuffer* p_target);
+		void BindFramebuffer(const Data::Framebuffer* p_target);
 
 		/** Reads pixels on the side that owns the context (Filament's readPixels). */
 		void ReadPixels(const ::Rendering::Backend::ReadPixelsRequest& p_request);
@@ -172,26 +172,34 @@ namespace Rendering::Context
 		void BindDescriptor(const ::Rendering::Backend::BindDescriptorRequest& p_request);
 
 		/** Builds a render target's attachments on the side that owns the context. */
-		void SetupFramebuffer(HAL::Framebuffer& p_target, uint32_t p_width, uint32_t p_height,
+		void SetupFramebuffer(Data::Framebuffer& p_target, uint32_t p_width, uint32_t p_height,
 			bool p_useDepth, bool p_useStencil, bool p_useMipMaps, bool p_useMultiSample);
 
 		/** The descriptor form: the attachment's format comes from p_desc. */
-		void SetupFramebuffer(HAL::Framebuffer& p_target, const Settings::TextureDesc& p_desc,
+		void SetupFramebuffer(Data::Framebuffer& p_target, const Settings::TextureDesc& p_desc,
 			bool p_useDepth, bool p_useStencil, bool p_useMultiSample);
 
 		/** Resizes a render target on the side that owns the context (the attachments are GL). */
-		void ResizeFramebuffer(HAL::Framebuffer& p_target, uint16_t p_width, uint16_t p_height);
+		void ResizeFramebuffer(Data::Framebuffer& p_target, uint16_t p_width, uint16_t p_height);
 
 		/** Blits one colour attachment of p_source into one of p_target (MSAA resolve, present). */
-		void CopyFramebufferColor(HAL::Framebuffer& p_source, uint32_t p_sourceIndex,
-			HAL::Framebuffer& p_target, uint32_t p_targetIndex);
+		void CopyFramebufferColor(Data::Framebuffer& p_source, uint32_t p_sourceIndex,
+			Data::Framebuffer& p_target, uint32_t p_targetIndex);
 		/** Depth blit between two targets (Filament's blit with TargetBufferFlags::DEPTH): the
 		 * depth-peeling pass copies the opaque depth into its first layer with it. */
-		void CopyFramebufferDepth(HAL::Framebuffer& p_source, HAL::Framebuffer& p_target);
+		void CopyFramebufferDepth(Data::Framebuffer& p_source, Data::Framebuffer& p_target);
 		/** Front end: publishes what has been recorded as one batch (Filament's FEngine::flush ->
 		 * flushCommandBuffer). Any thread may call it; only the recording thread may record, so
 		 * in practice it is the frame's thread. Does not execute anything. */
 		void Flush();
+		/** Publishes what has been recorded and waits until it has run, on the side that runs it.
+		 *
+		 * This is what the synchronous driver calls need - a readback into CPU memory, a fence
+		 * query, a mapping: they record their command and then wait for its result. It publishes a
+		 * partial batch, so it is a synchronous point like resource creation used to be, and it is
+		 * only meant for the calls that happen between frames (a pick, a screenshot). Commands that
+		 * run during a frame use the asynchronous form instead (ReadPixelsToBuffer + DownloadBuffer). */
+		void FlushAndWait();
 		/** Whether the batches are executed by a render thread of the engine's own. When they are,
 		 * ExecutePendingCommands stops executing and becomes flush + wait (Filament's
 		 * flushAndWait): the recording side must not run GL, and what it needs next - the frame's
@@ -207,6 +215,10 @@ namespace Rendering::Context
 		 * DriverBase::isDriverThread). Only the context-owning checks use it now; whether an
 		 * operation is recorded no longer depends on the mode (docs/RenderThreadPlan.md §8.72). */
 		bool IsDriverThread() const;
+		/** Whether the calling thread is the one that runs the batches - and only with a render
+		 * thread: in the single-threaded configuration the recording thread is not the executor
+		 * until Execute() is called. */
+		bool IsExecutorThread() const;
 		/** Asks the command queue to stop handing out work: the render thread's loop then ends. */
 		/** Makes the module context current on the thread that runs the batches, and re-applies the
 		 * per-context GL state. Filament does this from FRenderer::beginFrame through

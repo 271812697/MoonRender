@@ -95,6 +95,15 @@ namespace Rendering::Backend
 		 * context: the light SSBO binding used to be issued from the recording side, which left it
 		 * unbound on the executor (docs §8.67). */
 		void BindBuffer(const ::Rendering::Backend::BindBufferRequest& p_request);
+		/** glBindBufferRange: a byte range at an indexed binding point (a block of the pool). */
+		void BindBufferRange(const ::Rendering::Backend::BindBufferRangeRequest& p_request);
+		/** glUnmapNamedBuffer on the buffer's backend object. */
+		void UnmapBuffer(uint32_t p_handleId);
+		/** glFenceSync on the buffer's backend object (the GPU progress signal a readback waits
+		 * for). */
+		void InsertFence(uint32_t p_handleId);
+		/** glDeleteSync on the buffer's backend object. */
+		void ClearFence(uint32_t p_handleId);
 		void CreateBuffer(::Rendering::Backend::CreateBufferRequest p_request);
 		void CreateVertexArray(uint32_t p_handleId);
 		void CreateFramebuffer(uint32_t p_handleId);
@@ -123,6 +132,9 @@ namespace Rendering::Backend
 		/** A loose mat4 uniform on a program the overlay owns (its projection). */
 		void SetProgramMatrix4(const ::Rendering::Backend::ProgramMatrix4Request& p_request);
 		void ReadPixels(const ::Rendering::Backend::ReadPixelsRequest& p_request);
+		void SetFramebufferReadBuffer(const ::Rendering::Backend::SetFramebufferReadBufferRequest& p_request);
+		void ReadPixelsToBuffer(::Rendering::Backend::ReadPixelsToBufferRequest p_request);
+		void DownloadBuffer(::Rendering::Backend::DownloadBufferRequest p_request);
 		void SetVertexArrayLayout(const ::Rendering::Backend::SetVertexArrayLayoutRequest& p_request);
 		void UpdateBuffer(const ::Rendering::Backend::UpdateBufferRequest& p_request);
 		void BindDescriptor(const ::Rendering::Backend::BindDescriptorRequest& p_request);

@@ -56,7 +56,7 @@ namespace Rendering::Resources::Loaders
 		std::string* p_error = nullptr);
 		static bool Destroy(Shader*& p_shader);
 
-		static std::shared_ptr<Rendering::HAL::ShaderProgram> CompileVariant(
+		static std::shared_ptr<Rendering::Data::Program> CompileVariant(
 			const Rendering::Data::MaterialParser& p_package,
 			const Rendering::Data::MaterialParser::Variant& p_variant,
 			const Rendering::Data::DescriptorSetInfo& p_bindings,

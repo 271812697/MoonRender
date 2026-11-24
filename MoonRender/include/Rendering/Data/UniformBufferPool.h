@@ -4,7 +4,7 @@
 #include <memory>
 #include <vector>
 
-#include <Rendering/HAL/UniformBuffer.h>
+#include <Rendering/Data/BufferObject.h>
 
 namespace Rendering::Data
 {
@@ -61,7 +61,7 @@ namespace Rendering::Data
 		static uint32_t Alignment();
 		void EnsureCapacity(uint64_t p_required);
 
-		std::unique_ptr<Rendering::HAL::UniformBuffer> m_buffer;
+		std::unique_ptr<Rendering::Data::BufferObject> m_buffer;
 		uint64_t m_capacity = 0;
 		uint64_t m_usedEnd = 0;
 		std::vector<uint8_t> m_data;

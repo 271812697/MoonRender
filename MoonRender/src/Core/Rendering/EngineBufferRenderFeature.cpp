@@ -25,9 +25,11 @@ Core::Rendering::EngineBufferRenderFeature::EngineBufferRenderFeature(
 ) : 
 	ARenderFeature(p_renderer, p_executionPolicy)
 {
-	m_engineBuffer = std::make_unique<::Rendering::HAL::UniformBuffer>();
+	m_engineBuffer = std::make_unique<::Rendering::Data::BufferObject>(
+		::Rendering::Settings::EBufferType::UNIFORM);
 	m_engineBuffer->Allocate(kUBOSize, ::Rendering::Settings::EAccessSpecifier::STREAM_DRAW);
-	m_reflectionBuffer = std::make_unique<::Rendering::HAL::UniformBuffer>();
+	m_reflectionBuffer = std::make_unique<::Rendering::Data::BufferObject>(
+		::Rendering::Settings::EBufferType::UNIFORM);
 	m_reflectionBuffer->Allocate(sizeof(ReflectionUBO), ::Rendering::Settings::EAccessSpecifier::STATIC_DRAW);
 	{
 		// The IBL path scales its result by this block's brightness (Filament's iblLuminance)

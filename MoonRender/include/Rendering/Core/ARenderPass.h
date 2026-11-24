@@ -1,4 +1,5 @@
 ﻿#pragma once
+#include <Rendering/Data/PipelineState.h>
 #include <Rendering/Data/FrameDescriptor.h>
 #include <Rendering/Settings/ERenderPassOrder.h>
 

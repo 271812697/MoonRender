@@ -320,8 +320,8 @@ void Rendering::Core::ABaseRenderer::Clear(
 
 void Rendering::Core::ABaseRenderer::Blit(
 	Rendering::Data::PipelineState p_pso,
-	Rendering::HAL::Framebuffer& p_src,
-	Rendering::HAL::Framebuffer& p_dst,
+	Rendering::Data::Framebuffer& p_src,
+	Rendering::Data::Framebuffer& p_dst,
 	Rendering::Data::Material& p_material,
 	Rendering::Settings::EBlitFlags p_flags
 )
@@ -331,8 +331,8 @@ void Rendering::Core::ABaseRenderer::Blit(
 
 void Rendering::Core::ABaseRenderer::Blit(
 	Rendering::Data::PipelineState p_pso,
-	Rendering::HAL::Framebuffer& p_src,
-	Rendering::HAL::Framebuffer& p_dst,
+	Rendering::Data::Framebuffer& p_src,
+	Rendering::Data::Framebuffer& p_dst,
 	Rendering::Data::MaterialInstance& p_material,
 	Rendering::Settings::EBlitFlags p_flags
 )
@@ -383,7 +383,7 @@ void Rendering::Core::ABaseRenderer::Blit(
 	m_driver.BindFramebuffer(nullptr);
 }
 
-void Rendering::Core::ABaseRenderer::Present(Rendering::HAL::Framebuffer& p_src)
+void Rendering::Core::ABaseRenderer::Present(Rendering::Data::Framebuffer& p_src)
 {
 	if (m_presentMaterial == nullptr)
 	{
@@ -392,13 +392,13 @@ void Rendering::Core::ABaseRenderer::Present(Rendering::HAL::Framebuffer& p_src)
 	Present(p_src, m_presentMaterial->Instance());
 }
 void Rendering::Core::ABaseRenderer::Present(
-	Rendering::HAL::Framebuffer& p_src,
+	Rendering::Data::Framebuffer& p_src,
 	Rendering::Data::Material& mat)
 {
 	Present(p_src, mat.DefaultInstance());
 }
 void Rendering::Core::ABaseRenderer::Present(
-	Rendering::HAL::Framebuffer& p_src,
+	Rendering::Data::Framebuffer& p_src,
 	Rendering::Data::MaterialInstance& mat)
 {
 	const auto colorTex = p_src.GetAttachment<HAL::Texture>(Settings::EFramebufferAttachment::COLOR);

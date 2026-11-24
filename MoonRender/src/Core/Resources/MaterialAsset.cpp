@@ -3,6 +3,7 @@
 
 #include <Core/Resources/MaterialAsset.h>
 #include <Rendering/Data/Material.h>
+#include <Rendering/Settings/EUniformType.h>
 
 namespace
 {
@@ -131,7 +132,7 @@ void Core::Resources::MaterialAsset::OnSerialize(tinyxml2::XMLDocument& p_doc, t
 
 		auto visitor = [&](auto&& arg) {
 			using T = std::decay_t<decltype(arg)>;
-			using enum EUniformType;
+			using enum Rendering::Settings::EUniformType;
 
 			if constexpr (std::same_as<T, bool>)
 			{

@@ -2,7 +2,7 @@
 #include <cstdint>
 #include <vector>
 
-#include <Rendering/HAL/Framebuffer.h>
+#include <Rendering/Data/Framebuffer.h>
 #include <Rendering/Settings/TextureDesc.h>
 
 
@@ -18,7 +18,7 @@ namespace Rendering::Backend
 	 */
 	struct SetupFramebufferRequest
 	{
-		::Rendering::HAL::Framebuffer* target = nullptr;
+		::Rendering::Data::Framebuffer* target = nullptr;
 		uint32_t width = 1;
 		uint32_t height = 1;
 		bool useDepth = false;
@@ -40,7 +40,7 @@ namespace Rendering::Backend
 	 */
 	struct ResizeFramebufferRequest
 	{
-		::Rendering::HAL::Framebuffer* target = nullptr;
+		::Rendering::Data::Framebuffer* target = nullptr;
 		uint16_t width = 0;
 		uint16_t height = 0;
 	};
@@ -49,9 +49,9 @@ namespace Rendering::Backend
 	 * resolve and for handing the frame from the scene target to the present target. */
 	struct CopyFramebufferColorRequest
 	{
-		::Rendering::HAL::Framebuffer* source = nullptr;
+		::Rendering::Data::Framebuffer* source = nullptr;
 		uint32_t sourceIndex = 0;
-		::Rendering::HAL::Framebuffer* target = nullptr;
+		::Rendering::Data::Framebuffer* target = nullptr;
 		uint32_t targetIndex = 0;
 	};
 
@@ -73,6 +73,17 @@ namespace Rendering::Backend
 		/** Set when the attachment is one layer of a layered texture (glNamedFramebufferTextureLayer). */
 		bool useLayer = false;
 		uint32_t layer = 0;
+	};
+
+	/** glNamedFramebufferReadBuffer: which attachment a readback reads. Picking selects one colour
+	 * attachment, reads it, then selects another (the id, then the world position), so this is the
+	 * first half of a readback pair that is recorded and executed in order. */
+	struct SetFramebufferReadBufferRequest
+	{
+		uint32_t framebufferHandleId = 0;
+		/** The colour attachment to select; false selects none (GL_NONE). */
+		bool hasIndex = false;
+		uint32_t index = 0;
 	};
 
 	/** glNamedFramebufferDrawBuffers: which colour attachments a target writes (the gbuffer pass
@@ -109,7 +120,7 @@ namespace Rendering::Backend
 	 * MSAA resolve. */
 	struct CopyFramebufferDepthRequest
 	{
-		::Rendering::HAL::Framebuffer* source = nullptr;
-		::Rendering::HAL::Framebuffer* target = nullptr;
+		::Rendering::Data::Framebuffer* source = nullptr;
+		::Rendering::Data::Framebuffer* target = nullptr;
 	};
 }

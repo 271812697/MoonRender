@@ -1,9 +1,9 @@
 ﻿#pragma once
 #include <Core/ECS/Components/AComponent.h>
 #include <Core/Rendering/PingPongFramebuffer.h>
-#include <Rendering/HAL/Framebuffer.h>
+#include <Rendering/Data/Framebuffer.h>
 #include <Rendering/HAL/Texture.h>
-#include <Rendering/HAL/UniformBuffer.h>
+#include <Rendering/Data/BufferObject.h>
 
 namespace Core::ECS { class Actor; }
 
@@ -172,8 +172,8 @@ namespace Core::ECS::Components
 		void _AllocateResources();
 		void _PrepareUBO();
 		std::vector<uint32_t> _GetCaptureFaceIndices();
-		::Rendering::HAL::Framebuffer& _GetTargetFramebuffer() const;
-		::Rendering::HAL::UniformBuffer& _GetUniformBuffer() const;
+		::Rendering::Data::Framebuffer& _GetTargetFramebuffer() const;
+		::Rendering::Data::BufferObject& _GetUniformBuffer() const;
 		bool _IsDoubleBuffered() const;
 
 		friend class Core::Rendering::ReflectionRenderPass;
@@ -190,7 +190,7 @@ namespace Core::ECS::Components
 		Rendering::PingPongFramebuffer m_framebuffers;
 		std::array<std::shared_ptr<::Rendering::HAL::Texture>, 2> m_cubemaps;
 		Tools::Utils::CircularIterator<std::shared_ptr<::Rendering::HAL::Texture>, 2> m_cubemapIterator;
-		std::unique_ptr<::Rendering::HAL::UniformBuffer> m_uniformBuffer;
+		std::unique_ptr<::Rendering::Data::BufferObject> m_uniformBuffer;
 		uint32_t m_captureFaceIndex = 0; // Current frame index in the capture process
 		std::optional<CaptureRequestDesc> m_captureRequest = std::nullopt;
 		bool m_isAnyCubemapComplete = false;

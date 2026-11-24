@@ -160,8 +160,8 @@ void Rendering::Core::CompositeRenderer::DrawFrame()
 				|| (std::strchr(probeMode, 'c') == nullptr && std::strchr(probeMode, 'd') == nullptr);
 			const bool withDrain = std::strchr(probeMode, 'd') != nullptr || withCopy || withRead;
 
-			HAL::Framebuffer& source = m_frameDescriptor.outputMsaaBuffer.value();
-			HAL::Framebuffer& scratch = m_frameDescriptor.presentBuffer.value();
+			Data::Framebuffer& source = m_frameDescriptor.outputMsaaBuffer.value();
+			Data::Framebuffer& scratch = m_frameDescriptor.presentBuffer.value();
 			if (withCopy)
 			{
 				m_driver.CopyFramebufferColor(source, 0, scratch, 0);
@@ -231,8 +231,8 @@ void Rendering::Core::CompositeRenderer::DrawFrame()
 }
 
 void Rendering::Core::CompositeRenderer::PresentTo(
-	::Rendering::HAL::Framebuffer& p_source,
-	::Rendering::HAL::Framebuffer& p_target)
+	::Rendering::Data::Framebuffer& p_source,
+	::Rendering::Data::Framebuffer& p_target)
 {
 	if (m_presentPass == nullptr)
 	{

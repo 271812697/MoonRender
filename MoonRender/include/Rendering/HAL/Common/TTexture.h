@@ -2,6 +2,7 @@
 #include <string>
 
 #include <Maths/FVector4.h>
+#include <Rendering/HAL/Common/BackendConstructionTag.h>
 #include <Rendering/HAL/Common/TTextureHandle.h>
 #include <Rendering/Settings/EGraphicsBackend.h>
 #include <Rendering/Settings/TextureDesc.h>
@@ -9,11 +10,6 @@
 
 namespace Rendering::HAL
 {
-	/** Marks the construction of the *backend* object: the one that makes the GL name, in the slot
-	 * a handle names (Filament's createTextureR). The plain constructor is the front end, and with
-	 * a render thread it only takes a handle and records the creation. */
-	struct BackendConstructionTag {};
-
 	/**
 	* Represents a texture, used to store image data for the graphics backend to use.
 	*/

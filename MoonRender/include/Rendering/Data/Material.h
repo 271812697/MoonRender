@@ -1,4 +1,5 @@
 #pragma once
+#include <Tools/Utils/OptRef.h>
 #include <map>
 #include <memory>
 #include <optional>
@@ -11,7 +12,7 @@
 #include <Rendering/Data/MaterialDefinition.h>
 #include <Rendering/Data/MaterialInstance.h>
 #include <Rendering/Data/StateMask.h>
-#include <Rendering/HAL/ShaderProgram.h>
+#include <Rendering/Data/Program.h>
 
 namespace Rendering::Data
 {
@@ -33,7 +34,7 @@ namespace Rendering::Data
 		using State = MaterialState;
 		using FeatureVariants = std::unordered_map<
 			Data::FeatureSet,
-			std::shared_ptr<Rendering::HAL::ShaderProgram>,
+			std::shared_ptr<Rendering::Data::Program>,
 			Data::FeatureSetHash,
 			Data::FeatureSetEqual>;
 		using Variants = std::unordered_map<std::string, FeatureVariants>;
@@ -57,7 +58,7 @@ namespace Rendering::Data
 		const MaterialDefinition* Definition() const;
 		void SetDefinition(std::shared_ptr<const MaterialDefinition> p_definition);
 
-		Rendering::HAL::ShaderProgram& GetVariant(
+		Rendering::Data::Program& GetVariant(
 			std::optional<const std::string_view> p_pass = std::nullopt,
 			const Data::FeatureSet& p_featureSet = {});
 		const Variants& GetVariants() const { return m_variants; }

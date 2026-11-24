@@ -12,11 +12,16 @@
 #include <cstdio>
 #include <cstdlib>
 #include <Rendering/Backend/BackendResources.h>
+#include <Rendering/HAL/ShaderProgram.h>
+#include <Rendering/HAL/Framebuffer.h>
+#include <Rendering/HAL/Renderbuffer.h>
+#include <Rendering/HAL/VertexArray.h>
 #include <Rendering/Backend/BindFramebufferRequest.h>
 #include <Rendering/Backend/FramebufferRequests.h>
 #include <Rendering/Backend/TextureRequests.h>
 #include <Core/Rendering/FramebufferUtil.h>
 #include <Rendering/HAL/OpenGL/GLTypes.h>
+#include <Rendering/HAL/OpenGL/GLBuffer.h>
 #include <Rendering/Data/DescriptorSet.h>
 #include <Rendering/Settings/EBindingPoint.h>
 #include <Rendering/Utils/Conversions.h>
@@ -28,51 +33,26 @@
 
 namespace
 {
-	/** Filament keeps a program's uniform reflection on the backend program object. Ours is filled
-	 * by the create-program command and read back by the recording side after the drain. */
-	void ReflectUniforms(GLuint p_program, ::Rendering::Backend::HwProgram& p_record)
+	/** The buffer object a handle names, or null when there is none: the create command that makes
+	 * it runs earlier in the same batch, and a released or stale handle resolves to nothing
+	 * (Filament's handle_cast<GLBufferObject*>). */
+	::Rendering::HAL::GLBuffer* ResolveBuffer(uint32_t p_handleId)
 	{
-		p_record.uniforms.clear();
-		p_record.uniformLocations.clear();
+		return ::Rendering::Backend::GetHandleAllocator().HandleCast<::Rendering::HAL::GLBuffer>(
+			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwBufferObject>{ p_handleId });
+	}
 
-		GLint activeUniformCount = 0;
-		glGetProgramiv(p_program, GL_ACTIVE_UNIFORMS, &activeUniformCount);
+	/** The same for the container objects: the render target and its renderbuffer. */
+	::Rendering::HAL::Framebuffer* ResolveFramebuffer(uint32_t p_handleId)
+	{
+		return ::Rendering::Backend::GetHandleAllocator().HandleCast<::Rendering::HAL::Framebuffer>(
+			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwFramebuffer>{ p_handleId });
+	}
 
-		std::array<GLchar, 256> nameBuffer{};
-		for (GLint i = 0; i < activeUniformCount; ++i)
-		{
-			GLint arraySize = 0;
-			GLenum type = 0;
-			GLsizei actualLength = 0;
-			glGetActiveUniform(p_program, static_cast<GLuint>(i), static_cast<GLsizei>(nameBuffer.size()),
-				&actualLength, &arraySize, &type, nameBuffer.data());
-
-			const std::string name{ nameBuffer.data(), static_cast<size_t>(actualLength) };
-			// The engine's fixed blocks and the material block are written by offset; they have no
-			// individual location, and asking for one is an invalid operation.
-			if (name.starts_with("ubo_") || name.starts_with("ReflectionUBO"))
-			{
-				continue;
-			}
-
-			GLint blockIndex = -1;
-			const GLuint uniformIndex = static_cast<GLuint>(i);
-			glGetActiveUniformsiv(p_program, 1, &uniformIndex, GL_UNIFORM_BLOCK_INDEX, &blockIndex);
-			if (blockIndex != -1)
-			{
-				continue;
-			}
-
-			const GLint location = glGetUniformLocation(p_program, name.c_str());
-			p_record.uniformLocations.emplace(name, static_cast<uint32_t>(location));
-
-			Rendering::Settings::UniformInfo info{
-				.type = ::Rendering::HAL::ValueToEnum<Rendering::Settings::EUniformType>(type),
-				.name = name,
-				.defaultValue = std::any{}
-			};
-			p_record.uniforms.emplace(name, std::move(info));
-		}
+	::Rendering::HAL::Renderbuffer* ResolveRenderbuffer(uint32_t p_handleId)
+	{
+		return ::Rendering::Backend::GetHandleAllocator().HandleCast<::Rendering::HAL::Renderbuffer>(
+			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwRenderbuffer>{ p_handleId });
 	}
 }
 namespace Rendering::Backend
@@ -234,95 +214,31 @@ namespace Rendering::Backend
 	void OpenGLDriver::CreateProgram(::Rendering::Backend::CreateProgramRequest p_request)
 	{
 		// Filament's createProgram: the stages' sources travel with the command and the build
-		// happens here, where the context is. The shaders are attached, linked and thrown away -
-		// the program keeps the compiled stages - and the binding map is declared right after the
-		// link, because that is when the program exists to be told about its slots.
+		// happens here, where the context is. The program object lives in the handle's slot - the
+		// construct below is what makes it - and its Build is what attaches, links, reflects and
+		// throws the stages away. The binding map is declared right after the link, because that is
+		// when the program exists to be told about its slots.
 		if (p_request.programHandleId == 0 || p_request.stages == nullptr)
 		{
 			return;
 		}
 
-		std::vector<GLuint> shaders;
-		shaders.reserve(p_request.stages->size());
-		for (const ::Rendering::Backend::ShaderSourceSpec& spec : *p_request.stages)
-		{
-			if (spec.source == nullptr)
-			{
-				continue;
-			}
-			const GLuint shader = glCreateShader(::Rendering::HAL::EnumToValue<GLenum>(spec.type));
-			if (shader == 0)
-			{
-				continue;
-			}
-			const char* source = spec.source->c_str();
-			glShaderSource(shader, 1, &source, nullptr);
-			glCompileShader(shader);
+		using namespace ::Rendering::Backend;
+		const ResourceHandle<HwProgram> handle{ p_request.programHandleId };
 
-			GLint compileStatus = GL_FALSE;
-			glGetShaderiv(shader, GL_COMPILE_STATUS, &compileStatus);
-			if (compileStatus == GL_FALSE)
-			{
-				GLint length = 0;
-				glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &length);
-				std::string log(static_cast<size_t>(length > 0 ? length : 1), '\0');
-				glGetShaderInfoLog(shader, length, &length, log.data());
-				std::fprintf(stderr, "[program] a stage failed to compile:\n%s\n", log.c_str());
-				std::fflush(stderr);
-			}
-			shaders.push_back(shader);
-		}
-
-		const GLuint program = glCreateProgram();
-		if (program == 0)
+		Records::CreateProgram(handle);
+		Rendering::HAL::ShaderProgram* const program =
+			GetHandleAllocator().HandleCast<Rendering::HAL::ShaderProgram>(handle);
+		if (program == nullptr)
 		{
-			for (const GLuint shader : shaders)
-			{
-				glDeleteShader(shader);
-			}
 			return;
 		}
 
-		for (const GLuint shader : shaders)
-		{
-			glAttachShader(program, shader);
-		}
-		glLinkProgram(program);
-
-		GLint linkStatus = GL_FALSE;
-		glGetProgramiv(program, GL_LINK_STATUS, &linkStatus);
-		if (linkStatus == GL_FALSE)
-		{
-			GLint length = 0;
-			glGetProgramiv(program, GL_INFO_LOG_LENGTH, &length);
-			std::string log(static_cast<size_t>(length > 0 ? length : 1), '\0');
-			glGetProgramInfoLog(program, length, &length, log.data());
-			std::fprintf(stderr, "[program] link failed:\n%s\n", log.c_str());
-			std::fflush(stderr);
-		}
-
-		for (const GLuint shader : shaders)
-		{
-			glDetachShader(program, shader);
-			glDeleteShader(shader);
-		}
-
-		const ::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwProgram> programHandle{
-			p_request.programHandleId };
-		::Rendering::Backend::Records::RegisterProgram(programHandle, program);
-
-		// Reflection runs here, with the program and the context: glGetActiveUniform and
-		// glGetUniformLocation are how the material's loose uniforms are found, and the recording
-		// side reads the result out of the record after the drain (see GLShaderProgram::Link).
-		if (::Rendering::Backend::HwProgram* const record =
-			::Rendering::Backend::GetHandleAllocator().HandleCast<::Rendering::Backend::HwProgram>(programHandle))
-		{
-			ReflectUniforms(program, *record);
-		}
+		program->Build(*p_request.stages);
 
 		if (p_request.bindings != nullptr)
 		{
-			::Rendering::HAL::DeclareProgramBindings(program, *p_request.bindings);
+			program->DeclareBindings(*p_request.bindings);
 		}
 	}
 
@@ -334,33 +250,48 @@ namespace Rendering::Backend
 
 	void OpenGLDriver::BindProgramHandle(uint32_t p_programHandleId)
 	{
-		// The name lives in the record, and it only exists after the create command ran - which is
-		// exactly why this variant exists: the recording side records the handle, this side turns it
-		// into the name. A zero here means the program is not built (yet): leave the bound one alone
-		// rather than unbinding everything.
-		const uint32_t name = ::Rendering::Backend::Records::ProgramName(
-			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwProgram>{ p_programHandleId });
-		if (name != 0)
+		// The object only exists after the create command ran - which is exactly why this variant
+		// exists: the recording side records the handle, this side resolves it. A null here means
+		// the program is not built (yet): leave the bound one alone rather than unbinding
+		// everything.
+		::Rendering::HAL::ShaderProgram* const program =
+			::Rendering::Backend::GetHandleAllocator().HandleCast<::Rendering::HAL::ShaderProgram>(
+				::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwProgram>{
+					p_programHandleId });
+		if (program != nullptr)
 		{
-			glUseProgram(name);
+			program->Bind();
 		}
 	}
 
 	void OpenGLDriver::DeclareProgramBindings(::Rendering::Backend::DeclareProgramBindingsRequest p_request)
 	{
-		const uint32_t name = ::Rendering::Backend::Records::ProgramName(
-			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwProgram>{ p_request.programHandleId });
-		if (name == 0 || p_request.bindings == nullptr)
+		::Rendering::HAL::ShaderProgram* const program =
+			::Rendering::Backend::GetHandleAllocator().HandleCast<::Rendering::HAL::ShaderProgram>(
+				::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwProgram>{
+					p_request.programHandleId });
+		if (program == nullptr || p_request.bindings == nullptr)
 		{
 			return;
 		}
 
-		::Rendering::HAL::DeclareProgramBindings(name, *p_request.bindings);
+		program->DeclareBindings(*p_request.bindings);
 	}
 
 	void OpenGLDriver::ReadPixels(const ::Rendering::Backend::ReadPixelsRequest& p_request)
 	{
-		if (p_request.framebufferId == 0 || p_request.data == nullptr || p_request.width == 0 || p_request.height == 0)
+		// A handle is resolved here, so a target created in this batch can be read (Filament's
+		// readPixels takes the target the same way); a raw name is what the callers that already
+		// have one pass.
+		uint32_t framebuffer = p_request.framebufferId;
+		if (p_request.framebufferHandleId != 0)
+		{
+			framebuffer = ::Rendering::Backend::Records::FramebufferName(
+				::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwFramebuffer>{
+					p_request.framebufferHandleId });
+		}
+
+		if (framebuffer == 0 || p_request.data == nullptr || p_request.width == 0 || p_request.height == 0)
 		{
 			return;
 		}
@@ -368,8 +299,12 @@ namespace Rendering::Backend
 		// Filament's readPixels: bind the target, select the attachment, read. The bytes go to the
 		// buffer the request owns, and the completion callback runs here - on the thread that owns
 		// the context - so a caller on the recording side never reads a buffer the GPU is filling.
-		glBindFramebuffer(GL_READ_FRAMEBUFFER, p_request.framebufferId);
-		glReadBuffer(GL_COLOR_ATTACHMENT0 + p_request.readBufferIndex);
+		glBindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer);
+		if (p_request.readBufferIndex >= 0)
+		{
+			// A negative index keeps whatever the recorded SetFramebufferReadBuffer selected.
+			glReadBuffer(GL_COLOR_ATTACHMENT0 + static_cast<GLenum>(p_request.readBufferIndex));
+		}
 		glPixelStorei(GL_PACK_ALIGNMENT, 1);
 		glReadPixels(static_cast<GLint>(p_request.x), static_cast<GLint>(p_request.y),
 			static_cast<GLsizei>(p_request.width), static_cast<GLsizei>(p_request.height),
@@ -384,45 +319,89 @@ namespace Rendering::Backend
 		}
 	}
 
-	void OpenGLDriver::SetVertexArrayLayout(const ::Rendering::Backend::SetVertexArrayLayoutRequest& p_request)
+	/** glNamedFramebufferReadBuffer on the target the handle names: the first half of a recorded
+	 * readback pair (picking selects the id attachment, reads it, then the position one). */
+	void OpenGLDriver::SetFramebufferReadBuffer(const ::Rendering::Backend::SetFramebufferReadBufferRequest& p_request)
 	{
-		// The array and its buffers are named by handle; the create commands that made their GL
-		// names ran earlier in this batch (Filament's setVertexArrayObject).
-		const uint32_t array = ::Rendering::Backend::Records::VertexArrayName(
-			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwVertexArray>{
-				p_request.vertexArrayHandleId });
-		const uint32_t vertexBuffer = ::Rendering::Backend::Records::BufferName(
-			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwBufferObject>{
-				p_request.vertexBufferHandleId });
-		if (array == 0 || vertexBuffer == 0 || p_request.attributes == nullptr)
+		::Rendering::HAL::Framebuffer* const framebuffer = ResolveFramebuffer(p_request.framebufferHandleId);
+		if (framebuffer == nullptr)
 		{
 			return;
 		}
-		const uint32_t indexBuffer = ::Rendering::Backend::Records::BufferName(
+		framebuffer->SetReadBuffer(p_request.hasIndex
+			? std::optional<uint32_t>(p_request.index)
+			: std::nullopt);
+	}
+
+	/** glReadPixels into a pixel-pack buffer: the GPU writes it, and DownloadBuffer fetches it once
+	 * the buffer's fence says it is done. */
+	void OpenGLDriver::ReadPixelsToBuffer(::Rendering::Backend::ReadPixelsToBufferRequest p_request)
+	{
+		::Rendering::HAL::Framebuffer* const framebuffer = ResolveFramebuffer(p_request.framebufferHandleId);
+		const uint32_t buffer = ::Rendering::Backend::Records::BufferName(
 			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwBufferObject>{
-				p_request.indexBufferHandleId });
-
-		glBindVertexArray(array);
-		if (indexBuffer != 0)
+				p_request.bufferHandleId });
+		if (framebuffer == nullptr || buffer == 0)
 		{
-			glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBuffer);
-		}
-		glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer);
-
-		const std::vector<::Rendering::Backend::VertexLayoutAttribute>& attributes = *p_request.attributes;
-		for (uint32_t index = 0; index < static_cast<uint32_t>(attributes.size()); ++index)
-		{
-			const ::Rendering::Backend::VertexLayoutAttribute& attribute = attributes[index];
-			glEnableVertexAttribArray(index);
-			glVertexAttribPointer(index,
-				static_cast<GLint>(attribute.count),
-			::Rendering::HAL::EnumToValue<GLenum>(attribute.type),
-				static_cast<GLboolean>(attribute.normalized),
-				static_cast<GLsizei>(attribute.stride),
-				reinterpret_cast<const void*>(static_cast<uintptr_t>(attribute.offset)));
+			return;
 		}
 
-		glBindVertexArray(0);
+		framebuffer->ReadPixelsToBuffer(buffer, p_request.offset, p_request.x, p_request.y,
+			p_request.width, p_request.height, p_request.format, p_request.type);
+	}
+
+	/** The fetch half of the asynchronous readback: copies the buffer range into the request's CPU
+	 * memory, but only once the fence says the GPU is done with it. Telling the recording side that
+	 * it has to try again is the callback's false. */
+	void OpenGLDriver::DownloadBuffer(::Rendering::Backend::DownloadBufferRequest p_request)
+	{
+		::Rendering::HAL::GLBuffer* const buffer = ResolveBuffer(p_request.handleId);
+		if (buffer == nullptr || p_request.data == nullptr || p_request.size == 0)
+		{
+			return;
+		}
+
+		if (!buffer->IsFenceSignaled())
+		{
+			if (p_request.onDone)
+			{
+				p_request.onDone(false);
+			}
+			return;
+		}
+
+		if (p_request.data->size() < p_request.size)
+		{
+			p_request.data->resize(static_cast<size_t>(p_request.size));
+		}
+
+		// glGetNamedBufferSubData with the fence already signalled: a copy, not a stall.
+		glGetNamedBufferSubData(buffer->GetID(), static_cast<GLintptr>(p_request.offset),
+			static_cast<GLsizeiptr>(p_request.size), p_request.data->data());
+
+		if (p_request.onDone)
+		{
+			p_request.onDone(true);
+		}
+	}
+
+	void OpenGLDriver::SetVertexArrayLayout(const ::Rendering::Backend::SetVertexArrayLayoutRequest& p_request)
+	{
+		// The array and its buffers are resolved here: the create commands that made their GL names
+		// ran earlier in this batch (Filament's setVertexArrayObject).
+		::Rendering::HAL::VertexArray* const array =
+			::Rendering::Backend::GetHandleAllocator().HandleCast<::Rendering::HAL::VertexArray>(
+				::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwVertexArray>{
+					p_request.vertexArrayHandleId });
+		::Rendering::HAL::GLBuffer* const vertexBuffer = ResolveBuffer(p_request.vertexBufferHandleId);
+		if (array == nullptr || vertexBuffer == nullptr || p_request.attributes == nullptr)
+		{
+			return;
+		}
+		::Rendering::HAL::GLBuffer* const indexBuffer = ResolveBuffer(p_request.indexBufferHandleId);
+
+		array->SetLayout(*p_request.attributes, vertexBuffer->GetID(),
+			indexBuffer != nullptr ? indexBuffer->GetID() : 0u);
 	}
 
 	void OpenGLDriver::UpdateBuffer(const ::Rendering::Backend::UpdateBufferRequest& p_request)
@@ -431,15 +410,15 @@ namespace Rendering::Backend
 		{
 			return;
 		}
-		// The name belongs to the create command, which ran earlier in this batch.
-		const uint32_t name = ::Rendering::Backend::Records::BufferName(
-			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwBufferObject>{
-				p_request.handleId });
-		if (name == 0)
+		// The object belongs to the create command, which ran earlier in this batch: the handle is
+		// resolved on this side, because that is where the object (and its GL name) lives.
+		::Rendering::HAL::GLBuffer* const buffer = ResolveBuffer(p_request.handleId);
+		if (buffer == nullptr)
 		{
 			return;
 		}
-		glNamedBufferSubData(name, p_request.offset, p_request.size, p_request.data->data());
+		buffer->Upload(p_request.data->data(),
+			::Rendering::HAL::BufferMemoryRange{ p_request.offset, p_request.size });
 	}
 
 	void OpenGLDriver::BindDescriptor(const ::Rendering::Backend::BindDescriptorRequest& p_request)
@@ -571,96 +550,63 @@ namespace Rendering::Backend
 
 	void OpenGLDriver::AttachRenderbuffer(const ::Rendering::Backend::AttachRenderbufferRequest& p_request)
 	{
-		const uint32_t framebuffer = ::Rendering::Backend::Records::FramebufferName(
-			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwFramebuffer>{
-				p_request.framebufferHandleId });
-		const uint32_t renderbuffer = ::Rendering::Backend::Records::RenderbufferName(
-			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwRenderbuffer>{
-				p_request.renderbufferHandleId });
-		if (framebuffer == 0 || renderbuffer == 0)
+		::Rendering::HAL::Framebuffer* const framebuffer =
+			ResolveFramebuffer(p_request.framebufferHandleId);
+		::Rendering::HAL::Renderbuffer* const renderbuffer =
+			ResolveRenderbuffer(p_request.renderbufferHandleId);
+		if (framebuffer == nullptr || renderbuffer == nullptr)
 		{
 			return;
 		}
 
 		// The bind is kept because the immediate path has it (and some drivers want the
 		// renderbuffer current before it is attached).
-		glBindRenderbuffer(GL_RENDERBUFFER, renderbuffer);
-		const GLenum attachment = ::Rendering::HAL::EnumToValue<GLenum>(p_request.attachment)
-			+ static_cast<GLenum>(p_request.index);
-		glNamedFramebufferRenderbuffer(framebuffer, attachment, GL_RENDERBUFFER, renderbuffer);
+		renderbuffer->Bind();
+		framebuffer->AttachRenderbuffer(p_request.attachment, p_request.index, renderbuffer->GetID());
 	}
 
 	void OpenGLDriver::AllocateRenderbuffer(const ::Rendering::Backend::AllocateRenderbufferRequest& p_request)
 	{
-		const uint32_t renderbuffer = ::Rendering::Backend::Records::RenderbufferName(
-			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwRenderbuffer>{
-				p_request.handleId });
-		if (renderbuffer == 0)
+		::Rendering::HAL::Renderbuffer* const renderbuffer = ResolveRenderbuffer(p_request.handleId);
+		if (renderbuffer == nullptr)
 		{
 			return;
 		}
-
-		const GLenum format = ::Rendering::HAL::EnumToValue<GLenum>(p_request.format);
-		if (p_request.multiSample)
-		{
-			glNamedRenderbufferStorageMultisample(renderbuffer, 4, format,
-				p_request.width, p_request.height);
-		}
-		else
-		{
-			glNamedRenderbufferStorage(renderbuffer, format, p_request.width, p_request.height);
-		}
+		renderbuffer->Allocate(p_request.width, p_request.height, p_request.format,
+			p_request.multiSample);
 	}
 
 	void OpenGLDriver::AttachTexture(const ::Rendering::Backend::AttachTextureRequest& p_request)
 	{
-		const uint32_t framebuffer = ::Rendering::Backend::Records::FramebufferName(
-			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwFramebuffer>{
-				p_request.framebufferHandleId });
+		::Rendering::HAL::Framebuffer* const framebuffer =
+			ResolveFramebuffer(p_request.framebufferHandleId);
 		const uint32_t texture = ::Rendering::Backend::Records::TextureName(p_request.textureHandleId);
-		if (framebuffer == 0 || texture == 0)
+		if (framebuffer == nullptr || texture == 0)
 		{
 			return;
 		}
 
-		const GLenum attachment = ::Rendering::HAL::EnumToValue<GLenum>(p_request.attachment)
-			+ static_cast<GLenum>(p_request.index);
 		if (p_request.useLayer)
 		{
-			glNamedFramebufferTextureLayer(framebuffer, attachment, texture,
-				static_cast<GLint>(p_request.level), static_cast<GLint>(p_request.layer));
+			framebuffer->AttachTextureLayer(p_request.attachment, p_request.index, texture,
+				p_request.level, p_request.layer);
 		}
 		else
 		{
-			glNamedFramebufferTexture(framebuffer, attachment, texture,
-				static_cast<GLint>(p_request.level));
+			framebuffer->AttachTexture(p_request.attachment, p_request.index, texture,
+				p_request.level);
 		}
 	}
 
 	void OpenGLDriver::SetFramebufferDrawBuffers(const ::Rendering::Backend::SetFramebufferDrawBuffersRequest& p_request)
 	{
-		const uint32_t framebuffer = ::Rendering::Backend::Records::FramebufferName(
-			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwFramebuffer>{
-				p_request.framebufferHandleId });
-		if (framebuffer == 0)
+		::Rendering::HAL::Framebuffer* const framebuffer =
+			ResolveFramebuffer(p_request.framebufferHandleId);
+		if (framebuffer == nullptr)
 		{
 			return;
 		}
-
-		if (p_request.indices.empty())
-		{
-			// No colour attachment writes: the single-buffer form of the same call.
-			glNamedFramebufferDrawBuffer(framebuffer, GL_NONE);
-			return;
-		}
-
-		std::vector<GLenum> buffers;
-		buffers.reserve(p_request.indices.size());
-		for (const uint32_t index : p_request.indices)
-		{
-			buffers.push_back(GL_COLOR_ATTACHMENT0 + index);
-		}
-		glNamedFramebufferDrawBuffers(framebuffer, static_cast<GLsizei>(buffers.size()), buffers.data());
+		framebuffer->SetDrawBuffers(p_request.indices);
 	}
 
 	void OpenGLDriver::CreateFramebuffer(uint32_t p_handleId)
@@ -683,20 +629,22 @@ namespace Rendering::Backend
 
 	void OpenGLDriver::AllocateBuffer(::Rendering::Backend::AllocateBufferRequest p_request)
 	{
-		const uint32_t id = ::Rendering::Backend::Records::BufferName(
-			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwBufferObject>{ p_request.handleId });
-		if (id == 0)
+		// The storage belongs to the object the create command made earlier in this batch
+		// (Filament's allocateBufferObject): it is where the size the executor just allocated is
+		// recorded, so anything resolving the handle afterwards can read it.
+		::Rendering::HAL::GLBuffer* const buffer = ResolveBuffer(p_request.handleId);
+		if (buffer == nullptr)
 		{
 			return;
 		}
-		glNamedBufferData(id, p_request.size, nullptr,
-			::Rendering::HAL::EnumToValue<GLenum>(p_request.usage));
+		buffer->Allocate(p_request.size, p_request.usage);
 	}
 
 	void OpenGLDriver::CreateBuffer(::Rendering::Backend::CreateBufferRequest p_request)
 	{
 		::Rendering::Backend::Records::CreateBuffer(
-			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwBufferObject>{ p_request.handleId });
+			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwBufferObject>{ p_request.handleId },
+			p_request.type);
 	}
 
 	/** Sets a buffer's binding point where the context lives. A shader storage buffer bound on the
@@ -704,28 +652,70 @@ namespace Rendering::Backend
 	 * reads as empty and every lit surface comes out darker (docs §8.67). */
 	void OpenGLDriver::BindBuffer(const ::Rendering::Backend::BindBufferRequest& p_request)
 	{
-		const GLenum target =
-			static_cast<GLenum>(::Rendering::HAL::EnumToValue<GLenum>(p_request.type));
 		if (p_request.handleId == 0)
 		{
-			glBindBuffer(target, 0);
+			glBindBuffer(::Rendering::HAL::EnumToValue<GLenum>(p_request.type), 0);
 			return;
 		}
 
-		const uint32_t name = ::Rendering::Backend::Records::BufferName(
-			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwBufferObject>{ p_request.handleId });
-		if (name == 0)
+		::Rendering::HAL::GLBuffer* const buffer = ResolveBuffer(p_request.handleId);
+		if (buffer == nullptr)
 		{
 			return;
 		}
+
+		// The object knows its own target, which is why the create command had to carry the kind
+		// of buffer: binding a uniform/SSBO buffer as GL_ARRAY_BUFFER is an error.
 		if (p_request.indexed)
 		{
-			glBindBufferBase(target, p_request.index, name);
+			buffer->Bind(p_request.index);
 		}
 		else
 		{
-			glBindBuffer(target, name);
+			buffer->Bind();
 		}
+	}
+
+	/** glBindBufferRange: a block inside a shared buffer (the pool's slices, a descriptor that
+	 * carries an offset + size instead of a whole buffer). */
+	void OpenGLDriver::BindBufferRange(const ::Rendering::Backend::BindBufferRangeRequest& p_request)
+	{
+		::Rendering::HAL::GLBuffer* const buffer = ResolveBuffer(p_request.handleId);
+		if (buffer == nullptr)
+		{
+			return;
+		}
+		buffer->BindRange(p_request.index, p_request.offset, p_request.size);
+	}
+
+	void OpenGLDriver::UnmapBuffer(uint32_t p_handleId)
+	{
+		::Rendering::HAL::GLBuffer* const buffer = ResolveBuffer(p_handleId);
+		if (buffer == nullptr)
+		{
+			return;
+		}
+		buffer->Unmap();
+	}
+
+	void OpenGLDriver::InsertFence(uint32_t p_handleId)
+	{
+		::Rendering::HAL::GLBuffer* const buffer = ResolveBuffer(p_handleId);
+		if (buffer == nullptr)
+		{
+			return;
+		}
+		buffer->InsertFence();
+	}
+
+	void OpenGLDriver::ClearFence(uint32_t p_handleId)
+	{
+		::Rendering::HAL::GLBuffer* const buffer = ResolveBuffer(p_handleId);
+		if (buffer == nullptr)
+		{
+			return;
+		}
+		buffer->ClearFence();
 	}
 
 

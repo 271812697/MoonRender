@@ -1,6 +1,7 @@
 ﻿#pragma once
+#include <Rendering/Data/PipelineState.h>
 #include <Rendering/Core/ARenderPass.h>
-#include <Rendering/HAL/Framebuffer.h>
+#include <Rendering/Data/Framebuffer.h>
 #include <Core/Rendering/PingPongFramebuffer.h>
 #include <Core/Rendering/PostProcess/AEffect.h>
 

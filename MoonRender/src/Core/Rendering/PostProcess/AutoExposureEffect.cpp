@@ -38,8 +38,8 @@ Core::Rendering::PostProcess::AutoExposureEffect::AutoExposureEffect(
 
 void Core::Rendering::PostProcess::AutoExposureEffect::Draw(
 	::Rendering::Data::PipelineState p_pso,
-	::Rendering::HAL::Framebuffer& p_src,
-	::Rendering::HAL::Framebuffer& p_dst,
+	::Rendering::Data::Framebuffer& p_src,
+	::Rendering::Data::Framebuffer& p_dst,
 	const EffectSettings& p_settings
 )
 {

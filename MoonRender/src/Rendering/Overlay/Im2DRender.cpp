@@ -157,8 +157,8 @@ public:
 		m_vertexBuffer = GetHandleAllocator().Allocate<HwBufferObject>();
 		m_indexBuffer = GetHandleAllocator().Allocate<HwBufferObject>();
 
-		ResourceOps::EnsureBuffer(m_vertexBuffer);
-		ResourceOps::EnsureBuffer(m_indexBuffer);
+		ResourceOps::EnsureBuffer(m_vertexBuffer, ::Rendering::Settings::EBufferType::VERTEX);
+		ResourceOps::EnsureBuffer(m_indexBuffer, ::Rendering::Settings::EBufferType::INDEX);
 		ResourceOps::EnsureVertexArray(m_vertexArray);
 
 		// Storage is allocated large enough for the first frames and grown when a list outgrows it

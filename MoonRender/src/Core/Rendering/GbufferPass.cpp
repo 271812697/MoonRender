@@ -9,7 +9,7 @@
 #include <Core/ResourceManagement/ShaderManager.h>
 #include <Core/ResourceManagement/TextureManager.h>
 #include <Core/Rendering/FramebufferUtil.h>
-#include <Rendering/HAL/Renderbuffer.h>
+#include <Rendering/Data/Renderbuffer.h>
 #include <Rendering/HAL/Profiling.h>
 #include <Rendering/Resources/Loaders/TextureLoader.h>
 #include <random>

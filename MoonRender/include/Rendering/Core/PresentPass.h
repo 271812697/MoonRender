@@ -1,4 +1,5 @@
 #pragma once
+#include <Rendering/Data/PipelineState.h>
 #include <Rendering/Core/ARenderPass.h>
 
 namespace Rendering::Core

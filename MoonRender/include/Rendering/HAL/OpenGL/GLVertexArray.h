@@ -1,30 +1,16 @@
 #pragma once
-#include <Rendering/Backend/ResourceHandle.h>
+#include <cstdint>
 #include <Rendering/HAL/Common/TVertexArray.h>
-#include <Rendering/HAL/OpenGL/GLIndexBuffer.h>
-#include <Rendering/HAL/OpenGL/GLVertexBuffer.h>
-#include <Tools/Utils/OptRef.h>
-
-namespace Rendering::Backend
-{
-	struct HwVertexArray;
-}
 
 namespace Rendering::HAL
 {
+	/** The GL state of the backend object: the array's name. The array state itself - the attribute
+	 * pointers and the element buffer binding - is stored in the GL array object by
+	 * glVertexAttribPointer while that array is bound. */
 	struct GLVertexArrayContext
 	{
-		/** A handle; the GL name is in the record it names (Backend::HwVertexArray), which only
-		 * exists on the side that owns the context. */
-		Rendering::Backend::ResourceHandle<Rendering::Backend::HwVertexArray> handle;
-		uint32_t attributeCount = 0;
+		uint32_t glId = 0;
 	};
 
-	using GLVertexArray = TVertexArray<
-		Settings::EGraphicsBackend::OPENGL,
-		GLVertexArrayContext,
-		GLVertexBufferContext,
-		GLIndexBufferContext,
-		GLBufferContext
-	>;
+	using GLVertexArray = TVertexArray<Settings::EGraphicsBackend::OPENGL, GLVertexArrayContext>;
 }

@@ -167,7 +167,7 @@ void Rendering::Context::Driver::BindDescriptor(const ::Rendering::Backend::Bind
 	m_commandStream->BindDescriptor(p_request);
 }
 
-void Rendering::Context::Driver::SetupFramebuffer(HAL::Framebuffer& p_target, uint32_t p_width, uint32_t p_height,
+void Rendering::Context::Driver::SetupFramebuffer(Data::Framebuffer& p_target, uint32_t p_width, uint32_t p_height,
 	bool p_useDepth, bool p_useStencil, bool p_useMipMaps, bool p_useMultiSample)
 {
 	if (std::getenv("MOON_FRAME_TRACE") != nullptr)
@@ -186,7 +186,7 @@ void Rendering::Context::Driver::SetupFramebuffer(HAL::Framebuffer& p_target, ui
 	m_commandStream->SetupFramebuffer(request);
 }
 
-void Rendering::Context::Driver::SetupFramebuffer(HAL::Framebuffer& p_target, const ::Rendering::Settings::TextureDesc& p_desc,
+void Rendering::Context::Driver::SetupFramebuffer(Data::Framebuffer& p_target, const ::Rendering::Settings::TextureDesc& p_desc,
 	bool p_useDepth, bool p_useStencil, bool p_useMultiSample)
 {
 	::Rendering::Backend::SetupFramebufferRequest request;
@@ -201,7 +201,7 @@ void Rendering::Context::Driver::SetupFramebuffer(HAL::Framebuffer& p_target, co
 	m_commandStream->SetupFramebuffer(request);
 }
 
-void Rendering::Context::Driver::ResizeFramebuffer(HAL::Framebuffer& p_target, uint16_t p_width, uint16_t p_height)
+void Rendering::Context::Driver::ResizeFramebuffer(Data::Framebuffer& p_target, uint16_t p_width, uint16_t p_height)
 {
 	// The size is front-end state: it is the attachment descriptors, and GetSize() answers from
 	// them. Resizing here records the GL storage re-specs for the attachments (their own Resize
@@ -212,8 +212,8 @@ void Rendering::Context::Driver::ResizeFramebuffer(HAL::Framebuffer& p_target, u
 }
 
 void Rendering::Context::Driver::CopyFramebufferColor(
-	HAL::Framebuffer& p_source, uint32_t p_sourceIndex,
-	HAL::Framebuffer& p_target, uint32_t p_targetIndex)
+	Data::Framebuffer& p_source, uint32_t p_sourceIndex,
+	Data::Framebuffer& p_target, uint32_t p_targetIndex)
 {
 	::Rendering::Backend::CopyFramebufferColorRequest request;
 	request.source = &p_source;
@@ -224,7 +224,7 @@ void Rendering::Context::Driver::CopyFramebufferColor(
 }
 
 void Rendering::Context::Driver::CopyFramebufferDepth(
-	HAL::Framebuffer& p_source, HAL::Framebuffer& p_target)
+	Data::Framebuffer& p_source, Data::Framebuffer& p_target)
 {
 	::Rendering::Backend::CopyFramebufferDepthRequest request;
 	request.source = &p_source;
@@ -232,7 +232,7 @@ void Rendering::Context::Driver::CopyFramebufferDepth(
 	m_commandStream->CopyFramebufferDepth(request);
 }
 
-void Rendering::Context::Driver::BindFramebuffer(const HAL::Framebuffer* p_target)
+void Rendering::Context::Driver::BindFramebuffer(const Data::Framebuffer* p_target)
 {
 	::Rendering::Backend::BindFramebufferRequest request;
 	request.target = p_target;
@@ -282,9 +282,61 @@ void Rendering::Context::Driver::Flush()
 	m_commandQueue->Flush();
 }
 
-void Rendering::Context::Driver::ExecuteAll()
+namespace
 {
-	// Resources whose last reference was dropped asynchronously (a mesh freed by a feature rebuild
+	/** The state a synchronous driver call waits on: the barrier command signals it from the thread
+	 * that runs the batch, and the caller sleeps until it does. */
+	struct CommandBarrier
+	{
+		std::mutex lock;
+		std::condition_variable condition;
+		bool done = false;
+	};
+}
+
+bool Rendering::Context::Driver::IsExecutorThread() const
+{
+	return m_renderThreadActive && std::this_thread::get_id() == m_renderThreadId;
+}
+
+void Rendering::Context::Driver::FlushAndWait()
+{
+	if (IsExecutorThread())
+	{
+		// Already where the commands run: recording from here would land after the batch being
+		// executed, so the caller has to do its work inline (see the callers in ResourceOps).
+		return;
+	}
+
+	if (!m_renderThreadActive)
+	{
+		// Single-threaded: the batch runs on this thread, which is what Execute does at the end of
+		// the frame. The synchronous calls only happen between frames (a pick, a screenshot, a fence
+		// query), so executing here is the same point in time.
+		Flush();
+		Execute();
+		return;
+	}
+
+	// With a render thread: a barrier command goes after the recorded work, then the batch is
+	// published and this thread sleeps until the barrier has run.
+	auto barrier = std::make_shared<CommandBarrier>();
+	Enqueue([barrier]
+		{
+			{
+				std::lock_guard lock(barrier->lock);
+				barrier->done = true;
+			}
+			barrier->condition.notify_all();
+		});
+	Flush();
+
+	std::unique_lock lock(barrier->lock);
+	barrier->condition.wait(lock, [&barrier] { return barrier->done; });
+}
+
+void Rendering::Context::Driver::ExecuteAll()
+{	// Resources whose last reference was dropped asynchronously (a mesh freed by a feature rebuild
 	// or a job thread) are destroyed here: this is a point where the module's context is current
 	// and the batch that could still have referenced them has just been replayed.
 	Rendering::Backend::DeferredDeleter::Flush();

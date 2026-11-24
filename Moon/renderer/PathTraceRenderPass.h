@@ -1,6 +1,7 @@
 #pragma once
+#include <Rendering/Data/PipelineState.h>
 #include <Rendering/Core/ARenderPass.h>
-#include <Rendering/HAL/Framebuffer.h>
+#include <Rendering/Data/Framebuffer.h>
 #include <Rendering/HAL/OpenGL/GLTexture.h>
 #include <Rendering/Data/Material.h>
 #include <Maths/FVector3.h>
@@ -62,10 +63,10 @@ namespace Editor::Rendering
 		EnvironmentMap* envMap=nullptr;
 
 		::Rendering::HAL::GLTexture* denoisedTexture=nullptr;
-		::Rendering::HAL::Framebuffer pathTracefbo;
-		::Rendering::HAL::Framebuffer pathTraceFBOLowRes;
-		::Rendering::HAL::Framebuffer accumFBO;
-		::Rendering::HAL::Framebuffer outputFBO[2];
+		::Rendering::Data::Framebuffer pathTracefbo;
+		::Rendering::Data::Framebuffer pathTraceFBOLowRes;
+		::Rendering::Data::Framebuffer accumFBO;
+		::Rendering::Data::Framebuffer outputFBO[2];
 		Maths::FVector2 renderSize;
 		Maths::FVector2 windowSize;
 		Maths::FVector2 tile;

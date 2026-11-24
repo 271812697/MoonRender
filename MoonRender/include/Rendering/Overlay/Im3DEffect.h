@@ -1,4 +1,5 @@
 #pragma once
+#include <Rendering/Data/PipelineState.h>
 #include <cstdint>
 #include <memory>
 #include <string>

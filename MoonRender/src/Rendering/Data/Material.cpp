@@ -133,7 +133,7 @@ void Rendering::Data::Material::SetDefinition(
 	ResetStateToMaterial();
 }
 
-Rendering::HAL::ShaderProgram& Rendering::Data::Material::GetVariant(
+Rendering::Data::Program& Rendering::Data::Material::GetVariant(
 	std::optional<const std::string_view> p_pass,
 	const Data::FeatureSet& p_featureSet)
 {

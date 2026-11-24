@@ -14,7 +14,7 @@
 #include <glad/glad.h>
 #include <Rendering/Context/Driver.h>
 #include <Rendering/HAL/Common/HALDriverAccess.h>
-#include <Rendering/HAL/ShaderProgram.h>
+#include <Rendering/Data/Program.h>
 #include <Rendering/HAL/ShaderStage.h>
 #include <Rendering/Data/MaterialBuilder.h>
 #include <Rendering/Data/EngineDescriptorSets.h>
@@ -177,7 +177,7 @@ namespace
 		return result;
 	}
 
-	std::shared_ptr<Rendering::HAL::ShaderProgram> CreateProgram(
+	std::shared_ptr<Rendering::Data::Program> CreateProgram(
 		const ShaderInputInfo& p_shaderInputInfo,
 		std::span<const ShaderStageDesc> p_stages,
 		const std::string_view p_pass,
@@ -328,7 +328,7 @@ namespace
 		}
 
 		// Link the program
-		auto program = std::make_shared<Rendering::HAL::ShaderProgram>();
+		auto program = std::make_shared<Rendering::Data::Program>();
 
 		// Attach all stages
 		for (const auto& processedStage : processedStages)
@@ -376,7 +376,7 @@ namespace
 		}
 	}
 
-	std::shared_ptr<Rendering::HAL::ShaderProgram> CreateDefaultProgram()
+	std::shared_ptr<Rendering::Data::Program> CreateDefaultProgram()
 	{
 		const std::string vertex = R"(
 #version 450 core
@@ -806,7 +806,7 @@ void main()
 	void ValidateBindings(
 		const Rendering::Data::MaterialDefinition& p_definition,
 		const Rendering::Data::MaterialParser& p_parser,
-		Rendering::HAL::ShaderProgram& p_program)
+		Rendering::Data::Program& p_program)
 	{
 		// The check reads the program's blocks and block sizes from GL, which needs the program and
 		// the context. The program is built on the executor (see GLShaderProgram::Link), so the only
@@ -947,7 +947,7 @@ void main()
 		// unused variant bits are pruned by MoonMatc). Compile each distinct stage once and
 		// link each distinct stage combination once, instead of once per feature set.
 		std::unordered_map<std::string, std::shared_ptr<Rendering::HAL::ShaderStage>> stageCache;
-		std::unordered_map<std::string, std::shared_ptr<Rendering::HAL::ShaderProgram>> programCache;
+		std::unordered_map<std::string, std::shared_ptr<Rendering::Data::Program>> programCache;
 
 		const auto report = [p_error](const std::string& p_text) {
 			std::cout << p_text << std::endl;
@@ -1022,7 +1022,7 @@ void main()
 			auto& program = programCache[programKey];
 			if (program == nullptr)
 			{
-				auto candidate = std::make_shared<Rendering::HAL::ShaderProgram>(
+				auto candidate = std::make_shared<Rendering::Data::Program>(
 					p_definition.ProgramBindings());
 				for (const auto& stage : stages)
 				{
@@ -1242,7 +1242,7 @@ namespace Rendering::Resources::Loaders
 		return false;
 	}
 
-	std::shared_ptr<Rendering::HAL::ShaderProgram> ShaderLoader::CompileVariant(
+	std::shared_ptr<Rendering::Data::Program> ShaderLoader::CompileVariant(
 		const Rendering::Data::MaterialParser& p_parser,
 		const Rendering::Data::MaterialParser::Variant& p_variant,
 		const Rendering::Data::DescriptorSetInfo& p_bindings,
@@ -1306,7 +1306,7 @@ namespace Rendering::Resources::Loaders
 			stages.push_back(std::move(stage));
 		}
 
-		auto program = std::make_shared<Rendering::HAL::ShaderProgram>(p_bindings);
+		auto program = std::make_shared<Rendering::Data::Program>(p_bindings);
 		for (const auto& stage : stages) { program->Attach(*stage); }
 		const auto linkResult = program->Link();
 		for (const auto& stage : stages) { program->Detach(*stage); }

@@ -4,7 +4,7 @@
 
 #include <Rendering/Data/Descriptor.h>
 #include <Rendering/Data/DescriptorSetLayout.h>
-#include <Rendering/HAL/ShaderProgram.h>
+#include <Rendering/Data/Program.h>
 #include <Rendering/HAL/TextureHandle.h>
 
 /** One descriptor array per descriptor set. The array index is the shader's original binding
@@ -48,7 +48,7 @@ namespace Rendering::Data
 			uint32_t p_size);
 
 		/** Binds every descriptor at the slot the program's binding map assigns. */
-		void Bind(const Rendering::HAL::ShaderProgram& p_program, uint32_t p_set) const;
+		void Bind(const Rendering::Data::Program& p_program, uint32_t p_set) const;
 		/** Binds a set whose (binding -> GL slot) mapping is fixed by the engine. */
 		void BindFixed(uint32_t p_set) const;
 		void Release();

@@ -4,7 +4,7 @@
 #include <Core/ECS/Actor.h>
 #include <Core/ECS/Components/CReflectionProbe.h>
 
-#include <Rendering/HAL/Renderbuffer.h>
+#include <Rendering/Data/Renderbuffer.h>
 
 
 namespace
@@ -32,7 +32,8 @@ Core::ECS::Components::CReflectionProbe::CReflectionProbe(ECS::Actor& p_owner) :
 	m_framebuffers{ "ReflectionProbeFramebuffer" },
 	m_cubemapIterator{ m_cubemaps }
 {
-	m_uniformBuffer = std::make_unique<::Rendering::HAL::UniformBuffer>();
+	m_uniformBuffer = std::make_unique<::Rendering::Data::BufferObject>(
+		::Rendering::Settings::EBufferType::UNIFORM);
 	m_uniformBuffer->Allocate(kUBOSize, ::Rendering::Settings::EAccessSpecifier::STREAM_DRAW);
 
 	_AllocateResources();
@@ -280,7 +281,7 @@ void Core::ECS::Components::CReflectionProbe::_AllocateResources()
 		}
 
 		// Depth buffer
-		const auto renderbuffer = std::make_shared<::Rendering::HAL::Renderbuffer>(false);
+		const auto renderbuffer = std::make_shared<::Rendering::Data::Renderbuffer>(false);
 		const auto internalFormat = ::Rendering::Settings::EInternalFormat::DEPTH_COMPONENT;
 		renderbuffer->Allocate(m_resolution, m_resolution, internalFormat);
 		m_framebuffers[i].Attach(renderbuffer, ::Rendering::Settings::EFramebufferAttachment::DEPTH);
@@ -380,7 +381,7 @@ std::vector<uint32_t> Core::ECS::Components::CReflectionProbe::_GetCaptureFaceIn
 		return faceIndices;
 }
 
-Rendering::HAL::Framebuffer& Core::ECS::Components::CReflectionProbe::_GetTargetFramebuffer() const
+Rendering::Data::Framebuffer& Core::ECS::Components::CReflectionProbe::_GetTargetFramebuffer() const
 {
 	auto& framebuffer =
 		_IsDoubleBuffered() ?
@@ -391,7 +392,7 @@ Rendering::HAL::Framebuffer& Core::ECS::Components::CReflectionProbe::_GetTarget
 	return framebuffer;
 }
 
-Rendering::HAL::UniformBuffer& Core::ECS::Components::CReflectionProbe::_GetUniformBuffer() const
+Rendering::Data::BufferObject& Core::ECS::Components::CReflectionProbe::_GetUniformBuffer() const
 {
 	assert(m_uniformBuffer != nullptr&&"Uniform buffer is not initialized");
 	return *m_uniformBuffer;

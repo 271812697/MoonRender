@@ -1,9 +1,8 @@
 ﻿#pragma once
 #include <Core/Rendering/SceneRenderer.h>
-#include <Rendering/HAL/UniformBuffer.h>
 #include <Rendering/Entities/Camera.h>
 #include <Rendering/Core/CompositeRenderer.h>
-#include <Rendering/HAL/Framebuffer.h>
+#include <Rendering/Data/Framebuffer.h>
 #include <cstdint>
 #include <atomic>
 #include <functional>
@@ -99,8 +98,8 @@ namespace Editor {
 			Maths::FVector3 m_roaterCenter = {0,0,0};
 			Maths::FVector3 m_gridColor = Maths::FVector3{ 0.176f, 0.176f, 0.176f };
 
-			::Rendering::HAL::Framebuffer m_msaaframebuffer;
-			::Rendering::HAL::Framebuffer m_framebuffer;
+			::Rendering::Data::Framebuffer m_msaaframebuffer;
+			::Rendering::Data::Framebuffer m_framebuffer;
 			/** What leaves the module: the frame after the present pass (tone mapped, RGBA8).
 			 * A blit needs matching formats, and the window's framebuffer is RGBA8 while the
 			 * scene buffers above are RGBA32F - so the module composes the image here and the
@@ -116,10 +115,10 @@ namespace Editor {
 			/** The slot of the last frame whose batch has run; written by the render side. */
 			std::atomic<uint32_t> mPresentedSlot{ 0 };
 			uint64_t mSubmittedFrames = 0;      // 已提交给 Driver的帧数（只有录制侧读写）
-			std::array<std::unique_ptr<::Rendering::HAL::Framebuffer>, kPresentSlotCount> m_presentTargets;
+			std::array<std::unique_ptr<::Rendering::Data::Framebuffer>, kPresentSlotCount> m_presentTargets;
 
 			/** The target holding the newest frame known to be finished. */
-			::Rendering::HAL::Framebuffer& PresentedTarget();
+			::Rendering::Data::Framebuffer& PresentedTarget();
 			std::unique_ptr<::Core::Rendering::SceneRenderer> m_renderer;
 			int mWidth = 1;
 			int mHeight = 1;

@@ -1,25 +1,20 @@
 #pragma once
-#include <Rendering/Backend/ResourceHandle.h>
+#include <Rendering/Backend/BackendResources.h>
 #include <Rendering/HAL/Common/TBuffer.h>
-
-namespace Rendering::Backend
-{
-	struct HwBufferObject;
-}
 
 namespace Rendering::HAL
 {
+	/** The GL state of the backend object - the one that lives in the handle's slot. It holds no
+	 * handle: this object *is* what the handle names. The kind of buffer and the size of its
+	 * storage are in HwBufferObject, TBuffer's base, because those are what a caller holding only
+	 * the handle reads; what is left here is what only the side that owns the context can touch. */
 	struct GLBufferContext
 	{
-		/** The front-end half: a handle, not a GL name. The name lives in the record this names
-		 * (Backend::HwBufferObject, see BackendResources.h), which exists only on the side that
-		 * owns the context - Filament's BufferObjectHandle / HwBufferObject split. */
-		Rendering::Backend::ResourceHandle<Rendering::Backend::HwBufferObject> handle;
-		Settings::EBufferType type = Settings::EBufferType::UNKNOWN;
-		uint64_t allocatedBytes = 0;
+		/** The GL name, made by the constructor (glCreateBuffers). */
+		uint32_t glId = 0;
 		/** GLsync handle of the most recent fence, nullptr when none is active. */
 		void* fence = nullptr;
 	};
-	
+
 	using GLBuffer = TBuffer<Settings::EGraphicsBackend::OPENGL, GLBufferContext>;
 }

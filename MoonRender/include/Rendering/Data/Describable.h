@@ -1,7 +1,7 @@
 ﻿#pragma once
 #include <typeindex>
 #include <any>
-#include "Rendering/HAL/Framebuffer.h"
+#include "Rendering/Data/Framebuffer.h"
 #include "Rendering/Entities/Camera.h"
 
 namespace Rendering::Data
