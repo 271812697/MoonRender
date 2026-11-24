@@ -80,8 +80,6 @@ namespace Rendering::Backend
 	void CommandBufferQueue::ReleaseBuffer(const CircularBuffer::Range& p_batches)
 	{
 		size_t released = RangeSize(p_batches);
-		
-
 		std::lock_guard lock(m_lock);
 		m_freeSpace += released;
 		m_condition.notify_one();

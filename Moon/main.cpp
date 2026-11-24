@@ -16,7 +16,12 @@
 #include <QImage>
 #include <QStringList>
 #include <QTimer>
+#include <cstdio>
 #include <cstdlib>
+#include <exception>
+#include <windows.h>
+#include <dbghelp.h>
+#pragma comment(lib, "dbghelp.lib")
 #include <editor/editor.h>
 #include "Core/Global/ServiceLocator.h"
 #include "editor/DocumentSession.h"
@@ -26,6 +31,74 @@
 
 int main(int argc, char* argv[])
 {
+	// A fatal fault (an access violation, a debug-CRT abort from a failed assert, a breakpoint)
+	// ends the process with nothing on stderr. Print the faulting thread's stack with file and
+	// line instead: the PDB is next to the executable the run was started from.
+	SetUnhandledExceptionFilter([](EXCEPTION_POINTERS* p_info) -> LONG {
+		std::fprintf(stderr, "[fatal] exception 0x%08lx at %p\n",
+			static_cast<unsigned long>(p_info->ExceptionRecord->ExceptionCode),
+			p_info->ExceptionRecord->ExceptionAddress);
+		void* frames[64] = {};
+		const USHORT count = CaptureStackBackTrace(0, 64, frames, nullptr);
+		HANDLE process = GetCurrentProcess();
+		SymSetOptions(SYMOPT_LOAD_LINES | SYMOPT_UNDNAME | SYMOPT_DEFERRED_LOADS);
+		SymInitialize(process, nullptr, TRUE);
+		for (USHORT i = 0; i < count; ++i)
+		{
+			char buffer[sizeof(SYMBOL_INFO) + 512] = {};
+			SYMBOL_INFO* symbol = reinterpret_cast<SYMBOL_INFO*>(buffer);
+			symbol->SizeOfStruct = sizeof(SYMBOL_INFO);
+			symbol->MaxNameLen = 511;
+			DWORD64 displacement = 0;
+			DWORD lineDisplacement = 0;
+			IMAGEHLP_LINE64 line{ sizeof(IMAGEHLP_LINE64) };
+			if (SymFromAddr(process, reinterpret_cast<DWORD64>(frames[i]), &displacement, symbol))
+			{
+				const bool hasLine = SymGetLineFromAddr64(process,
+					reinterpret_cast<DWORD64>(frames[i]), &lineDisplacement, &line) != FALSE;
+				std::fprintf(stderr, "  #%02u %s+0x%llx  %s(%lu)\n", i, symbol->Name,
+					static_cast<unsigned long long>(displacement),
+					hasLine ? line.FileName : "?", hasLine ? line.LineNumber : 0);
+			}
+			else
+			{
+				std::fprintf(stderr, "  #%02u %p\n", i, frames[i]);
+			}
+		}
+		std::fflush(stderr);
+		SymCleanup(process);
+		return EXCEPTION_CONTINUE_SEARCH;
+	});
+
+	// An unhandled C++ exception ends the process with 0xe06d7363 and no message at all in a
+	// release-style console, which says nothing about what threw. Report the type and the message
+	// on the way out, so a fatal `bad_any_cast` or `bad_optional_access` names itself.
+	std::set_terminate([] {
+		if (std::exception_ptr thrown = std::current_exception())
+		{
+			try
+			{
+				std::rethrow_exception(thrown);
+			}
+			catch (const std::exception& p_error)
+			{
+				std::fprintf(stderr, "[terminate] unhandled C++ exception: %s\n", p_error.what());
+			}
+			catch (...)
+			{
+				std::fprintf(stderr, "[terminate] unhandled exception of a non-std type\n");
+			}
+		}
+		else
+		{
+			// Nothing is in flight: std::terminate was reached through a `noexcept` boundary (or an
+			// explicit call), and the type is already lost by then.
+			std::fprintf(stderr, "[terminate] no active exception (noexcept boundary)\n");
+		}
+		std::fflush(stderr);
+		std::abort();
+	});
+
 	// Every GL context in the editor has to be in one share group. The render module draws on a
 	// context of its own, and the material panel shows the preview by blitting the module's
 	// frame texture into a widget - a texture name only means something in the group that

@@ -139,9 +139,12 @@ namespace Rendering::Data
 		m_buffer->Upload(p_data, Rendering::HAL::BufferMemoryRange{ p_slice.offset, p_slice.size });
 	}
 
-	uint32_t UniformBufferPool::GetBufferId() const
+	Rendering::Backend::ResourceHandle<Rendering::Backend::HwBufferObject>
+	UniformBufferPool::GetHandle() const
 	{
-		return m_buffer != nullptr ? m_buffer->GetID() : 0;
+		return m_buffer != nullptr
+			? m_buffer->GetHandle()
+			: Rendering::Backend::ResourceHandle<Rendering::Backend::HwBufferObject>{};
 	}
 
 	void UniformBufferPool::StoreCPU(Slice p_slice, const void* p_data)

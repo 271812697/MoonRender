@@ -5,6 +5,7 @@
 #include <Rendering/Core/CompositeRenderer.h>
 #include <Rendering/HAL/Framebuffer.h>
 #include <cstdint>
+#include <atomic>
 #include <functional>
 #include <vector>
 #include <Rendering/View/InputState.h>
@@ -49,19 +50,20 @@ namespace Editor {
 			/** Turns the view's own frame into the image the window pastes: the scene renderer's
 			 * present pass. */
 			void Present();
-			void Commit();
+			/** The render side reports that the frame recorded for p_slot has been executed.
+			 *
+			 * It is the last command of the frame's batch, so it means "every command this frame
+			 * recorded has run" - the same job as filament's FFence (a signal carried by the
+			 * command stream), not a GPU fence. The window only ever pastes a slot this was called
+			 * for, which is what keeps the paste off a half-drawn slot without making the window
+			 * wait for the render thread. */
+			void Commit(uint32_t p_slot);
 			/** The GL id of the colour texture holding the last rendered frame.
 			 *
 			 * This is how the frame leaves the render module: the window pastes this texture into
 			 * its own framebuffer (textures are shared between the two contexts, framebuffers are
 			 * not). 0 when the view has not rendered yet. */
 			uint32_t GetFrameTextureID();
-			/** Blocks until the frame the window is about to paste has been drawn.
-			 *
-			 * That is frame N-1 (or N-2 in the demo's numbering), never the one being drawn, so
-			 * this normally returns at once instead of stalling the window on the frame it just
-			 * submitted (docs/RenderThreadPlan.md §8.68). */
-			void WaitForPresentedFrame(uint64_t frames);
 			/** Reads the last frame back into p_pixels as RGBA8, top row first.
 			 *
 			 * Needs the module's context current (the frame lives on it). The window layer uses
@@ -103,23 +105,20 @@ namespace Editor {
 			 * A blit needs matching formats, and the window's framebuffer is RGBA8 while the
 			 * scene buffers above are RGBA32F - so the module composes the image here and the
 			 * window pastes this one. */
-			/** The present ring, copied from the Qt/Filament demo's PlatformGlfwGL (RING_COUNT = 3):
-			 * frame F is drawn into slot F % 3 and the window pastes slot (F - latency) % 3, so the
-			 * texture being presented is never the one being drawn, and the consumer only has to
-			 * wait for the frame it is about to show. One target could not do this: the paste read a
+			/** The present ring: frame N is recorded into slot N % 3, and the window pastes the slot
+			 * the render side last reported through Commit() - which is frame N-1 once the executor
+			 * has caught up, and frame N-2 if it has not. So the pasted texture is never the one
+			 * being drawn, and the window never waits for the render thread: it shows the newest
+			 * frame that is known to be finished and keeps the previous one otherwise (a swap
+			 * chain's dequeue, without the fence). One target could not do this: the paste read a
 			 * texture the executor was still writing. */
 			static constexpr uint32_t kPresentSlotCount = 3;
-			/** How many frames behind the window presents. The demo presents two frames back
-			 * (slot = (submitted - 2) % 3); one is enough with three slots and halves the visible
-			 * latency. */
-			static constexpr uint64_t kPresentLatencyFrames = 1;
-			std::mutex mMutex;
-			std::condition_variable mCond;
-			uint32_t mDriverSlot = 0;    // 驱动线程的帧序号
-			uint64_t mSubmittedFrames = 0;      // 已提交给 Driver的帧数
+			/** The slot of the last frame whose batch has run; written by the render side. */
+			std::atomic<uint32_t> mPresentedSlot{ 0 };
+			uint64_t mSubmittedFrames = 0;      // 已提交给 Driver的帧数（只有录制侧读写）
 			std::array<std::unique_ptr<::Rendering::HAL::Framebuffer>, kPresentSlotCount> m_presentTargets;
 
-			/** The target holding the frame the window should paste. */
+			/** The target holding the newest frame known to be finished. */
 			::Rendering::HAL::Framebuffer& PresentedTarget();
 			std::unique_ptr<::Core::Rendering::SceneRenderer> m_renderer;
 			int mWidth = 1;

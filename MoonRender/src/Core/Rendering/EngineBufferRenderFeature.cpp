@@ -194,10 +194,10 @@ void Core::Rendering::EngineBufferRenderFeature::OnBeginFrame(const ::Rendering:
 
 	m_perViewSet.SetBuffer(::Rendering::Settings::kEngineUBOBinding,
 		::Rendering::Data::Descriptor::BufferType::Uniform,
-		m_engineBuffer->GetID(), 0, static_cast<uint32_t>(m_engineBuffer->GetSize()));
+		m_engineBuffer->GetHandle(), 0, static_cast<uint32_t>(m_engineBuffer->GetSize()));
 	m_perViewSet.SetBuffer(::Rendering::Settings::kReflectionUBOBinding,
 		::Rendering::Data::Descriptor::BufferType::Uniform,
-		m_reflectionBuffer->GetID(), 0, static_cast<uint32_t>(m_reflectionBuffer->GetSize()));
+		m_reflectionBuffer->GetHandle(), 0, static_cast<uint32_t>(m_reflectionBuffer->GetSize()));
 
 }
 
@@ -230,7 +230,7 @@ void Core::Rendering::EngineBufferRenderFeature::OnBeforeDraw(::Rendering::Data:
 		auto& pool = ::Rendering::Data::UniformBufferPool::Get();
 		pool.Write(m_objectSlice, &object);
 		m_perRenderableSet.SetBuffer(::Rendering::Settings::kObjectUBOBinding,
-			::Rendering::Data::Descriptor::BufferType::Uniform, pool.GetBufferId(),
+			::Rendering::Data::Descriptor::BufferType::Uniform, pool.GetHandle(),
 			m_objectSlice.offset, m_objectSlice.size);
 	}
 }

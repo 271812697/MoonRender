@@ -162,9 +162,10 @@ namespace Rendering::Context
 		/** Declares a program's descriptor slots to GL, on the side that owns the context. */
 		void DeclareProgramBindings(::Rendering::Backend::DeclareProgramBindingsRequest p_request);
 
-		/** Writes bytes into a GL buffer on the side that owns the context. The data is copied into
-		 * the command, so it does not have to outlive this call (Filament's updateBufferObject). */
-		void UpdateBufferRange(uint32_t p_bufferId, uint32_t p_offset, const void* p_data, uint32_t p_size);
+		/** Writes bytes into a buffer on the side that owns the context. The buffer is named by its
+		 * handle, because its GL name does not exist yet on this side; the data is copied into the
+		 * command, so it does not have to outlive this call (Filament's updateBufferObject). */
+		void UpdateBufferRange(uint32_t p_bufferHandleId, uint32_t p_offset, const void* p_data, uint32_t p_size);
 
 		/** Binds one descriptor - a buffer range or a texture - as a command (see
 		 * Backend::BindDescriptorRequest). */

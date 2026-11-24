@@ -130,19 +130,13 @@ namespace Core::Rendering::FramebufferUtil
 		bool p_useStencil,
 		bool p_useMultiSample)
 	{
-		// Setup is a driver command and nothing else (Filament's createRenderTargetR): the target's
-		// attachments are made and attached on the side that owns the context. Without a module
-		// there is no such side, and building the target here would produce a name with no
-		// attachments - so it is reported instead of half-done.
-		::Rendering::Context::Driver* const driver = ::Rendering::HAL::CurrentDriver();
-		if (driver == nullptr)
-		{
-			std::fprintf(stderr, "[fbo] SetupFramebuffer(%s) without a render module\n",
-				p_framebuffer.GetDebugName().c_str());
-			std::fflush(stderr);
-			return;
-		}
-		driver->SetupFramebuffer(p_framebuffer, p_textureDesc, p_useDepth, p_useStencil, p_useMultiSample);
+		// The target is built on *this* side, one recorded command per step: the colour texture and
+		// the renderbuffer exist here as front-end objects (handles), the attach commands name those
+		// handles, and the executor only creates the GL names. That is Filament's split (the front
+		// end owns the HwTexture handles, the driver makes the objects) and it is what keeps the
+		// target's attachment list readable here - a pass that samples its own target asks for it at
+		// record time, long before the executor has run anything.
+		SetupFramebuffer(p_framebuffer, p_textureDesc, p_useDepth, p_useStencil, p_useMultiSample);
 	}
 
 	void SetupFramebufferWithDriver(
@@ -154,14 +148,6 @@ namespace Core::Rendering::FramebufferUtil
 		bool p_useMipMaps,
 		bool p_useMultiSample)
 	{
-		::Rendering::Context::Driver* const driver = ::Rendering::HAL::CurrentDriver();
-		if (driver == nullptr)
-		{
-			std::fprintf(stderr, "[fbo] SetupFramebuffer(%s) without a render module\n",
-				p_framebuffer.GetDebugName().c_str());
-			std::fflush(stderr);
-			return;
-		}
-		driver->SetupFramebuffer(p_framebuffer, p_width, p_height, p_useDepth, p_useStencil, p_useMipMaps, p_useMultiSample);
+		SetupFramebuffer(p_framebuffer, p_width, p_height, p_useDepth, p_useStencil, p_useMipMaps, p_useMultiSample);
 	}
 }

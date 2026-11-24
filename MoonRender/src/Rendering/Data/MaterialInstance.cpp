@@ -658,7 +658,7 @@ void Rendering::Data::MaterialInstance::EnsureDescriptorSet() const
 			const DescriptorSetLayout::Binding* uniform =
 				definition->Layout().Find("MaterialParams");
 			set.SetBuffer(uniform != nullptr ? uniform->binding : 0,
-				Descriptor::BufferType::Uniform, pool.GetBufferId(),
+				Descriptor::BufferType::Uniform, pool.GetHandle(),
 				m_uniformSlice.offset, m_uniformSlice.size);
 		}
 	}
@@ -774,13 +774,13 @@ void Rendering::Data::MaterialInstance::UploadParameterBlock(
 	// across uploads; rewriting them here on every upload was redundant.
 	for (const MaterialDefinition::SamplerField& field : definition->SamplerFields())
 	{
-		// Late binding: a sampler that was given an asset is resolved to its backend object *here*,
-		// at upload time, through the front-end handle - not to whatever pointer happened to exist
-		// when the property was set. That is the prerequisite for the backend object being owned by
-		// the side that owns the context (see docs/RenderThreadPlan.md §7).
+		// A sampler that names an asset is already in the descriptor: the asset's handle is what
+		// travels, and the executor resolves it to the backend object when it binds the set
+		// (Filament's descriptor set holds the handle). Resolving the pointer here would need the
+		// backend object on the recording side, which does not exist yet - creation is a command.
 		if (Rendering::Resources::Texture* asset = m_descriptorSet.GetTextureAsset(field.binding))
 		{
-			m_descriptorSet.SetTexture(field.binding, &asset->GetTexture(), asset);
+			(void)asset;
 			continue;
 		}
 
@@ -1018,8 +1018,10 @@ void Rendering::Data::MaterialInstance::SetProperty(const std::string p_name, co
 			}
 			else if (const auto* value = std::get_if<Rendering::Resources::Texture*>(&p_value))
 			{
+				// The asset is named by its handle: its HAL object is created by a command on the
+				// executor, so asking for it here would assert (Filament stores the handle in the
+				// descriptor and the driver resolves it).
 				asset = *value;
-				handle = asset != nullptr ? &asset->GetTexture() : nullptr;
 			}
 			m_descriptorSet.SetTexture(parameter->binding, handle, asset);
 		}

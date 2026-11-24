@@ -85,11 +85,17 @@ Editor::Rendering::GridRenderPass::GridRenderPass(::Rendering::Core::CompositeRe
 	depthTexture->SetBorderColor(Maths::FVector4::One);
 	m_mirroFbo.Attach<::Rendering::HAL::Texture>(renderTexture, ::Rendering::Settings::EFramebufferAttachment::COLOR);
 	m_mirroFbo.Attach<::Rendering::HAL::Texture>(depthTexture, ::Rendering::Settings::EFramebufferAttachment::DEPTH);
-	// The shadow pair's attachments are made and attached on the side that owns the context, like
-	// every other target (the manual Attach path built them on this thread, which produced names
-	// with no attachments there - see the [fbo] attach trace).
+	// The shadow pair's colour textures are created here, as front-end objects, and attached by
+	// handle: that is what keeps the attachment list readable on this side. A target whose
+	// attachments the executor creates (SetupFramebufferWithDriver) has an empty list here until
+	// the command runs, and this pass samples its own target's colour (Filament's shape is the
+	// same: the pass owns the textures and names them by handle).
 	for (auto& mirroShadowFbo : m_mirroShadowFbo.GetFramebuffers()) {
-		::Core::Rendering::FramebufferUtil::SetupFramebufferWithDriver(mirroShadowFbo, shadowDesc, false, false, false);
+		auto shadowColor = std::make_shared<::Rendering::HAL::Texture>(
+			::Rendering::Settings::ETextureType::TEXTURE_2D, "mirrorShadow");
+		shadowColor->Allocate(shadowDesc);
+		mirroShadowFbo.Attach<::Rendering::HAL::Texture>(
+			shadowColor, ::Rendering::Settings::EFramebufferAttachment::COLOR);
 	}
 
 }

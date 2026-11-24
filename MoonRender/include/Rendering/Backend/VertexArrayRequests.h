@@ -23,12 +23,14 @@ namespace Rendering::Backend
 	 * cannot touch GL: glVertexAttribPointer/glEnableVertexAttribArray need the context, and with a
 	 * render thread that context belongs to the executor. The attributes travel on the heap, like
 	 * the upload payloads, so the command does not depend on the caller's memory.
-	 */
+	 *
+	 * The array and its two buffers travel as handles: their GL names are made by the create
+	 * commands, which run later in the same batch, and are resolved here when this runs. */
 	struct SetVertexArrayLayoutRequest
 	{
-		uint32_t vertexArrayId = 0;
-		uint32_t vertexBufferId = 0;
-		uint32_t indexBufferId = 0;
+		uint32_t vertexArrayHandleId = 0;
+		uint32_t vertexBufferHandleId = 0;
+		uint32_t indexBufferHandleId = 0;
 		std::shared_ptr<const std::vector<VertexLayoutAttribute>> attributes;
 	};
 }

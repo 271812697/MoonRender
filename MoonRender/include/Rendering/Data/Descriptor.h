@@ -11,6 +11,11 @@ namespace Rendering::Resources
 	class Texture;
 }
 
+namespace Rendering::Backend
+{
+	struct HwBufferObject;
+}
+
 /** One slot of a DescriptorSet: the GPU resource a material binds at a binding point.
  *
  * A descriptor is either a buffer range (uniform buffer or shader-storage buffer: GL buffer
@@ -35,9 +40,13 @@ namespace Rendering::Data
 			ShaderStorage = 1,
 		};
 
+		/** A buffer range, split the way the texture below is: the front end knows the *handle*,
+		 * the executor knows the GL name it stands for (Filament's DescriptorSet::buffer). Storing
+		 * a GL name here would pin the descriptor to a name that does not exist yet at record
+		 * time, because creation is asynchronous. */
 		struct BufferInfo
 		{
-			uint32_t bufferId = 0;   // GL buffer name
+			Rendering::Backend::ResourceHandle<Rendering::Backend::HwBufferObject> handle;
 			uint32_t offset = 0;
 			uint32_t size = 0;
 			BufferType type = BufferType::Uniform;
@@ -65,7 +74,7 @@ namespace Rendering::Data
 
 		static Descriptor MakeBuffer(
 			BufferType p_type,
-			uint32_t p_bufferId,
+			Rendering::Backend::ResourceHandle<Rendering::Backend::HwBufferObject> p_buffer,
 			uint32_t p_offset,
 			uint32_t p_size);
 		static Descriptor MakeTexture(

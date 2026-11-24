@@ -20,7 +20,7 @@ namespace Rendering::Data
 	bool DescriptorSet::SetBuffer(
 		uint32_t p_binding,
 		Descriptor::BufferType p_type,
-		uint32_t p_bufferId,
+		Rendering::Backend::ResourceHandle<Rendering::Backend::HwBufferObject> p_buffer,
 		uint32_t p_offset,
 		uint32_t p_size)
 	{
@@ -36,7 +36,7 @@ namespace Rendering::Data
 			m_descriptors.resize(p_binding + 1);
 		}
 		m_descriptors[p_binding] =
-			Descriptor::MakeBuffer(p_type, p_bufferId, p_offset, p_size);
+			Descriptor::MakeBuffer(p_type, p_buffer, p_offset, p_size);
 		return true;
 	}
 

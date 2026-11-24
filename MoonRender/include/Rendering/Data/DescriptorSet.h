@@ -27,7 +27,7 @@ namespace Rendering::Data
 		bool SetBuffer(
 			uint32_t p_binding,
 			Descriptor::BufferType p_type,
-			uint32_t p_bufferId,
+			Rendering::Backend::ResourceHandle<Rendering::Backend::HwBufferObject> p_buffer,
 			uint32_t p_offset,
 			uint32_t p_size);
 		bool SetTexture(

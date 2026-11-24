@@ -2253,3 +2253,49 @@ driver 时已经是空操作 —— 这张表已经什么都不做。
 **验证**：`1800×901`（窗口随桌面尺寸变了，和旧基准不是同一尺寸，不能直接比历史图）。单线程 vs
 渲染线程 **0.000% 逐像素相同**；同模式重跑只差 CAD 拓扑红点（双稳态）；无崩溃、`GL_INVALID` 0；
 出图正常（实体面、边线、红点、导航方块都在）。
+
+### 8.74 呈现改成"贴最近完成的一槽"；相机仍不跟手，待查（2026-11-24 上午）
+
+**症状**：8.69 之后拖拽旋转仍然"不跟手"（跟手的标准：鼠标动了，画面在同一帧或下一帧就转起来，且 GUI 不被渲染拖住）。
+
+**这一轮的定位**：稳态下 `mDriverSlot == mSubmittedFrames - 1`，而画槽用 `mDriverSlot % 3`、贴槽用 `(mSubmittedFrames - 1) % 3` —— 两者恒等，也就是"往正在被贴的那张纹理里画"。跨上下文读写同一张纹理时驱动只能在 paste 处隐式同步，再叠加 GUI 线程里那条 `WaitForPresentedFrame()`（等渲染线程把要贴的那一帧执行完），GUI 与渲染线程完全串行，每帧 GUI 都被卡掉一个渲染帧的时间。Debug 下渲染慢 3~5 倍，所以特别明显。
+
+**做法（无 fence，呈现不等待）**：
+
+- 画槽改成 `mSubmittedFrames % 3`（`AView.cpp`），和贴的槽永不重合；
+- 帧的最后一条命令（原来的 `Commit` 计数）改成 `Commit(slot)`：执行时把 `mPresentedSlot` 置为该槽（atomic，release/acquire），语义是"这一槽的命令都执行完了"；
+- 删掉 `WaitForPresentedFrame` / `mCond` / `mDriverSlot`；`PresentedTarget()` 改为读 `mPresentedSlot`：渲染线程还没登记这一帧就继续贴上一槽（最多晚一帧），**GUI 线程任何时候都不阻塞**；
+- 单线程模式在 `AView::Render` 末尾自己 `Execute()`（与 Filament `flush()` 里的 `if constexpr (!UTILS_HAS_THREADING) execute();` 同形），否则没有消费点、而且旧实现会死等。
+
+**关于 fence 的两次更正**（之前写错的地方，留档）：
+
+1. §8.69 里"照 Qt/Filament demo 的 `PlatformGlfwGL`：`RING_COUNT = 3`、`waitFrameCompleted`、`getTextureId`" —— **这个出处不存在**。`waitFrameCompleted` 与 `PlatformGlfwGL` 在 Filament 源码和网上都搜不到，是凭印象写的；§8.69 那段引用作废，原文保留以便对照。
+2. Filament 的帧循环里**没有等 GPU 的调用点**：
+   - `filament/src/details/Engine.cpp`：`FEngine::loop()` 是 `while (true) { if (!execute()) break; }`；`execute()` 只做 `mCommandBufferQueue.waitForCommands()` → `driver.execute()` → `releaseBuffer()`；`FRenderer::endFrame()` 最后也只是 `engine.flush()`。
+   - fence 只出现在两处：`FrameSkipper`（`endFrame` 里 `driver.createFence()`，`beginFrame` 里 `driver.getFenceStatus()` —— **非阻塞**，GPU 落后就返回 false 跳帧）和 `flushAndWait`（`getDriverApi().finish()` + `FFence::wait()`，关机/读回用）。
+   - `FFence` 本身是**命令流进度信号**：构造时 `driverApi.queueCommand([fs]{ pEngine->signalFence(*fs, SIGNALED); })`，`wait()` 是主线程在条件变量上等；不含 `glFenceSync`。GL 后端也没有"GPU 画完"的回调（`SwapChain::setFrameCompletedCallback` 只在 Metal 实现）。
+   - 因此"呈现前加 fence"这条建议作废。跨上下文贴纹理的正确性靠"画槽 ≠ 贴槽"，以及驱动对共享纹理的串行化。
+
+**验证**：
+
+- Release，`1800×901`，单线程 vs 渲染线程：`compare-dots.py` → `IDENTICAL`，max delta 0（`Build/refactor-shots/wV-release-single.png` / `wV-release-thread.png`）；
+- Debug 线程模式：正常出图，22s 截图，26s 自行退出（不再需要手动 kill）；
+- GUI 不再等渲染线程（结构性：`AView::Render` 里已无等待点）。
+
+**仍未解决：相机还是不跟手**（用户实测）。下一步排查方向，按怀疑度排序：
+
+1. **paste 自己的隐式同步**：`mPresentedSlot` 只保证"命令执行完"，不保证 GPU 画完；驱动在 paste 读这张纹理时仍可能等 GPU。测法：paste 前后夹 `glFinish`/计时，或 `MOON_FRAME_TIMING` 打印 paste 耗时。
+2. **`Flush()` 的背压**：ring 满时 `CommandBufferQueue::Flush()` 阻塞录制侧（8 MB ring ≈ 2~3 帧命令）。Debug 下命令多，容易触发。
+3. **Debug 构建本身**：渲染线程一帧可能 100 ms 以上，"晚一帧"在 Debug 下必然可感知；先只用 Release 评估跟手。
+4. **GUI 每帧的其它工作**：`viewportframe` 里 3 个 present 槽 + 两个主目标每帧都 `ResizeFramebuffer`；`FlushDocumentRead` / `TreeViewSync` / `ReadPassSettingsOnce` 都在 GUI 帧里。
+5. **2D overlay 还缺着**：`Im2DRender::EndFrame` 开头 `m_programName == 0` 就整帧 return（程序名是执行期才有的东西），视图立方体/图标因此不出现；评估跟手前先恢复它，避免把"没画面"误判成"不跟手"。
+6. 量化工具（待加）：`MOON_FRAME_TIMING` 每帧打印 `record / flush / paste / interval`，以及渲染线程每帧耗时。
+
+**本轮顺带修掉的崩溃链**（细节见各文件注释）：
+
+- `GLBuffer::IsValid()` 不再要求 GL 名（只查 handle + type）；`UpdateBuffer` / `SetVertexArrayLayout` / `BindDescriptor` 三条命令改成携带 handle，执行期解析；
+- 材质纹理不在录制期 `asset->GetTexture()`（描述符只存 handle/asset）；
+- `FramebufferUtil::SetupFramebufferWithDriver` 改在录制侧建目标（前端纹理 + 按 handle 记录 Attach），否则 `GetAttachment` 在录制期是空的（Grid pass 的 `bad_optional_access`）；
+- `Driver::ResizeFramebuffer` 在前端立即更新尺寸（否则 `GetSize()` 整帧还是 1×1，Bloom 的 `clamp` 断言）；
+- `RenderModuleHost::Loop()` 改用已有的 `Driver::WaitAndExecute()`：阻塞等批次 + 能看见 `RequestExit()`（修掉空转和退出挂死）；
+- `Moon/main.cpp` 增加未捕获 C++ 异常与致命错误的符号化栈打印，`CommandStream.h` 在命令体抛异常时打印命令名（定位上述崩溃用的）。

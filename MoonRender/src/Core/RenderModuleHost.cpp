@@ -107,42 +107,6 @@ namespace Core
 		return m_context != nullptr;
 	}
 
-	bool RenderModuleHost::MakeCurrent()
-	{
-		if (!IsReady())
-		{
-			return false;
-		}
-
-		// On the threaded path the context belongs to the render thread and never becomes current
-		// here: a QOpenGLContext cannot be made current in another thread at all (Qt aborts the
-		// process). The caller's work is recording, which needs no context.
-		if (m_threaded)
-		{
-			return true;
-		}
-
-		// Without a context of its own the module renders on the caller's, which has it current
-		// already when it draws.
-		if (m_contextHost != nullptr)
-		{
-			return m_contextHost->MakeCurrent();
-		}
-		return m_platformContextHost != nullptr ? m_platformContextHost->MakeCurrent() : true;
-	}
-
-	void RenderModuleHost::DoneCurrent()
-	{
-		if (m_threaded)
-		{
-			return;
-		}
-
-		if (m_contextHost != nullptr)
-		{
-			m_contextHost->DoneCurrent();
-		}
-	}
 	void RenderModuleHost::Flush() {
 		if (m_context == nullptr || m_context->driver == nullptr)
 		{
@@ -320,9 +284,11 @@ void Core::RenderModuleHost::Loop()
 		std::fflush(stderr);
 	}
 
-	while (true)
+	// Filament's FEngine::loop: wait for a batch, run it, repeat - and leave the loop when the host
+	// asks it to stop (FrameHost::~RenderModuleHost does, before joining this thread). Spinning on
+	// an empty queue burned a core, and never noticing the exit request made shutdown hang.
+	while (m_context->driver->Execute())
 	{
-		m_context->driver->Execute();
 	}
 
 	// Teardown lands on this thread too: the Context owns the driver, and the driver owns GL

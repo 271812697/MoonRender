@@ -95,10 +95,12 @@ namespace Core
 		 * views can be created on the module's context. */
 		bool IsReady() const;
 
-		/** Makes the module's context current, when it has one. False means the module is not
-		 * built and nothing can be rendered. */
-		bool MakeCurrent();
-		void DoneCurrent();
+		/** There is deliberately no MakeCurrent()/DoneCurrent() here: the module's context belongs
+		 * to the executor, which activates it with a recorded command (Driver::MakeCurrent, the
+		 * first command of every frame - filament's DriverApi::makeCurrent). Recording needs no
+		 * context, and a caller that made it current would take it away from the executor
+		 * mid-batch. Callers that still do immediate GL (the previews' readback) bind the context
+		 * host themselves and are on the list to become commands. */
 
 		/** Filament's Engine::execute - this host is the engine, so the loop calls it here.
 		 *

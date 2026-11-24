@@ -106,9 +106,12 @@ void Rendering::HAL::GLBuffer::Unbind() const
 template<>
 bool Rendering::HAL::GLBuffer::IsValid() const
 {
+	// Only what this side owns: the handle that names the object and the kind of buffer it is.
+	// Whether the backend object has its GL name yet is the executor's business - it is made by a
+	// command, so on this side the name may legitimately not exist (Filament's BufferObject has the
+	// same split: the handle is the front end's, gl.id the backend's).
 	return
 		static_cast<bool>(m_buffer.handle) &&
-		::Rendering::Backend::Records::BufferName(m_buffer.handle) != 0 &&
 		m_buffer.type != Settings::EBufferType::UNKNOWN;
 }
 

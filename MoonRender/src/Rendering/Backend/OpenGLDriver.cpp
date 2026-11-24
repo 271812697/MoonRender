@@ -386,17 +386,28 @@ namespace Rendering::Backend
 
 	void OpenGLDriver::SetVertexArrayLayout(const ::Rendering::Backend::SetVertexArrayLayoutRequest& p_request)
 	{
-		if (p_request.vertexArrayId == 0 || p_request.vertexBufferId == 0 || p_request.attributes == nullptr)
+		// The array and its buffers are named by handle; the create commands that made their GL
+		// names ran earlier in this batch (Filament's setVertexArrayObject).
+		const uint32_t array = ::Rendering::Backend::Records::VertexArrayName(
+			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwVertexArray>{
+				p_request.vertexArrayHandleId });
+		const uint32_t vertexBuffer = ::Rendering::Backend::Records::BufferName(
+			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwBufferObject>{
+				p_request.vertexBufferHandleId });
+		if (array == 0 || vertexBuffer == 0 || p_request.attributes == nullptr)
 		{
 			return;
 		}
+		const uint32_t indexBuffer = ::Rendering::Backend::Records::BufferName(
+			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwBufferObject>{
+				p_request.indexBufferHandleId });
 
-		glBindVertexArray(p_request.vertexArrayId);
-		if (p_request.indexBufferId != 0)
+		glBindVertexArray(array);
+		if (indexBuffer != 0)
 		{
-			glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, p_request.indexBufferId);
+			glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBuffer);
 		}
-		glBindBuffer(GL_ARRAY_BUFFER, p_request.vertexBufferId);
+		glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer);
 
 		const std::vector<::Rendering::Backend::VertexLayoutAttribute>& attributes = *p_request.attributes;
 		for (uint32_t index = 0; index < static_cast<uint32_t>(attributes.size()); ++index)
@@ -416,29 +427,78 @@ namespace Rendering::Backend
 
 	void OpenGLDriver::UpdateBuffer(const ::Rendering::Backend::UpdateBufferRequest& p_request)
 	{
-		if (p_request.bufferId == 0 || p_request.data == nullptr || p_request.size == 0)
+		if (p_request.handleId == 0 || p_request.data == nullptr || p_request.size == 0)
 		{
 			return;
 		}
-		glNamedBufferSubData(p_request.bufferId, p_request.offset, p_request.size, p_request.data->data());
+		// The name belongs to the create command, which ran earlier in this batch.
+		const uint32_t name = ::Rendering::Backend::Records::BufferName(
+			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwBufferObject>{
+				p_request.handleId });
+		if (name == 0)
+		{
+			return;
+		}
+		glNamedBufferSubData(name, p_request.offset, p_request.size, p_request.data->data());
 	}
 
 	void OpenGLDriver::BindDescriptor(const ::Rendering::Backend::BindDescriptorRequest& p_request)
 	{
 		using Kind = ::Rendering::Backend::BindDescriptorRequest::Kind;
+
+		// A handle names the front end's object, whose GL name only exists once its create command
+		// has run; a backend-only resource (render-target attachment, engine fallback) has no
+		// handle and carries its name directly.
+		const auto resolveBuffer = [&p_request]() -> uint32_t
+		{
+			if (p_request.handleId != 0)
+			{
+				return ::Rendering::Backend::Records::BufferName(
+					::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwBufferObject>{
+						p_request.handleId });
+			}
+			return p_request.objectId;
+		};
+		const auto resolveTexture = [&p_request]() -> uint32_t
+		{
+			if (p_request.handleId != 0)
+			{
+				return ::Rendering::Backend::Records::TextureName(p_request.handleId);
+			}
+			return p_request.objectId;
+		};
+
 		switch (p_request.kind)
 		{
 		case Kind::UniformBuffer:
-			glBindBufferRange(GL_UNIFORM_BUFFER, p_request.slot, p_request.objectId,
-				p_request.offset, p_request.size);
+		{
+			const uint32_t name = resolveBuffer();
+			if (name != 0)
+			{
+				glBindBufferRange(GL_UNIFORM_BUFFER, p_request.slot, name,
+					p_request.offset, p_request.size);
+			}
 			break;
+		}
 		case Kind::ShaderStorageBuffer:
-			glBindBufferRange(GL_SHADER_STORAGE_BUFFER, p_request.slot, p_request.objectId,
-				p_request.offset, p_request.size);
+		{
+			const uint32_t name = resolveBuffer();
+			if (name != 0)
+			{
+				glBindBufferRange(GL_SHADER_STORAGE_BUFFER, p_request.slot, name,
+					p_request.offset, p_request.size);
+			}
 			break;
+		}
 		case Kind::Texture:
-			glBindTextureUnit(p_request.slot, p_request.objectId);
+		{
+			const uint32_t name = resolveTexture();
+			if (name != 0)
+			{
+				glBindTextureUnit(p_request.slot, name);
+			}
 			break;
+		}
 		}
 	}
 

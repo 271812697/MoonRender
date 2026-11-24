@@ -40,8 +40,9 @@ namespace Rendering::Data
 		Slice Acquire(uint32_t p_size);
 		void Release(Slice p_slice);
 
-		/** The GL name of the pool's buffer object (0 before the first acquisition). */
-		uint32_t GetBufferId() const;
+		/** The handle of the pool's buffer object: what a descriptor stores, and what the executor
+		 * resolves to the GL name when it binds the range (0 before the first acquisition). */
+		Rendering::Backend::ResourceHandle<Rendering::Backend::HwBufferObject> GetHandle() const;
 
 		/** Copies p_data into the slice and uploads that range. Needs the GL context current. */
 		void Write(Slice p_slice, const void* p_data);

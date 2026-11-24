@@ -1,11 +1,7 @@
-﻿
+
 #include <Rendering/Context/Driver.h>
 
 #include <cstdio>
-#include <cstdlib>
-#include <cstring>
-
-
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
@@ -137,9 +133,9 @@ void Rendering::Context::Driver::DeclareProgramBindings(::Rendering::Backend::De
 }
 
 void Rendering::Context::Driver::UpdateBufferRange(
-	uint32_t p_bufferId, uint32_t p_offset, const void* p_data, uint32_t p_size)
+	uint32_t p_bufferHandleId, uint32_t p_offset, const void* p_data, uint32_t p_size)
 {
-	if (p_bufferId == 0 || p_data == nullptr || p_size == 0)
+	if (p_bufferHandleId == 0 || p_data == nullptr || p_size == 0)
 	{
 		return;
 	}
@@ -149,7 +145,7 @@ void Rendering::Context::Driver::UpdateBufferRange(
 		static int calls = 0;
 		if (++calls < 40 || (calls % 500) == 0)
 		{
-			std::fprintf(stderr, "[buf] #%d id=%u off=%u size=%u\n", calls, p_bufferId, p_offset, p_size);
+			std::fprintf(stderr, "[buf] #%d handle=%u off=%u size=%u\n", calls, p_bufferHandleId, p_offset, p_size);
 			std::fflush(stderr);
 		}
 	}
@@ -159,7 +155,7 @@ void Rendering::Context::Driver::UpdateBufferRange(
 	std::memcpy(owned->data(), p_data, p_size);
 
 	::Rendering::Backend::UpdateBufferRequest request;
-	request.bufferId = p_bufferId;
+	request.handleId = p_bufferHandleId;
 	request.offset = p_offset;
 	request.size = p_size;
 	request.data = std::move(owned);
@@ -207,11 +203,12 @@ void Rendering::Context::Driver::SetupFramebuffer(HAL::Framebuffer& p_target, co
 
 void Rendering::Context::Driver::ResizeFramebuffer(HAL::Framebuffer& p_target, uint16_t p_width, uint16_t p_height)
 {
-	::Rendering::Backend::ResizeFramebufferRequest request;
-	request.target = &p_target;
-	request.width = p_width;
-	request.height = p_height;
-	m_commandStream->ResizeFramebuffer(request);
+	// The size is front-end state: it is the attachment descriptors, and GetSize() answers from
+	// them. Resizing here records the GL storage re-specs for the attachments (their own Resize
+	// does that), so this side knows the new size immediately - deferring it to the executor left
+	// GetSize() reporting the old size for the rest of the frame, and a blit then sized its
+	// destination from a 1x1 target (the bloom pass then clamped 0..0).
+	p_target.Resize(p_width, p_height);
 }
 
 void Rendering::Context::Driver::CopyFramebufferColor(
@@ -308,6 +305,14 @@ void Rendering::Context::Driver::ExecuteAll()
 	{
 		return;
 	}
+	// The executor activates the module's context for the batch it is about to run: a batch can
+	// predate the frame's own MakeCurrent command (everything recorded while the module and its
+	// views were built), and in the single-threaded configuration these run on a thread whose
+	// context Qt controls. On the driver thread this is a no-op.
+	if (m_openGLDriver != nullptr)
+	{
+		m_openGLDriver->MakeCurrent();
+	}
 	for (const Rendering::Backend::CircularBuffer::Range& batch : batches)
 	{
 		m_openGLDriver->Execute(batch.tail, batch.head);
@@ -336,31 +341,23 @@ bool Rendering::Context::Driver::IsDriverThread() const
 
 bool Rendering::Context::Driver::WaitAndExecute()
 {
-	// The render thread's body (Filament's FEngine::execute): block until a batch is published, run
-	// it, give the ring back. False means the queue was asked to exit.
+	Rendering::Backend::DeferredDeleter::Flush();
 	const std::vector<Rendering::Backend::CircularBuffer::Range> batches = m_commandQueue->WaitForCommands();
 	if (batches.empty())
 	{
 		return false;
 	}
-
-	Rendering::Backend::DeferredDeleter::Flush();
+	// Same contract as ExecuteAll(): the context is made current here, on the side that runs the
+	// batch, so a batch recorded before any MakeCurrent command still has one.
+	if (m_openGLDriver != nullptr)
+	{
+		m_openGLDriver->MakeCurrent();
+	}
 	for (const Rendering::Backend::CircularBuffer::Range& batch : batches)
 	{
 		m_openGLDriver->Execute(batch.tail, batch.head);
+		m_commandQueue->ReleaseBuffer(batch);
 	}
-
-	
-
-	// The frame is drawn now: say so, so the consumer can present it (frame N-1 while N is being
-	// drawn, exactly as the Qt/Filament demo does with its swap chain ring).
-	{
-		std::lock_guard lock(m_frameMutex);
-		++m_frameCompleted;
-	}
-	m_frameCondition.notify_all();
-
-	m_commandQueue->ReleaseBuffers(batches);
 	return true;
 }
 
@@ -383,9 +380,6 @@ uint64_t Rendering::Context::Driver::GetCompletedFrameCount() const
 
 void Rendering::Context::Driver::MakeCurrent()
 {
-	// The frame's first command, exactly as Filament issues it (FRenderer::beginFrame ->
-	// FSwapChain::makeCurrent -> driver.makeCurrent): the executor makes the module's context
-	// current for the batch it is about to run.
 	m_commandStream->MakeCurrent();
 }
 
@@ -397,10 +391,16 @@ void Rendering::Context::Driver::RequestExit()
 bool Rendering::Context::Driver::Execute()
 {
 	Rendering::Backend::DeferredDeleter::Flush();
-	const std::vector<Rendering::Backend::CircularBuffer::Range> batches = m_commandQueue->TakeCommands();
+	const std::vector<Rendering::Backend::CircularBuffer::Range> batches = m_commandQueue->WaitForCommands();
 	if (batches.empty())
 	{
 		return false;
+	}
+	// Same contract as ExecuteAll(): the context is made current here, on the side that runs the
+	// batch, so a batch recorded before any MakeCurrent command still has one.
+	if (m_openGLDriver != nullptr)
+	{
+		m_openGLDriver->MakeCurrent();
 	}
 	for (const Rendering::Backend::CircularBuffer::Range& batch : batches)
 	{

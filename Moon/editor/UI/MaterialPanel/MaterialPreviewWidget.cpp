@@ -36,18 +36,12 @@ MOON::MaterialPreviewWidget::MaterialPreviewWidget(QWidget* p_parent) :
 
 MOON::MaterialPreviewWidget::~MaterialPreviewWidget()
 {
-	// The view and the material own GL objects of the module's context; destroying them needs
-	// that context current. The view goes first: its scene points at the material.
-	auto& editorContext = ::Core::Global::ServiceLocator::Get<::Editor::Core::Context>();
-	auto* host = editorContext.driver != nullptr ? editorContext.driver->GetContextHost() : nullptr;
-	const bool moduleCurrent = host != nullptr && host->MakeCurrent();
+	// The view and the material release through recorded destroy commands, so taking them down
+	// needs no context - and no module: this panel can outlive it at shutdown. The view goes
+	// first: its scene points at the material.
 	delete m_view;
 	m_view = nullptr;
 	m_material.reset();
-	if (moduleCurrent)
-	{
-		host->DoneCurrent();
-	}
 
 	// The paster's read framebuffer belongs to this widget's context, so it is deleted while
 	// that context is current; the member's destructor then has nothing left to release.

@@ -62,8 +62,10 @@ namespace MOON
 			return;
 		}
 
-		// The view owns GL objects of the module's context; destroying it needs that context.
-		ModuleContextScope context;
+		// Destroying the view only records: its HAL objects release through the destroy commands,
+		// which the executor runs with the module's context current. So this needs no context, and
+		// it must not ask the module for one - by the time the editor tears its panels down the
+		// module can already be gone (it was: this used to dereference a dead driver here).
 		m_view.reset();
 	}
 

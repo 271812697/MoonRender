@@ -1,5 +1,7 @@
 #pragma once
 #include <cstddef>
+#include <cstdio>
+#include <exception>
 #include <cstdint>
 #include <functional>
 #include <tuple>
@@ -116,7 +118,26 @@ namespace Rendering::Backend
 			{
 				Command* self = static_cast<Command*>(p_command);
 				*p_next = static_cast<intptr_t>(CommandBase::Align(sizeof(Command)));
-				Call(p_driver, self->m_arguments, std::index_sequence_for<ARGS...>{});
+				// A command body must not throw: it runs on the executor, where an exception with no
+				// handler ends the process with nothing to say (a `noexcept` frame swallows the type).
+				// Name the command on the way out instead (Filament's DEBUG_COMMAND_BEGIN/END has the
+				// same job in debug builds).
+				try
+				{
+					Call(p_driver, self->m_arguments, std::index_sequence_for<ARGS...>{});
+				}
+				catch (const std::exception& p_error)
+				{
+					std::fprintf(stderr, "[cmd] %s threw: %s\n", p_command->GetName(), p_error.what());
+					std::fflush(stderr);
+					std::abort();
+				}
+				catch (...)
+				{
+					std::fprintf(stderr, "[cmd] %s threw a non-std exception\n", p_command->GetName());
+					std::fflush(stderr);
+					std::abort();
+				}
 				// The arguments may own resources; a command lives exactly one batch.
 				self->~Command();
 			}

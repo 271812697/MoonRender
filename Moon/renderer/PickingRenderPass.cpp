@@ -41,9 +41,10 @@ Editor::Rendering::PickingRenderPass::PickingRenderPass(::Rendering::Core::Compo
 	m_actorPickingFramebuffer("ActorPicking")
 {
 
-	// Through the driver: the attachments are GL, and with a render thread they are built on the
-	// side that owns the context (see Driver::SetupFramebuffer).
-	m_renderer.GetDriver().SetupFramebuffer(m_actorPickingFramebuffer, 1u, 1u, true, false, false, false);
+	// Built on this side by recorded commands: the attachments are front-end textures with handles,
+	// which is what lets the pass name its own targets's colour attachment when it reads a pick back.
+	::Core::Rendering::FramebufferUtil::SetupFramebuffer(
+		m_actorPickingFramebuffer, 1u, 1u, true, false, false, false);
 
 	// user picks carries both the id of what is under it and where on that geometry it is. It is a
 	// texture of its own format; its creation and its attach are commands like everything else on

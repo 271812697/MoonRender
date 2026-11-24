@@ -1,7 +1,5 @@
 ﻿#include "viewportframe.h"
 
-#include <QOpenGLContext>
-
 #include "viewportoverlay.h"
 #include "qtinputtranslator.h"
 
@@ -31,14 +29,14 @@ namespace MOON
 		: m_overlay(new ViewportOverlay)
 	{
 		Editor::Core::RenderModuleHost* module = Editor::Core::RenderModuleHost::Instance();
-		// A view owns framebuffers and render targets, and those belong to the context that draws
-		// with them: the scene view is created with the module's context current, and it is taken
-		// down the same way. Without a context of its own the module renders on the widget's,
-		// which its owner has current already (see ViewerWidget).
-		if (module != nullptr && module->IsReady() && module->MakeCurrent())
+		// Creating a view records commands - front-end framebuffers/textures take handles, and the
+		// GL objects behind them are made by the executor - so it needs no context of its own, and
+		// it must not borrow the module's: that one belongs to the executor. The view's first
+		// frame records "activate the context" as its first command (AView::Render ->
+		// Driver::MakeCurrent), which is where filament puts it too (DriverApi::makeCurrent).
+		if (module != nullptr && module->IsReady())
 		{
 			m_view = new Editor::Panels::SceneView("SceneView");
-			module->DoneCurrent();
 		}
 		if (m_view == nullptr)
 		{
@@ -54,16 +52,10 @@ namespace MOON
 			return;
 		}
 
-		// The view's render targets are the module context's objects, so they go with that
-		// context current - and only while the module still exists.
-		Editor::Core::RenderModuleHost* module = Editor::Core::RenderModuleHost::Instance();
-		const bool bound = module != nullptr && module->MakeCurrent();
+		// Taking the view down releases front-end objects, and their HAL destructors record the
+		// destroy commands (the executor deletes the GL objects) - so this needs no context either.
 		delete m_view;
 		m_view = nullptr;
-		if (bound)
-		{
-			module->DoneCurrent();
-		}
 		// The view registered itself as a service; nothing may be left pointing at it.
 		::Core::Global::ServiceLocator::Remove<Editor::Panels::SceneView>();
 	}
@@ -184,6 +176,7 @@ namespace
 }
 	ViewportFrame::Result ViewportFrame::Render()
 	{
+	
 		Result result;
 		Editor::Panels::SceneView* view = m_view;
 		Editor::Core::RenderModuleHost* module = Editor::Core::RenderModuleHost::Instance();
@@ -192,6 +185,7 @@ namespace
 		{
 			return result;
 		}
+		module->GetContext()->driver->MakeCurrent();
 
 		SyncViewSize();
 
@@ -233,10 +227,10 @@ namespace
 			// needs the module's context on this thread and runs in both modes.
 			if (!minimalFrame && !m_gizmoReady)
 			{
-				//m_gizmoReady = true;
-				//MOON::ImRenderer::instance().initGizmoGl();
-				//TraceFrame("initGizmoGl");
-				//Rendering::Backend::DeferredDeleter::SetUploadsDeferrable(true);
+				m_gizmoReady = true;
+				MOON::ImRenderer::instance().initGizmoGl();
+				TraceFrame("initGizmoGl");
+				Rendering::Backend::DeferredDeleter::SetUploadsDeferrable(true);
 			}
 
 			if (!overlayOff)
@@ -295,30 +289,12 @@ namespace
 			}
 		};
 
-		// A GL context belongs to one thread at a time. When the module runs its batches on a
-		// render thread, that thread owns the module's context, and making it current here would
-		// take it away from the executor mid-batch - the GL calls it then issues land on a context
-		// another thread owns, which is a hard crash inside the driver (docs/RenderThreadPlan.md).
-		// The recording side has no GL work of its own in that mode: everything it does is commands.
-		QOpenGLContext* const previousContext = QOpenGLContext::currentContext();
-		const bool threaded = module->IsThreaded();
-		if (!threaded && !module->MakeCurrent())
-		{
-			return result;
-		}
+		// Recording only: no context is made current here in either mode. The module's context
+		// belongs to the executor and is activated by the frame's own first command
+		// (Driver::MakeCurrent). In the single-threaded configuration the frame executes on this
+		// thread inside AView::Render, and the executor activates the context there; the window
+		// rebinds its own context before it pastes (ViewerWidget::paintGL).
 		renderJob();
-		if (threaded)
-		{
-			// Nothing was made current, so there is nothing to put back.
-		}
-		else if (previousContext != nullptr && previousContext->surface() != nullptr)
-		{
-			previousContext->makeCurrent(previousContext->surface());
-		}
-		else
-		{
-			module->DoneCurrent();
-		}
 		// GUI-thread work that the frame asked for: the tree panel is a Qt model and stays here.
 		TreeViewSync::Instance().Flush();
 		ReadPassSettingsOnce();

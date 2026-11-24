@@ -126,20 +126,21 @@ namespace Rendering::HAL::ResourceOps
 			return;
 		}
 
+		if (Rendering::Context::Driver* const driver = CurrentDriver())
+		{
+			// Recorded, not executed: the handle and the bytes travel with the command
+			// (Filament's BufferDescriptor) and the executor resolves the name it was given when
+			// the object was created. Asking for the name here would be 0 - creation is a command
+			// that has not run yet.
+			driver->UpdateBufferRange(p_handle.GetId(), static_cast<uint32_t>(p_offset), p_data, static_cast<uint32_t>(p_size));
+			return;
+		}
+
 		const uint32_t name = Records::BufferName(p_handle);
 		if (name == 0)
 		{
 			return;
 		}
-
-		if (Rendering::Context::Driver* const driver = CurrentDriver())
-		{
-			// Recorded, not executed: the bytes travel with the command (Filament's
-			// BufferDescriptor) and the ring runs it where the context is.
-			driver->UpdateBufferRange(name, static_cast<uint32_t>(p_offset), p_data, static_cast<uint32_t>(p_size));
-			return;
-		}
-
 		glNamedBufferSubData(name, p_offset, p_size, p_data);
 	}
 
@@ -216,9 +217,9 @@ namespace Rendering::HAL::ResourceOps
 		}
 
 		SetVertexArrayLayoutRequest request;
-		request.vertexArrayId = Records::VertexArrayName(p_array);
-		request.vertexBufferId = Records::BufferName(p_vertexBuffer);
-		request.indexBufferId = Records::BufferName(p_indexBuffer);
+		request.vertexArrayHandleId = p_array.GetId();
+		request.vertexBufferHandleId = p_vertexBuffer.GetId();
+		request.indexBufferHandleId = p_indexBuffer.GetId();
 		request.attributes = std::move(attributes);
 		CurrentDriver()->ApplyVertexArrayLayout(request);
 	}
