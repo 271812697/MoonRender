@@ -503,10 +503,7 @@ namespace MOON {
 		// The pixels come from the engine's hook: the editor paints the labels, the engine owns the
 		// texture (see Rendering::Overlay::ViewCubeLabels::BuildAtlas).
 		Rendering::Overlay::ViewCubeLabels::BuildAtlas(192, atlasPixels, atlasWidth, atlasHeight);
-		if (atlasPixels.empty())
-		{
-			return;
-		}
+		if (atlasPixels.empty()) { static bool reported = false; if (!reported) { reported = true; std::fprintf(stderr, "[viewcube] label atlas empty: the editor painter is not registered\n"); std::fflush(stderr); } return; }
 
 		static Rendering::Resources::Texture* s_labelTexture = nullptr;
 		if (s_labelTexture == nullptr)
@@ -523,10 +520,7 @@ namespace MOON {
 		}
 		else
 		{
-			s_labelTexture->GetTexture().Upload(
-				atlasPixels.data(),
-				Settings::EFormat::RGBA,
-				Settings::EPixelDataType::UNSIGNED_BYTE);
+			/* The HAL object lives on the executor, so uploading into it here would do nothing. Rebuild the atlas through the command stream instead: CreateMutable records a create command carrying the new pixels, and the old texture is released by its own destroy command. */ delete s_labelTexture; s_labelTexture = Loaders::TextureLoader::CreateMutable(atlasWidth, atlasHeight, atlasPixels.data(), Settings::ETextureFilteringMode::LINEAR, Settings::ETextureFilteringMode::LINEAR, Settings::ETextureWrapMode::CLAMP_TO_EDGE, Settings::ETextureWrapMode::CLAMP_TO_EDGE, false);
 
 		}
 

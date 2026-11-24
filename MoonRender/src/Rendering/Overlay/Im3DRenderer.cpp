@@ -757,9 +757,7 @@ namespace MOON
 					}
 					else if (font.ConsumeAtlasDirty(run.atlas))
 					{
-						texture->GetTexture().Upload(pixels.data(),
-							Rendering::Settings::EFormat::RGBA,
-							Rendering::Settings::EPixelDataType::UNSIGNED_BYTE);
+						Rendering::Resources::Texture* const rebuilt = Rendering::Resources::Loaders::TextureLoader::CreateMutable(static_cast<uint32_t>(font.GetAtlasWidth(run.atlas)), static_cast<uint32_t>(font.GetAtlasHeight(run.atlas)), pixels.data(), Rendering::Settings::ETextureFilteringMode::LINEAR, Rendering::Settings::ETextureFilteringMode::LINEAR, Rendering::Settings::ETextureWrapMode::CLAMP_TO_EDGE, Rendering::Settings::ETextureWrapMode::CLAMP_TO_EDGE, false); delete texture; texture = rebuilt; textAtlasTextures[run.atlas] = texture;
 					}
 				}
 				if (texture == nullptr)

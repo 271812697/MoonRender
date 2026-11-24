@@ -131,6 +131,15 @@ void Editor::Panels::AView::Render(const std::function<void()>& p_drawOverlays)
 		const uint32_t slot = static_cast<uint32_t>(mSubmittedFrames % kPresentSlotCount);
 		m_renderer->PresentTo(m_framebuffer, *m_presentTargets[static_cast<size_t>(slot)]);
 
+		// The overlays are part of the frame the window pastes: ImGui, the 2D draw list and the
+		// gizmos. PresentTo left the slot bound, so drawing them here puts them in the picture the
+		// window shows and not in a target nobody reads. The callback only records commands (see
+		// ViewportFrame::Render), so it is safe on the side that has no context as well.
+		if (m_drawOverlays)
+		{
+			m_drawOverlays();
+		}
+
 		// The frame's last command: when it runs, every command this frame recorded has run. The
 		// window pastes the slot it names and never waits for this side (filament's FFence is the
 		// same signal carried by the command stream).

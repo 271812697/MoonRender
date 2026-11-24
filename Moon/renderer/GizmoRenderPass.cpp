@@ -202,5 +202,5 @@ void Editor::Rendering::GizmoRenderPass::Draw(::Rendering::Data::PipelineState p
 			renderer.drawAlignedBox({ pmin.x,pmin.y ,pmin.z }, { pmax.x,pmax.y ,pmax.z });
 		}
 	}
-	//renderer.endFrame();
+	renderer.endFrame();
 }

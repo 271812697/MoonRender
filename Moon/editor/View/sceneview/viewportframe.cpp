@@ -234,15 +234,15 @@ namespace
 
 			if (!overlayOff)
 			{
-				//m_overlay->BeginFrame(*view);
+				m_overlay->BeginFrame(*view);
 			}
 			else if (!minimalFrame)
 			{
 				// With a render thread only the command-recorded overlay layers run: the 3D one
 				// (gizmos, view cube) and the 2D draw list (the widgets' icons and lines). ImGui
 				// still issues its own GL, so its frame stays closed.
-				//m_overlay->BeginGizmoFrame(*view);
-				//m_overlay->BeginOverlay2D(*view);
+				m_overlay->BeginGizmoFrame(*view);
+				m_overlay->BeginOverlay2D(*view);
 			}
 			TraceFrame("overlay->BeginFrame");
 
@@ -275,11 +275,11 @@ namespace
 				// stream and drains it there (see Im2DRender::EndFrame).
 				if (!overlayOff)
 				{
-					//m_overlay->EndFrame(*view, *module->GetContext()->driver);
+					m_overlay->EndFrame(*view, *module->GetContext()->driver);
 				}
 				else if (!minimalFrame)
 				{
-					//m_overlay->EndOverlay2D(*view, *module->GetContext()->driver);
+					m_overlay->EndOverlay2D(*view, *module->GetContext()->driver);
 				}
 			});
 			if (traceFrame)

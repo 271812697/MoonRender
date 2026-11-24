@@ -4,8 +4,23 @@
 
 namespace
 {
-	Rendering::Overlay::ViewCubeLabels::AtlasBuilder g_atlasBuilder;
-	bool g_dirty = true;
+	/** The builder lives in a function-local static on purpose: the editor installs it from a
+	 * static initializer of its own translation unit, and a namespace-scope std::function here
+	 * could be constructed *after* that registration (static initialization order across
+	 * translation units is unspecified), wiping the callback and leaving the view cube without its
+	 * labels. Constructing on first use removes the ordering problem: whichever call comes first
+	 * builds the object, the other one sees the registered value. */
+	Rendering::Overlay::ViewCubeLabels::AtlasBuilder& Builder()
+	{
+		static Rendering::Overlay::ViewCubeLabels::AtlasBuilder builder;
+		return builder;
+	}
+
+	bool& Dirty()
+	{
+		static bool dirty = true;
+		return dirty;
+	}
 }
 
 void Rendering::Overlay::ViewCubeLabels::FaceUvRect(int p_face, float& p_x, float& p_y, float& p_w, float& p_h)
@@ -30,7 +45,7 @@ void Rendering::Overlay::ViewCubeLabels::FaceUvRect(int p_face, float& p_x, floa
 
 void Rendering::Overlay::ViewCubeLabels::SetAtlasBuilder(AtlasBuilder p_builder)
 {
-	g_atlasBuilder = std::move(p_builder);
+	Builder() = std::move(p_builder);
 }
 
 bool Rendering::Overlay::ViewCubeLabels::BuildAtlas(
@@ -39,26 +54,27 @@ bool Rendering::Overlay::ViewCubeLabels::BuildAtlas(
 	p_rgba.clear();
 	p_width = 0;
 	p_height = 0;
-	if (!g_atlasBuilder)
+	AtlasBuilder& builder = Builder();
+	if (!builder)
 	{
 		return false;
 	}
 
-	g_atlasBuilder(p_cellPixels, p_rgba, p_width, p_height);
+	builder(p_cellPixels, p_rgba, p_width, p_height);
 	return !p_rgba.empty() && p_width > 0 && p_height > 0;
 }
 
 void Rendering::Overlay::ViewCubeLabels::Invalidate()
 {
-	g_dirty = true;
+	Dirty() = true;
 }
 
 bool Rendering::Overlay::ViewCubeLabels::IsDirty()
 {
-	return g_dirty;
+	return Dirty();
 }
 
 void Rendering::Overlay::ViewCubeLabels::MarkClean()
 {
-	g_dirty = false;
+	Dirty() = false;
 }

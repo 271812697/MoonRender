@@ -55,7 +55,12 @@ namespace Rendering::Data
 		{
 			m_descriptors.resize(p_binding + 1);
 		}
-		m_descriptors[p_binding] = p_texture != nullptr
+		// A material property set from a texture asset carries no HAL handle at all: the handle is
+		// the asset's, and the descriptor is what binds it (Descriptor::MakeTexture stores it). So
+		// the slot is empty only when neither side names a texture - testing the handle alone
+		// dropped every "SetProperty(u_AlbedoMap, texture)" descriptor and left the sampler reading
+		// whatever the previous pass had bound to that unit.
+		m_descriptors[p_binding] = (p_texture != nullptr || p_asset != nullptr)
 			? Descriptor::MakeTexture(p_texture, p_asset)
 			: Descriptor{};
 		return true;

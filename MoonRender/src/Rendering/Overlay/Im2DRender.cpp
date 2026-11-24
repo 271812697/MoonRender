@@ -412,6 +412,12 @@ void Rendering::Overlay::Im2DRender::EndFrame(
 	// Closes the run the last primitive opened; without it the tail of the frame is dropped.
 	mInternal->m_drawList.AddDrawCommand();
 
+	// The program's GL name is made by its create command (see Init), so on the frame that
+	// recorded it this reads 0 and the overlay is skipped; from the next frame on it is stable and
+	// the commands below name it. (TODO: carry the handle in the bind/matrix requests instead -
+	// they are the last name-based commands of the overlay.)
+	mInternal->m_programName = ::Rendering::Backend::Records::ProgramName(mInternal->m_programHandle);
+
 	const auto& commands = mInternal->m_drawList.GetCommands();
 	if (commands.empty() || mInternal->m_programName == 0 || p_viewWidth == 0 || p_viewHeight == 0)
 	{
