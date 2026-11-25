@@ -195,7 +195,7 @@ void Core::Rendering::PostProcess::BloomEffect::Draw(
 	upsamplingPass(bloomMips[0].target, m_bloomOutputBuffer);
 
 	// Final pass, interpolate bloom result with the input image
-	const auto bloomTex = m_bloomOutputBuffer.GetAttachment<::Rendering::HAL::Texture>(::Rendering::Settings::EFramebufferAttachment::COLOR);
+	const auto bloomTex = m_bloomOutputBuffer.GetAttachment<::Rendering::Data::Texture>(::Rendering::Settings::EFramebufferAttachment::COLOR);
 	m_bloomMaterial.SetProperty("_BloomTexture", &bloomTex.value());
 	m_bloomMaterial.SetProperty("_BloomStrength", std::min(bloomSettings.intensity * 0.04f, 1.0f));
 	m_renderer.Blit(p_pso, p_src, p_dst, m_bloomMaterial);

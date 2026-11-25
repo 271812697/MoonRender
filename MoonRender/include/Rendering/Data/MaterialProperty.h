@@ -6,7 +6,7 @@
 #include <Maths/FVector2.h>
 #include <Maths/FVector3.h>
 #include <Maths/FVector4.h>
-#include <Rendering/HAL/TextureHandle.h>
+#include <Rendering/Data/Texture.h>
 
 namespace Rendering::Resources
 {
@@ -28,7 +28,7 @@ namespace Rendering::Data
 		Maths::FVector4,
 		Maths::FMatrix3,
 		Maths::FMatrix4,
-		Rendering::HAL::TextureHandle*,
+		Rendering::Data::Texture*,
 		Rendering::Resources::Texture*
 	>;
 

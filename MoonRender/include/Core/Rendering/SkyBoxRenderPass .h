@@ -42,10 +42,10 @@ namespace Core::Rendering
 	{
 	public:
 		SkyboxRenderPass(::Rendering::Core::CompositeRenderer& p_renderer);
-		::Rendering::HAL::Texture* GetSkyBoxCube();
-		::Rendering::HAL::Texture* GetIrradianceCube();
-		::Rendering::HAL::Texture* GetPrefilterCube();
-		::Rendering::HAL::Texture* GetBrdfTexture();
+		::Rendering::Data::Texture* GetSkyBoxCube();
+		::Rendering::Data::Texture* GetIrradianceCube();
+		::Rendering::Data::Texture* GetPrefilterCube();
+		::Rendering::Data::Texture* GetBrdfTexture();
 		void updateSkyTexture(const std::string& path); 
 		SkyBoxSetting& GetSetting() { return mSetting; }
 
@@ -78,9 +78,9 @@ namespace Core::Rendering
 		::Rendering::Data::Framebuffer prefilterBuffer;
 		::Rendering::Data::Framebuffer brdfBuffer;
 		::Rendering::Resources::Texture*skyTexture=nullptr;
-		std::shared_ptr<::Rendering::HAL::Texture> skyBoxCube;
-		std::shared_ptr<::Rendering::HAL::Texture> irradianceCube;
-		std::shared_ptr<::Rendering::HAL::Texture> prefilterCube;
+		std::shared_ptr<::Rendering::Data::Texture> skyBoxCube;
+		std::shared_ptr<::Rendering::Data::Texture> irradianceCube;
+		std::shared_ptr<::Rendering::Data::Texture> prefilterCube;
 		std::unique_ptr<::Rendering::Data::BufferObject> m_irradianceSHBuffer;
 		SkyBoxSetting mSetting;
 		// The default environment is the same studio HDR the FilamentPBR material preview

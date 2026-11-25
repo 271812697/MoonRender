@@ -31,16 +31,16 @@ Rendering::Core::CompositeRenderer::CompositeRenderer(Context::Driver& p_driver)
 	: ABaseRenderer(p_driver)
 {
 }
-::Rendering::HAL::Texture* Rendering::Core::CompositeRenderer::GetSkyBoxCube() {
+::Rendering::Data::Texture* Rendering::Core::CompositeRenderer::GetSkyBoxCube() {
 	return GetPass<::Core::Rendering::SkyboxRenderPass>("SkyboxRenderPass").GetSkyBoxCube();;
 }
-::Rendering::HAL::Texture* Rendering::Core::CompositeRenderer::GetIrradianceCube() {
+::Rendering::Data::Texture* Rendering::Core::CompositeRenderer::GetIrradianceCube() {
 	return GetPass<::Core::Rendering::SkyboxRenderPass>("SkyboxRenderPass").GetIrradianceCube();;
 }
-::Rendering::HAL::Texture* Rendering::Core::CompositeRenderer::GetPrefilterCube() {
+::Rendering::Data::Texture* Rendering::Core::CompositeRenderer::GetPrefilterCube() {
 	return GetPass<::Core::Rendering::SkyboxRenderPass>("SkyboxRenderPass").GetPrefilterCube();;
 }
-::Rendering::HAL::Texture* Rendering::Core::CompositeRenderer::GetBrdfTexture() {
+::Rendering::Data::Texture* Rendering::Core::CompositeRenderer::GetBrdfTexture() {
 	return GetPass<::Core::Rendering::SkyboxRenderPass>("SkyboxRenderPass").GetBrdfTexture();;
 }
 void Rendering::Core::CompositeRenderer::BeginFrame(const Data::FrameDescriptor& p_frameDescriptor)

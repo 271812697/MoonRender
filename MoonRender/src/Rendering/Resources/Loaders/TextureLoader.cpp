@@ -52,7 +52,7 @@ namespace
 	}
 
 	void PrepareTexture(
-		Rendering::HAL::Texture& p_texture,
+		Rendering::Data::Texture& p_texture,
 		void* p_data,
 		Rendering::Settings::ETextureFilteringMode p_minFilter,
 		Rendering::Settings::ETextureFilteringMode p_magFilter,
@@ -83,29 +83,6 @@ namespace
 		{
 			p_texture.GenerateMipmaps();
 		}
-	}
-
-	/** Records the creation as a driver command (Filament's createTexture).
-	 *
-	 * The object is made on the side that owns the context; anything recorded after this - the
-	 * upload, the draws sampling it - runs later in the ring, so it finds the texture. Without a
-	 * driver the object is created here, which is what the code did before there was a command.
-	 */
-	void RecordCreate(Rendering::Resources::Texture& p_texture, std::string p_name)
-	{
-		Rendering::Context::Driver* const driver = GetDriver();
-		if (driver == nullptr)
-		{
-			Rendering::Backend::Records::CreateTexture(p_texture.GetHandle(),
-				Rendering::Settings::ETextureType::TEXTURE_2D, p_name);
-			return;
-		}
-
-		Rendering::Backend::CreateTextureRequest request;
-		request.handleId = p_texture.GetHandle().GetId();
-		request.type = Rendering::Settings::ETextureType::TEXTURE_2D;
-		request.debugName = std::move(p_name);
-		driver->CreateTexture(std::move(request));
 	}
 
 	/** Records the allocate+upload as a driver command (Filament's update2DImage): the command
@@ -166,8 +143,8 @@ Rendering::Resources::Texture* Rendering::Resources::Loaders::TextureLoader::Cre
 {
 	if (Image image{ p_filepath })
 	{
-		Texture* result = new Texture{ p_filepath };
-		RecordCreate(*result, Tools::Utils::PathParser::GetElementName(p_filepath));
+		Texture* result = new Texture{ p_filepath,
+			Tools::Utils::PathParser::GetElementName(p_filepath) };
 		RecordPrepare(*result, image.data,
 			static_cast<size_t>(image.width) * image.height * 4 * (image.isHDR ? sizeof(float) : 1),
 			p_minFilter, p_magFilter, p_horizontalWrapMode, p_verticalWrapMode,
@@ -208,8 +185,7 @@ Rendering::Resources::Texture* Rendering::Resources::Loaders::TextureLoader::Cre
 	bool p_generateMipmap
 )
 {
-	Texture* result = new Texture("");
-	RecordCreate(*result, "FromMemory");
+	Texture* result = new Texture("", "FromMemory");
 	RecordPrepare(*result, p_data,
 		static_cast<size_t>(p_width) * p_height * 4,
 		p_minFilter, p_magFilter, p_horizontalWrapMode, p_verticalWrapMode,
@@ -230,13 +206,11 @@ Rendering::Resources::Texture* Rendering::Resources::Loaders::TextureLoader::Cre
 {
 	using namespace Rendering::Settings;
 
-	Texture* result = new Texture("");
-	Rendering::Backend::CreateTextureRequest request;
-	request.handleId = result->GetHandle().GetId();
-	request.type = ETextureType::TEXTURE_2D;
-	request.debugName = "RuntimeGenerated";
-	request.allocate = true;
-	request.descriptor = {
+	// A mutable texture: the storage is described by this allocation, and a later upload into it
+	// does not re-specify it (the font atlas and the view cube's labels replace their contents).
+	Texture* result = new Texture("", "RuntimeGenerated");
+	Rendering::Data::Texture& texture = result->GetTexture();
+	texture.Allocate({
 		.width = p_width,
 		.height = p_height,
 		.minFilter = p_minFilter,
@@ -245,37 +219,16 @@ Rendering::Resources::Texture* Rendering::Resources::Loaders::TextureLoader::Cre
 		.verticalWrap = p_verticalWrapMode,
 		.internalFormat = EInternalFormat::RGBA8,
 		.useMipMaps = p_generateMipmap,
-		// The mutable descriptor is what lets a later upload reach the GPU copy.
 		.mutableDesc = MutableTextureDesc{
 			.format = EFormat::RGBA,
 			.type = EPixelDataType::UNSIGNED_BYTE,
 			.data = nullptr
 		}
-	};
-	request.pixels.assign(static_cast<const uint8_t*>(p_rgba8),
-		static_cast<const uint8_t*>(p_rgba8) + static_cast<size_t>(p_width) * p_height * 4);
-	request.generateMipmaps = p_generateMipmap;
-
-	// Recorded, then drained: the object has to exist for the caller that binds it next, and the
-	// request carries the pixels so nothing here touches GL.
-	if (Rendering::Context::Driver* const driver = GetDriver())
+	});
+	texture.Upload(p_rgba8, EFormat::RGBA, EPixelDataType::UNSIGNED_BYTE);
+	if (p_generateMipmap)
 	{
-		driver->CreateTexture(std::move(request));
-	}
-	else
-	{
-		Rendering::HAL::Texture* const texture = Rendering::Backend::Records::CreateTexture(
-			result->GetHandle(), ETextureType::TEXTURE_2D, "RuntimeGenerated");
-		if (texture != nullptr)
-		{
-			auto descriptor = request.descriptor;
-			descriptor.mutableDesc.value().data = request.pixels.data();
-			texture->Allocate(descriptor);
-			if (p_generateMipmap)
-			{
-				texture->GenerateMipmaps();
-			}
-		}
+		texture.GenerateMipmaps();
 	}
 
 	return result;

@@ -172,7 +172,7 @@ void Editor::Panels::AView::Commit(uint32_t p_slot)
 
 uint32_t Editor::Panels::AView::GetFrameTextureID()
 {
-	auto color = PresentedTarget().GetAttachment<::Rendering::HAL::Texture>(
+	auto color = PresentedTarget().GetAttachment<::Rendering::Data::Texture>(
 		::Rendering::Settings::EFramebufferAttachment::COLOR);
 	return color.has_value() ? static_cast<uint32_t>(color.value().GetID()) : 0u;
 }

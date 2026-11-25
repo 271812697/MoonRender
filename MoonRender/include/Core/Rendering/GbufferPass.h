@@ -7,11 +7,11 @@
 namespace Core::Rendering
 {
 	struct GbufferTextureData {
-		std::shared_ptr<::Rendering::HAL::Texture> position;
-		std::shared_ptr<::Rendering::HAL::Texture> normal;
-		std::shared_ptr<::Rendering::HAL::Texture> albedo;
-		std::shared_ptr<::Rendering::HAL::Texture> occlusion;
-		std::shared_ptr<::Rendering::HAL::Texture> occlusionBlur;
+		std::shared_ptr<::Rendering::Data::Texture> position;
+		std::shared_ptr<::Rendering::Data::Texture> normal;
+		std::shared_ptr<::Rendering::Data::Texture> albedo;
+		std::shared_ptr<::Rendering::Data::Texture> occlusion;
+		std::shared_ptr<::Rendering::Data::Texture> occlusionBlur;
 	};
 	struct SSAOParam
 	{
@@ -32,7 +32,7 @@ namespace Core::Rendering
 		virtual void Draw(::Rendering::Data::PipelineState p_pso) override;
 		virtual void ResizeRenderer(int width, int height) override;
 	private:
-		std::shared_ptr<::Rendering::HAL::Texture> noiseTexture;
+		std::shared_ptr<::Rendering::Data::Texture> noiseTexture;
 		::Core::Resources::MaterialAsset gbufferMaterial;
 		::Core::Resources::MaterialAsset ssaoMaterial;
 		::Core::Resources::MaterialAsset ssaoblurMaterial;

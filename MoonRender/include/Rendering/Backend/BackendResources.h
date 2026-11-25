@@ -1,7 +1,8 @@
 #pragma once
 #include <Rendering/Backend/HandleAllocator.h>
-#include <Rendering/HAL/Texture.h>
 #include <Rendering/Settings/EBufferType.h>
+#include <Rendering/Settings/ETextureType.h>
+#include <Rendering/Settings/TextureDesc.h>
 #include <Rendering/Settings/UniformInfo.h>
 
 #include <string>
@@ -20,12 +21,13 @@ namespace Rendering::Backend
 	 * context, and the front end refers to the object by handle (Filament's HwTexture/HwProgram
 	 * hold `gl.id` the same way).
 	 *
-	 * A texture's record is HAL::Texture itself (its constructor creates the GL name and its
-	 * methods are the backend operations), and so is a buffer's: it is HAL::Buffer (TBuffer), the
-	 * object the create-buffer command constructs in the slot. The front end of a buffer is
-	 * Rendering::Data::BufferObject, which only holds the handle. The remaining records below are
-	 * still name records for now, because the HAL object of a framebuffer/... is still the
-	 * front-end object that also caches the name.
+	 * A buffer's record is HAL::Buffer itself (TBuffer): its constructor creates the GL name and its
+	 * methods are the backend operations, and so is a texture's: HAL::Texture, the object the
+	 * create-texture command constructs in the slot. The front end of a buffer is
+	 * Rendering::Data::BufferObject and the front end of a texture is
+	 * Rendering::Data::Texture; both only hold the handle and record commands. The remaining
+	 * records below are still name records for now, because the HAL object of a
+	 * framebuffer/... is still the front-end object that also caches the name.
 	 *
 	 * HwResource is what those records have in common: a virtual destructor, so a slot can hold
 	 * any of them and free it through the destructor stored next to it. */
@@ -45,6 +47,24 @@ namespace Rendering::Backend
 
 		Settings::EBufferType type = Settings::EBufferType::UNKNOWN;
 		uint64_t size = 0;
+	};
+
+	/** A texture (Filament's HwTexture): the *backend* base of every texture, with the kind it was
+	 * created as and the description its storage was allocated with - the width/height a caller
+	 * holding only the handle reads (a target sizes itself from its attachments), and the debug
+	 * name the GL debug output labels it with. The OpenGL object itself (the GL name) is
+	 * HAL::Texture, which derives from this and lives in the same slot; the front end is
+	 * Rendering::Data::Texture, which only holds the handle and records commands. */
+	struct HwTexture : HwResource
+	{
+		explicit HwTexture(Settings::ETextureType p_type = Settings::ETextureType::TEXTURE_2D) noexcept
+			: type(p_type) {}
+
+		Settings::ETextureType type = Settings::ETextureType::TEXTURE_2D;
+		/** What the storage was allocated with; valid once allocated is set. */
+		Rendering::Settings::TextureDesc desc;
+		bool allocated = false;
+		std::string debugName;
 	};
 
 	/** A vertex array (Filament's HwVertexArray). The object in the slot is Backend::GLVertexArray,
@@ -88,9 +108,9 @@ namespace Rendering::Backend
 		void CreateRenderbuffer(ResourceHandle<HwRenderbuffer> p_handle);
 
 		/** Constructs the HAL texture in its slot (the constructor is what creates the GL name),
-		 * once per handle. Returns the object, or null for a stale handle. */
-		Rendering::HAL::Texture* CreateTexture(
-			ResourceHandle<Rendering::HAL::Texture> p_handle,
+		 * once per handle: a second create for the same handle leaves the first object alone. */
+		void CreateTexture(
+			ResourceHandle<HwTexture> p_handle,
 			Rendering::Settings::ETextureType p_type,
 			std::string_view p_debugName);
 
@@ -103,7 +123,7 @@ namespace Rendering::Backend
 		void DestroyFramebuffer(ResourceHandle<HwFramebuffer> p_handle);
 		void DestroyRenderbuffer(ResourceHandle<HwRenderbuffer> p_handle);
 		void DestroyProgram(ResourceHandle<HwProgram> p_handle);
-		void DestroyTexture(ResourceHandle<Rendering::HAL::Texture> p_handle);
+		void DestroyTexture(ResourceHandle<HwTexture> p_handle);
 
 		/** handle_cast + the GL name, i.e. Filament's `handle_cast<GLBufferObject*>(h)->gl.id`.
 		 * 0 while the object does not exist (yet), which is what the callers of the old name
@@ -118,8 +138,9 @@ namespace Rendering::Backend
 		uint32_t RenderbufferName(ResourceHandle<HwRenderbuffer> p_handle);
 		uint32_t ProgramName(ResourceHandle<HwProgram> p_handle);
 
-		/** The same for a texture, named by the plain id a front-end object carries (the HAL
-		 * header cannot include this one - see GLTextureHandle.h). */
+		/** The same for a texture, named by the plain id: this one is called from the executor of
+		 * the texture commands and from the overlay requests, both of which carry raw ids (the
+		 * HAL header cannot include this one - see the note on HwTexture). */
 		uint32_t TextureName(uint32_t p_handleId);
 	}
 }

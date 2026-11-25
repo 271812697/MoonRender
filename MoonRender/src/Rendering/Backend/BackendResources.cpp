@@ -5,6 +5,7 @@
 #include <Rendering/HAL/Buffer.h>
 #include <Rendering/HAL/Framebuffer.h>
 #include <Rendering/HAL/Renderbuffer.h>
+#include <Rendering/HAL/Texture.h>
 #include <Rendering/HAL/VertexArray.h>
 
 #include <glad/glad.h>
@@ -114,8 +115,8 @@ namespace Rendering::Backend::Records
 			p_handle, Rendering::HAL::BackendConstructionTag{});
 	}
 
-	Rendering::HAL::Texture* CreateTexture(
-		ResourceHandle<Rendering::HAL::Texture> p_handle,
+	void CreateTexture(
+		ResourceHandle<HwTexture> p_handle,
 		Rendering::Settings::ETextureType p_type,
 		std::string_view p_debugName)
 	{
@@ -123,20 +124,20 @@ namespace Rendering::Backend::Records
 
 		// Created once per handle: callers keep the typed handle (and materials keep descriptors
 		// naming it), so replacing the object would leave them pointing at a freed one.
-		if (Rendering::HAL::Texture* const existing = allocator.HandleCast<Rendering::HAL::Texture>(p_handle))
+		if (allocator.HandleCast<Rendering::HAL::Texture>(p_handle) != nullptr)
 		{
-			return existing;
+			return;
 		}
 
 		// The tagged constructor: this runs where the context is, and must not take the front
 		// end's path (which would record another create command).
-		return allocator.Construct<Rendering::HAL::Texture>(p_handle, p_type, p_debugName,
-			Rendering::HAL::BackendConstructionTag{});
+		allocator.Construct<Rendering::HAL::Texture, HwTexture>(
+			p_handle, p_type, p_debugName, Rendering::HAL::BackendConstructionTag{});
 	}
 
 	uint32_t TextureName(uint32_t p_handleId)
 	{
-		const ResourceHandle<Rendering::HAL::Texture> handle{ p_handleId };
+		const ResourceHandle<HwTexture> handle{ p_handleId };
 		const Rendering::HAL::Texture* const object =
 			GetHandleAllocator().HandleCast<Rendering::HAL::Texture>(handle);
 		return object != nullptr ? object->GetID() : 0u;
@@ -247,7 +248,7 @@ namespace Rendering::Backend::Records
 		}
 	}
 
-	void DestroyTexture(ResourceHandle<Rendering::HAL::Texture> p_handle)
+	void DestroyTexture(ResourceHandle<HwTexture> p_handle)
 	{
 		HandleAllocator& allocator = GetHandleAllocator();
 		if (allocator.HandleCast<Rendering::HAL::Texture>(p_handle) == nullptr)

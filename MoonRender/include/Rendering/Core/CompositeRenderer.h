@@ -9,6 +9,7 @@
 #include <Rendering/Features/ARenderFeature.h>
 #include <Rendering/Types/RenderFeatureType.h>
 #include <Rendering/Types/RenderPassType.h>
+#include <Tools/Eventing/Event.h>
 
 namespace Rendering::Core
 {
@@ -57,10 +58,10 @@ namespace Rendering::Core
 		std::multimap<uint32_t, std::pair<std::string, std::unique_ptr<Core::ARenderPass>>>& GetPasses() {
 			return m_passes;
 		}
-		::Rendering::HAL::Texture* GetSkyBoxCube();
-		::Rendering::HAL::Texture* GetIrradianceCube();
-		::Rendering::HAL::Texture* GetPrefilterCube();
-		::Rendering::HAL::Texture* GetBrdfTexture();
+		::Rendering::Data::Texture* GetSkyBoxCube();
+		::Rendering::Data::Texture* GetIrradianceCube();
+		::Rendering::Data::Texture* GetPrefilterCube();
+		::Rendering::Data::Texture* GetBrdfTexture();
 	protected:
 		std::unordered_map<std::type_index, std::unique_ptr<Features::ARenderFeature>> m_features;
 		std::multimap<uint32_t, std::pair<std::string, std::unique_ptr<Core::ARenderPass>>> m_passes;

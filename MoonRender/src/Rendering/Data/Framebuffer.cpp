@@ -161,7 +161,7 @@ namespace Rendering::Data
 		// a renderbuffer (see Data::Renderbuffer), so this is pure front-end bookkeeping.
 		for (auto& attachment : m_attachments)
 		{
-			if (const auto texture = std::get_if<std::shared_ptr<Rendering::HAL::Texture>>(&attachment.second);
+			if (const auto texture = std::get_if<std::shared_ptr<Rendering::Data::Texture>>(&attachment.second);
 				texture != nullptr && *texture)
 			{
 				(*texture)->Resize(p_width, p_height);
@@ -175,7 +175,7 @@ namespace Rendering::Data
 	}
 
 	void Framebuffer::AttachTexture(
-		std::shared_ptr<Rendering::HAL::Texture> p_texture,
+		std::shared_ptr<Rendering::Data::Texture> p_texture,
 		Settings::EFramebufferAttachment p_attachment,
 		uint32_t p_index,
 		std::optional<uint32_t> p_layer,
@@ -189,14 +189,14 @@ namespace Rendering::Data
 		const uint32_t key = AttachmentKey(p_attachment, p_index);
 		::Rendering::Context::Driver* const driver = ::Rendering::HAL::CurrentDriver();
 
-		if (driver != nullptr && p_texture->GetHandleId() != 0 && !p_texture->HasBackendName())
+		if (driver != nullptr && static_cast<bool>(p_texture->GetHandle()))
 		{
 			// The texture is a front-end object and the target is a handle: attaching is GL, so it is
 			// recorded with the two handles and done where the context is (Filament's createRenderTarget
 			// naming its attachments instead of making them).
 			Rendering::Backend::AttachTextureRequest request;
 			request.framebufferHandleId = m_handle.GetId();
-			request.textureHandleId = p_texture->GetHandleId();
+			request.textureHandleId = p_texture->GetHandle().GetId();
 			request.attachment = p_attachment;
 			request.index = p_index;
 			request.level = p_level;
@@ -208,8 +208,8 @@ namespace Rendering::Data
 			return;
 		}
 
-		// No driver (or a texture that already carries its own name): the attach is applied here,
-		// through the target's backend object.
+		// No driver: this is the side that owns the context, so the attach is applied here, through
+		// the target's backend object.
 		if (Rendering::HAL::Framebuffer* const framebuffer = Resolve(m_handle))
 		{
 			if (p_layer.has_value())
@@ -339,7 +339,7 @@ namespace Rendering::Data
 	{
 		for (const auto& attachment : m_attachments)
 		{
-			if (const auto texture = std::get_if<std::shared_ptr<Rendering::HAL::Texture>>(&attachment.second);
+			if (const auto texture = std::get_if<std::shared_ptr<Rendering::Data::Texture>>(&attachment.second);
 				texture != nullptr && *texture)
 			{
 				return { (*texture)->GetDesc().width, (*texture)->GetDesc().height };

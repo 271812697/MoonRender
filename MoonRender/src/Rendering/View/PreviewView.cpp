@@ -20,7 +20,7 @@
 #include <Maths/FVector3.h>
 #include <Rendering/Context/Driver.h>
 #include <Rendering/Geometry/Vertex.h>
-#include <Rendering/HAL/OpenGL/GLTexture.h>
+#include <Rendering/Data/Texture.h>
 #include <Rendering/Settings/TextureDesc.h>
 #include <Rendering/Resources/Loaders/ModelLoader.h>
 #include <Rendering/Resources/Mesh.h>
@@ -894,7 +894,7 @@ void Editor::Panels::PreviewView::SetPreviewMesh(EPreviewMesh p_mesh)
 	SetMaterial(m_material);
 }
 
-::Rendering::HAL::TextureHandle* Editor::Panels::PreviewView::DomainColorTable()
+::Rendering::Data::Texture* Editor::Panels::PreviewView::DomainColorTable()
 {
 	if (m_domainColorTable != nullptr)
 	{
@@ -923,7 +923,7 @@ void Editor::Panels::PreviewView::SetPreviewMesh(EPreviewMesh p_mesh)
 		.data = const_cast<Maths::FVector4*>(colors.data())
 	};
 
-	auto* texture = new ::Rendering::HAL::GLTexture(::Rendering::Settings::ETextureType::TEXTURE_BUFFER);
+	auto* texture = new ::Rendering::Data::Texture(::Rendering::Settings::ETextureType::TEXTURE_BUFFER);
 	texture->Allocate(desc);
 	m_domainColorTable = texture;
 	return m_domainColorTable;

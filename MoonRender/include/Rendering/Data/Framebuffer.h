@@ -10,8 +10,8 @@
 
 #include <Rendering/Backend/ResourceHandle.h>
 #include <Rendering/Data/Renderbuffer.h>
+#include <Rendering/Data/Texture.h>
 #include <Rendering/HAL/Framebuffer.h>
-#include <Rendering/HAL/Texture.h>
 #include <Rendering/Settings/EFramebufferAttachment.h>
 #include <Rendering/Settings/EPixelDataFormat.h>
 #include <Rendering/Settings/EPixelDataType.h>
@@ -39,13 +39,13 @@ namespace Rendering::Data
 		/** What can be attached: a texture (the colour/depth attachment a material may also sample)
 		 * or a renderbuffer (the depth/stencil storage). Both are front-end objects here. */
 		using Attachment = std::variant<
-			std::shared_ptr<Rendering::HAL::Texture>,
+			std::shared_ptr<Rendering::Data::Texture>,
 			std::shared_ptr<Rendering::Data::Renderbuffer>
 		>;
 
 		template<typename T>
 		static constexpr bool IsSupportedAttachmentType =
-			std::same_as<T, Rendering::HAL::Texture> ||
+			std::same_as<T, Rendering::Data::Texture> ||
 			std::same_as<T, Rendering::Data::Renderbuffer>;
 
 		/** Reserves the handle and records the creation of its backend object. */
@@ -84,7 +84,7 @@ namespace Rendering::Data
 			uint32_t p_index = 0,
 			std::optional<uint32_t> p_layer = std::nullopt)
 		{
-			if constexpr (std::same_as<T, Rendering::HAL::Texture>)
+			if constexpr (std::same_as<T, Rendering::Data::Texture>)
 			{
 				AttachTexture(std::move(p_toAttach), p_attachment, p_index, p_layer, 0);
 			}
@@ -104,7 +104,7 @@ namespace Rendering::Data
 			uint32_t p_level = 0,
 			std::optional<uint32_t> p_layer = std::nullopt)
 		{
-			if constexpr (std::same_as<T, Rendering::HAL::Texture>)
+			if constexpr (std::same_as<T, Rendering::Data::Texture>)
 			{
 				AttachTexture(std::move(p_toAttach), p_attachment, p_index, p_layer, p_level);
 			}
@@ -212,7 +212,7 @@ namespace Rendering::Data
 		}
 
 		void AttachTexture(
-			std::shared_ptr<Rendering::HAL::Texture> p_texture,
+			std::shared_ptr<Rendering::Data::Texture> p_texture,
 			Settings::EFramebufferAttachment p_attachment,
 			uint32_t p_index,
 			std::optional<uint32_t> p_layer,

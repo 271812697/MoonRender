@@ -1,7 +1,7 @@
 #pragma once
 #include <QImage>
 #include <QOpenGLWidget>
-#include <Rendering/HAL/Texture.h>
+#include <Rendering/Data/Texture.h>
 
 #include <cstdint>
 #include <memory>
@@ -117,7 +117,7 @@ namespace MOON
 		Editor::Panels::PreviewView* m_view = nullptr;
 		// A 1x1 cubemap of the preview's backdrop, bound as _RefractionCube: a transmissive
 		// material then sees the dark surround instead of the studio IBL.
-		std::unique_ptr<::Rendering::HAL::Texture> m_refractionCube;
+		std::unique_ptr<::Rendering::Data::Texture> m_refractionCube;
 		/** The material the preview sphere carries. The scene holds a pointer to it, so it
 		 * outlives the view (both are released together, view first). */
 		std::unique_ptr<::Core::Resources::MaterialAsset> m_material;

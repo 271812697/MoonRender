@@ -13,7 +13,7 @@ namespace
 		using namespace Rendering::HAL;
 		using namespace Rendering::Settings;
 
-		const auto renderTexture = std::make_shared<Texture>(
+		const auto renderTexture = std::make_shared<::Rendering::Data::Texture>(
 			ETextureType::TEXTURE_2D,
 			std::format(
 				"{}/Depth",
@@ -38,7 +38,7 @@ namespace
 
 		renderTexture->Allocate(renderTextureDesc);
 		renderTexture->SetBorderColor(Maths::FVector4::One);
-		p_framebuffer.Attach<Texture>(renderTexture, EFramebufferAttachment::DEPTH);
+		p_framebuffer.Attach<::Rendering::Data::Texture>(renderTexture, EFramebufferAttachment::DEPTH);
 		p_framebuffer.Validate();
 		p_framebuffer.SetTargetDrawBuffer(std::nullopt);
 		p_framebuffer.SetTargetReadBuffer(std::nullopt);

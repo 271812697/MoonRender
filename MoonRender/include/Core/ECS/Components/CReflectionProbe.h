@@ -2,7 +2,7 @@
 #include <Core/ECS/Components/AComponent.h>
 #include <Core/Rendering/PingPongFramebuffer.h>
 #include <Rendering/Data/Framebuffer.h>
-#include <Rendering/HAL/Texture.h>
+#include <Rendering/Data/Texture.h>
 #include <Rendering/Data/BufferObject.h>
 
 namespace Core::ECS { class Actor; }
@@ -150,7 +150,7 @@ namespace Core::ECS::Components
 		/**
 		* Returns the last complete cubemap captured by the reflection probe
 		*/
-		std::shared_ptr<::Rendering::HAL::Texture> GetCubemap() const;
+		std::shared_ptr<::Rendering::Data::Texture> GetCubemap() const;
 
 		/**
 		* Serialize the component
@@ -188,8 +188,8 @@ namespace Core::ECS::Components
 	private:
 		// Double buffering so we can render to progressively one while reading from the other
 		Rendering::PingPongFramebuffer m_framebuffers;
-		std::array<std::shared_ptr<::Rendering::HAL::Texture>, 2> m_cubemaps;
-		Tools::Utils::CircularIterator<std::shared_ptr<::Rendering::HAL::Texture>, 2> m_cubemapIterator;
+		std::array<std::shared_ptr<::Rendering::Data::Texture>, 2> m_cubemaps;
+		Tools::Utils::CircularIterator<std::shared_ptr<::Rendering::Data::Texture>, 2> m_cubemapIterator;
 		std::unique_ptr<::Rendering::Data::BufferObject> m_uniformBuffer;
 		uint32_t m_captureFaceIndex = 0; // Current frame index in the capture process
 		std::optional<CaptureRequestDesc> m_captureRequest = std::nullopt;

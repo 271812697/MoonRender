@@ -61,7 +61,7 @@ namespace Core::ECS::Components
 			// which took the editor down the moment a face was picked.
 			const std::optional<::Rendering::Data::MaterialProperty> property =
 				mat != nullptr ? mat->GetProperty("domainColorTex") : std::nullopt;
-			const auto* texture = property ? std::get_if<::Rendering::HAL::TextureHandle*>(&property.value().value) : nullptr;
+			const auto* texture = property ? std::get_if<::Rendering::Data::Texture*>(&property.value().value) : nullptr;
 			if (texture != nullptr) {
 				auto tex = *texture;
 
@@ -81,7 +81,7 @@ namespace Core::ECS::Components
 					desc.mutableDesc = ::Rendering::Settings::MutableTextureDesc{
 						.data = colors.data()
 					};
-					static_cast<::Rendering::HAL::GLTexture*>(tex)->Allocate(desc);
+					static_cast<::Rendering::Data::Texture*>(tex)->Allocate(desc);
 				}
 			}
 		}

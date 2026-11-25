@@ -162,7 +162,7 @@ void Core::ECS::Components::CReflectionProbe::RequestCapture(bool p_forceImmedia
 	};
 }
 
-std::shared_ptr<Rendering::HAL::Texture> Core::ECS::Components::CReflectionProbe::GetCubemap() const
+std::shared_ptr<Rendering::Data::Texture> Core::ECS::Components::CReflectionProbe::GetCubemap() const
 {
 	const auto& target =
 		_IsDoubleBuffered() ?
@@ -252,7 +252,7 @@ void Core::ECS::Components::CReflectionProbe::_AllocateResources()
 	for (uint8_t i = 0; i < cubemapCount; ++i)
 	{
 		auto& cubemap = m_cubemaps[i];
-		cubemap = std::make_shared<::Rendering::HAL::Texture>(
+		cubemap = std::make_shared<::Rendering::Data::Texture>(
 			::Rendering::Settings::ETextureType::TEXTURE_CUBE,
 			"ReflectionProbeCubemap"
 		);
@@ -272,7 +272,7 @@ void Core::ECS::Components::CReflectionProbe::_AllocateResources()
 
 		for (uint32_t faceIndex = 0; faceIndex < 6; ++faceIndex)
 		{
-			m_framebuffers[i].Attach<::Rendering::HAL::Texture>(
+			m_framebuffers[i].Attach<::Rendering::Data::Texture>(
 				cubemap,
 				::Rendering::Settings::EFramebufferAttachment::COLOR,
 				faceIndex, // Each color attachment is a face of the cubemap

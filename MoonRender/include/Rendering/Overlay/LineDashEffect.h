@@ -3,7 +3,7 @@
 #include <vector>
 
 #include <Rendering/Data/Material.h>
-#include <Rendering/HAL/Texture.h>
+#include <Rendering/Data/Texture.h>
 
 #include <Rendering/Overlay/ALineEffect.h>
 
@@ -109,6 +109,6 @@ namespace MOON
 		/** One row per distinct line type; survives the frames (a line type is not per frame). */
 		std::vector<ImLinePattern> m_patterns;
 		bool m_patternsDirty = true;
-		std::unique_ptr<Rendering::HAL::Texture> m_patternTexture;
+		std::unique_ptr<Rendering::Data::Texture> m_patternTexture;
 	};
 }

@@ -394,7 +394,7 @@ void main()
 			.data = bvhService->materials.data()
 		};
 		if (materialsTex == nullptr) {
-			materialsTex = new ::Rendering::HAL::GLTexture(::Rendering::Settings::ETextureType::TEXTURE_2D);
+			materialsTex = new ::Rendering::Data::Texture(::Rendering::Settings::ETextureType::TEXTURE_2D);
 		}
 		materialsTex->Allocate(desc);
 	}
@@ -413,7 +413,7 @@ void main()
 		};
 
 		if (BVHTex == nullptr) {
-			BVHTex = new ::Rendering::HAL::GLTexture(::Rendering::Settings::ETextureType::TEXTURE_BUFFER);
+			BVHTex = new ::Rendering::Data::Texture(::Rendering::Settings::ETextureType::TEXTURE_BUFFER);
 		}
 		BVHTex->Allocate(desc);
 		
@@ -425,7 +425,7 @@ void main()
 			.data = bvhService->vertIndices.data()
 		};
 		if (vertexIndicesTex == nullptr) {
-			vertexIndicesTex = new ::Rendering::HAL::GLTexture(::Rendering::Settings::ETextureType::TEXTURE_BUFFER);
+			vertexIndicesTex = new ::Rendering::Data::Texture(::Rendering::Settings::ETextureType::TEXTURE_BUFFER);
 		}
 		vertexIndicesTex->Allocate(desc);
 
@@ -436,7 +436,7 @@ void main()
 			.data = bvhService->verticesUVX.data()
 		};
 		if (verticesTex== nullptr) {
-			verticesTex= new ::Rendering::HAL::GLTexture(::Rendering::Settings::ETextureType::TEXTURE_BUFFER);
+			verticesTex= new ::Rendering::Data::Texture(::Rendering::Settings::ETextureType::TEXTURE_BUFFER);
 		}
 		verticesTex->Allocate(desc);
 
@@ -447,7 +447,7 @@ void main()
 			.data = bvhService->normalsUVY.data()
 		};
 		if (normalsTex== nullptr) {
-			normalsTex = new ::Rendering::HAL::GLTexture(::Rendering::Settings::ETextureType::TEXTURE_BUFFER);
+			normalsTex = new ::Rendering::Data::Texture(::Rendering::Settings::ETextureType::TEXTURE_BUFFER);
 		}
 		normalsTex->Allocate(desc);
 
@@ -459,7 +459,7 @@ void main()
 			.data = bvhService->triangleDomainColors.data()
 		};
 		if (triangleDomainColorTex == nullptr) {
-			triangleDomainColorTex = new ::Rendering::HAL::GLTexture(::Rendering::Settings::ETextureType::TEXTURE_BUFFER);
+			triangleDomainColorTex = new ::Rendering::Data::Texture(::Rendering::Settings::ETextureType::TEXTURE_BUFFER);
 		}
 		triangleDomainColorTex->Allocate(desc);
 
@@ -480,7 +480,7 @@ void main()
 
 		};
 		if (transformsTex== nullptr) {
-			transformsTex = new ::Rendering::HAL::GLTexture(::Rendering::Settings::ETextureType::TEXTURE_2D);
+			transformsTex = new ::Rendering::Data::Texture(::Rendering::Settings::ETextureType::TEXTURE_2D);
 		}
 		transformsTex->Allocate(desc);
 
@@ -499,7 +499,7 @@ void main()
 
 			};
 			if (lightsTex== nullptr) {
-				lightsTex = new ::Rendering::HAL::GLTexture(::Rendering::Settings::ETextureType::TEXTURE_2D);
+				lightsTex = new ::Rendering::Data::Texture(::Rendering::Settings::ETextureType::TEXTURE_2D);
 			}
 			lightsTex->Allocate(desc);
 		}
@@ -517,7 +517,7 @@ void main()
 			.data = envMap->img
 		};
 		if (envMapTex== nullptr) {
-			envMapTex= new ::Rendering::HAL::GLTexture(::Rendering::Settings::ETextureType::TEXTURE_2D);
+			envMapTex= new ::Rendering::Data::Texture(::Rendering::Settings::ETextureType::TEXTURE_2D);
 		}
 		envMapTex->Allocate(desc);
 
@@ -531,7 +531,7 @@ void main()
 			.data = envMap->cdf
 		};
 		if (envMapCDFTex== nullptr) {
-			envMapCDFTex = new ::Rendering::HAL::GLTexture(::Rendering::Settings::ETextureType::TEXTURE_2D);
+			envMapCDFTex = new ::Rendering::Data::Texture(::Rendering::Settings::ETextureType::TEXTURE_2D);
 		}
 		envMapCDFTex->Allocate(desc);
 
@@ -550,7 +550,7 @@ void main()
 				.arrayLayers = static_cast<int>(bvhService->textures.size())
 			};
 			if (textureMapsArrayTex== nullptr) {
-				textureMapsArrayTex = new ::Rendering::HAL::GLTexture(::Rendering::Settings::ETextureType::TEXTURE_2DARRAY);
+				textureMapsArrayTex = new ::Rendering::Data::Texture(::Rendering::Settings::ETextureType::TEXTURE_2DARRAY);
 			}
 			textureMapsArrayTex->Allocate(desc);
 		}
@@ -571,7 +571,7 @@ void main()
 		};
 
 		if (meshInfoTex == nullptr) {
-			meshInfoTex = new ::Rendering::HAL::GLTexture(::Rendering::Settings::ETextureType::TEXTURE_BUFFER);
+			meshInfoTex = new ::Rendering::Data::Texture(::Rendering::Settings::ETextureType::TEXTURE_BUFFER);
 		}
 		meshInfoTex->Allocate(desc);
 
@@ -583,7 +583,7 @@ void main()
 			.data = bvhService->triangleInfo.data()
 		};
 		if (triangleInfoTex == nullptr) {
-			triangleInfoTex = new ::Rendering::HAL::GLTexture(::Rendering::Settings::ETextureType::TEXTURE_BUFFER);
+			triangleInfoTex = new ::Rendering::Data::Texture(::Rendering::Settings::ETextureType::TEXTURE_BUFFER);
 		}
 		triangleInfoTex->Allocate(desc);
 	}
@@ -762,7 +762,7 @@ void main()
 		}
 		};
 		if (denoisedTexture == nullptr) {
-			denoisedTexture = new ::Rendering::HAL::GLTexture(::Rendering::Settings::ETextureType::TEXTURE_2D);
+			denoisedTexture = new ::Rendering::Data::Texture(::Rendering::Settings::ETextureType::TEXTURE_2D);
 		}
 		denoisedTexture->Allocate(desc);
 		
@@ -911,7 +911,7 @@ void main()
 			//每间隔降噪
 			if (!denoised || (frameCounter % (bvhService->renderOptions.denoiserFrameCnt * int(numTiles.x * numTiles.y)) == 0))
 			{
-				auto texture=&outputFBO[1 - currentBuffer].GetAttachment<::Rendering::HAL::GLTexture>(::Rendering::Settings::EFramebufferAttachment::COLOR, 0).value();
+				auto texture=&outputFBO[1 - currentBuffer].GetAttachment<::Rendering::Data::Texture>(::Rendering::Settings::EFramebufferAttachment::COLOR, 0).value();
 				glBindTexture(GL_TEXTURE_2D, texture->GetID());
 				glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, denoiserInputFramePtr);
 				memcpy(frameOutputPtr, denoiserInputFramePtr, renderSize.x * renderSize.y * 16);
@@ -1044,7 +1044,7 @@ void main()
 		tonemapShader.SetProperty("enableAces",bvhService->renderOptions.enableAces);
 		tonemapShader.SetProperty("simpleAcesFit", bvhService->renderOptions.simpleAcesFit);
 		tonemapShader.SetProperty("backgroundCol", bvhService->renderOptions.backgroundCol);
-		tonemapShader.SetProperty("pathTraceTexture", &accumFBO.GetAttachment<::Rendering::HAL::GLTexture>(::Rendering::Settings::EFramebufferAttachment::COLOR, 0).value());
+		tonemapShader.SetProperty("pathTraceTexture", &accumFBO.GetAttachment<::Rendering::Data::Texture>(::Rendering::Settings::EFramebufferAttachment::COLOR, 0).value());
 
 		// set BVH Resources uniforms
 		if (envMap) {
@@ -1053,7 +1053,7 @@ void main()
 		}
 		pathTraceShader.SetProperty("topBVHIndex", bvhService->topLevelIndex);
 		pathTraceShader.SetProperty("numOfLights", (int)bvhService->lights.size());
-		pathTraceShader.SetProperty("accumTexture", &accumFBO.GetAttachment<::Rendering::HAL::GLTexture>(::Rendering::Settings::EFramebufferAttachment::COLOR, 0).value());
+		pathTraceShader.SetProperty("accumTexture", &accumFBO.GetAttachment<::Rendering::Data::Texture>(::Rendering::Settings::EFramebufferAttachment::COLOR, 0).value());
 		pathTraceShader.SetProperty("BVH", BVHTex);
 		pathTraceShader.SetProperty("vertexIndicesTex", vertexIndicesTex);
 		pathTraceShader.SetProperty("verticesTex", verticesTex);
@@ -1074,7 +1074,7 @@ void main()
 		}
 		pathTraceShaderLowRes.SetProperty("topBVHIndex", bvhService->topLevelIndex);
 		pathTraceShaderLowRes.SetProperty("numOfLights", (int)bvhService->lights.size());
-		pathTraceShaderLowRes.SetProperty("accumTexture", &accumFBO.GetAttachment<::Rendering::HAL::GLTexture>(::Rendering::Settings::EFramebufferAttachment::COLOR, 0).value());
+		pathTraceShaderLowRes.SetProperty("accumTexture", &accumFBO.GetAttachment<::Rendering::Data::Texture>(::Rendering::Settings::EFramebufferAttachment::COLOR, 0).value());
 		pathTraceShaderLowRes.SetProperty("BVH", BVHTex);
 		pathTraceShaderLowRes.SetProperty("vertexIndicesTex", vertexIndicesTex);
 		pathTraceShaderLowRes.SetProperty("verticesTex", verticesTex);
@@ -1157,7 +1157,7 @@ void main()
 
 		if (refreshFlag || sampleCounter == 1)
 		{
-			auto& lowResColor = pathTraceFBOLowRes.GetAttachment<::Rendering::HAL::GLTexture>(::Rendering::Settings::EFramebufferAttachment::COLOR, 0).value();
+			auto& lowResColor = pathTraceFBOLowRes.GetAttachment<::Rendering::Data::Texture>(::Rendering::Settings::EFramebufferAttachment::COLOR, 0).value();
 			tonemapShader.SetProperty("pathTraceTexture", &lowResColor);
 			m_renderer.Present(tonemapShader);
 		}

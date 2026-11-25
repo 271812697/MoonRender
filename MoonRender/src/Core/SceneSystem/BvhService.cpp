@@ -10,7 +10,6 @@
 #include <Rendering/Backend/CreateTextureRequest.h>
 #include <Rendering/Backend/BackendResources.h>
 #include <Rendering/Context/Driver.h>
-#include <Rendering/HAL/TextureHandle.h>
 #include <Rendering/Resources/Texture.h>
 #include <Core/ECS/Components/CAmbientSphereLight.h>
 #include <Core/ECS/Components/CDirectionalLight.h>
@@ -42,17 +41,16 @@ namespace Core::SceneSystem
 			? module->GetContext()->driver.get() : nullptr;
 		if (driver == nullptr || !p_texture.GetHandle())
 		{
-			::Rendering::HAL::Texture* const texture = ::Rendering::Backend::Records::CreateTexture(
+			// No driver: the object is made here, and the description the caller handed over is what
+			// it is allocated with.
+			::Rendering::Backend::Records::CreateTexture(
 				p_texture.GetHandle(), ::Rendering::Settings::ETextureType::TEXTURE_BUFFER, p_debugName);
-			if (texture != nullptr)
+			auto descriptor = p_descriptor;
+			if (descriptor.mutableDesc.has_value())
 			{
-				auto descriptor = p_descriptor;
-				if (descriptor.mutableDesc.has_value())
-				{
-					descriptor.mutableDesc.value().data = p_initialData;
-				}
-				texture->Allocate(descriptor);
+				descriptor.mutableDesc.value().data = p_initialData;
 			}
+			p_texture.GetTexture().Allocate(descriptor);
 			return;
 		}
 
@@ -232,10 +230,10 @@ namespace Core::SceneSystem
 			//Albedo Texture
 			it = propertyOf("u_AlbedoMap");
 			if (it.has_value()) {
-				::Rendering::HAL::Texture* handle = nullptr;
-				if (auto textureHandle = std::get_if<::Rendering::HAL::TextureHandle*>(&it->value))
+				::Rendering::Data::Texture* handle = nullptr;
+				if (auto textureHandle = std::get_if<::Rendering::Data::Texture*>(&it->value))
 				{
-					handle = static_cast<::Rendering::HAL::Texture*>(*textureHandle);
+					handle = *textureHandle;
 				}
 				else if (auto texture = std::get_if<::Rendering::Resources::Texture*>(&it->value))
 				{
@@ -250,10 +248,10 @@ namespace Core::SceneSystem
 			}
 			it = propertyOf("u_RoughnessMap");
 			if (it.has_value()) {
-				::Rendering::HAL::Texture* handle = nullptr;
-				if (auto textureHandle = std::get_if<::Rendering::HAL::TextureHandle*>(&it->value))
+				::Rendering::Data::Texture* handle = nullptr;
+				if (auto textureHandle = std::get_if<::Rendering::Data::Texture*>(&it->value))
 				{
-					handle = static_cast<::Rendering::HAL::Texture*>(*textureHandle);
+					handle = *textureHandle;
 				}
 				else if (auto texture = std::get_if<::Rendering::Resources::Texture*>(&it->value))
 				{
@@ -268,10 +266,10 @@ namespace Core::SceneSystem
 			}
 			it = propertyOf("u_EmissiveMap");
 			if (it.has_value()) {
-				::Rendering::HAL::Texture* handle = nullptr;
-				if (auto textureHandle = std::get_if<::Rendering::HAL::TextureHandle*>(&it->value))
+				::Rendering::Data::Texture* handle = nullptr;
+				if (auto textureHandle = std::get_if<::Rendering::Data::Texture*>(&it->value))
 				{
-					handle = static_cast<::Rendering::HAL::Texture*>(*textureHandle);
+					handle = *textureHandle;
 				}
 				else if (auto texture = std::get_if<::Rendering::Resources::Texture*>(&it->value))
 				{
@@ -286,10 +284,10 @@ namespace Core::SceneSystem
 			}
 			it = propertyOf("u_NormalMap");
 			if (it.has_value()) {
-				::Rendering::HAL::Texture* handle = nullptr;
-				if (auto textureHandle = std::get_if<::Rendering::HAL::TextureHandle*>(&it->value))
+				::Rendering::Data::Texture* handle = nullptr;
+				if (auto textureHandle = std::get_if<::Rendering::Data::Texture*>(&it->value))
 				{
-					handle = static_cast<::Rendering::HAL::Texture*>(*textureHandle);
+					handle = *textureHandle;
 				}
 				else if (auto texture = std::get_if<::Rendering::Resources::Texture*>(&it->value))
 				{
@@ -309,7 +307,7 @@ namespace Core::SceneSystem
 		tempMat.baseColor = { 1.0,1.0f,1.0f };
 		materials.push_back(tempMat);
 	}
-	int	 BvhService::AddTexture(::Rendering::HAL::Texture* tex)
+	int	 BvhService::AddTexture(::Rendering::Data::Texture* tex)
 	{
 		int id = -1;
 		// Check if texture was already loaded
@@ -528,9 +526,9 @@ namespace Core::SceneSystem
 				if (!mat) break;
 				auto prop = mat->GetProperty("domainColorTex");
 				if (!prop.has_value()) break;
-				auto handle = std::get_if<::Rendering::HAL::TextureHandle*>(&prop.value().value);
+				auto handle = std::get_if<::Rendering::Data::Texture*>(&prop.value().value);
 				if (!handle || !*handle) break;
-				auto* tex = static_cast<::Rendering::HAL::GLTexture*>(*handle);
+				auto* tex = static_cast<::Rendering::Data::Texture*>(*handle);
 				glBindTexture(GL_TEXTURE_BUFFER, tex->GetID());
 				GLint texSize = 0;
 				glGetTexLevelParameteriv(GL_TEXTURE_BUFFER, 0, GL_TEXTURE_BUFFER_SIZE, &texSize);
@@ -788,7 +786,7 @@ namespace Core::SceneSystem
 							if (mat) {
 								mat->AddFeature("TRIANGLE_INFO");
 								auto& tfo=it.second;
-								::Rendering::HAL::GLTexture* triangleInfoTex = nullptr;
+								::Rendering::Data::Texture* triangleInfoTex = nullptr;
 								::Rendering::Resources::Texture* triangleInfoAsset = nullptr;
 								// TriangleInfo Texture
 								::Rendering::Settings::TextureDesc desc;
@@ -826,10 +824,10 @@ namespace Core::SceneSystem
 											tfo.size() * sizeof(::Core::SceneSystem::TriangleInfo), "triangleInfo");
 									}
 								}
-								else if (auto* handle = std::get_if<::Rendering::HAL::TextureHandle*>(&prop.value))
+								else if (auto* handle = std::get_if<::Rendering::Data::Texture*>(&prop.value))
 								{
 									auto v = *handle;
-									::Rendering::HAL::GLTexture* ttex = static_cast<::Rendering::HAL::GLTexture*>(v);
+									::Rendering::Data::Texture* ttex = static_cast<::Rendering::Data::Texture*>(v);
 									ttex->Allocate(desc);
 								}
 							}

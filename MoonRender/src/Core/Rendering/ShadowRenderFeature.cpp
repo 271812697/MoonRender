@@ -49,7 +49,7 @@ void Core::Rendering::ShadowRenderFeature::OnBeforeDraw(::Rendering::Data::Pipel
 		{
 			assert(light.IsSetupForShadowRendering()&&"This light isn't setup for shadow rendering");
 
-			const auto shadowTex = light.shadowBuffer->GetAttachment<::Rendering::HAL::Texture>(
+			const auto shadowTex = light.shadowBuffer->GetAttachment<::Rendering::Data::Texture>(
 				::Rendering::Settings::EFramebufferAttachment::DEPTH
 			);
 

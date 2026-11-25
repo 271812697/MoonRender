@@ -23,38 +23,26 @@ namespace Rendering::Data
 	}
 
 	Descriptor Descriptor::MakeTexture(
-		Rendering::HAL::TextureHandle* p_handle,
+		Rendering::Data::Texture* p_texture,
 		Rendering::Resources::Texture* p_asset)
 	{
 		Descriptor descriptor;
 		TextureInfo info;
-		info.direct = p_handle;
+		info.direct = p_texture;
 		info.asset = p_asset;
-		if (p_asset != nullptr)
+		// The handle is what every command names: the front end's own when there is one, otherwise
+		// the asset's (the loader's textures are named by their Resources::Texture, which holds the
+		// front end).
+		if (p_texture != nullptr)
 		{
-			// The front end names the asset by handle; the pointer is only the eager fallback until
-			// the resolver below has run (docs/RenderThreadPlan.md §7).
+			info.handle = p_texture->GetHandle();
+		}
+		else if (p_asset != nullptr)
+		{
 			info.handle = p_asset->GetHandle();
 		}
 		descriptor.m_value = info;
 		return descriptor;
-	}
-
-	void Descriptor::ResolveTexture()
-	{
-		TextureInfo* texture = std::get_if<TextureInfo>(&m_value);
-		if (texture == nullptr || !texture->handle)
-		{
-			return;
-		}
-
-		// The commit step: the front-end handle is turned into the backend object the draw binds.
-		// Descriptors that name a backend resource directly (render-target attachment, engine
-		// fallback) have nothing to resolve.
-		if (Rendering::HAL::Texture* resolved = Rendering::Backend::GetHandleAllocator().HandleCast<Rendering::HAL::Texture>(texture->handle))
-		{
-			texture->direct = resolved;
-		}
 	}
 
 	bool Descriptor::IsValid() const
@@ -65,7 +53,7 @@ namespace Rendering::Data
 		}
 		if (const TextureInfo* texture = GetTexture())
 		{
-			return texture->handle.operator bool() || texture->direct != nullptr;
+			return static_cast<bool>(texture->handle) || texture->direct != nullptr;
 		}
 		return false;
 	}
@@ -124,21 +112,18 @@ namespace Rendering::Data
 
 		if (const TextureInfo* texture = GetTexture())
 		{
-			// The front end's handle when there is one; a backend-only texture (a render-target
-			// attachment, the engine's 1x1 fallbacks) has no handle and only a GL name, which is
-			// the side it lives on.
-			const uint32_t handleId = texture->handle
+			// The whole descriptor is named by the handle the recording side stored: the executor
+			// resolves it to the GL name, so nothing here needs the object.
+			const uint32_t handleId = static_cast<bool>(texture->handle)
 				? texture->handle.GetId()
-				: (texture->direct != nullptr ? texture->direct->GetHandleId() : 0);
+				: (texture->direct != nullptr ? texture->direct->GetHandle().GetId() : 0);
 
 			// A descriptor can still name a texture whose object was deleted (a resource reloaded
 			// while an instance still points at the old one). Binding a stale name is a GL error
 			// on every draw; skip it instead.
 			if (viaCommand)
 			{
-				const uint32_t name = handleId == 0 && texture->direct != nullptr
-					? texture->direct->GetID() : 0;
-				if (handleId == 0 && name == 0)
+				if (handleId == 0)
 				{
 					return;
 				}
@@ -146,16 +131,16 @@ namespace Rendering::Data
 				::Rendering::Backend::BindDescriptorRequest request;
 				request.kind = ::Rendering::Backend::BindDescriptorRequest::Kind::Texture;
 				request.handleId = handleId;
-				request.objectId = name;
 				request.slot = p_slot;
 				driver->BindDescriptor(request);
 				return;
 			}
 
-			if (texture->direct != nullptr && texture->direct->GetID() != 0
-				&& glIsTexture(texture->direct->GetID()))
+			// No driver: this is the side that owns the context, so the name is here.
+			const uint32_t name = ::Rendering::Backend::Records::TextureName(handleId);
+			if (name != 0 && glIsTexture(name))
 			{
-				texture->direct->Bind(p_slot);
+				glBindTextureUnit(p_slot, name);
 			}
 		}
 	}

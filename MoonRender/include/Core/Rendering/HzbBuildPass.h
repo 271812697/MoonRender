@@ -74,8 +74,8 @@ namespace Core::Rendering
 
 		/** Depth only framebuffer holding the resolved (non MSAA) scene depth. */
 		::Rendering::Data::Framebuffer m_resolveFbo;
-		std::shared_ptr<::Rendering::HAL::Texture> m_resolveColor;
-		std::shared_ptr<::Rendering::HAL::Texture> m_resolveDepth;
+		std::shared_ptr<::Rendering::Data::Texture> m_resolveColor;
+		std::shared_ptr<::Rendering::Data::Texture> m_resolveDepth;
 
 		/** One framebuffer per pyramid level (R32F color, half resolution each step).
 		 *
@@ -87,7 +87,7 @@ namespace Core::Rendering
 		 */
 		std::vector<std::unique_ptr<::Rendering::Data::Framebuffer>> m_levels;
 		std::vector<Maths::FVector2> m_levelResolutions;
-		std::vector<std::shared_ptr<::Rendering::HAL::Texture>> m_levelTextures;
+		std::vector<std::shared_ptr<::Rendering::Data::Texture>> m_levelTextures;
 
 		/** One entry of the asynchronous readback ring.
 		 *

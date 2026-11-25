@@ -108,11 +108,11 @@ namespace Rendering::Core
 		void Present(Rendering::Data::Framebuffer& p_src);
 		void Present(Rendering::Data::Framebuffer& p_src, Rendering::Data::MaterialInstance& mat);
 		void Present(Rendering::Data::Framebuffer& p_src, Rendering::Data::Material& mat);
-		void Present(Rendering::HAL::Texture& p_src, Rendering::Data::MaterialInstance& mat);
-		void Present(Rendering::HAL::Texture& p_src, Rendering::Data::Material& mat);
+		void Present(Rendering::Data::Texture& p_src, Rendering::Data::MaterialInstance& mat);
+		void Present(Rendering::Data::Texture& p_src, Rendering::Data::Material& mat);
 		void Present(Rendering::Data::MaterialInstance& mat);
 		void Present(Rendering::Data::Material& mat);
-		void Present(Rendering::HAL::Texture& p_src);
+		void Present(Rendering::Data::Texture& p_src);
 		/**
 		* Returns true if the entity is drawable. Should be used before submitting an entity.
 		* @param p_drawable
@@ -134,7 +134,7 @@ namespace Rendering::Core
 		Rendering::Resources::Mesh m_unitCube;
 		/** The view's split-sum DFG LUT: global, bound for every material that declares
 		 * _BRDFLut (see Material::UploadParameterBlock). Set by CompositeRenderer each frame. */
-		void SetBrdfLut(Rendering::HAL::Texture* p_lut);
+		void SetBrdfLut(Rendering::Data::Texture* p_lut);
 		void SetEngineDescriptorSets(
 			Rendering::Data::DescriptorSet* p_perView,
 			Rendering::Data::DescriptorSet* p_perRenderable)
@@ -145,8 +145,8 @@ namespace Rendering::Core
 		/** The view's environment (filament's IndirectLight): the irradiance cube (diffuse) and
 		 * the prefiltered cube (specular). These are view descriptors, not material properties. */
 		void SetEnvironmentTextures(
-			Rendering::HAL::Texture* p_irradianceCube,
-			Rendering::HAL::Texture* p_prefilterCube);
+			Rendering::Data::Texture* p_irradianceCube,
+			Rendering::Data::Texture* p_prefilterCube);
 		/** Binds the per-view set once, after its view textures have been assigned. */
 		void BindPerViewDescriptorSet() const;
 	protected:
@@ -160,14 +160,14 @@ namespace Rendering::Core
 
 		void BindFramebuffer(Data::Framebuffer* p_target) { m_driver.BindFramebuffer(p_target); }
 		void BindDefaultFramebuffer() { m_driver.BindFramebuffer(nullptr); }
-		Rendering::HAL::Texture m_emptyTexture2D;
-		Rendering::HAL::Texture m_emptyTextureCube;
+		Rendering::Data::Texture m_emptyTexture2D;
+		Rendering::Data::Texture m_emptyTextureCube;
 		/** The neutral tangent-space normal (0.5, 0.5, 1.0), bound for a sampler declared
 		 * `fallback : flatNormal` when the material instance has no map in that slot. */
-		Rendering::HAL::Texture m_flatNormalTexture;
-		Rendering::HAL::Texture* m_brdfLut = nullptr;
-		Rendering::HAL::Texture* m_irradianceCube = nullptr;
-		Rendering::HAL::Texture* m_prefilterCube = nullptr;
+		Rendering::Data::Texture m_flatNormalTexture;
+		Rendering::Data::Texture* m_brdfLut = nullptr;
+		Rendering::Data::Texture* m_irradianceCube = nullptr;
+		Rendering::Data::Texture* m_prefilterCube = nullptr;
 		
 		Rendering::Data::PipelineState m_basePipelineState;
 		bool m_isDrawing;

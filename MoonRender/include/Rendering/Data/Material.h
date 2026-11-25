@@ -125,9 +125,9 @@ namespace Rendering::Data
 		}
 		void Unbind(bool p_resetBoundProgram = false) { m_defaultInstance->Unbind(p_resetBoundProgram); }
 		void UploadProperties(
-			Rendering::HAL::Texture* p_emptyTexture2D = nullptr,
-			Rendering::HAL::Texture* p_emptyTextureCube = nullptr,
-			Rendering::HAL::Texture* p_flatNormalTexture = nullptr)
+			Rendering::Data::Texture* p_emptyTexture2D = nullptr,
+			Rendering::Data::Texture* p_emptyTextureCube = nullptr,
+			Rendering::Data::Texture* p_flatNormalTexture = nullptr)
 		{
 			m_defaultInstance->UploadProperties(p_emptyTexture2D, p_emptyTextureCube,
 				p_flatNormalTexture);

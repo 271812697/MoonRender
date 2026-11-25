@@ -72,7 +72,7 @@ namespace Editor::Panels
 		void BuildPreviewMesh();
 		/** The 1xN colour table the CAD shader samples by domain id. Created once, for the CAD
 		 * preview mesh only: without it the domain colour path multiplies the albedo by black. */
-		::Rendering::HAL::TextureHandle* DomainColorTable();
+		::Rendering::Data::Texture* DomainColorTable();
 		/** Fills the scene: the preview actor, the light rig and the post-process stack. */
 		void BuildScene();
 		/** Places the rig around the mesh the way the scene view places its own around the
@@ -95,7 +95,7 @@ namespace Editor::Panels
 		 * domain colour table on the material, and that must not be written into the asset the
 		 * resource browser and the shapes share. */
 		std::unique_ptr<::Rendering::Data::MaterialInstance> m_previewInstance;
-		::Rendering::HAL::TextureHandle* m_domainColorTable = nullptr;
+		::Rendering::Data::Texture* m_domainColorTable = nullptr;
 		/** Declared last so it is destroyed first: the actors that point at the sphere's meshes
 		 * go before the model does. */
 		::Core::SceneSystem::Scene m_scene;

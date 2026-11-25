@@ -30,7 +30,7 @@
 #include "Core/Rendering/SsaoRenderFeature.h"
 #include <Rendering/HAL/Profiling.h>
 #include <Rendering/Resources/Loaders/ShaderLoader.h>
-#include <Rendering/HAL/Texture.h>
+#include <Rendering/Data/Texture.h>
 
 namespace
 {
@@ -400,7 +400,7 @@ namespace
 				.arrayLayers= static_cast<int>(mLayerFbo.size())
 			    
 			};
-			mLayerColor = std::make_shared<::Rendering::HAL::Texture>(
+			mLayerColor = std::make_shared<::Rendering::Data::Texture>(
 				::Rendering::Settings::ETextureType::TEXTURE_2DARRAY, "layercolor");
 			mLayerColor->Allocate(desc);
 			
@@ -435,29 +435,29 @@ namespace
 				}
 			};
 			for (int i = 0; i < mLayerFbo.size(); i++) {
-				auto renderTexture = std::make_shared<::Rendering::HAL::Texture>(
+				auto renderTexture = std::make_shared<::Rendering::Data::Texture>(
 					 ::Rendering::Settings::ETextureType::TEXTURE_2D,"peelcolor");
 				renderTexture->Allocate(colorDesc);
-				auto depthTexture = std::make_shared<::Rendering::HAL::Texture>(
+				auto depthTexture = std::make_shared<::Rendering::Data::Texture>(
 					::Rendering::Settings::ETextureType::TEXTURE_2D,"peeldepth");
 				depthTexture->Allocate(depthDesc);
 				depthTexture->SetBorderColor(Maths::FVector4::Zero);
-				mLayerFbo[i].Attach<::Rendering::HAL::Texture>(renderTexture, ::Rendering::Settings::EFramebufferAttachment::COLOR);
-				mLayerFbo[i].Attach<::Rendering::HAL::Texture>(depthTexture, ::Rendering::Settings::EFramebufferAttachment::DEPTH);
+				mLayerFbo[i].Attach<::Rendering::Data::Texture>(renderTexture, ::Rendering::Settings::EFramebufferAttachment::COLOR);
+				mLayerFbo[i].Attach<::Rendering::Data::Texture>(depthTexture, ::Rendering::Settings::EFramebufferAttachment::DEPTH);
 				if (!mLayerFbo[i].Validate()) {
 					std::cout << "invalidate buffer" << std::endl;
 				}
 			}
 
-			auto renderTexture = std::make_shared<::Rendering::HAL::Texture>(
+			auto renderTexture = std::make_shared<::Rendering::Data::Texture>(
 				::Rendering::Settings::ETextureType::TEXTURE_2D, "peelcolor");
 			renderTexture->Allocate(colorDesc);
-			auto depthTexture = std::make_shared<::Rendering::HAL::Texture>(
+			auto depthTexture = std::make_shared<::Rendering::Data::Texture>(
 				::Rendering::Settings::ETextureType::TEXTURE_2D, "peeldepth");
 			depthTexture->Allocate(depthDesc);
 			depthTexture->SetBorderColor(Maths::FVector4::Zero);
-			mBlendFbo.Attach<::Rendering::HAL::Texture>(renderTexture, ::Rendering::Settings::EFramebufferAttachment::COLOR);
-			mBlendFbo.Attach<::Rendering::HAL::Texture>(depthTexture, ::Rendering::Settings::EFramebufferAttachment::DEPTH);
+			mBlendFbo.Attach<::Rendering::Data::Texture>(renderTexture, ::Rendering::Settings::EFramebufferAttachment::COLOR);
+			mBlendFbo.Attach<::Rendering::Data::Texture>(depthTexture, ::Rendering::Settings::EFramebufferAttachment::DEPTH);
 
 			// Blending the peel layers back to front is a full-screen copy, and the copy material is
 			// the MatC one (same package as the present): its layer texture is a declared parameter,
@@ -526,8 +526,8 @@ namespace
 					// ???? FBO
 					m_renderer.BindFramebuffer(&mLayerFbo[currFbo]);
 					m_renderer.Clear(true, true, false, Maths::FVector4(0, 0, 0, 0));
-					const auto& depth=mLayerFbo[prevFbo].GetAttachment<::Rendering::HAL::GLTexture>(::Rendering::Settings::EFramebufferAttachment::DEPTH,0);
-					const auto& opaquedepth = mBlendFbo.GetAttachment<::Rendering::HAL::GLTexture>(::Rendering::Settings::EFramebufferAttachment::DEPTH, 0);
+					const auto& depth=mLayerFbo[prevFbo].GetAttachment<::Rendering::Data::Texture>(::Rendering::Settings::EFramebufferAttachment::DEPTH,0);
+					const auto& opaquedepth = mBlendFbo.GetAttachment<::Rendering::Data::Texture>(::Rendering::Settings::EFramebufferAttachment::DEPTH, 0);
 					for ( auto drawable : drawables.transparents | std::views::values)
 					{
 						drawable.stateMask.depthWriting = true;
@@ -548,7 +548,7 @@ namespace
 				 */
 				m_renderer.BindFramebuffer(&mBlendFbo);
 				for (int i = mLayerFbo.size() - 1; i >= 0; i--) {
-					const auto& color = mLayerFbo[i].GetAttachment<::Rendering::HAL::GLTexture>(::Rendering::Settings::EFramebufferAttachment::COLOR, 0);
+					const auto& color = mLayerFbo[i].GetAttachment<::Rendering::Data::Texture>(::Rendering::Settings::EFramebufferAttachment::COLOR, 0);
 					mBlendColorMat.SetProperty("_InputTexture",&color.value());
 					Rendering::Entities::Drawable blit;
 					blit.mesh = m_renderer.m_unitQuad;
@@ -564,7 +564,7 @@ namespace
 				m_renderer.BindDefaultFramebuffer();
 				
 				m_renderer.BindFramebuffer(&msaaframebuffer);
-				const auto& content = mBlendFbo.GetAttachment<::Rendering::HAL::GLTexture>(::Rendering::Settings::EFramebufferAttachment::COLOR, 0);
+				const auto& content = mBlendFbo.GetAttachment<::Rendering::Data::Texture>(::Rendering::Settings::EFramebufferAttachment::COLOR, 0);
 				m_renderer.Present(content.value());
 			}
 		}
@@ -572,7 +572,7 @@ namespace
 		::Rendering::Data::Material mBlendColorMat;
 		std::vector<::Rendering::Data::Framebuffer>mLayerFbo ;
 		::Rendering::Data::Framebuffer mBlendFbo;
-		std::shared_ptr<::Rendering::HAL::Texture>mLayerColor;
+		std::shared_ptr<::Rendering::Data::Texture>mLayerColor;
 	};
 
 	class UIRenderPass : public SceneRenderPass

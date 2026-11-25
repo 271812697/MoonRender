@@ -177,7 +177,7 @@ namespace MOON
 
 		if (m_patternTexture == nullptr)
 		{
-			m_patternTexture = std::make_unique<Rendering::HAL::Texture>(
+			m_patternTexture = std::make_unique<Rendering::Data::Texture>(
 				Rendering::Settings::ETextureType::TEXTURE_2D);
 		}
 		m_patternTexture->Allocate(Rendering::Settings::TextureDesc{
@@ -230,7 +230,7 @@ namespace MOON
 			return;
 		}
 		m_material.SetProperty("uPatternTex",
-			static_cast<Rendering::HAL::TextureHandle*>(m_patternTexture.get()));
+			static_cast<Rendering::Data::Texture*>(m_patternTexture.get()));
 		m_material.SetProperty("uPatternRows", static_cast<float>(m_patterns.size()));
 		DrawBuffer(p_gl, m_material, m_vertices);
 	}

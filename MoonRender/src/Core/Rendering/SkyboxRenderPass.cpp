@@ -78,24 +78,24 @@ Core::Rendering::SkyboxRenderPass::SkyboxRenderPass(::Rendering::Core::Composite
 	m_clearMaterial.SetMaterial(GetShaderService[":Shaders\\ClearBackground.shader"]);
 }
 
-::Rendering::HAL::Texture* Core::Rendering::SkyboxRenderPass::GetSkyBoxCube()
+::Rendering::Data::Texture* Core::Rendering::SkyboxRenderPass::GetSkyBoxCube()
 {
 	return skyBoxCube.get();
 }
 
-::Rendering::HAL::Texture* Core::Rendering::SkyboxRenderPass::GetIrradianceCube()
+::Rendering::Data::Texture* Core::Rendering::SkyboxRenderPass::GetIrradianceCube()
 {
 	return irradianceCube.get();
 }
 
-::Rendering::HAL::Texture* Core::Rendering::SkyboxRenderPass::GetPrefilterCube()
+::Rendering::Data::Texture* Core::Rendering::SkyboxRenderPass::GetPrefilterCube()
 {
 	return prefilterCube.get();
 }
 
-::Rendering::HAL::Texture* Core::Rendering::SkyboxRenderPass::GetBrdfTexture()
+::Rendering::Data::Texture* Core::Rendering::SkyboxRenderPass::GetBrdfTexture()
 {
-	auto attachment = brdfBuffer.GetAttachment<::Rendering::HAL::GLTexture>(::Rendering::Settings::EFramebufferAttachment::COLOR, 0);
+	auto attachment = brdfBuffer.GetAttachment<::Rendering::Data::Texture>(::Rendering::Settings::EFramebufferAttachment::COLOR, 0);
 	return attachment.has_value() ? &attachment.value() : nullptr;
 }
 	
@@ -309,7 +309,7 @@ void Core::Rendering::SkyboxRenderPass::computeSkyTexture()
 
 				
 
-				skyBoxCube = std::make_shared<::Rendering::HAL::Texture>(
+				skyBoxCube = std::make_shared<::Rendering::Data::Texture>(
 					::Rendering::Settings::ETextureType::TEXTURE_CUBE,
 					"skyBoxCube"
 				);
@@ -326,7 +326,7 @@ void Core::Rendering::SkyboxRenderPass::computeSkyTexture()
 					}
 				);
 
-				irradianceCube = std::make_shared<::Rendering::HAL::Texture>(
+				irradianceCube = std::make_shared<::Rendering::Data::Texture>(
 					::Rendering::Settings::ETextureType::TEXTURE_CUBE,
 					"irradianceCube"
 				);
@@ -343,7 +343,7 @@ void Core::Rendering::SkyboxRenderPass::computeSkyTexture()
 						.useMipMaps = true
 					}
 				);
-				prefilterCube = std::make_shared<::Rendering::HAL::Texture>(
+				prefilterCube = std::make_shared<::Rendering::Data::Texture>(
 					::Rendering::Settings::ETextureType::TEXTURE_CUBE,
 					"prefilterCube"
 				);
@@ -369,7 +369,7 @@ void Core::Rendering::SkyboxRenderPass::computeSkyTexture()
 			{
 				for (uint32_t faceIndex = 0; faceIndex < 6; ++faceIndex)
 				{
-					skyBoxBuffer.Attach<::Rendering::HAL::Texture>(
+					skyBoxBuffer.Attach<::Rendering::Data::Texture>(
 						skyBoxCube,
 						::Rendering::Settings::EFramebufferAttachment::COLOR,
 						faceIndex, // Each color attachment is a face of the cubemap
@@ -388,7 +388,7 @@ void Core::Rendering::SkyboxRenderPass::computeSkyTexture()
 			{
 				for (uint32_t faceIndex = 0; faceIndex < 6; ++faceIndex)
 				{
-					irradianceBuffer.Attach<::Rendering::HAL::Texture>(
+					irradianceBuffer.Attach<::Rendering::Data::Texture>(
 						irradianceCube,
 						::Rendering::Settings::EFramebufferAttachment::COLOR,
 						faceIndex, // Each color attachment is a face of the cubemap
@@ -415,7 +415,7 @@ void Core::Rendering::SkyboxRenderPass::computeSkyTexture()
 				// different mip levels some drivers take the smallest one as the framebuffer
 				// size. Attaching only the face being written keeps color and depth at the
 				// same mip, so every level is baked over its whole face instead of a corner.
-				prefilterBuffer.Attach<::Rendering::HAL::Texture>(
+				prefilterBuffer.Attach<::Rendering::Data::Texture>(
 					prefilterCube,
 					::Rendering::Settings::EFramebufferAttachment::COLOR,
 					0,
@@ -569,7 +569,7 @@ void Core::Rendering::SkyboxRenderPass::computeSkyTexture()
 					skyCamera.CacheMatrices(mipWidth, mipHeight);
 					engineBufferRenderFeature.SetCamera(skyCamera);
 
-					prefilterBuffer.AttachLevel<::Rendering::HAL::Texture>(
+					prefilterBuffer.AttachLevel<::Rendering::Data::Texture>(
 						prefilterCube,
 						::Rendering::Settings::EFramebufferAttachment::COLOR,
 						0,

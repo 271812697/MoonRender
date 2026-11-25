@@ -53,7 +53,7 @@ void Core::Rendering::PostProcess::AutoExposureEffect::Draw(
 	m_luminanceMaterial.SetProperty("_CenterWeightBias", autoExposureSettings.centerWeightBias);
 	m_renderer.Blit(p_pso, p_src, m_luminanceBuffer, m_luminanceMaterial,
 		::Rendering::Settings::EBlitFlags::DEFAULT & ~::Rendering::Settings::EBlitFlags::RESIZE_DST_TO_MATCH_SRC);
-	const auto luminanceTex = m_luminanceBuffer.GetAttachment<::Rendering::HAL::Texture>(::Rendering::Settings::EFramebufferAttachment::COLOR);
+	const auto luminanceTex = m_luminanceBuffer.GetAttachment<::Rendering::Data::Texture>(::Rendering::Settings::EFramebufferAttachment::COLOR);
 	luminanceTex->GenerateMipmaps();
 
 	float elapsedTime = 1.0f;
@@ -82,7 +82,7 @@ void Core::Rendering::PostProcess::AutoExposureEffect::Draw(
 	m_renderer.Blit(p_pso, previousExposure, currentExposure, m_exposureMaterial);
 
 	// Apply the exposure to the final image
-	const auto exposureTex = currentExposure.GetAttachment<::Rendering::HAL::Texture>(::Rendering::Settings::EFramebufferAttachment::COLOR);
+	const auto exposureTex = currentExposure.GetAttachment<::Rendering::Data::Texture>(::Rendering::Settings::EFramebufferAttachment::COLOR);
 	m_compensationMaterial.SetProperty("_ExposureTexture", &exposureTex.value());
 	m_renderer.Blit(p_pso, p_src, p_dst, m_compensationMaterial);
 

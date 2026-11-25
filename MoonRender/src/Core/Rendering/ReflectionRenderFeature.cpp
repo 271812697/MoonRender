@@ -182,7 +182,7 @@ void Core::Rendering::ReflectionRenderFeature::SendProbeData(
 {
 	p_material.SetProperty(
 		"_EnvironmentMap",
-		p_reflectionProbe.has_value() ? p_reflectionProbe->GetCubemap().get() : static_cast<::Rendering::HAL::TextureHandle*>(nullptr));
+		p_reflectionProbe.has_value() ? p_reflectionProbe->GetCubemap().get() : static_cast<::Rendering::Data::Texture*>(nullptr));
 }
 
 void Core::Rendering::ReflectionRenderFeature::BindProbe(const Core::ECS::Components::CReflectionProbe& p_reflectionProbe)

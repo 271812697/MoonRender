@@ -12,7 +12,7 @@
 #include <Core/ResourceManagement/ShaderManager.h>
 #include <Rendering/Core/CompositeRenderer.h>
 #include <Rendering/HAL/Profiling.h>
-#include <Rendering/HAL/Texture.h>
+#include <Rendering/Data/Texture.h>
 #include <Rendering/Settings/EBlitFlags.h>
 #include <Rendering/Settings/TextureDesc.h>
 
@@ -99,23 +99,23 @@ void Core::Rendering::HzbBuildPass::SetupTargets(uint32_t p_width, uint32_t p_he
 	p_width = std::max(1u, p_width);
 	p_height = std::max(1u, p_height);
 
-	m_resolveColor = std::make_shared<::Rendering::HAL::Texture>(
+	m_resolveColor = std::make_shared<::Rendering::Data::Texture>(
 		ETextureType::TEXTURE_2D,
 		"Hzb/ResolveColor"
 	);
 	m_resolveColor->Allocate(MakeGridTextureDesc(p_width, p_height));
 
-	m_resolveDepth = std::make_shared<::Rendering::HAL::Texture>(
+	m_resolveDepth = std::make_shared<::Rendering::Data::Texture>(
 		ETextureType::TEXTURE_2D,
 		"Hzb/ResolveDepth"
 	);
 	m_resolveDepth->Allocate(MakeDepthTextureDesc(p_width, p_height));
 
-	m_resolveFbo.Attach<::Rendering::HAL::Texture>(
+	m_resolveFbo.Attach<::Rendering::Data::Texture>(
 		m_resolveColor,
 		EFramebufferAttachment::COLOR
 	);
-	m_resolveFbo.Attach<::Rendering::HAL::Texture>(
+	m_resolveFbo.Attach<::Rendering::Data::Texture>(
 		m_resolveDepth,
 		EFramebufferAttachment::DEPTH
 	);
@@ -141,7 +141,7 @@ void Core::Rendering::HzbBuildPass::SetupTargets(uint32_t p_width, uint32_t p_he
 		levelWidth = std::max(1u, levelWidth / 2);
 		levelHeight = std::max(1u, levelHeight / 2);
 
-		auto texture = std::make_shared<::Rendering::HAL::Texture>(
+		auto texture = std::make_shared<::Rendering::Data::Texture>(
 			ETextureType::TEXTURE_2D,
 			std::format("Hzb/Level{}", i)
 		);
@@ -150,7 +150,7 @@ void Core::Rendering::HzbBuildPass::SetupTargets(uint32_t p_width, uint32_t p_he
 		auto framebuffer = std::make_unique<::Rendering::Data::Framebuffer>(
 			std::format("HzbLevel{}", i)
 		);
-		framebuffer->Attach<::Rendering::HAL::Texture>(
+		framebuffer->Attach<::Rendering::Data::Texture>(
 			texture,
 			EFramebufferAttachment::COLOR
 		);

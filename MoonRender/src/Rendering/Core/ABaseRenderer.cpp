@@ -10,7 +10,7 @@
 #include <Rendering/Data/DescriptorSet.h>
 #include <Rendering/Data/EngineDescriptorSets.h>
 #include <Rendering/Data/ProgramDescriptorBindings.h>
-#include <Rendering/HAL/TextureHandle.h>
+#include <Rendering/Data/Texture.h>
 #include <Rendering/Resources/Loaders/TextureLoader.h>
 #include <Rendering/Resources/Loaders/ShaderLoader.h>
 std::atomic_bool Rendering::Core::ABaseRenderer::s_isDrawing{ false };
@@ -156,7 +156,7 @@ Rendering::Core::ABaseRenderer::ABaseRenderer(Context::Driver& p_driver) :
 	}
 }
 
-void Rendering::Core::ABaseRenderer::SetBrdfLut(Rendering::HAL::Texture* p_lut)
+void Rendering::Core::ABaseRenderer::SetBrdfLut(Rendering::Data::Texture* p_lut)
 {
 	m_brdfLut = p_lut;
 	if (m_perViewSet != nullptr && p_lut != nullptr && p_lut->IsValid())
@@ -167,8 +167,8 @@ void Rendering::Core::ABaseRenderer::SetBrdfLut(Rendering::HAL::Texture* p_lut)
 }
 
 void Rendering::Core::ABaseRenderer::SetEnvironmentTextures(
-	Rendering::HAL::Texture* p_irradianceCube,
-	Rendering::HAL::Texture* p_prefilterCube)
+	Rendering::Data::Texture* p_irradianceCube,
+	Rendering::Data::Texture* p_prefilterCube)
 {
 	m_irradianceCube = p_irradianceCube;
 	m_prefilterCube = p_prefilterCube;
@@ -348,7 +348,7 @@ void Rendering::Core::ABaseRenderer::Blit(
 
 	if (Rendering::Settings::IsFlagSet(Rendering::Settings::EBlitFlags::FILL_INPUT_TEXTURE, p_flags))
 	{
-		const auto colorTex = p_src.GetAttachment<HAL::Texture>(Settings::EFramebufferAttachment::COLOR);
+		const auto colorTex = p_src.GetAttachment<Data::Texture>(Settings::EFramebufferAttachment::COLOR);
 		
 		p_material.SetProperty("_InputTexture", &colorTex.value());
 	}
@@ -401,17 +401,17 @@ void Rendering::Core::ABaseRenderer::Present(
 	Rendering::Data::Framebuffer& p_src,
 	Rendering::Data::MaterialInstance& mat)
 {
-	const auto colorTex = p_src.GetAttachment<HAL::Texture>(Settings::EFramebufferAttachment::COLOR);
+	const auto colorTex = p_src.GetAttachment<Data::Texture>(Settings::EFramebufferAttachment::COLOR);
 	Present(colorTex.value(), mat);
 }
 void Rendering::Core::ABaseRenderer::Present(
-	Rendering::HAL::Texture& p_src,
+	Rendering::Data::Texture& p_src,
 	Rendering::Data::Material& mat)
 {
 	Present(p_src, mat.DefaultInstance());
 }
 void Rendering::Core::ABaseRenderer::Present(
-	Rendering::HAL::Texture& p_src,
+	Rendering::Data::Texture& p_src,
 	Rendering::Data::MaterialInstance& mat)
 {
 	ZoneScoped;
@@ -478,7 +478,7 @@ void Rendering::Core::ABaseRenderer::Present(Rendering::Data::MaterialInstance& 
 		material->Unbind();
 	}
 }
-void Rendering::Core::ABaseRenderer::Present(Rendering::HAL::Texture& p_src)
+void Rendering::Core::ABaseRenderer::Present(Rendering::Data::Texture& p_src)
 {	
 	if (m_presentMaterial == nullptr)
 	{

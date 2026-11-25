@@ -193,7 +193,7 @@ void MOON::MaterialPreviewWidget::BindEnvironmentTextures()
 	}
 
 	const auto bind = [](::Core::Resources::MaterialAsset* p_material, const char* p_name,
-		::Rendering::HAL::Texture* p_texture)
+		::Rendering::Data::Texture* p_texture)
 	{
 		if (p_material == nullptr)
 		{
@@ -201,7 +201,7 @@ void MOON::MaterialPreviewWidget::BindEnvironmentTextures()
 		}
 		if (const auto property = p_material->GetProperty(p_name))
 		{
-			if (const auto handle = std::get_if<::Rendering::HAL::TextureHandle*>(&property->value);
+			if (const auto handle = std::get_if<::Rendering::Data::Texture*>(&property->value);
 				handle != nullptr && *handle == p_texture)
 			{
 				return; // already pointing at it; SetProperty would bump the upload version
@@ -217,7 +217,7 @@ void MOON::MaterialPreviewWidget::BindEnvironmentTextures()
 	if (!m_refractionCube)
 	{
 		// One dark texel per face: the preview backdrop, used as the refraction source.
-		m_refractionCube = std::make_unique<::Rendering::HAL::Texture>(
+		m_refractionCube = std::make_unique<::Rendering::Data::Texture>(
 			::Rendering::Settings::ETextureType::TEXTURE_CUBE, "PreviewRefraction");
 		m_refractionCube->Allocate(::Rendering::Settings::TextureDesc{
 			.width = 1, .height = 1,

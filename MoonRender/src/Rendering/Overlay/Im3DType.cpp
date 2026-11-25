@@ -36,40 +36,13 @@ namespace
 
 		if (p_texture == nullptr)
 		{
-			p_texture = new Rendering::Resources::Texture();
+			p_texture = new Rendering::Resources::Texture(ETextureType::TEXTURE_BUFFER, p_name);
 		}
 
-		Rendering::Context::Driver* const driver = ::Rendering::HAL::CurrentDriver();
-		if (driver != nullptr)
-		{
-			Rendering::Backend::CreateTextureRequest request;
-			request.handleId = p_texture->GetHandle().GetId();
-			request.type = ETextureType::TEXTURE_BUFFER;
-			request.debugName = p_name;
-			request.allocate = true;
-			request.descriptor = p_desc;
-
-			// The descriptor's data pointer points into the caller's vector (the edge values of the
-			// mesh being submitted, a local in submit()), which is gone by the time this command
-			// runs. Carry the bytes with the command - Filament's BufferDescriptor owns its copy for
-			// the same reason - and the executor points the descriptor at them.
-			if (p_desc.mutableDesc.has_value() && p_desc.mutableDesc->data != nullptr
-				&& p_desc.buffetLen > 0)
-			{
-				const auto* const begin = static_cast<const uint8_t*>(p_desc.mutableDesc->data);
-				request.pixels.assign(begin, begin + p_desc.buffetLen);
-			}
-
-			driver->CreateTexture(std::move(request));
-			return;
-		}
-
-		auto* gltexture = Rendering::Backend::Records::CreateTexture(
-			p_texture->GetHandle(), ETextureType::TEXTURE_BUFFER, p_name);
-		if (gltexture != nullptr)
-		{
-			gltexture->Allocate(p_desc);
-		}
+		// The allocation is one command for the front end, which carries the bytes with it (see
+		// Data::Texture::Allocate): the descriptor's pointer into the caller's vector is gone by the
+		// time the executor runs. With no driver there is no other side and it is done here.
+		p_texture->GetTexture().Allocate(p_desc);
 	}
 }
 

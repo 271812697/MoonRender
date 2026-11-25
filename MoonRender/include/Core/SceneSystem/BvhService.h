@@ -1,7 +1,7 @@
 ﻿#pragma once
 #include <string>
 #include <Rendering/Geometry/bvh.h>
-#include <Rendering/HAL/Texture.h>
+#include <Rendering/Data/Texture.h>
 #include <Rendering/Data/MaterialInstance.h>
 #include <Core/ECS/Actor.h>
 #include <Core/SceneSystem/Intersection.h>
@@ -244,7 +244,7 @@ namespace Core::SceneSystem
 			Maths::FVector3 LRLeaf;
 		};
 		void AddMaterial(::Rendering::Data::MaterialInstance* material);
-		int AddTexture(::Rendering::HAL::Texture*);
+		int AddTexture(::Rendering::Data::Texture*);
 		void ProcessBLAS();
 		void ProcessTLAS();
 		int ProcessBLASNodes(const ::Rendering::Geometry::Bvh::Node* node);
@@ -325,7 +325,7 @@ namespace Core::SceneSystem
 		// Lights
 		std::vector<Light> lights;
 		// textures
-		std::vector<::Rendering::HAL::Texture*> textures;
+		std::vector<::Rendering::Data::Texture*> textures;
 		std::vector<unsigned char> textureMapsArray;
 	};
 

@@ -132,7 +132,7 @@ namespace MOON
 		// Bind that environment to the material: the preview renderer's cubes, not the
 		// viewport's, otherwise the thumbnail would be lit by a different sky.
 		auto& renderer = m_view->GetRenderer();
-		const auto bind = [material](const char* p_name, Rendering::HAL::Texture* p_texture)
+		const auto bind = [material](const char* p_name, Rendering::Data::Texture* p_texture)
 		{
 			if (p_texture != nullptr)
 			{

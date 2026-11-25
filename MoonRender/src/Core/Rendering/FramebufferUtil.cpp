@@ -7,7 +7,7 @@
 #include <Rendering/Context/Driver.h>
 #include <Rendering/Data/Framebuffer.h>
 #include <Rendering/Data/Renderbuffer.h>
-#include <Rendering/HAL/Texture.h>
+#include <Rendering/Data/Texture.h>
 #include <glad/glad.h>
 
 namespace Core::Rendering::FramebufferUtil
@@ -51,7 +51,7 @@ namespace Core::Rendering::FramebufferUtil
 			std::fflush(stderr);
 		}
 
-		const auto renderTexture = std::make_shared<Texture>(
+		const auto renderTexture = std::make_shared<::Rendering::Data::Texture>(
 			useMulSample? ETextureType::TEXTURE_2DMULSAMPLE:ETextureType::TEXTURE_2D,
 			std::format(
 				"{}/Color",

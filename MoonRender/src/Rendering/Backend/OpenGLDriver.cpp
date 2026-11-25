@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <Rendering/Backend/BackendResources.h>
 #include <Rendering/HAL/ShaderProgram.h>
+#include <Rendering/HAL/Texture.h>
 #include <Rendering/HAL/Framebuffer.h>
 #include <Rendering/HAL/Renderbuffer.h>
 #include <Rendering/HAL/VertexArray.h>
@@ -177,7 +178,7 @@ namespace Rendering::Backend
 	 * by now, and no GL name is ever cached on the recording side. */
 	void OpenGLDriver::UpdateTexture(::Rendering::Backend::UpdateTextureRequest p_request)
 	{
-		const auto handle = ::Rendering::Backend::ResourceHandle<Rendering::HAL::Texture>{ p_request.handleId };
+		const auto handle = ::Rendering::Backend::ResourceHandle<Rendering::Backend::HwTexture>{ p_request.handleId };
 		auto* target = ::Rendering::Backend::GetHandleAllocator().HandleCast<Rendering::HAL::Texture>(handle);
 		if (target == nullptr)
 		{
@@ -722,8 +723,12 @@ namespace Rendering::Backend
 
 	void OpenGLDriver::CreateTexture(::Rendering::Backend::CreateTextureRequest p_request)
 	{
-		const auto handle = ::Rendering::Backend::ResourceHandle<Rendering::HAL::Texture>{ p_request.handleId };
-		auto* target = ::Rendering::Backend::Records::CreateTexture(handle, p_request.type, p_request.debugName);
+		const auto handle = ::Rendering::Backend::ResourceHandle<Rendering::Backend::HwTexture>{ p_request.handleId };
+
+		// The create is idempotent (once per handle), so the object is looked up afterwards: what
+		// comes back is the one the slot already held or the one just made.
+		::Rendering::Backend::Records::CreateTexture(handle, p_request.type, p_request.debugName);
+		auto* target = ::Rendering::Backend::GetHandleAllocator().HandleCast<Rendering::HAL::Texture>(handle);
 		if (target == nullptr)
 		{
 			return;
@@ -753,7 +758,7 @@ namespace Rendering::Backend
 
 	void OpenGLDriver::UploadTexture(::Rendering::Backend::TextureUploadRequest p_request)
 	{
-		const auto handle = ::Rendering::Backend::ResourceHandle<Rendering::HAL::Texture>{
+		const auto handle = ::Rendering::Backend::ResourceHandle<Rendering::Backend::HwTexture>{
 			p_request.handleId };
 		auto* target = ::Rendering::Backend::GetHandleAllocator().HandleCast<Rendering::HAL::Texture>(handle);
 		if (target == nullptr || p_request.pixels.empty())
@@ -780,7 +785,7 @@ namespace Rendering::Backend
 	 * what the recording side uploaded" (a texture buffer's contents cannot be seen from a draw). */
 	void OpenGLDriver::PrintTextureBytes(uint32_t p_textureHandleId, uint32_t p_byteCount, const char* p_label)
 	{
-		const auto handle = ::Rendering::Backend::ResourceHandle<::Rendering::HAL::Texture>{ p_textureHandleId };
+		const auto handle = ::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwTexture>{ p_textureHandleId };
 		const auto* target = ::Rendering::Backend::GetHandleAllocator().HandleCast<::Rendering::HAL::Texture>(handle);
 		if (target == nullptr || target->GetID() == 0 || p_byteCount == 0)
 		{
@@ -799,7 +804,7 @@ namespace Rendering::Backend
 
 	void OpenGLDriver::SetTextureBorderColor(const ::Rendering::Backend::SetTextureBorderColorRequest& p_request)
 	{
-		const auto handle = ::Rendering::Backend::ResourceHandle<Rendering::HAL::Texture>{ p_request.handleId };
+		const auto handle = ::Rendering::Backend::ResourceHandle<Rendering::Backend::HwTexture>{ p_request.handleId };
 		auto* target = ::Rendering::Backend::GetHandleAllocator().HandleCast<Rendering::HAL::Texture>(handle);
 		if (target != nullptr)
 		{
@@ -809,7 +814,7 @@ namespace Rendering::Backend
 
 	void OpenGLDriver::GenerateTextureMipmaps(const ::Rendering::Backend::GenerateTextureMipmapsRequest& p_request)
 	{
-		const auto handle = ::Rendering::Backend::ResourceHandle<Rendering::HAL::Texture>{ p_request.handleId };
+		const auto handle = ::Rendering::Backend::ResourceHandle<Rendering::Backend::HwTexture>{ p_request.handleId };
 		auto* target = ::Rendering::Backend::GetHandleAllocator().HandleCast<Rendering::HAL::Texture>(handle);
 		if (target != nullptr)
 		{
@@ -881,7 +886,7 @@ namespace Rendering::Backend
 		{
 			// A front-end texture: its GL name only exists on this side, and only after the create
 			// command that ran earlier in the batch.
-			const auto handle = ResourceHandle<::Rendering::HAL::Texture>{ p_request.textureHandleId };
+			const auto handle = ResourceHandle<::Rendering::Backend::HwTexture>{ p_request.textureHandleId };
 			if (const auto* resolved = GetHandleAllocator().HandleCast<::Rendering::HAL::Texture>(handle))
 			{
 				texture = resolved->GetID();

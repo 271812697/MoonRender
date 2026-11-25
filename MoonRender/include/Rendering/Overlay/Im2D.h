@@ -20,7 +20,7 @@
 namespace Rendering::Overlay::Im2D
 {
 	/** What a draw command samples. Bit 63 set means the low 32 bits are a
-	 * Backend::ResourceHandle<HAL::Texture> id, resolved to the GL name when the command runs (on
+	 * Backend::ResourceHandle<Data::Texture> id, resolved to the GL name when the command runs (on
 	 * the side that owns the context); without it the value is a raw GL name belonging to a
 	 * backend-owned texture (ImGui's font atlas, the overlay's white pixel). 0 means "no texture"
 	 * (solid white). That is filagui's arrangement, where ImGui's ImTextureID holds a front-end

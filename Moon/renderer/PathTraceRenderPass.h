@@ -2,7 +2,7 @@
 #include <Rendering/Data/PipelineState.h>
 #include <Rendering/Core/ARenderPass.h>
 #include <Rendering/Data/Framebuffer.h>
-#include <Rendering/HAL/OpenGL/GLTexture.h>
+#include <Rendering/Data/Texture.h>
 #include <Rendering/Data/Material.h>
 #include <Maths/FVector3.h>
 #include "OpenImageDenoise/oidn.hpp"
@@ -45,24 +45,24 @@ namespace Editor::Rendering
 		::Rendering::Data::Material* lineOutputShader = nullptr;
 		::Rendering::Data::Material lineOutputMat;
 
-		::Rendering::HAL::GLTexture* BVHTex = nullptr;
-		::Rendering::HAL::GLTexture* vertexIndicesTex = nullptr;
-		::Rendering::HAL::GLTexture* verticesTex = nullptr;
-		::Rendering::HAL::GLTexture* normalsTex = nullptr;
-		::Rendering::HAL::GLTexture* triangleDomainColorTex = nullptr;
-		::Rendering::HAL::GLTexture* meshInfoTex = nullptr;
-		::Rendering::HAL::GLTexture* triangleInfoTex = nullptr;
+		::Rendering::Data::Texture* BVHTex = nullptr;
+		::Rendering::Data::Texture* vertexIndicesTex = nullptr;
+		::Rendering::Data::Texture* verticesTex = nullptr;
+		::Rendering::Data::Texture* normalsTex = nullptr;
+		::Rendering::Data::Texture* triangleDomainColorTex = nullptr;
+		::Rendering::Data::Texture* meshInfoTex = nullptr;
+		::Rendering::Data::Texture* triangleInfoTex = nullptr;
 
-		::Rendering::HAL::GLTexture* materialsTex = nullptr;
-		::Rendering::HAL::GLTexture* transformsTex = nullptr;
-		::Rendering::HAL::GLTexture* lightsTex = nullptr;
-		::Rendering::HAL::GLTexture* textureMapsArrayTex = nullptr;
-		::Rendering::HAL::GLTexture* envMapTex = nullptr;
-		::Rendering::HAL::GLTexture* envMapCDFTex = nullptr;
+		::Rendering::Data::Texture* materialsTex = nullptr;
+		::Rendering::Data::Texture* transformsTex = nullptr;
+		::Rendering::Data::Texture* lightsTex = nullptr;
+		::Rendering::Data::Texture* textureMapsArrayTex = nullptr;
+		::Rendering::Data::Texture* envMapTex = nullptr;
+		::Rendering::Data::Texture* envMapCDFTex = nullptr;
 
 		EnvironmentMap* envMap=nullptr;
 
-		::Rendering::HAL::GLTexture* denoisedTexture=nullptr;
+		::Rendering::Data::Texture* denoisedTexture=nullptr;
 		::Rendering::Data::Framebuffer pathTracefbo;
 		::Rendering::Data::Framebuffer pathTraceFBOLowRes;
 		::Rendering::Data::Framebuffer accumFBO;

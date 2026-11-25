@@ -42,7 +42,7 @@ namespace Rendering::Data
 
 	bool DescriptorSet::SetTexture(
 		uint32_t p_binding,
-		Rendering::HAL::TextureHandle* p_texture,
+		Rendering::Data::Texture* p_texture,
 		Rendering::Resources::Texture* p_asset)
 	{
 		if (m_layout != nullptr
@@ -88,7 +88,7 @@ namespace Rendering::Data
 		return &m_descriptors[p_binding];
 	}
 
-	Rendering::HAL::TextureHandle* DescriptorSet::GetTexture(uint32_t p_binding) const
+	Rendering::Data::Texture* DescriptorSet::GetTexture(uint32_t p_binding) const
 	{
 		const Descriptor* descriptor = FindTexture(p_binding);
 		const Descriptor::TextureInfo* texture =

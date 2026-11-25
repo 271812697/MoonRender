@@ -16,7 +16,7 @@
 #include <Rendering/Data/Material.h>
 #include <Rendering/Data/EngineDescriptorSets.h>
 #include <Rendering/Data/MaterialBuilder.h>
-#include <Rendering/HAL/TextureHandle.h>
+#include <Rendering/Data/Texture.h>
 #include <Rendering/Data/MaterialParser.h>
 #include <Rendering/Resources/Texture.h>
 #include <Rendering/Backend/BackendResources.h>
@@ -47,7 +47,7 @@ namespace
 		if (auto value = as.operator() < FVector4 > ()) return *value;
 		if (auto value = as.operator() < FMatrix3 > ()) return *value;
 		if (auto value = as.operator() < FMatrix4 > ()) return *value;
-		if (auto value = as.operator() < HAL::TextureHandle* > ()) return *value;
+		if (auto value = as.operator() < Data::Texture* > ()) return *value;
 		if (auto value = as.operator() < Resources::Texture* > ()) return *value;
 
 		return std::monostate{};
@@ -238,7 +238,7 @@ namespace
 			else if constexpr (std::same_as<T, FVector4>) { return FVector4{}; }
 			else if constexpr (std::same_as<T, FMatrix3>) { return FMatrix3{}; }
 			else if constexpr (std::same_as<T, FMatrix4>) { return FMatrix4{}; }
-			else if constexpr (std::same_as<T, HAL::TextureHandle*>) { return static_cast<HAL::TextureHandle*>(nullptr); }
+			else if constexpr (std::same_as<T, Data::Texture*>) { return static_cast<Data::Texture*>(nullptr); }
 			else if constexpr (std::same_as<T, Resources::Texture*>) { return static_cast<Resources::Texture*>(nullptr); }
 			else { return std::monostate{}; }
 		}, p_value);
@@ -602,7 +602,7 @@ const Rendering::Data::MaterialDefinition* Rendering::Data::MaterialInstance::De
 {
 	return m_material != nullptr ? m_material->Definition() : nullptr;
 }
-void Rendering::Data::MaterialInstance::UploadProperties(Rendering::HAL::Texture* p_emptyTexture2D, Rendering::HAL::Texture* p_emptyTextureCube, Rendering::HAL::Texture* p_flatNormalTexture)
+void Rendering::Data::MaterialInstance::UploadProperties(Rendering::Data::Texture* p_emptyTexture2D, Rendering::Data::Texture* p_emptyTextureCube, Rendering::Data::Texture* p_flatNormalTexture)
 {
 	ZoneScoped;
 
@@ -741,9 +741,9 @@ void Rendering::Data::MaterialInstance::ResetBlockToDefinition()
 
 
 void Rendering::Data::MaterialInstance::UploadParameterBlock(
-	Rendering::HAL::Texture* p_emptyTexture2D,
-	Rendering::HAL::Texture* p_emptyTextureCube,
-	Rendering::HAL::Texture* p_flatNormalTexture)
+	Rendering::Data::Texture* p_emptyTexture2D,
+	Rendering::Data::Texture* p_emptyTextureCube,
+	Rendering::Data::Texture* p_flatNormalTexture)
 {
 	const MaterialDefinition* definition = Definition();
 	if (definition == nullptr)
@@ -783,7 +783,7 @@ void Rendering::Data::MaterialInstance::UploadParameterBlock(
 			continue;
 		}
 
-		Rendering::HAL::TextureHandle* handle = m_descriptorSet.GetTexture(field.binding);
+		Rendering::Data::Texture* handle = m_descriptorSet.GetTexture(field.binding);
 		if (handle != nullptr)
 		{
 			continue;
@@ -798,7 +798,7 @@ void Rendering::Data::MaterialInstance::UploadParameterBlock(
 			continue;
 		}
 
-		Rendering::HAL::TextureHandle* fallback =
+		Rendering::Data::Texture* fallback =
 			field.type == "samplerCube" ? p_emptyTextureCube : p_emptyTexture2D;
 		const char* fallbackName = field.type == "samplerCube" ? "empty cube (black)" : "empty 2D (white)";
 		if (field.fallback == static_cast<uint8_t>(Rendering::Data::MaterialParser::SamplerFallback::FlatNormal)
@@ -850,7 +850,7 @@ bool Rendering::Data::MaterialInstance::ResetPropertyToDefault(const std::string
 	EnsureDescriptorSet();
 	if (parameter->isSampler)
 	{
-		Rendering::HAL::TextureHandle* handle = nullptr;
+		Rendering::Data::Texture* handle = nullptr;
 		Rendering::Resources::Texture* asset = nullptr;
 		if (!m_isDefaultInstance && m_material != nullptr)
 		{
@@ -1009,9 +1009,9 @@ void Rendering::Data::MaterialInstance::SetProperty(const std::string p_name, co
 		EnsureDescriptorSet();
 		if (parameter->isSampler)
 		{
-			Rendering::HAL::TextureHandle* handle = nullptr;
+			Rendering::Data::Texture* handle = nullptr;
 			Rendering::Resources::Texture* asset = nullptr;
-			if (const auto* value = std::get_if<Rendering::HAL::TextureHandle*>(&p_value))
+			if (const auto* value = std::get_if<Rendering::Data::Texture*>(&p_value))
 			{
 				handle = *value;
 			}
@@ -1047,7 +1047,7 @@ void Rendering::Data::MaterialInstance::SetProperty(const std::string p_name, co
 		// recording thread - is gone (docs/RenderThreadPlan.md §8.73). Reported once per material
 		// and name, so a source-built shader that still sets its uniforms this way shows up here
 		// instead of silently rendering nothing.
-		if (std::holds_alternative<Rendering::HAL::TextureHandle*>(p_value)
+		if (std::holds_alternative<Rendering::Data::Texture*>(p_value)
 			|| std::holds_alternative<Rendering::Resources::Texture*>(p_value))
 		{
 			if (Rendering::Data::EngineDescriptorSets::IsGlobalSampler(p_name))

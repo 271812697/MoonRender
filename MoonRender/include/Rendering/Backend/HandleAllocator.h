@@ -227,7 +227,7 @@ namespace Rendering::Backend
 			}
 		}
 
-		/** Recursive because an object's destructor can run engine code (HAL::Texture fires an
+		/** Recursive because an object's destructor can run engine code (Data::Texture fires an
 		 * event), which is allowed to allocate a handle. */
 		mutable std::recursive_mutex m_mutex;
 		std::vector<Slot> m_slots;

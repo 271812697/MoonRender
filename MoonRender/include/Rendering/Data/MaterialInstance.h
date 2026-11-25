@@ -12,7 +12,7 @@
 #include <Rendering/Data/UniformBufferPool.h>
 #include <Rendering/Data/FeatureSet.h>
 #include <Rendering/Data/Program.h>
-#include <Rendering/HAL/TextureHandle.h>
+#include <Rendering/Data/Texture.h>
 #include <Rendering/Resources/Texture.h>
 #include <Rendering/Settings/EBindingPoint.h>
 #include <Rendering/Settings/EProjectionMode.h>
@@ -78,9 +78,9 @@ namespace Rendering::Data
 		/** Uploads the parameters. Textures are bound to their declared units here; the
 		 * engine-global ones are bound per draw by the renderer instead. */
 		void UploadProperties(
-			Rendering::HAL::Texture* p_emptyTexture2D = nullptr,
-			Rendering::HAL::Texture* p_emptyTextureCube = nullptr,
-			Rendering::HAL::Texture* p_flatNormalTexture = nullptr
+			Rendering::Data::Texture* p_emptyTexture2D = nullptr,
+			Rendering::Data::Texture* p_emptyTextureCube = nullptr,
+			Rendering::Data::Texture* p_flatNormalTexture = nullptr
 		);
 
 		/** Re-reads the property values of textures that were assigned by path. */
@@ -102,7 +102,7 @@ namespace Rendering::Data
 
 		/** The texture/asset currently in a descriptor slot (used to inherit a material's
 		 * defaults when a plain instance is created). */
-		Rendering::HAL::TextureHandle* GetTexture(uint32_t p_binding) const
+		Rendering::Data::Texture* GetTexture(uint32_t p_binding) const
 		{
 			return m_descriptorSet.GetTexture(p_binding);
 		}
@@ -185,9 +185,9 @@ namespace Rendering::Data
 
 		void BindParameterBlock(const Rendering::Data::Program& p_program);
 		void UploadParameterBlock(
-			Rendering::HAL::Texture* p_emptyTexture2D,
-			Rendering::HAL::Texture* p_emptyTextureCube,
-			Rendering::HAL::Texture* p_flatNormalTexture
+			Rendering::Data::Texture* p_emptyTexture2D,
+			Rendering::Data::Texture* p_emptyTextureCube,
+			Rendering::Data::Texture* p_flatNormalTexture
 		);
 		void EnsureDescriptorSet() const;
 		void ReleaseDescriptorSet();

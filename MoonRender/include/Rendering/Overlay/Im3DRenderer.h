@@ -350,8 +350,8 @@ namespace MOON
 		std::unordered_map<std::string, std::function<void()>> mDrawTaskMap;
 		std::unordered_map<unsigned int, EventWidget*>mGizmoWidgets;
 		
-		Rendering::HAL::Texture mEmptyTexture2D;
-		Rendering::HAL::Texture mEmptyTextureCube;
+		Rendering::Data::Texture mEmptyTexture2D;
+		Rendering::Data::Texture mEmptyTextureCube;
 		Rendering::Data::Material* mLineMaterial = nullptr;
 		Rendering::Data::Material* mPointMaterial = nullptr;
 		Rendering::Data::Material* mTriangleMaterial = nullptr;

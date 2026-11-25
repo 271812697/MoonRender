@@ -3,8 +3,6 @@
 #include <variant>
 
 #include <Rendering/Backend/ResourceHandle.h>
-#include <Rendering/HAL/Texture.h>
-#include <Rendering/HAL/TextureHandle.h>
 
 namespace Rendering::Resources
 {
@@ -14,6 +12,12 @@ namespace Rendering::Resources
 namespace Rendering::Backend
 {
 	struct HwBufferObject;
+	struct HwTexture;
+}
+
+namespace Rendering::Data
+{
+	class Texture;
 }
 
 /** One slot of a DescriptorSet: the GPU resource a material binds at a binding point.
@@ -55,14 +59,13 @@ namespace Rendering::Data
 		/** A texture descriptor, split the way Filament's descriptor sets are: the front end knows
 		 * the *handle* (a texture the render side owns, resolved with
 		 * Backend::GetHandleAllocator().HandleCast), the back end knows the object the draw
-		 * binds. `direct` is for resources that only exist on the backend side - render-target
-		 * attachments and the engine's 1x1 fallbacks - which never come from the asset side.
-		 * `asset` is the serializable object behind the handle (a .mat stores a path, not a GL
-		 * name). */
+		 * binds. `direct` is for textures that are not an asset - the engine's 1x1 fallbacks and
+		 * a target's own attachments - which have no Resources::Texture behind them. `asset` is
+		 * the serializable object behind the handle (a .mat stores a path, not a GL name). */
 		struct TextureInfo
 		{
-			Rendering::Backend::ResourceHandle<Rendering::HAL::Texture> handle;
-			Rendering::HAL::TextureHandle* direct = nullptr;
+			Rendering::Backend::ResourceHandle<Rendering::Backend::HwTexture> handle;
+			Rendering::Data::Texture* direct = nullptr;
 			Rendering::Resources::Texture* asset = nullptr;
 		};
 
@@ -77,13 +80,12 @@ namespace Rendering::Data
 			Rendering::Backend::ResourceHandle<Rendering::Backend::HwBufferObject> p_buffer,
 			uint32_t p_offset,
 			uint32_t p_size);
-		static Descriptor MakeTexture(
-			Rendering::HAL::TextureHandle* p_handle,
-			Rendering::Resources::Texture* p_asset = nullptr);
 
-		/** Commit: turns a front-end texture handle into the backend object the draw binds, in
-		 * place. Filament does the same when a descriptor set is committed. */
-		void ResolveTexture();
+		/** A texture descriptor from the front end's texture, or from the asset that stands for
+		 * one (the loader's own textures are named by a Resources::Texture). */
+		static Descriptor MakeTexture(
+			Rendering::Data::Texture* p_texture,
+			Rendering::Resources::Texture* p_asset = nullptr);
 
 		Type GetType() const { return static_cast<Type>(m_value.index()); }
 		bool IsValid() const;

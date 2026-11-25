@@ -68,7 +68,7 @@ void Core::Rendering::PostProcessRenderPass::Draw(::Rendering::Data::PipelineSta
 		// in the same batch.
 		for (auto& buffer : m_pingPongBuffers.GetFramebuffers())
 		{
-			const bool hasColor = buffer.GetAttachment<::Rendering::HAL::GLTexture>(
+			const bool hasColor = buffer.GetAttachment<::Rendering::Data::Texture>(
 				::Rendering::Settings::EFramebufferAttachment::COLOR, 0).has_value();
 			if (!hasColor)
 			{

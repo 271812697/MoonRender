@@ -61,19 +61,19 @@ Core::Rendering::GbufferPass::GbufferPass(::Rendering::Core::CompositeRenderer& 
 			}
 		};
 
-		gbufferData.position = std::make_shared<::Rendering::HAL::Texture>(
+		gbufferData.position = std::make_shared<::Rendering::Data::Texture>(
 			::Rendering::Settings::ETextureType::TEXTURE_2D, "position");
 		gbufferData.position->Allocate(colorDesc);
-		gbufferData.normal = std::make_shared<::Rendering::HAL::Texture>(
+		gbufferData.normal = std::make_shared<::Rendering::Data::Texture>(
 			::Rendering::Settings::ETextureType::TEXTURE_2D, "normal");
 		gbufferData.normal->Allocate(colorDesc);
-		auto depthTexture = std::make_shared<::Rendering::HAL::Texture>(
+		auto depthTexture = std::make_shared<::Rendering::Data::Texture>(
 			::Rendering::Settings::ETextureType::TEXTURE_2D, "depth");
 		depthTexture->Allocate(depthDesc);
 		depthTexture->SetBorderColor(Maths::FVector4::One);
-		gbuffer.Attach<::Rendering::HAL::Texture>(gbufferData.position, ::Rendering::Settings::EFramebufferAttachment::COLOR,0);
-		gbuffer.Attach<::Rendering::HAL::Texture>(gbufferData.normal, ::Rendering::Settings::EFramebufferAttachment::COLOR,1);
-		gbuffer.Attach<::Rendering::HAL::Texture>(depthTexture, ::Rendering::Settings::EFramebufferAttachment::DEPTH);
+		gbuffer.Attach<::Rendering::Data::Texture>(gbufferData.position, ::Rendering::Settings::EFramebufferAttachment::COLOR,0);
+		gbuffer.Attach<::Rendering::Data::Texture>(gbufferData.normal, ::Rendering::Settings::EFramebufferAttachment::COLOR,1);
+		gbuffer.Attach<::Rendering::Data::Texture>(depthTexture, ::Rendering::Settings::EFramebufferAttachment::DEPTH);
 		//gbuffer.SetTargetDrawBuffer(0);
 		gbuffer.SetDrawBuffers({0,1});
 		if (!gbuffer.Validate()) {
@@ -134,22 +134,22 @@ Core::Rendering::GbufferPass::GbufferPass(::Rendering::Core::CompositeRenderer& 
 		};
 
 
-		noiseTexture= std::make_shared<::Rendering::HAL::Texture>(
+		noiseTexture= std::make_shared<::Rendering::Data::Texture>(
 			::Rendering::Settings::ETextureType::TEXTURE_2D, "noiseTexture");
 		noiseTexture->Allocate(noiseDesc);
 
-		gbufferData.occlusion = std::make_shared<::Rendering::HAL::Texture>(
+		gbufferData.occlusion = std::make_shared<::Rendering::Data::Texture>(
 			::Rendering::Settings::ETextureType::TEXTURE_2D, "occlusion");
 		gbufferData.occlusion->Allocate(colorDesc);
-		ssaobuffer.Attach<::Rendering::HAL::Texture>(gbufferData.occlusion, ::Rendering::Settings::EFramebufferAttachment::COLOR, 0);
+		ssaobuffer.Attach<::Rendering::Data::Texture>(gbufferData.occlusion, ::Rendering::Settings::EFramebufferAttachment::COLOR, 0);
 		if (!ssaobuffer.Validate()) {
 			std::cout << "invalidate buffer" << std::endl;
 		}
 
-		gbufferData.occlusionBlur = std::make_shared<::Rendering::HAL::Texture>(
+		gbufferData.occlusionBlur = std::make_shared<::Rendering::Data::Texture>(
 			::Rendering::Settings::ETextureType::TEXTURE_2D, "occlusionBlur");
 		gbufferData.occlusionBlur->Allocate(colorDesc);
-		ssaoblurbuffer.Attach<::Rendering::HAL::Texture>(gbufferData.occlusionBlur, ::Rendering::Settings::EFramebufferAttachment::COLOR, 0);
+		ssaoblurbuffer.Attach<::Rendering::Data::Texture>(gbufferData.occlusionBlur, ::Rendering::Settings::EFramebufferAttachment::COLOR, 0);
 		if (!ssaoblurbuffer.Validate()) {
 			std::cout << "invalidate buffer" << std::endl;
 		}
@@ -241,7 +241,7 @@ void Core::Rendering::GbufferPass::Draw(::Rendering::Data::PipelineState p_pso)
 
 	//auto& mssaaframebuffer = m_renderer.GetFrameDescriptor().outputMsaaBuffer.value();
 	//mssaaframebuffer.Bind();
-	//const auto& content = ssaoblurbuffer.GetAttachment<::Rendering::HAL::GLTexture>(::Rendering::Settings::EFramebufferAttachment::COLOR, 0);
+	//const auto& content = ssaoblurbuffer.GetAttachment<::Rendering::Data::Texture>(::Rendering::Settings::EFramebufferAttachment::COLOR, 0);
 	//m_renderer.Present(content.value());
 }
 

@@ -5,7 +5,7 @@
 #include <Rendering/Data/Descriptor.h>
 #include <Rendering/Data/DescriptorSetLayout.h>
 #include <Rendering/Data/Program.h>
-#include <Rendering/HAL/TextureHandle.h>
+#include <Rendering/Data/Texture.h>
 
 /** One descriptor array per descriptor set. The array index is the shader's original binding
  * point; at bind time the OpenGLProgram binding map turns (set, binding) into the GL slot the
@@ -32,13 +32,13 @@ namespace Rendering::Data
 			uint32_t p_size);
 		bool SetTexture(
 			uint32_t p_binding,
-			Rendering::HAL::TextureHandle* p_texture,
+			Rendering::Data::Texture* p_texture,
 			Rendering::Resources::Texture* p_asset = nullptr);
 
 		const Descriptor* FindBuffer(uint32_t p_binding, Descriptor::BufferType p_type) const;
 		const Descriptor* FindTexture(uint32_t p_binding) const;
 
-		Rendering::HAL::TextureHandle* GetTexture(uint32_t p_binding) const;
+		Rendering::Data::Texture* GetTexture(uint32_t p_binding) const;
 		Rendering::Resources::Texture* GetTextureAsset(uint32_t p_binding) const;
 
 		void UploadBuffer(

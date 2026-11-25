@@ -400,7 +400,7 @@ namespace Core::ECS::Components
                 desc.mutableDesc = ::Rendering::Settings::MutableTextureDesc{
                     .data = domainColor.data()
                 };
-                ::Rendering::HAL::GLTexture* domainColorTex = new ::Rendering::HAL::GLTexture(::Rendering::Settings::ETextureType::TEXTURE_BUFFER);
+                ::Rendering::Data::Texture* domainColorTex = new ::Rendering::Data::Texture(::Rendering::Settings::ETextureType::TEXTURE_BUFFER);
                 if (std::getenv("MOON_UNIFORMS") != nullptr)
                 {
                     // What the face colours hold before they go to the GPU: identical hashes in two

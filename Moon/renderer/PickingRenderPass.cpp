@@ -69,7 +69,7 @@ Editor::Rendering::PickingRenderPass::PickingRenderPass(::Rendering::Core::Compo
 			.type = EPixelDataType::FLOAT
 		}
 	};
-	auto worldPositionTexture = std::make_shared<::Rendering::HAL::Texture>(
+	auto worldPositionTexture = std::make_shared<::Rendering::Data::Texture>(
 		ETextureType::TEXTURE_2D,
 		std::format("{}/WorldPosition", m_actorPickingFramebuffer.GetDebugName())
 	);

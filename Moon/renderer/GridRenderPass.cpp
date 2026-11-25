@@ -76,25 +76,25 @@ Editor::Rendering::GridRenderPass::GridRenderPass(::Rendering::Core::CompositeRe
 		}
 	};
 	
-	auto renderTexture = std::make_shared<::Rendering::HAL::Texture>(
+	auto renderTexture = std::make_shared<::Rendering::Data::Texture>(
 		::Rendering::Settings::ETextureType::TEXTURE_2D, "color");
 	renderTexture->Allocate(colorDesc);
-	auto depthTexture = std::make_shared<::Rendering::HAL::Texture>(
+	auto depthTexture = std::make_shared<::Rendering::Data::Texture>(
 		::Rendering::Settings::ETextureType::TEXTURE_2D, "depth");
 	depthTexture->Allocate(depthDesc);
 	depthTexture->SetBorderColor(Maths::FVector4::One);
-	m_mirroFbo.Attach<::Rendering::HAL::Texture>(renderTexture, ::Rendering::Settings::EFramebufferAttachment::COLOR);
-	m_mirroFbo.Attach<::Rendering::HAL::Texture>(depthTexture, ::Rendering::Settings::EFramebufferAttachment::DEPTH);
+	m_mirroFbo.Attach<::Rendering::Data::Texture>(renderTexture, ::Rendering::Settings::EFramebufferAttachment::COLOR);
+	m_mirroFbo.Attach<::Rendering::Data::Texture>(depthTexture, ::Rendering::Settings::EFramebufferAttachment::DEPTH);
 	// The shadow pair's colour textures are created here, as front-end objects, and attached by
 	// handle: that is what keeps the attachment list readable on this side. A target whose
 	// attachments the executor creates (SetupFramebufferWithDriver) has an empty list here until
 	// the command runs, and this pass samples its own target's colour (Filament's shape is the
 	// same: the pass owns the textures and names them by handle).
 	for (auto& mirroShadowFbo : m_mirroShadowFbo.GetFramebuffers()) {
-		auto shadowColor = std::make_shared<::Rendering::HAL::Texture>(
+		auto shadowColor = std::make_shared<::Rendering::Data::Texture>(
 			::Rendering::Settings::ETextureType::TEXTURE_2D, "mirrorShadow");
 		shadowColor->Allocate(shadowDesc);
-		mirroShadowFbo.Attach<::Rendering::HAL::Texture>(
+		mirroShadowFbo.Attach<::Rendering::Data::Texture>(
 			shadowColor, ::Rendering::Settings::EFramebufferAttachment::COLOR);
 	}
 
@@ -201,8 +201,8 @@ void Editor::Rendering::GridRenderPass::Draw(::Rendering::Data::PipelineState p_
 	//Maths::FMatrix4::Scaling({ gridSize * 2.0f, 1.f, gridSize * 2.0f });
 
 	model = Maths::FMatrix4::Transpose(model);
-	const auto& color = m_mirroFbo.GetAttachment<::Rendering::HAL::GLTexture>(::Rendering::Settings::EFramebufferAttachment::COLOR, 0);
-	const auto& shadow = m_mirroShadowFbo[0].GetAttachment<::Rendering::HAL::GLTexture>(::Rendering::Settings::EFramebufferAttachment::COLOR, 0);
+	const auto& color = m_mirroFbo.GetAttachment<::Rendering::Data::Texture>(::Rendering::Settings::EFramebufferAttachment::COLOR, 0);
+	const auto& shadow = m_mirroShadowFbo[0].GetAttachment<::Rendering::Data::Texture>(::Rendering::Settings::EFramebufferAttachment::COLOR, 0);
 	m_gridMaterial.SetProperty("u_Color", gridDescriptor.gridColor*0.7f);
 	m_gridMaterial.SetProperty("u_PlaneTransform", model);
 	m_gridMaterial.SetProperty("u_MirrorTex", &color.value());
@@ -214,7 +214,7 @@ void Editor::Rendering::GridRenderPass::Draw(::Rendering::Data::PipelineState p_
 	//if (false) {
 	//	ImVec2 a = { 0,1 }, b = { 1,0 };
 	//	ImVec2 size = ImVec2(frameDesc.renderWidth, frameDesc.renderHeight);
-	//	auto resid = m_mirroShadowFbo.GetAttachment<::Rendering::HAL::GLTexture>(::Rendering::Settings::EFramebufferAttachment::COLOR, 0);
+	//	auto resid = m_mirroShadowFbo.GetAttachment<::Rendering::Data::Texture>(::Rendering::Settings::EFramebufferAttachment::COLOR, 0);
 	//	ImGui::Image(resid->GetID(), size, a, b);
 	//}
 }
