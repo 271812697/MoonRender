@@ -729,9 +729,6 @@ void Editor::Panels::SceneView::DrawFrame()
 {
 	HandleActorPicking();
 	Editor::Panels::AViewControllable::DrawFrame();
-	// The picking target for this frame has just been rendered (only when a pick
-	// was requested), so the click can be resolved against it exactly.
-	ResolvePendingClick();
 }
 
 bool IsResizing()
@@ -749,12 +746,18 @@ void Editor::Panels::SceneView::HandleActorPicking()
 		//GetScene()->BuildSceneBvh();
 	}
 
-	// While a gizmo drag is active there is nothing to pick, and the picking
-	// readback is a synchronous glReadPixels, so skip it entirely.
+	// While a gizmo drag is active there is nothing to pick: skip it entirely, and leave a pending
+	// click pending (it is resolved once the drag is over).
 	if (m_gizmoOperations.IsPicking())
 	{
 		return;
 	}
+
+	// A click is the same asynchronous readback as the hover highlight, so it has to be consumed
+	// before the hover block below takes the slot it is waiting for. Its pixels were copied by the
+	// frame that rendered it, which is the frame before this one when the render thread is doing the
+	// work.
+	ResolvePendingClick();
 
 	const auto [viewWidth, viewHeight] = GetSafeSize();
 	if (viewWidth == 0 || viewHeight == 0)
@@ -885,34 +888,55 @@ void Editor::Panels::SceneView::ResolvePendingClick()
 	{
 		return;
 	}
-	m_clickPickPending = false;
 
 	auto& scene = *GetScene();
 	auto& actorPickingPass = m_renderer->GetPass<Rendering::PickingRenderPass>("Picking");
 
-	bool isSeletedSomething = false;
-	pickingResult = actorPickingPass.ReadbackPickingResult(
-		scene,
-		static_cast<uint32_t>(m_clickPickX),
-		static_cast<uint32_t>(m_clickPickY),
-		isSeletedSomething);
-	ApplyPickResult(pickingResult.result);
+	// The click's pixel comes back through the same asynchronous readback the hover highlight uses:
+	// the pass wrote it this frame, the side that owns the context copied it, and it is on the CPU
+	// either by the time this runs (single-threaded) or a frame later. Nothing here waits for the
+	// GPU - the synchronous pair this replaced cost two pipeline stalls per click.
+	Rendering::PickingRenderPass::PickHit finishedPick;
+	uint32_t pickX = 0;
+	uint32_t pickY = 0;
+	while (actorPickingPass.TryConsumePick(scene, finishedPick, pickX, pickY))
+	{
+		if (pickX != static_cast<uint32_t>(m_clickPickX)
+			|| pickY != static_cast<uint32_t>(m_clickPickY))
+		{
+			// A hover result that arrived in the meantime: apply it and keep looking for the click.
+			pickingResult = finishedPick;
+			ApplyPickResult(pickingResult.result);
+			continue;
+		}
 
-	if (m_highlightedGizmoDirection)
-	{
-		m_gizmoOperations.StartPicking(
-			*GetSelectedActor(),
-			m_camera.GetPosition(),
-			m_currentOperation,
-			m_highlightedGizmoDirection.value());
+		m_clickPickPending = false;
+		pickingResult = finishedPick;
+		ApplyPickResult(pickingResult.result);
+
+		if (m_highlightedGizmoDirection)
+		{
+			m_gizmoOperations.StartPicking(
+				*GetSelectedActor(),
+				m_camera.GetPosition(),
+				m_currentOperation,
+				m_highlightedGizmoDirection.value());
+		}
+		else if (m_highlightedActor)
+		{
+			SelectActor(m_highlightedActor.value());
+		}
+		else if (!finishedPick.hitSomething)
+		{
+			UnselectActor();
+		}
+		return;
 	}
-	else if (m_highlightedActor)
-	{
-		SelectActor(m_highlightedActor.value());
-	}
-	else if (!isSeletedSomething)
-	{
-		UnselectActor();
-	}
+
+	// Not on the CPU yet (or the readback ring was full when it was requested): ask again for the
+	// same pixel, so a click cannot be lost to a dropped request. The picking pass renders on
+	// demand, so this costs one extra pick pass per frame until the bytes arrive.
+	actorPickingPass.RequestPick(
+		static_cast<uint32_t>(m_clickPickX), static_cast<uint32_t>(m_clickPickY));
 }
 

@@ -94,20 +94,6 @@ void* Rendering::HAL::GLBuffer::GetFence() const
 }
 
 template<>
-void* Rendering::HAL::GLBuffer::MapRead(uint64_t p_offset, uint64_t p_size)
-{
-	assert(IsValid() && "Cannot map an invalid buffer");
-	assert(!IsEmpty() && "Cannot map an empty buffer");
-
-	return glMapNamedBufferRange(
-		m_buffer.glId,
-		p_offset,
-		p_size,
-		GL_MAP_READ_BIT
-	);
-}
-
-template<>
 void Rendering::HAL::GLBuffer::Unmap()
 {
 	assert(IsValid() && "Cannot unmap an invalid buffer");

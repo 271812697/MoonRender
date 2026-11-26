@@ -370,35 +370,43 @@ void OpenGLDriver::DeclareProgramBindingsObject(
 /** The fetch half of the asynchronous readback: copies the buffer range into the request's CPU
 	 * memory, but only once the fence says the GPU is done with it. Telling the recording side that
 	 * it has to try again is the callback's false. */
-	void OpenGLDriver::DownloadBuffer(::Rendering::Backend::DownloadBufferRequest p_request)
+		void OpenGLDriver::DownloadBufferObject(
+		::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwBufferObject> p_buffer,
+		uint64_t p_offset,
+		uint64_t p_size,
+		std::shared_ptr<std::vector<uint8_t>> p_data,
+		std::function<void(bool)> p_onDone)
 	{
-		::Rendering::HAL::GLBuffer* const buffer = ResolveBuffer(p_request.handleId);
-		if (buffer == nullptr || p_request.data == nullptr || p_request.size == 0)
+		// The fetch half of the asynchronous readback: the GPU wrote the bytes, and this copies them
+		// into the caller's memory - but only once the fence says it may. Telling the recording side
+		// to try again next frame is the callback's false; nothing here ever waits.
+		::Rendering::HAL::GLBuffer* const buffer = ResolveBuffer(p_buffer);
+		if (buffer == nullptr || p_data == nullptr || p_size == 0)
 		{
 			return;
 		}
 
 		if (!buffer->IsFenceSignaled())
 		{
-			if (p_request.onDone)
+			if (p_onDone)
 			{
-				p_request.onDone(false);
+				p_onDone(false);
 			}
 			return;
 		}
 
-		if (p_request.data->size() < p_request.size)
+		if (p_data->size() < p_size)
 		{
-			p_request.data->resize(static_cast<size_t>(p_request.size));
+			p_data->resize(static_cast<size_t>(p_size));
 		}
 
 		// glGetNamedBufferSubData with the fence already signalled: a copy, not a stall.
-		glGetNamedBufferSubData(buffer->GetID(), static_cast<GLintptr>(p_request.offset),
-			static_cast<GLsizeiptr>(p_request.size), p_request.data->data());
+		glGetNamedBufferSubData(buffer->GetID(), static_cast<GLintptr>(p_offset),
+			static_cast<GLsizeiptr>(p_size), p_data->data());
 
-		if (p_request.onDone)
+		if (p_onDone)
 		{
-			p_request.onDone(true);
+			p_onDone(true);
 		}
 	}
 

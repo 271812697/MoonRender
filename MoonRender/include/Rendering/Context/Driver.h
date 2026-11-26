@@ -8,7 +8,6 @@
 #include <thread>
 #include <memory>
 #include <Rendering/Backend/OverlayRequests.h>
-#include "Rendering/Backend/BufferRequests.h"
 #include <Rendering/Backend/BufferDescriptor.h>
 #include <Rendering/Backend/PixelBufferDescriptor.h>
 #include "Rendering/Backend/BackendResources.h"
@@ -136,24 +135,12 @@ namespace Rendering::Context
 		 * requirement: there is no resource before there is an engine. */
 		static Driver& Get();
 
-		// ---- The synchronous halves of the buffer API --------------------------------------
-		//
-		// These two return the GPU's answer, so they are not commands: the query is recorded (it
-		// has to run where the context is) and then waited for. Filament declares them
-		// DECL_DRIVER_API_RETURN too (getFenceStatus / mapBuffer) and its command stream serves
-		// them through getResult(); ours has no result channel, so the wait is FlushAndWait and they
-		// are between-frame calls only (the HZB readback uses DownloadBuffer instead, so no frame
-		// ever waits).
+		/** The recording side never waits for the GPU. A readback is the driver API's
+		 * DownloadBufferObject (see DriverAPI.inc): it copies only once the buffer's fence says the
+		 * GPU is done writing, and answers "not yet" otherwise, so the caller asks again next frame.
+		 * MapBufferRead / IsBufferFenceSignaled used to live here and waited for the batch
+		 * (FlushAndWait) - which stalled the frame, so they are gone. */
 
-		bool IsBufferFenceSignaled(Rendering::Backend::ResourceHandle<Rendering::Backend::HwBufferObject> p_buffer);
-
-		/** Filament's mapBuffer: the range is mapped where the context is and the pointer comes
-		 * back. It stays mapped until UnmapBufferObject runs, so the caller reads it while the
-		 * range is still mapped. Synchronous, like the fence query. */
-		void* MapBufferRead(
-			Rendering::Backend::ResourceHandle<Rendering::Backend::HwBufferObject> p_buffer,
-			uint64_t p_offset,
-			uint64_t p_size);
 		/** Records p_command to be run when the batch is executed, on the render side.
 		 *
 		 * The escape hatch for GL that is not described by a command yet - an overlay renderer, a

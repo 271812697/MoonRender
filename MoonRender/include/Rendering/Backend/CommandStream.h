@@ -10,7 +10,6 @@
 
 #include <Rendering/Backend/CircularBuffer.h>
 #include <Rendering/Backend/CommandBufferQueue.h>
-#include <Rendering/Backend/BufferRequests.h>
 #include <Rendering/Backend/BufferDescriptor.h>
 #include <Rendering/Backend/PixelBufferDescriptor.h>
 #include <Rendering/Settings/EAccessSpecifier.h>

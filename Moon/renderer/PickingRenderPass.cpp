@@ -93,53 +93,6 @@ Editor::Rendering::PickingRenderPass::PickingRenderPass(::Rendering::Core::Compo
 	m_TopoShapePickingFallbackMaterial.SetLineWidth(8);
 }
 
-Editor::Rendering::PickingRenderPass::PickHit Editor::Rendering::PickingRenderPass::ReadbackPickingResult(
-	const ::Core::SceneSystem::Scene& p_scene,
-	uint32_t p_x,
-	uint32_t p_y,bool& isSelected
-)
-{
-	ZoneScoped;
-	PickHit hit;
-	uint8_t pixel[4];
-	m_actorPickingFramebuffer.ReadPixels(
-		p_x, p_y, 1, 1,
-		::Rendering::Settings::EPixelDataFormat::RGBA,
-		::Rendering::Settings::EPixelDataType::UNSIGNED_BYTE,
-		pixel
-	);
-	hit.result = DecodePickResult(p_scene, pixel, isSelected);
-	hit.hasWorldPosition = ReadbackWorldPosition(p_x, p_y, hit.worldPosition);
-	return hit;
-}
-
-bool Editor::Rendering::PickingRenderPass::ReadbackWorldPosition(
-	uint32_t p_x,
-	uint32_t p_y,
-	Maths::FVector3& p_out
-)
-{
-	// The second color attachment of the picking target, at the very pixel that was
-	// picked. A pixel nothing was drawn at is still the cleared zero.
-	m_actorPickingFramebuffer.SetTargetReadBuffer(1);
-	float position[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
-	m_actorPickingFramebuffer.ReadPixels(
-		p_x, p_y, 1, 1,
-		::Rendering::Settings::EPixelDataFormat::RGBA,
-		::Rendering::Settings::EPixelDataType::FLOAT,
-		position
-	);
-	m_actorPickingFramebuffer.SetTargetReadBuffer(0);
-
-	// The shaders write w = 1; the clear leaves 0 behind. Nothing else can be "no
-	// position" - a position of (0, 0, 0) is a perfectly good one.
-	if (position[3] < 0.5f) {
-		return false;
-	}
-	p_out = Maths::FVector3{ position[0], position[1], position[2] };
-	return true;
-}
-
 Editor::Rendering::PickingRenderPass::PickingResult Editor::Rendering::PickingRenderPass::DecodePickResult(
 	const ::Core::SceneSystem::Scene& p_scene,
 	const uint8_t p_pixel[4],
@@ -193,9 +146,16 @@ void Editor::Rendering::PickingRenderPass::SetupPickReadbacks()
 
 	for (PickReadbackSlot& slot : m_pickReadbackSlots)
 	{
-		// No GL objects here: a slot is the CPU side of two read-pixels commands, and the bytes are
-		// filled where the context is (see IssuePickReadback).
-		slot.readback = std::make_shared<PickReadback>();
+		// The destination of the two read-pixels commands: a pixel-pack buffer. Its storage is a
+		// command like everything else, so creating it here stays GL-free; the fence goes in after
+		// each pair of reads (see IssuePickReadback).
+		slot.buffer.Allocate(kPickReadbackBytes,
+			::Rendering::Settings::EAccessSpecifier::STREAM_READ);
+		slot.cpuBytes = std::make_shared<std::vector<uint8_t>>(
+			static_cast<size_t>(kPickReadbackBytes));
+		slot.downloadState = std::make_shared<std::atomic<int>>(0);
+		slot.downloadIssued = false;
+		slot.pending = false;
 	}
 }
 
@@ -234,42 +194,46 @@ void Editor::Rendering::PickingRenderPass::IssuePickReadback()
 
 	if (freeSlot == nullptr)
 	{
-		// The whole ring is still in flight: drop the request instead of
-		// blocking. The hover highlight simply lags one more frame.
+		// The whole ring is still in flight: drop the request instead of blocking. The hover
+		// highlight simply lags one more frame.
 		return;
 	}
 
-	// Two read-pixels commands, one per attachment: they run where the context is (the render
-	// thread, or this thread in the single-threaded configuration), and each one bumps the slot's
-	// counter when its bytes are on the CPU. Nothing here touches GL, so the frame never waits for
-	// the readback: TryConsumePick picks it up on a later frame.
-	// Filament's readPixels, once per attachment: select the colour attachment, then read the pixel
-	// into the slot's bytes. Both run where the context is, and each bumps the slot's counter when
-	// its bytes are on the CPU.
-	::Rendering::Context::Driver& driver = m_renderer.GetDriver();
-	const auto framebuffer = m_actorPickingFramebuffer.GetHandle();
+	PickReadbackSlot& slot = *freeSlot;
+	slot.downloadState->store(0, std::memory_order_release);
+	slot.downloadIssued = false;
 
-	driver.SetFramebufferReadBufferObject(framebuffer, true, 0);
-	driver.ReadPixelsObject(framebuffer, freeSlot->readback->idBytes,
-		m_pickRequestX, m_pickRequestY, 1, 1,
+	// glReadPixels with a pixel-pack buffer bound writes into the buffer on the GPU: the driver may
+	// DMA it, and neither side waits. The id pixel goes at offset 0 and the world position of the
+	// same spot right behind it, so one fence covers both.
+	m_actorPickingFramebuffer.ReadPixelsToBuffer(
+		slot.buffer.GetHandle(),
+		0,
+		m_pickRequestX,
+		m_pickRequestY,
+		1, 1,
 		::Rendering::Settings::EPixelDataFormat::RGBA,
-		::Rendering::Settings::EPixelDataType::UNSIGNED_BYTE,
-		[readback = freeSlot->readback] {
-			readback->arrived->fetch_add(1, std::memory_order_release);
-		});
-
-	driver.SetFramebufferReadBufferObject(framebuffer, true, 1);
-	driver.ReadPixelsObject(framebuffer, freeSlot->readback->positionBytes,
-		m_pickRequestX, m_pickRequestY, 1, 1,
+		::Rendering::Settings::EPixelDataType::UNSIGNED_BYTE
+	);
+	m_actorPickingFramebuffer.SetTargetReadBuffer(1);
+	m_actorPickingFramebuffer.ReadPixelsToBuffer(
+		slot.buffer.GetHandle(),
+		kPickReadbackPositionOffset,
+		m_pickRequestX,
+		m_pickRequestY,
+		1, 1,
 		::Rendering::Settings::EPixelDataFormat::RGBA,
-		::Rendering::Settings::EPixelDataType::FLOAT,
-		[readback = freeSlot->readback] {
-			readback->arrived->fetch_add(1, std::memory_order_release);
-		});
+		::Rendering::Settings::EPixelDataType::FLOAT
+	);
+	m_actorPickingFramebuffer.SetTargetReadBuffer(0);
 
-	freeSlot->x = m_pickRequestX;
-	freeSlot->y = m_pickRequestY;
-	freeSlot->pending = true;
+	// What says both reads landed: a fence the fetch polls (never waits on) - Filament inserts the
+	// same one after a readback and asks getFenceStatus for it.
+	slot.buffer.InsertFence();
+
+	slot.x = m_pickRequestX;
+	slot.y = m_pickRequestY;
+	slot.pending = true;
 }
 
 bool Editor::Rendering::PickingRenderPass::TryConsumePick(
@@ -289,32 +253,68 @@ bool Editor::Rendering::PickingRenderPass::TryConsumePick(
 		PickReadbackSlot& slot = m_pickReadbackSlots[
 			(m_pickWriteIndex + i) % kPickReadbackSlotCount
 		];
-		const PickReadback& readback = *slot.readback;
-		if (!slot.pending || readback.arrived->load(std::memory_order_acquire) < 2)
+		if (!slot.pending || !slot.downloadState)
 		{
 			continue;
 		}
 
-		// Both reads are on the CPU (the callbacks ran on the side that owns the context), so the
-		// bytes can be decoded right here - no fence, no mapping, no GL on this thread.
+		if (!slot.downloadIssued)
+		{
+			// Ask for the bytes: the command checks the buffer's fence where the context is and
+			// copies only once the GPU is done writing, so this side never waits. The answer comes
+			// back through downloadState - 1 copied, 2 fence not signalled yet (ask again).
+			slot.downloadState->store(0, std::memory_order_release);
+			slot.buffer.Download(
+				0,
+				kPickReadbackBytes,
+				slot.cpuBytes,
+				[state = slot.downloadState](bool p_copied)
+				{
+					state->store(p_copied ? 1 : 2, std::memory_order_release);
+				});
+			slot.downloadIssued = true;
+			continue;
+		}
+
+		const int state = slot.downloadState->load(std::memory_order_acquire);
+		if (state == 0)
+		{
+			continue; // the fetch has not run yet
+		}
+		if (state == 2)
+		{
+			// The fence says the GPU is still writing: try again on a later frame.
+			slot.downloadIssued = false;
+			continue;
+		}
+
+		// Both reads are on the CPU, decoded here: no fence, no mapping, no GL on this thread.
 		uint8_t pixel[4];
-		std::memcpy(pixel, readback.idBytes->data(), kPickReadbackIdBytes);
+		std::memcpy(pixel, slot.cpuBytes->data(), kPickReadbackIdBytes);
 		float position[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
-		std::memcpy(position, readback.positionBytes->data(), sizeof(position));
+		std::memcpy(
+			position,
+			slot.cpuBytes->data() + kPickReadbackPositionOffset,
+			sizeof(position)
+		);
+
+		slot.buffer.ClearFence();
+		slot.downloadIssued = false;
+		slot.downloadState->store(0, std::memory_order_release);
 		slot.pending = false;
 
 		p_outX = slot.x;
 		p_outY = slot.y;
 
-		bool ignoredSelectionState = false;
 		p_outHit = PickHit{};
-		p_outHit.result = DecodePickResult(p_scene, pixel, ignoredSelectionState);
+		p_outHit.result = DecodePickResult(p_scene, pixel, p_outHit.hitSomething);
 		if (position[3] >= 0.5f) {
 			p_outHit.worldPosition = Maths::FVector3{ position[0], position[1], position[2] };
 			p_outHit.hasWorldPosition = true;
 		}
 		return true;
 	}
+
 	return false;
 }
 

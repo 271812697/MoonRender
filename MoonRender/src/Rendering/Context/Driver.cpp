@@ -14,7 +14,6 @@
 #include <Rendering/Backend/DrawMeshRequest.h>
 #include <Rendering/Backend/OpenGLDriver.h>
 #include <Rendering/HAL/Backend.h>
-#include <Rendering/HAL/Buffer.h>
 #include <Rendering/Utils/Conversions.h>
 #include <tracy/Tracy.hpp>
 
@@ -27,14 +26,6 @@ namespace
 	 * thread the driver is made on that thread and asked for from the recording one. */
 	std::atomic<Rendering::Context::Driver*> s_currentDriver{ nullptr };
 
-	using BufferHandle = Rendering::Backend::ResourceHandle<Rendering::Backend::HwBufferObject>;
-
-	/** The backend object a handle names, on the side that owns the context: null until the create
-	 * command has run, or after the object was released. */
-	Rendering::HAL::Buffer* ResolveBuffer(BufferHandle p_handle)
-	{
-		return Rendering::Backend::GetHandleAllocator().HandleCast<Rendering::HAL::Buffer>(p_handle);
-	}
 
 	/** The ring the frame is recorded into, and the space a publish is guaranteed after a flush.
 	 *
@@ -144,62 +135,6 @@ Rendering::Context::Driver::~Driver()
 #undef DECL_DRIVER_API
 #undef DECL_DRIVER_API_RETURN
 #undef MOON_EXPAND_ARGS
-
-// ---- The synchronous halves of the driver API ------------------------------------------------
-//
-// These return the GPU's answer, so they cannot be a command: the query is recorded (it has to run
-// where the context is) and waited for. Filament declares them DECL_DRIVER_API_RETURN too
-// (getFenceStatus / mapBuffer) and its command stream serves them through getResult(); ours has no
-// result channel, so the wait is FlushAndWait - which is why they are between-frame calls only.
-
-bool Rendering::Context::Driver::IsBufferFenceSignaled(BufferHandle p_buffer)
-{
-	if (!static_cast<bool>(p_buffer))
-	{
-		return false;
-	}
-
-	if (IsExecutorThread())
-	{
-		// Already where the context is: ask directly instead of recording and waiting.
-		const Rendering::HAL::Buffer* const buffer = ResolveBuffer(p_buffer);
-		return buffer != nullptr && buffer->IsFenceSignaled();
-	}
-
-	bool signaled = false;
-	Enqueue([&signaled, p_buffer]
-		{
-			const Rendering::HAL::Buffer* const buffer = ResolveBuffer(p_buffer);
-			signaled = buffer != nullptr && buffer->IsFenceSignaled();
-		});
-	FlushAndWait();
-	return signaled;
-}
-
-void* Rendering::Context::Driver::MapBufferRead(BufferHandle p_buffer, uint64_t p_offset, uint64_t p_size)
-{
-	if (!static_cast<bool>(p_buffer))
-	{
-		return nullptr;
-	}
-
-	if (IsExecutorThread())
-	{
-		Rendering::HAL::Buffer* const buffer = ResolveBuffer(p_buffer);
-		return buffer != nullptr ? buffer->MapRead(p_offset, p_size) : nullptr;
-	}
-
-	// Filament's mapBuffer: the map runs where the context is and the pointer comes back. It stays
-	// mapped until UnmapBufferObject runs, so the caller reads it while the range is mapped.
-	void* mapped = nullptr;
-	Enqueue([&mapped, p_buffer, p_offset, p_size]
-		{
-			Rendering::HAL::Buffer* const buffer = ResolveBuffer(p_buffer);
-			mapped = buffer != nullptr ? buffer->MapRead(p_offset, p_size) : nullptr;
-		});
-	FlushAndWait();
-	return mapped;
-}
 
 void Rendering::Context::Driver::Enqueue(std::function<void()> p_command)
 {

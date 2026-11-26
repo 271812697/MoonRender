@@ -262,9 +262,18 @@ DECL_DRIVER_API(InsertBufferFence,
 DECL_DRIVER_API(ClearBufferFence,
 	(::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwBufferObject> p_buffer),
 	(p_buffer))
-// Copy a buffer range into CPU memory once its fence is signalled: the fetch half of the HZB
-// readback (the GPU wrote the bytes, and the CPU asks for them a frame or two later).
-DECL_DRIVER_COMMAND(DownloadBuffer, (::Rendering::Backend::DownloadBufferRequest p_request), (std::move(p_request)))
+// Copy a buffer range into CPU memory, but only once the buffer's fence says the GPU is done
+// writing it: the fetch half of the HZB readback (the GPU wrote the bytes, the CPU asks for them a
+// frame or two later). This is the only buffer readback there is, and it never waits: p_onDone runs
+// where the context is, with false when the fence is not signalled yet, and the caller asks again
+// next frame (Filament's readPixels + getFenceStatus, folded into one command).
+DECL_DRIVER_API(DownloadBufferObject,
+	(::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwBufferObject> p_buffer,
+		uint64_t p_offset,
+		uint64_t p_size,
+		std::shared_ptr<std::vector<uint8_t>> p_data,
+		std::function<void(bool)> p_onDone),
+	(p_buffer, p_offset, p_size, std::move(p_data), std::move(p_onDone)))
 // Attaching a texture its owner already has, and choosing which colour attachments are written:
 // both are GL on the target object, so both belong to the side that owns the context.
 DECL_DRIVER_COMMAND(BindDescriptor, (const ::Rendering::Backend::BindDescriptorRequest& p_request), (p_request))

@@ -9,7 +9,6 @@
 #include <Rendering/Backend/BufferDescriptor.h>
 #include <Rendering/Backend/PixelBufferDescriptor.h>
 #include <Rendering/Settings/EFramebufferAttachment.h>
-#include <Rendering/Backend/BufferRequests.h>
 #include <Rendering/Settings/EAccessSpecifier.h>
 #include <Rendering/Backend/DescriptorRequests.h>
 #include <Rendering/Backend/ProgramRequests.h>
@@ -240,7 +239,12 @@ namespace Rendering::Backend
 		void DrawIndexedVertexArray(const ::Rendering::Backend::DrawIndexedVertexArrayRequest& p_request);
 		/** A loose mat4 uniform on a program the overlay owns (its projection). */
 		void SetProgramMatrix4(const ::Rendering::Backend::ProgramMatrix4Request& p_request);
-		void DownloadBuffer(::Rendering::Backend::DownloadBufferRequest p_request);
+		void DownloadBufferObject(
+			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwBufferObject> p_buffer,
+			uint64_t p_offset,
+			uint64_t p_size,
+			std::shared_ptr<std::vector<uint8_t>> p_data,
+			std::function<void(bool)> p_onDone);
 		void BindDescriptor(const ::Rendering::Backend::BindDescriptorRequest& p_request);
 		void CommitAView();
 

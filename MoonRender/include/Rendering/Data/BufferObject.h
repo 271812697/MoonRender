@@ -1,5 +1,8 @@
 #pragma once
 #include <cstdint>
+#include <functional>
+#include <vector>
+#include <memory>
 #include <optional>
 
 #include <Rendering/Backend/ResourceHandle.h>
@@ -69,19 +72,22 @@ namespace Rendering::Data
 		/** Binds nothing to the buffer's target. */
 		void Unbind() const;
 
-		/** Maps a range for reading on the CPU. Synchronous (Filament's mapBuffer is a
-		 * DECL_DRIVER_API_RETURN): the map happens where the context is and the pointer comes
-		 * back, so it may only be used between frames. */
-		void* MapRead(uint64_t p_offset, uint64_t p_size);
+		/** Copies a range into p_data once the GPU is done writing it (Filament's readPixels with a
+		 * callback): the fence is checked where the context is, and p_onDone answers true when the
+		 * bytes were copied, false when they are not ready yet - then ask again next frame. Nothing
+		 * on this side waits for the GPU. */
+		void Download(
+			uint64_t p_offset,
+			uint64_t p_size,
+			std::shared_ptr<std::vector<uint8_t>> p_data,
+			std::function<void(bool)> p_onDone) const;
 
-		/** Unmaps what MapRead mapped (a command: the unmap needs the context). */
+		/** Unmaps a range that was mapped on the other side (a command: the unmap needs the
+		 * context). */
 		void Unmap();
 
 		/** Records the fence that says the GPU finished the work submitted so far. */
 		void InsertFence();
-
-		/** Non-blocking check of that fence. Synchronous, like MapRead. */
-		bool IsFenceSignaled() const;
 
 		/** Deletes the fence. */
 		void ClearFence();

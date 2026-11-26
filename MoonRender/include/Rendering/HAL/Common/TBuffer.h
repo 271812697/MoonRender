@@ -99,16 +99,11 @@ namespace Rendering::HAL
 		 * the context. */
 		void* GetFence() const;
 
-		/**
-		* Maps a range of the buffer for reading on the CPU.
-		* @param p_offset
-		* @param p_size
-		* @return Pointer to the mapped memory, or nullptr on failure
-		*/
-		void* MapRead(uint64_t p_offset, uint64_t p_size);
 
 		/**
-		* Unmaps the buffer previously mapped with MapRead()
+		* Unmaps a range that was mapped on the side that owns the context. The recording side never
+		* maps: a readback is Backend::Records' DownloadBufferObject, which copies once the fence says
+		* the GPU is done.
 		*/
 		void Unmap();
 

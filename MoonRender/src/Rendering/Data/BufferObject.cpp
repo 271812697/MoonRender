@@ -81,9 +81,16 @@ namespace Rendering::Data
 		Rendering::Context::Driver::Get().UnbindBufferObject(m_type);
 	}
 
-	void* BufferObject::MapRead(uint64_t p_offset, uint64_t p_size)
+	void BufferObject::Download(
+		uint64_t p_offset,
+		uint64_t p_size,
+		std::shared_ptr<std::vector<uint8_t>> p_data,
+		std::function<void(bool)> p_onDone) const
 	{
-		return Rendering::Context::Driver::Get().MapBufferRead(m_handle, p_offset, p_size);
+		// One recorded command: the fence check and the copy both happen where the context is, and a
+		// "not yet" answer comes back through the callback (see the HZB readback).
+		Rendering::Context::Driver::Get().DownloadBufferObject(
+			m_handle, p_offset, p_size, std::move(p_data), std::move(p_onDone));
 	}
 
 	void BufferObject::Unmap()
@@ -94,11 +101,6 @@ namespace Rendering::Data
 	void BufferObject::InsertFence()
 	{
 		Rendering::Context::Driver::Get().InsertBufferFence(m_handle);
-	}
-
-	bool BufferObject::IsFenceSignaled() const
-	{
-		return Rendering::Context::Driver::Get().IsBufferFenceSignaled(m_handle);
 	}
 
 	void BufferObject::ClearFence()

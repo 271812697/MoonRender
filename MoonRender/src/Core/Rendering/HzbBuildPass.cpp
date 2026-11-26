@@ -1,6 +1,5 @@
 #include <Core/Rendering/HzbBuildPass.h>
 
-#include <Rendering/Backend/BufferRequests.h>
 
 #include <algorithm>
 #include <chrono>
@@ -252,16 +251,11 @@ void Core::Rendering::HzbBuildPass::ConsumeReadyReadback()
 			// through downloadState on a later frame.
 			slot.downloadState->store(0, std::memory_order_release);
 
-			::Rendering::Backend::DownloadBufferRequest request;
-			request.handleId = slot.buffer->GetHandle().GetId();
-			request.offset = 0;
-			request.size = m_readbackBytes;
-			request.data = slot.cpuBytes;
-			request.onDone = [state = slot.downloadState](bool p_copied)
+			slot.buffer->Download(0, m_readbackBytes, slot.cpuBytes,
+				[state = slot.downloadState](bool p_copied)
 				{
 					state->store(p_copied ? 1 : 2, std::memory_order_release);
-				};
-			m_renderer.GetDriver().EnqueueDownloadBuffer(std::move(request));
+				});
 			slot.downloadIssued = true;
 
 			if (std::getenv("MOON_HZB_TRACE") != nullptr)
