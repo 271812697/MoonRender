@@ -11,54 +11,7 @@
 
 namespace Rendering::Data
 {
-	namespace
-	{
-		uint32_t GetDataTypeSizeInBytes(Rendering::Settings::EDataType p_type)
-		{
-			switch (p_type)
-			{
-			case Rendering::Settings::EDataType::BYTE: return 1;
-			case Rendering::Settings::EDataType::UNSIGNED_BYTE: return 1;
-			case Rendering::Settings::EDataType::SHORT: return 2;
-			case Rendering::Settings::EDataType::UNSIGNED_SHORT: return 2;
-			case Rendering::Settings::EDataType::INT: return 4;
-			case Rendering::Settings::EDataType::UNSIGNED_INT: return 4;
-			case Rendering::Settings::EDataType::FLOAT: return 4;
-			case Rendering::Settings::EDataType::DOUBLE: return 8;
-			default: return 0;
-			}
-		}
-
-		/** The layout in the shape the backend object reads it: one entry per attribute, with the
-		 * stride and the offset already resolved. The recording side knows these numbers (they are
-		 * the mesh's), so it is where they are computed; the executor only feeds them to GL. */
-		std::shared_ptr<const std::vector<Rendering::Backend::VertexLayoutAttribute>> BuildLayout(
-			Rendering::Settings::VertexAttributeLayout p_attributes)
-		{
-			auto attributes = std::make_shared<std::vector<Rendering::Backend::VertexLayoutAttribute>>();
-			attributes->reserve(p_attributes.size());
-
-			uint32_t stride = 0;
-			for (const Rendering::Settings::VertexAttribute& attribute : p_attributes)
-			{
-				stride += GetDataTypeSizeInBytes(attribute.type) * attribute.count;
-			}
-
-			uint64_t offset = 0;
-			for (const Rendering::Settings::VertexAttribute& attribute : p_attributes)
-			{
-				Rendering::Backend::VertexLayoutAttribute entry;
-				entry.type = attribute.type;
-				entry.count = attribute.count;
-				entry.normalized = attribute.normalized;
-				entry.stride = stride;
-				entry.offset = offset;
-				attributes->push_back(entry);
-				offset += GetDataTypeSizeInBytes(attribute.type) * attribute.count;
-			}
-			return attributes;
-		}
-	}
+	using Rendering::Backend::BuildVertexLayout;
 
 	VertexArrayObject::VertexArrayObject()
 	{
@@ -110,7 +63,7 @@ namespace Rendering::Data
 		// The array and its two buffers travel as handles: the create commands that make their GL
 		// names are earlier in the batch, and the executor resolves them when this runs.
 		Rendering::Context::Driver::Get().SetVertexArrayObjectLayout(
-			m_handle, p_vertexBuffer, p_indexBuffer, BuildLayout(p_attributes));
+			m_handle, p_vertexBuffer, p_indexBuffer, BuildVertexLayout(p_attributes));
 
 		m_attributeCount += static_cast<uint32_t>(p_attributes.size());
 	}

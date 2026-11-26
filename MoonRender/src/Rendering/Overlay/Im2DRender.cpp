@@ -171,7 +171,7 @@ public:
 			{ ::Rendering::Settings::EDataType::UNSIGNED_BYTE, 4, true },
 		};
 		p_driver.SetVertexArrayObjectLayout(m_vertexArray, m_vertexBuffer, m_indexBuffer,
-			Im2DVertexLayout(attributes));
+			::Rendering::Backend::BuildVertexLayout(attributes));
 
 		// 1x1 white: what untextured geometry samples. The front end records the create, the
 		// allocation and the upload; all the executor does is make the object and fill it.
@@ -196,35 +196,6 @@ public:
 		}
 		// The atlases themselves are created on demand in NewFrame: the font makes a new one
 		// whenever a text size appears for the first time.
-	}
-
-	/** The 2D vertex layout in the shape the driver API takes it: one entry per attribute, with the
-	 * stride and the offset already resolved (the executor only feeds them to GL). */
-	std::shared_ptr<const std::vector<::Rendering::Backend::VertexLayoutAttribute>> Im2DVertexLayout(
-		::Rendering::Settings::VertexAttributeLayout p_attributes)
-	{
-		auto attributes = std::make_shared<std::vector<::Rendering::Backend::VertexLayoutAttribute>>();
-		attributes->reserve(p_attributes.size());
-
-		uint32_t stride = 0;
-		for (const ::Rendering::Settings::VertexAttribute& attribute : p_attributes)
-		{
-			stride += 4u * attribute.count;
-		}
-
-		uint64_t offset = 0;
-		for (const ::Rendering::Settings::VertexAttribute& attribute : p_attributes)
-		{
-			::Rendering::Backend::VertexLayoutAttribute entry;
-			entry.type = attribute.type;
-			entry.count = attribute.count;
-			entry.normalized = attribute.normalized;
-			entry.stride = stride;
-			entry.offset = offset;
-			attributes->push_back(entry);
-			offset += 4u * attribute.count;
-		}
-		return attributes;
 	}
 
 	/** Grows a buffer when a frame's list needs more room than the last allocation. */
