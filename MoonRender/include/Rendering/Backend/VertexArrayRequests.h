@@ -17,20 +17,4 @@ namespace Rendering::Backend
 		uint64_t offset = 0;
 	};
 
-	/** Applies a vertex layout to a vertex array on the side that owns the context.
-	 *
-	 * The recording side knows the layout (it is the mesh's, built when the mesh is created) but
-	 * cannot touch GL: glVertexAttribPointer/glEnableVertexAttribArray need the context, and with a
-	 * render thread that context belongs to the executor. The attributes travel on the heap, like
-	 * the upload payloads, so the command does not depend on the caller's memory.
-	 *
-	 * The array and its two buffers travel as handles: their GL names are made by the create
-	 * commands, which run later in the same batch, and are resolved here when this runs. */
-	struct SetVertexArrayLayoutRequest
-	{
-		uint32_t vertexArrayHandleId = 0;
-		uint32_t vertexBufferHandleId = 0;
-		uint32_t indexBufferHandleId = 0;
-		std::shared_ptr<const std::vector<VertexLayoutAttribute>> attributes;
-	};
 }

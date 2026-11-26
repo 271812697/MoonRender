@@ -7,7 +7,6 @@
 #include <tracy/Tracy.hpp>
 #include <Core/Context.h>
 #include <Core/RenderModuleHost.h>
-#include <Rendering/Backend/CreateTextureRequest.h>
 #include <Rendering/Backend/BackendResources.h>
 #include <Rendering/Context/Driver.h>
 #include <Rendering/Resources/Texture.h>
@@ -26,9 +25,9 @@
 namespace Core::SceneSystem
 {
 
-	// Records a texture allocation (Filament's createTexture on a mutable texture) and drains, so
-	// the object exists for the material that binds it. All of this is load-time work: the GL call
-	// belongs on the side that owns the context, not on the caller's thread.
+	// Gives a texture-buffer asset its storage (Filament's createTexture + allocateTextureObject on a
+	// mutable texture). Load-time work: the GL call belongs on the side that owns the context, which
+	// is where Data::Texture::Allocate records it.
 	static void BvhRecordTextureAllocate(
 		::Rendering::Resources::Texture& p_texture,
 		const ::Rendering::Settings::TextureDesc& p_descriptor,
@@ -36,37 +35,17 @@ namespace Core::SceneSystem
 		size_t p_initialSize,
 		const char* p_debugName)
 	{
-		auto* module = ::Core::RenderModuleHost::Instance();
-		::Rendering::Context::Driver* driver = module != nullptr && module->GetContext() != nullptr
-			? module->GetContext()->driver.get() : nullptr;
-		if (driver == nullptr || !p_texture.GetHandle())
-		{
-			// No driver: the object is made here, and the description the caller handed over is what
-			// it is allocated with.
-			::Rendering::Backend::Records::CreateTexture(
-				p_texture.GetHandle(), ::Rendering::Settings::ETextureType::TEXTURE_BUFFER, p_debugName);
-			auto descriptor = p_descriptor;
-			if (descriptor.mutableDesc.has_value())
-			{
-				descriptor.mutableDesc.value().data = p_initialData;
-			}
-			p_texture.GetTexture().Allocate(descriptor);
-			return;
-		}
+		(void)p_debugName;
+		(void)p_initialSize;
 
-		::Rendering::Backend::CreateTextureRequest request;
-		request.handleId = p_texture.GetHandle().GetId();
-		request.type = ::Rendering::Settings::ETextureType::TEXTURE_BUFFER;
-		request.debugName = p_debugName;
-		request.allocate = true;
-		request.descriptor = p_descriptor;
-		if (p_initialData != nullptr && p_initialSize > 0)
+		// The descriptor names the caller's vector as its data; Allocate copies it into the command
+		// (PixelBufferDescriptor), so the vector may die right after this.
+		auto descriptor = p_descriptor;
+		if (descriptor.mutableDesc.has_value())
 		{
-			request.pixels.assign(static_cast<const uint8_t*>(p_initialData),
-				static_cast<const uint8_t*>(p_initialData) + p_initialSize);
+			descriptor.mutableDesc.value().data = p_initialData;
 		}
-		driver->CreateTexture(std::move(request));
-		
+		p_texture.GetTexture().Allocate(descriptor);
 	}
 
 	/** The per-mesh BVH a traversal walks. The ray tracing builds them for its own use
@@ -811,7 +790,8 @@ namespace Core::SceneSystem
 
 										// Front end + recorded creation: the material gets the asset, and the
 										// GL object is made on the side that owns the context.
-										triangleInfoAsset = new ::Rendering::Resources::Texture("");
+										triangleInfoAsset = new ::Rendering::Resources::Texture(
+										::Rendering::Settings::ETextureType::TEXTURE_BUFFER, "triangleInfo");
 										BvhRecordTextureAllocate(*triangleInfoAsset, desc, tfo.data(),
 											tfo.size() * sizeof(::Core::SceneSystem::TriangleInfo), "triangleInfo");
 										mat->SetProperty("triangleInfoTex", triangleInfoAsset);

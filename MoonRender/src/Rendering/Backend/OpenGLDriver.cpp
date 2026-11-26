@@ -17,9 +17,6 @@
 #include <Rendering/HAL/Framebuffer.h>
 #include <Rendering/HAL/Renderbuffer.h>
 #include <Rendering/HAL/VertexArray.h>
-#include <Rendering/Backend/BindFramebufferRequest.h>
-#include <Rendering/Backend/FramebufferRequests.h>
-#include <Rendering/Backend/TextureRequests.h>
 #include <Core/Rendering/FramebufferUtil.h>
 #include <Rendering/HAL/OpenGL/GLTypes.h>
 #include <Rendering/HAL/OpenGL/GLBuffer.h>
@@ -37,23 +34,38 @@ namespace
 	/** The buffer object a handle names, or null when there is none: the create command that makes
 	 * it runs earlier in the same batch, and a released or stale handle resolves to nothing
 	 * (Filament's handle_cast<GLBufferObject*>). */
+	/** The backend object a texture handle names, on the side that owns the context. */
+	::Rendering::HAL::Texture* ResolveTexture(
+		::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwTexture> p_handle)
+	{
+		return ::Rendering::Backend::GetHandleAllocator().HandleCast<::Rendering::HAL::Texture>(p_handle);
+	}
+
 	::Rendering::HAL::GLBuffer* ResolveBuffer(uint32_t p_handleId)
 	{
 		return ::Rendering::Backend::GetHandleAllocator().HandleCast<::Rendering::HAL::GLBuffer>(
 			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwBufferObject>{ p_handleId });
+	}
+	/** The same for a command that carries the typed handle: the command keeps it (a four byte
+	 * value), the executor resolves it here, where the object lives. */
+	::Rendering::HAL::GLBuffer* ResolveBuffer(
+		::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwBufferObject> p_handle)
+	{
+		return ResolveBuffer(p_handle.GetId());
 	}
+
 
 	/** The same for the container objects: the render target and its renderbuffer. */
-	::Rendering::HAL::Framebuffer* ResolveFramebuffer(uint32_t p_handleId)
+	::Rendering::HAL::Framebuffer* ResolveFramebuffer(
+		::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwFramebuffer> p_handle)
 	{
-		return ::Rendering::Backend::GetHandleAllocator().HandleCast<::Rendering::HAL::Framebuffer>(
-			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwFramebuffer>{ p_handleId });
+		return ::Rendering::Backend::GetHandleAllocator().HandleCast<::Rendering::HAL::Framebuffer>(p_handle);
 	}
 
-	::Rendering::HAL::Renderbuffer* ResolveRenderbuffer(uint32_t p_handleId)
+	::Rendering::HAL::Renderbuffer* ResolveRenderbuffer(
+		::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwRenderbuffer> p_handle)
 	{
-		return ::Rendering::Backend::GetHandleAllocator().HandleCast<::Rendering::HAL::Renderbuffer>(
-			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwRenderbuffer>{ p_handleId });
+		return ::Rendering::Backend::GetHandleAllocator().HandleCast<::Rendering::HAL::Renderbuffer>(p_handle);
 	}
 }
 namespace Rendering::Backend
@@ -153,45 +165,49 @@ namespace Rendering::Backend
 
 	/** Binds the pass's render target; null means the default framebuffer. The name is asked for
 	 * here, when the command runs, so a target resized after recording still binds right. */
-	void OpenGLDriver::BindFramebuffer(const ::Rendering::Backend::BindFramebufferRequest& p_request)
+		/** Binds the target the handle names, or the default framebuffer for a null handle. The name is
+	 * asked for here, when the command runs, so a target made earlier in the batch binds right. */
+	void OpenGLDriver::BindFramebufferObject(
+		::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwFramebuffer> p_framebuffer)
 	{
-		const uint32_t id = p_request.target != nullptr ? p_request.target->GetID() : 0;
+		const uint32_t id = ::Rendering::Backend::Records::FramebufferName(p_framebuffer);
 		m_backend.BindFramebuffer(id);
 
-		// MOON_FRAME_TRACE: which target is bound and whether it is complete. A pass that draws
-		// into a target whose attachments were never built reports here, with the GL status, instead
-		// of a stream of GL_INVALID_FRAMEBUFFER_OPERATION later. The pass name is the label the
-		// recording side published, because this side only sees the bind.
+		// MOON_FRAME_TRACE: whether the bound target is complete. A pass that draws into a target
+		// whose attachments were never built reports here, with the GL status, instead of a stream of
+		// GL_INVALID_FRAMEBUFFER_OPERATION later. The pass name is the label the recording side
+		// published, because this side only sees the bind.
 		if (std::getenv("MOON_FRAME_TRACE") != nullptr && id != 0)
 		{
 			const GLenum status = glCheckNamedFramebufferStatus(id, GL_FRAMEBUFFER);
-			const auto size = p_request.target->GetSize();
-			std::fprintf(stderr, "[fbo] bind %u (%s) %ux%u status=0x%04x pass=%s\n", id,
-				p_request.target->GetDebugName().c_str(), size.first, size.second, status,
+			std::fprintf(stderr, "[fbo] bind %u status=0x%04x pass=%s\n", id, status,
 				::Rendering::Utils::FrameTrace::GetPass());
 			std::fflush(stderr);
 		}
 	}
 
-	/** Binds the mesh's array, draws it, unbinds. The array name is asked for here, at replay
+/** Binds the mesh's array, draws it, unbinds. The array name is asked for here, at replay
 	 * time: a mesh whose upload was deferred to this side (see Backend::DeferredDeleter) has one
 	 * by now, and no GL name is ever cached on the recording side. */
-	void OpenGLDriver::UpdateTexture(::Rendering::Backend::UpdateTextureRequest p_request)
+	void OpenGLDriver::UpdateTextureObject(
+	::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwTexture> p_texture,
+	uint32_t p_x, uint32_t p_y, uint32_t p_width, uint32_t p_height,
+	::Rendering::Backend::PixelBufferDescriptor p_pixels)
+{
+	::Rendering::HAL::Texture* const target = ResolveTexture(p_texture);
+	if (target == nullptr || !p_pixels.IsValid())
 	{
-		const auto handle = ::Rendering::Backend::ResourceHandle<Rendering::Backend::HwTexture>{ p_request.handleId };
-		auto* target = ::Rendering::Backend::GetHandleAllocator().HandleCast<Rendering::HAL::Texture>(handle);
-		if (target == nullptr)
-		{
-			return;
-		}
-
-		target->UploadSubImage(p_request.pixels.data(), p_request.format, p_request.type,
-			p_request.x, p_request.y, p_request.width, p_request.height);
+		return;
 	}
 
+	// A rectangle inside storage that already exists (Filament's update2DImage): the atlas
+	// that grows as glyphs are baked, the view cube's labels after a language switch.
+	target->UploadSubImage(p_pixels.Data(), p_pixels.Format(), p_pixels.Type(),
+		p_x, p_y, p_width, p_height);
+}
 
 
-	void OpenGLDriver::MakeCurrent()
+void OpenGLDriver::MakeCurrent()
 	{
 		// Filament's OpenGLDriver::makeCurrent: the platform makes the context current, then the
 		// bindings that belonged to whatever context was current before are invalidated. Our
@@ -212,146 +228,146 @@ namespace Rendering::Backend
 		}
 	}
 
-	void OpenGLDriver::CreateProgram(::Rendering::Backend::CreateProgramRequest p_request)
+	void OpenGLDriver::CreateProgramObject(
+	::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwProgram> p_program,
+	std::shared_ptr<const std::vector<::Rendering::Backend::ShaderSourceSpec>> p_stages,
+	std::shared_ptr<const ::Rendering::Data::DescriptorSetInfo> p_bindings)
+{
+	// Filament's createProgram: the stages' sources travel with the command and the build
+	// happens here, where the context is. The program object lives in the handle's slot - the
+	// construct below is what makes it - and its Build is what attaches, links, reflects and
+	// throws the stages away. The binding map is declared right after the link, because that is
+	// when the program exists to be told about its slots.
+	if (!static_cast<bool>(p_program) || p_stages == nullptr)
 	{
-		// Filament's createProgram: the stages' sources travel with the command and the build
-		// happens here, where the context is. The program object lives in the handle's slot - the
-		// construct below is what makes it - and its Build is what attaches, links, reflects and
-		// throws the stages away. The binding map is declared right after the link, because that is
-		// when the program exists to be told about its slots.
-		if (p_request.programHandleId == 0 || p_request.stages == nullptr)
+		return;
+	}
+
+	::Rendering::Backend::Records::CreateProgram(p_program);
+	Rendering::HAL::ShaderProgram* const program =
+		::Rendering::Backend::GetHandleAllocator().HandleCast<Rendering::HAL::ShaderProgram>(p_program);
+	if (program == nullptr)
+	{
+		return;
+	}
+
+	program->Build(*p_stages);
+
+	if (p_bindings != nullptr)
+	{
+		program->DeclareBindings(*p_bindings);
+	}
+}
+
+void OpenGLDriver::BindProgramObject(
+	::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwProgram> p_program)
+{
+	// Filament's bindProgram. The object only exists after the create command ran - which is
+	// why the recording side names the handle and this side resolves it. A null here means the
+	// program is not built (yet): leave the bound one alone rather than unbinding everything.
+	if (!static_cast<bool>(p_program))
+	{
+		glUseProgram(0);
+		return;
+	}
+
+	::Rendering::HAL::ShaderProgram* const program =
+		::Rendering::Backend::GetHandleAllocator().HandleCast<::Rendering::HAL::ShaderProgram>(p_program);
+	if (program != nullptr)
+	{
+		program->Bind();
+	}
+}
+
+void OpenGLDriver::DeclareProgramBindingsObject(
+	::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwProgram> p_program,
+	std::shared_ptr<const ::Rendering::Data::DescriptorSetInfo> p_bindings)
+{
+	::Rendering::HAL::ShaderProgram* const program =
+		::Rendering::Backend::GetHandleAllocator().HandleCast<::Rendering::HAL::ShaderProgram>(p_program);
+	if (program == nullptr || p_bindings == nullptr)
+	{
+		return;
+	}
+
+	program->DeclareBindings(*p_bindings);
+}
+
+	void OpenGLDriver::ReadPixelsObject(
+		::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwFramebuffer> p_framebuffer,
+		std::shared_ptr<std::vector<uint8_t>> p_data,
+		uint32_t p_x, uint32_t p_y, uint32_t p_width, uint32_t p_height,
+		::Rendering::Settings::EPixelDataFormat p_format,
+		::Rendering::Settings::EPixelDataType p_type,
+		std::function<void()> p_onDone)
+	{
+		// Filament's readPixels: the target is named by its handle and resolved here. The attachment
+		// is whatever a recorded SetFramebufferReadBufferObject selected - picking selects one, reads
+		// it, then selects the next.
+		const uint32_t framebuffer = ::Rendering::Backend::Records::FramebufferName(p_framebuffer);
+		if (framebuffer == 0 || p_data == nullptr || p_width == 0 || p_height == 0)
 		{
 			return;
 		}
 
-		using namespace ::Rendering::Backend;
-		const ResourceHandle<HwProgram> handle{ p_request.programHandleId };
-
-		Records::CreateProgram(handle);
-		Rendering::HAL::ShaderProgram* const program =
-			GetHandleAllocator().HandleCast<Rendering::HAL::ShaderProgram>(handle);
-		if (program == nullptr)
+		if (p_data->size() < static_cast<size_t>(p_width) * p_height * 4)
 		{
-			return;
+			p_data->resize(static_cast<size_t>(p_width) * p_height * 4);
 		}
 
-		program->Build(*p_request.stages);
-
-		if (p_request.bindings != nullptr)
-		{
-			program->DeclareBindings(*p_request.bindings);
-		}
-	}
-
-	void OpenGLDriver::BindProgram(uint32_t p_programId)
-	{
-		// Filament's bindProgram: the actual call, with the program the create command produced.
-		glUseProgram(p_programId);
-	}
-
-	void OpenGLDriver::BindProgramHandle(uint32_t p_programHandleId)
-	{
-		// The object only exists after the create command ran - which is exactly why this variant
-		// exists: the recording side records the handle, this side resolves it. A null here means
-		// the program is not built (yet): leave the bound one alone rather than unbinding
-		// everything.
-		::Rendering::HAL::ShaderProgram* const program =
-			::Rendering::Backend::GetHandleAllocator().HandleCast<::Rendering::HAL::ShaderProgram>(
-				::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwProgram>{
-					p_programHandleId });
-		if (program != nullptr)
-		{
-			program->Bind();
-		}
-	}
-
-	void OpenGLDriver::DeclareProgramBindings(::Rendering::Backend::DeclareProgramBindingsRequest p_request)
-	{
-		::Rendering::HAL::ShaderProgram* const program =
-			::Rendering::Backend::GetHandleAllocator().HandleCast<::Rendering::HAL::ShaderProgram>(
-				::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwProgram>{
-					p_request.programHandleId });
-		if (program == nullptr || p_request.bindings == nullptr)
-		{
-			return;
-		}
-
-		program->DeclareBindings(*p_request.bindings);
-	}
-
-	void OpenGLDriver::ReadPixels(const ::Rendering::Backend::ReadPixelsRequest& p_request)
-	{
-		// A handle is resolved here, so a target created in this batch can be read (Filament's
-		// readPixels takes the target the same way); a raw name is what the callers that already
-		// have one pass.
-		uint32_t framebuffer = p_request.framebufferId;
-		if (p_request.framebufferHandleId != 0)
-		{
-			framebuffer = ::Rendering::Backend::Records::FramebufferName(
-				::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwFramebuffer>{
-					p_request.framebufferHandleId });
-		}
-
-		if (framebuffer == 0 || p_request.data == nullptr || p_request.width == 0 || p_request.height == 0)
-		{
-			return;
-		}
-
-		// Filament's readPixels: bind the target, select the attachment, read. The bytes go to the
-		// buffer the request owns, and the completion callback runs here - on the thread that owns
-		// the context - so a caller on the recording side never reads a buffer the GPU is filling.
 		glBindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer);
-		if (p_request.readBufferIndex >= 0)
-		{
-			// A negative index keeps whatever the recorded SetFramebufferReadBuffer selected.
-			glReadBuffer(GL_COLOR_ATTACHMENT0 + static_cast<GLenum>(p_request.readBufferIndex));
-		}
 		glPixelStorei(GL_PACK_ALIGNMENT, 1);
-		glReadPixels(static_cast<GLint>(p_request.x), static_cast<GLint>(p_request.y),
-			static_cast<GLsizei>(p_request.width), static_cast<GLsizei>(p_request.height),
-			::Rendering::HAL::EnumToValue<GLenum>(p_request.format),
-			::Rendering::HAL::EnumToValue<GLenum>(p_request.type),
-			p_request.data->data());
+		glReadPixels(static_cast<GLint>(p_x), static_cast<GLint>(p_y),
+			static_cast<GLsizei>(p_width), static_cast<GLsizei>(p_height),
+			::Rendering::HAL::EnumToValue<GLenum>(p_format),
+			::Rendering::HAL::EnumToValue<GLenum>(p_type),
+			p_data->data());
 		glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
 
-		if (p_request.onDone)
+		// The callback runs here, where the bytes are: a caller on the recording side never reads a
+		// buffer the GPU is still filling.
+		if (p_onDone)
 		{
-			p_request.onDone();
+			p_onDone();
 		}
 	}
 
-	/** glNamedFramebufferReadBuffer on the target the handle names: the first half of a recorded
+/** glNamedFramebufferReadBuffer on the target the handle names: the first half of a recorded
 	 * readback pair (picking selects the id attachment, reads it, then the position one). */
-	void OpenGLDriver::SetFramebufferReadBuffer(const ::Rendering::Backend::SetFramebufferReadBufferRequest& p_request)
+		void OpenGLDriver::SetFramebufferReadBufferObject(
+		::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwFramebuffer> p_framebuffer,
+		bool p_hasIndex,
+		uint32_t p_index)
 	{
-		::Rendering::HAL::Framebuffer* const framebuffer = ResolveFramebuffer(p_request.framebufferHandleId);
+		::Rendering::HAL::Framebuffer* const framebuffer = ResolveFramebuffer(p_framebuffer);
 		if (framebuffer == nullptr)
 		{
 			return;
 		}
-		framebuffer->SetReadBuffer(p_request.hasIndex
-			? std::optional<uint32_t>(p_request.index)
-			: std::nullopt);
+		framebuffer->SetReadBuffer(p_hasIndex ? std::optional<uint32_t>(p_index) : std::nullopt);
 	}
 
-	/** glReadPixels into a pixel-pack buffer: the GPU writes it, and DownloadBuffer fetches it once
+/** glReadPixels into a pixel-pack buffer: the GPU writes it, and DownloadBuffer fetches it once
 	 * the buffer's fence says it is done. */
-	void OpenGLDriver::ReadPixelsToBuffer(::Rendering::Backend::ReadPixelsToBufferRequest p_request)
+		void OpenGLDriver::ReadPixelsToBufferObject(
+		::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwFramebuffer> p_framebuffer,
+		::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwBufferObject> p_buffer,
+		uint64_t p_offset,
+		uint32_t p_x, uint32_t p_y, uint32_t p_width, uint32_t p_height,
+		::Rendering::Settings::EPixelDataFormat p_format,
+		::Rendering::Settings::EPixelDataType p_type)
 	{
-		::Rendering::HAL::Framebuffer* const framebuffer = ResolveFramebuffer(p_request.framebufferHandleId);
-		const uint32_t buffer = ::Rendering::Backend::Records::BufferName(
-			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwBufferObject>{
-				p_request.bufferHandleId });
+		::Rendering::HAL::Framebuffer* const framebuffer = ResolveFramebuffer(p_framebuffer);
+		const uint32_t buffer = ::Rendering::Backend::Records::BufferName(p_buffer);
 		if (framebuffer == nullptr || buffer == 0)
 		{
 			return;
 		}
 
-		framebuffer->ReadPixelsToBuffer(buffer, p_request.offset, p_request.x, p_request.y,
-			p_request.width, p_request.height, p_request.format, p_request.type);
+		framebuffer->ReadPixelsToBuffer(buffer, p_offset, p_x, p_y, p_width, p_height, p_format, p_type);
 	}
 
-	/** The fetch half of the asynchronous readback: copies the buffer range into the request's CPU
+/** The fetch half of the asynchronous readback: copies the buffer range into the request's CPU
 	 * memory, but only once the fence says the GPU is done with it. Telling the recording side that
 	 * it has to try again is the callback's false. */
 	void OpenGLDriver::DownloadBuffer(::Rendering::Backend::DownloadBufferRequest p_request)
@@ -386,43 +402,43 @@ namespace Rendering::Backend
 		}
 	}
 
-	void OpenGLDriver::SetVertexArrayLayout(const ::Rendering::Backend::SetVertexArrayLayoutRequest& p_request)
+	void OpenGLDriver::SetVertexArrayObjectLayout(
+	::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwVertexArray> p_array,
+	::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwBufferObject> p_vertexBuffer,
+	::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwBufferObject> p_indexBuffer,
+	std::shared_ptr<const std::vector<::Rendering::Backend::VertexLayoutAttribute>> p_attributes)
+{
+	// The array and its buffers are resolved here: the create commands that made their GL names
+	// ran earlier in this batch (Filament's setVertexArrayObject).
+	::Rendering::HAL::VertexArray* const array =
+		::Rendering::Backend::GetHandleAllocator().HandleCast<::Rendering::HAL::VertexArray>(p_array);
+	::Rendering::HAL::GLBuffer* const vertexBuffer = ResolveBuffer(p_vertexBuffer);
+	if (array == nullptr || vertexBuffer == nullptr || p_attributes == nullptr)
 	{
-		// The array and its buffers are resolved here: the create commands that made their GL names
-		// ran earlier in this batch (Filament's setVertexArrayObject).
-		::Rendering::HAL::VertexArray* const array =
-			::Rendering::Backend::GetHandleAllocator().HandleCast<::Rendering::HAL::VertexArray>(
-				::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwVertexArray>{
-					p_request.vertexArrayHandleId });
-		::Rendering::HAL::GLBuffer* const vertexBuffer = ResolveBuffer(p_request.vertexBufferHandleId);
-		if (array == nullptr || vertexBuffer == nullptr || p_request.attributes == nullptr)
-		{
-			return;
-		}
-		::Rendering::HAL::GLBuffer* const indexBuffer = ResolveBuffer(p_request.indexBufferHandleId);
-
-		array->SetLayout(*p_request.attributes, vertexBuffer->GetID(),
-			indexBuffer != nullptr ? indexBuffer->GetID() : 0u);
+		return;
 	}
+	::Rendering::HAL::GLBuffer* const indexBuffer = ResolveBuffer(p_indexBuffer);
 
-	void OpenGLDriver::UpdateBuffer(const ::Rendering::Backend::UpdateBufferRequest& p_request)
+	array->SetLayout(*p_attributes, vertexBuffer->GetID(),
+		indexBuffer != nullptr ? indexBuffer->GetID() : 0u);
+}
+
+void OpenGLDriver::UpdateBufferObject(
+	::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwBufferObject> p_buffer,
+	::Rendering::Backend::BufferDescriptor p_data,
+	uint64_t p_offset)
+{
+	// The bytes belong to the descriptor the recording side handed over (Filament's
+	// BufferDescriptor), so nothing here depends on the caller's memory still existing.
+	::Rendering::HAL::GLBuffer* const buffer = ResolveBuffer(p_buffer);
+	if (buffer == nullptr || !p_data.IsValid())
 	{
-		if (p_request.handleId == 0 || p_request.data == nullptr || p_request.size == 0)
-		{
-			return;
-		}
-		// The object belongs to the create command, which ran earlier in this batch: the handle is
-		// resolved on this side, because that is where the object (and its GL name) lives.
-		::Rendering::HAL::GLBuffer* const buffer = ResolveBuffer(p_request.handleId);
-		if (buffer == nullptr)
-		{
-			return;
-		}
-		buffer->Upload(p_request.data->data(),
-			::Rendering::HAL::BufferMemoryRange{ p_request.offset, p_request.size });
+		return;
 	}
+	buffer->Upload(p_data.Data(), ::Rendering::HAL::BufferMemoryRange{ p_offset, p_data.size });
+}
 
-	void OpenGLDriver::BindDescriptor(const ::Rendering::Backend::BindDescriptorRequest& p_request)
+void OpenGLDriver::BindDescriptor(const ::Rendering::Backend::BindDescriptorRequest& p_request)
 	{
 		using Kind = ::Rendering::Backend::BindDescriptorRequest::Kind;
 
@@ -482,79 +498,80 @@ namespace Rendering::Backend
 		}
 	}
 
-	void OpenGLDriver::SetupFramebuffer(const ::Rendering::Backend::SetupFramebufferRequest& p_request)
+		void OpenGLDriver::CopyFramebufferColorObject(
+		::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwFramebuffer> p_source,
+		uint32_t p_sourceIndex,
+		uint16_t p_sourceWidth, uint16_t p_sourceHeight,
+		::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwFramebuffer> p_target,
+		uint32_t p_targetIndex,
+		uint16_t p_targetWidth, uint16_t p_targetHeight)
 	{
-		if (std::getenv("MOON_FRAME_TRACE") != nullptr)
-		{
-			std::fprintf(stderr, "[setup] execute target=%p name=%s desc=%d\n",
-				static_cast<void*>(p_request.target),
-				p_request.target != nullptr ? p_request.target->GetDebugName().c_str() : "-",
-				p_request.useDesc ? 1 : 0);
-			std::fflush(stderr);
-		}
-
-		if (p_request.target == nullptr)
+		// The names are resolved here, where the objects are; the sizes travel with the command,
+		// because the recording side is the one that knows what its attachments are right now.
+		const uint32_t source = ::Rendering::Backend::Records::FramebufferName(p_source);
+		const uint32_t target = ::Rendering::Backend::Records::FramebufferName(p_target);
+		if (source == 0 || target == 0)
 		{
 			return;
 		}
 
-		// The whole setup - the colour texture, the depth/stencil renderbuffer, the attachments -
-		// is GL, so it happens here (Filament's createRenderTargetR).
-		if (p_request.useDesc)
-		{
-			::Core::Rendering::FramebufferUtil::SetupFramebuffer(
-				*p_request.target,
-				p_request.desc,
-				p_request.useDepth,
-				p_request.useStencil,
-				p_request.useMultiSample);
-		}
-		else
-		{
-			::Core::Rendering::FramebufferUtil::SetupFramebuffer(
-				*p_request.target,
-				p_request.width,
-				p_request.height,
-				p_request.useDepth,
-				p_request.useStencil,
-				p_request.useMipMaps,
-				p_request.useMultiSample);
-		}
+		glNamedFramebufferReadBuffer(source, GL_COLOR_ATTACHMENT0 + p_sourceIndex);
+		glNamedFramebufferDrawBuffer(target, GL_COLOR_ATTACHMENT0 + p_targetIndex);
+		glBlitNamedFramebuffer(source, target, 0, 0, p_sourceWidth, p_sourceHeight,
+			0, 0, p_targetWidth, p_targetHeight, GL_COLOR_BUFFER_BIT, GL_NEAREST);
 	}
 
-	void OpenGLDriver::ResizeFramebuffer(const ::Rendering::Backend::ResizeFramebufferRequest& p_request)
+	void OpenGLDriver::CopyFramebufferDepthObject(
+		::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwFramebuffer> p_source,
+		uint16_t p_sourceWidth, uint16_t p_sourceHeight,
+		::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwFramebuffer> p_target,
+		uint16_t p_targetWidth, uint16_t p_targetHeight)
 	{
-		if (p_request.target != nullptr)
+		const uint32_t source = ::Rendering::Backend::Records::FramebufferName(p_source);
+		const uint32_t target = ::Rendering::Backend::Records::FramebufferName(p_target);
+		if (source == 0 || target == 0)
 		{
-			p_request.target->Resize(p_request.width, p_request.height);
+			return;
 		}
+
+		glBlitNamedFramebuffer(source, target, 0, 0, p_sourceWidth, p_sourceHeight,
+			0, 0, p_targetWidth, p_targetHeight, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
 	}
 
-	void OpenGLDriver::CopyFramebufferColor(const ::Rendering::Backend::CopyFramebufferColorRequest& p_request)
+	void OpenGLDriver::BlitFramebufferObject(
+		::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwFramebuffer> p_source,
+		uint16_t p_sourceWidth, uint16_t p_sourceHeight,
+		uint16_t p_targetWidth, uint16_t p_targetHeight)
 	{
-		if (p_request.source != nullptr && p_request.target != nullptr)
+		::Rendering::HAL::Framebuffer* const source = ResolveFramebuffer(p_source);
+		if (source == nullptr)
 		{
-			::Core::Rendering::FramebufferUtil::CopyFramebufferColor(
-				*p_request.source, static_cast<int>(p_request.sourceIndex),
-				*p_request.target, static_cast<int>(p_request.targetIndex));
+			return;
 		}
+		source->BlitTo(0, p_sourceWidth, p_sourceHeight, p_targetWidth, p_targetHeight);
 	}
 
-	void OpenGLDriver::CopyFramebufferDepth(const ::Rendering::Backend::CopyFramebufferDepthRequest& p_request)
+	void OpenGLDriver::ClearFramebufferAttachmentObject(
+		::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwFramebuffer> p_framebuffer,
+		::Rendering::Settings::EFramebufferAttachment p_attachment,
+		int32_t p_index)
 	{
-		if (p_request.source != nullptr && p_request.target != nullptr)
+		::Rendering::HAL::Framebuffer* const framebuffer = ResolveFramebuffer(p_framebuffer);
+		if (framebuffer == nullptr)
 		{
-			::Core::Rendering::FramebufferUtil::CopyFramebufferDepth(
-				*p_request.source, *p_request.target);
+			return;
 		}
+		framebuffer->Clear(p_attachment, p_index);
 	}
 
-	void OpenGLDriver::AttachRenderbuffer(const ::Rendering::Backend::AttachRenderbufferRequest& p_request)
+void OpenGLDriver::AttachRenderbufferObject(
+		::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwFramebuffer> p_framebuffer,
+		::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwRenderbuffer> p_renderbuffer,
+		::Rendering::Settings::EFramebufferAttachment p_attachment,
+		uint32_t p_index)
 	{
-		::Rendering::HAL::Framebuffer* const framebuffer =
-			ResolveFramebuffer(p_request.framebufferHandleId);
-		::Rendering::HAL::Renderbuffer* const renderbuffer =
-			ResolveRenderbuffer(p_request.renderbufferHandleId);
+		::Rendering::HAL::Framebuffer* const framebuffer = ResolveFramebuffer(p_framebuffer);
+		::Rendering::HAL::Renderbuffer* const renderbuffer = ResolveRenderbuffer(p_renderbuffer);
 		if (framebuffer == nullptr || renderbuffer == nullptr)
 		{
 			return;
@@ -563,266 +580,302 @@ namespace Rendering::Backend
 		// The bind is kept because the immediate path has it (and some drivers want the
 		// renderbuffer current before it is attached).
 		renderbuffer->Bind();
-		framebuffer->AttachRenderbuffer(p_request.attachment, p_request.index, renderbuffer->GetID());
+		framebuffer->AttachRenderbuffer(p_attachment, p_index, renderbuffer->GetID());
 	}
 
-	void OpenGLDriver::AllocateRenderbuffer(const ::Rendering::Backend::AllocateRenderbufferRequest& p_request)
+void OpenGLDriver::AllocateRenderbufferObject(
+	::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwRenderbuffer> p_renderbuffer,
+	uint16_t p_width, uint16_t p_height,
+	::Rendering::Settings::EInternalFormat p_format,
+	bool p_multiSample)
+{
+	::Rendering::HAL::Renderbuffer* const renderbuffer =
+		::Rendering::Backend::GetHandleAllocator()
+			.HandleCast<::Rendering::HAL::Renderbuffer>(p_renderbuffer);
+	if (renderbuffer != nullptr)
 	{
-		::Rendering::HAL::Renderbuffer* const renderbuffer = ResolveRenderbuffer(p_request.handleId);
-		if (renderbuffer == nullptr)
-		{
-			return;
-		}
-		renderbuffer->Allocate(p_request.width, p_request.height, p_request.format,
-			p_request.multiSample);
+		renderbuffer->Allocate(p_width, p_height, p_format, p_multiSample);
 	}
+}
 
-	void OpenGLDriver::AttachTexture(const ::Rendering::Backend::AttachTextureRequest& p_request)
+	void OpenGLDriver::AttachTextureObject(
+		::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwFramebuffer> p_framebuffer,
+		::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwTexture> p_texture,
+		::Rendering::Settings::EFramebufferAttachment p_attachment,
+		uint32_t p_index, uint32_t p_level, bool p_hasLayer, uint32_t p_layer)
 	{
-		::Rendering::HAL::Framebuffer* const framebuffer =
-			ResolveFramebuffer(p_request.framebufferHandleId);
-		const uint32_t texture = ::Rendering::Backend::Records::TextureName(p_request.textureHandleId);
+		::Rendering::HAL::Framebuffer* const framebuffer = ResolveFramebuffer(p_framebuffer);	const uint32_t texture = ::Rendering::Backend::Records::TextureName(p_texture.GetId());
 		if (framebuffer == nullptr || texture == 0)
 		{
 			return;
 		}
 
-		if (p_request.useLayer)
+		if (p_hasLayer)
 		{
-			framebuffer->AttachTextureLayer(p_request.attachment, p_request.index, texture,
-				p_request.level, p_request.layer);
+			framebuffer->AttachTextureLayer(p_attachment, p_index, texture, p_level, p_layer);
 		}
 		else
 		{
-			framebuffer->AttachTexture(p_request.attachment, p_request.index, texture,
-				p_request.level);
+			framebuffer->AttachTexture(p_attachment, p_index, texture, p_level);
 		}
 	}
 
-	void OpenGLDriver::SetFramebufferDrawBuffers(const ::Rendering::Backend::SetFramebufferDrawBuffersRequest& p_request)
+	void OpenGLDriver::SetFramebufferDrawBuffersObject(
+		::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwFramebuffer> p_framebuffer,
+		std::vector<uint32_t> p_indices)
 	{
-		::Rendering::HAL::Framebuffer* const framebuffer =
-			ResolveFramebuffer(p_request.framebufferHandleId);
+		::Rendering::HAL::Framebuffer* const framebuffer = ResolveFramebuffer(p_framebuffer);
 		if (framebuffer == nullptr)
 		{
 			return;
 		}
-		framebuffer->SetDrawBuffers(p_request.indices);
+		framebuffer->SetDrawBuffers(p_indices);
 	}
 
-	void OpenGLDriver::CreateFramebuffer(uint32_t p_handleId)
+void OpenGLDriver::CreateFramebufferObject(
+	::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwFramebuffer> p_framebuffer,
+	std::string p_debugName)
+{
+	(void)p_debugName;
+	::Rendering::Backend::Records::CreateFramebuffer(p_framebuffer);
+}
+
+void OpenGLDriver::CreateRenderbufferObject(
+	::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwRenderbuffer> p_renderbuffer,
+	std::string p_debugName)
+{
+	(void)p_debugName;
+	::Rendering::Backend::Records::CreateRenderbuffer(p_renderbuffer);
+}
+
+void OpenGLDriver::CreateVertexArrayObject(
+	::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwVertexArray> p_array,
+	std::string p_debugName)
+{
+	(void)p_debugName;
+	// The slot was reserved by the driver that recorded the command: the GL array is made here.
+	::Rendering::Backend::Records::CreateVertexArray(p_array);
+}
+
+void OpenGLDriver::CreateBufferObject(
+	::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwBufferObject> p_buffer,
+	::Rendering::Settings::EBufferType p_type)
+{
+	// The slot was reserved by the driver that recorded the command; the object (and its GL
+	// name) is made here, once - Filament's createBufferObjectR.
+	::Rendering::Backend::Records::CreateBuffer(p_buffer, p_type);
+}
+
+void OpenGLDriver::AllocateBufferObject(
+	::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwBufferObject> p_buffer,
+	uint64_t p_size,
+	::Rendering::Settings::EAccessSpecifier p_usage)
+{
+	// The storage belongs to the object the create command made earlier in this batch: this
+	// is where the size the executor allocates is recorded, so anything resolving the handle
+	// afterwards can read it (Filament's allocateBufferObject).
+	::Rendering::HAL::GLBuffer* const buffer = ResolveBuffer(p_buffer);
+	if (buffer == nullptr)
 	{
-		::Rendering::Backend::Records::CreateFramebuffer(
-			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwFramebuffer>{ p_handleId });
+		return;
+	}
+	buffer->Allocate(p_size, p_usage);
+}
+
+/** Sets a buffer's binding point where the context lives. A shader storage buffer bound on
+ * the recording side is simply not bound when the draws run on another thread: the light
+ * list then reads as empty and every lit surface comes out darker (docs §8.67). */
+void OpenGLDriver::BindBufferObject(
+	::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwBufferObject> p_buffer,
+	::Rendering::Settings::EBufferType p_type,
+	std::optional<uint32_t> p_index)
+{
+	if (!static_cast<bool>(p_buffer))
+	{
+		// No handle: the recording side asked for nothing to be bound to that target.
+		glBindBuffer(::Rendering::HAL::EnumToValue<GLenum>(p_type), 0);
+		return;
 	}
 
-	void OpenGLDriver::CreateRenderbuffer(uint32_t p_handleId)
+	::Rendering::HAL::GLBuffer* const buffer = ResolveBuffer(p_buffer);
+	if (buffer == nullptr)
 	{
-		::Rendering::Backend::Records::CreateRenderbuffer(
-			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwRenderbuffer>{ p_handleId });
+		return;
 	}
 
-	void OpenGLDriver::CreateVertexArray(uint32_t p_handleId)
+	// The object knows its own target, which is why the create command had to carry the kind
+	// of buffer: binding a uniform/SSBO buffer as GL_ARRAY_BUFFER is an error.
+	if (p_index.has_value())
 	{
-		::Rendering::Backend::Records::CreateVertexArray(
-			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwVertexArray>{ p_handleId });
+		buffer->Bind(p_index.value());
+	}
+	else
+	{
+		buffer->Bind();
+	}
+}
+
+void OpenGLDriver::UnbindBufferObject(::Rendering::Settings::EBufferType p_type)
+{
+	glBindBuffer(::Rendering::HAL::EnumToValue<GLenum>(p_type), 0);
+}
+
+/** glBindBufferRange: a block inside a shared buffer (the pool's slices, a descriptor that
+ * carries an offset + size instead of a whole buffer). */
+void OpenGLDriver::BindBufferObjectRange(
+	::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwBufferObject> p_buffer,
+	uint32_t p_index,
+	uint64_t p_offset,
+	uint64_t p_size)
+{
+	::Rendering::HAL::GLBuffer* const buffer = ResolveBuffer(p_buffer);
+	if (buffer == nullptr)
+	{
+		return;
+	}
+	buffer->BindRange(p_index, p_offset, p_size);
+}
+
+void OpenGLDriver::UnmapBufferObject(
+	::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwBufferObject> p_buffer)
+{
+	::Rendering::HAL::GLBuffer* const buffer = ResolveBuffer(p_buffer);
+	if (buffer == nullptr)
+	{
+		return;
+	}
+	buffer->Unmap();
+}
+
+void OpenGLDriver::InsertBufferFence(
+	::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwBufferObject> p_buffer)
+{
+	::Rendering::HAL::GLBuffer* const buffer = ResolveBuffer(p_buffer);
+	if (buffer == nullptr)
+	{
+		return;
+	}
+	buffer->InsertFence();
+}
+
+void OpenGLDriver::ClearBufferFence(
+	::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwBufferObject> p_buffer)
+{
+	::Rendering::HAL::GLBuffer* const buffer = ResolveBuffer(p_buffer);
+	if (buffer == nullptr)
+	{
+		return;
+	}
+	buffer->ClearFence();
+}
+
+
+	void OpenGLDriver::CreateTextureObject(
+	::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwTexture> p_texture,
+	::Rendering::Settings::ETextureType p_type,
+	std::string p_debugName)
+{
+	// The slot was reserved by the driver that recorded the command; the object (and its GL
+	// name) is made here, once - Filament's createTextureR.
+	::Rendering::Backend::Records::CreateTexture(p_texture, p_type, p_debugName);
+}
+
+void OpenGLDriver::AllocateTextureObject(
+	::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwTexture> p_texture,
+	::Rendering::Settings::TextureDesc p_desc,
+	::Rendering::Backend::PixelBufferDescriptor p_pixels)
+{
+	::Rendering::HAL::Texture* const target = ResolveTexture(p_texture);
+	if (target == nullptr)
+	{
+		return;
 	}
 
-	void OpenGLDriver::AllocateBuffer(::Rendering::Backend::AllocateBufferRequest p_request)
+	// The bytes that travel with the command are the ones to allocate from: the descriptor's
+	// own pointer names memory the recording side may have rewritten by now (a local vector of
+	// block colours, a texture buffer rebuilt on every submit).
+	if (p_desc.mutableDesc.has_value() && p_pixels.IsValid())
 	{
-		// The storage belongs to the object the create command made earlier in this batch
-		// (Filament's allocateBufferObject): it is where the size the executor just allocated is
-		// recorded, so anything resolving the handle afterwards can read it.
-		::Rendering::HAL::GLBuffer* const buffer = ResolveBuffer(p_request.handleId);
-		if (buffer == nullptr)
-		{
-			return;
-		}
-		buffer->Allocate(p_request.size, p_request.usage);
+		p_desc.mutableDesc.value().data = p_pixels.Data();
 	}
 
-	void OpenGLDriver::CreateBuffer(::Rendering::Backend::CreateBufferRequest p_request)
+	// A texture's storage is immutable (glTextureStorage2D): allocating again is
+	// GL_INVALID_OPERATION "Texture is immutable". Only a mutable texture - a texture buffer is
+	// one, its data buffer is rebuilt on every submit - may be re-specified in place.
+	if (!target->IsValid() || p_desc.mutableDesc.has_value())
 	{
-		::Rendering::Backend::Records::CreateBuffer(
-			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwBufferObject>{ p_request.handleId },
-			p_request.type);
+		target->Allocate(p_desc);
+	}
+}
+
+void OpenGLDriver::UploadTextureObject(
+	::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwTexture> p_texture,
+	::Rendering::Settings::TextureDesc p_desc,
+	::Rendering::Backend::PixelBufferDescriptor p_pixels,
+	bool p_generateMipmaps)
+{
+	::Rendering::HAL::Texture* const target = ResolveTexture(p_texture);
+	if (target == nullptr || !p_pixels.IsValid())
+	{
+		return;
 	}
 
-	/** Sets a buffer's binding point where the context lives. A shader storage buffer bound on the
-	 * recording side is simply not bound when the draws run on another thread: the light list then
-	 * reads as empty and every lit surface comes out darker (docs §8.67). */
-	void OpenGLDriver::BindBuffer(const ::Rendering::Backend::BindBufferRequest& p_request)
+	// Storage once: a re-upload - the font atlas grows as glyphs are baked - only needs the
+	// sub-image, which is what Upload does. IsValid() is the allocated flag.
+	if (!target->IsValid())
 	{
-		if (p_request.handleId == 0)
-		{
-			glBindBuffer(::Rendering::HAL::EnumToValue<GLenum>(p_request.type), 0);
-			return;
-		}
-
-		::Rendering::HAL::GLBuffer* const buffer = ResolveBuffer(p_request.handleId);
-		if (buffer == nullptr)
-		{
-			return;
-		}
-
-		// The object knows its own target, which is why the create command had to carry the kind
-		// of buffer: binding a uniform/SSBO buffer as GL_ARRAY_BUFFER is an error.
-		if (p_request.indexed)
-		{
-			buffer->Bind(p_request.index);
-		}
-		else
-		{
-			buffer->Bind();
-		}
+		target->Allocate(p_desc);
 	}
-
-	/** glBindBufferRange: a block inside a shared buffer (the pool's slices, a descriptor that
-	 * carries an offset + size instead of a whole buffer). */
-	void OpenGLDriver::BindBufferRange(const ::Rendering::Backend::BindBufferRangeRequest& p_request)
+	target->Upload(p_pixels.Data(), p_pixels.Format(), p_pixels.Type());
+	if (p_generateMipmaps)
 	{
-		::Rendering::HAL::GLBuffer* const buffer = ResolveBuffer(p_request.handleId);
-		if (buffer == nullptr)
-		{
-			return;
-		}
-		buffer->BindRange(p_request.index, p_request.offset, p_request.size);
+		target->GenerateMipmaps();
 	}
+}
 
-	void OpenGLDriver::UnmapBuffer(uint32_t p_handleId)
+/** Reads a texture back and prints the first bytes: the diagnostic for "is the object holding
+ * what the recording side uploaded" (a texture buffer's contents cannot be seen from a draw). */
+void OpenGLDriver::PrintTextureBytes(uint32_t p_textureHandleId, uint32_t p_byteCount, const char* p_label)
+{
+	const auto handle = ::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwTexture>{ p_textureHandleId };
+	const auto* target = ResolveTexture(handle);
+	if (target == nullptr || target->GetID() == 0 || p_byteCount == 0)
 	{
-		::Rendering::HAL::GLBuffer* const buffer = ResolveBuffer(p_handleId);
-		if (buffer == nullptr)
-		{
-			return;
-		}
-		buffer->Unmap();
-	}
-
-	void OpenGLDriver::InsertFence(uint32_t p_handleId)
-	{
-		::Rendering::HAL::GLBuffer* const buffer = ResolveBuffer(p_handleId);
-		if (buffer == nullptr)
-		{
-			return;
-		}
-		buffer->InsertFence();
-	}
-
-	void OpenGLDriver::ClearFence(uint32_t p_handleId)
-	{
-		::Rendering::HAL::GLBuffer* const buffer = ResolveBuffer(p_handleId);
-		if (buffer == nullptr)
-		{
-			return;
-		}
-		buffer->ClearFence();
-	}
-
-
-
-	void OpenGLDriver::CreateTexture(::Rendering::Backend::CreateTextureRequest p_request)
-	{
-		const auto handle = ::Rendering::Backend::ResourceHandle<Rendering::Backend::HwTexture>{ p_request.handleId };
-
-		// The create is idempotent (once per handle), so the object is looked up afterwards: what
-		// comes back is the one the slot already held or the one just made.
-		::Rendering::Backend::Records::CreateTexture(handle, p_request.type, p_request.debugName);
-		auto* target = ::Rendering::Backend::GetHandleAllocator().HandleCast<Rendering::HAL::Texture>(handle);
-		if (target == nullptr)
-		{
-			return;
-		}
-
-		if (p_request.allocate)
-		{
-			auto descriptor = p_request.descriptor;
-			if (descriptor.mutableDesc.has_value() && !p_request.pixels.empty())
-			{
-				// The descriptor names the recording side's vector as its data (the sketch's block
-				// colours, a texture buffer): by the time this runs that memory may have been
-				// rewritten - which is what made the solid's colours differ between runs. The bytes
-				// that travel with the command are the ones to allocate from.
-				descriptor.mutableDesc.value().data = p_request.pixels.data();
-			}
-
-			// A texture's storage is immutable (glTextureStorage2D): allocating again is
-			// GL_INVALID_OPERATION "Texture is immutable". Only a mutable texture - a texture buffer
-			// is one, its data buffer is rebuilt on every submit - may be re-allocated in place.
-			if (!target->IsValid() || descriptor.mutableDesc.has_value())
-			{
-				target->Allocate(descriptor);
-			}
-		}
-	}
-
-	void OpenGLDriver::UploadTexture(::Rendering::Backend::TextureUploadRequest p_request)
-	{
-		const auto handle = ::Rendering::Backend::ResourceHandle<Rendering::Backend::HwTexture>{
-			p_request.handleId };
-		auto* target = ::Rendering::Backend::GetHandleAllocator().HandleCast<Rendering::HAL::Texture>(handle);
-		if (target == nullptr || p_request.pixels.empty())
-		{
-			return;
-		}
-
-		// Storage once: a texture's storage is immutable (glTextureStorage2D), so allocating again
-		// answers GL_INVALID_OPERATION "Texture is immutable". A re-upload - the font atlas grows as
-		// glyphs are baked - only needs the sub-image, which is what Upload does. IsValid() is the
-		// allocated flag the descriptor sets.
-		if (!target->IsValid())
-		{
-			target->Allocate(p_request.descriptor);
-		}
-		target->Upload(p_request.pixels.data(), p_request.format, p_request.type);
-		if (p_request.generateMipmaps)
-		{
-			target->GenerateMipmaps();
-		}
-	}
-
-	/** Reads a texture back and prints the first bytes: the diagnostic for "is the object holding
-	 * what the recording side uploaded" (a texture buffer's contents cannot be seen from a draw). */
-	void OpenGLDriver::PrintTextureBytes(uint32_t p_textureHandleId, uint32_t p_byteCount, const char* p_label)
-	{
-		const auto handle = ::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwTexture>{ p_textureHandleId };
-		const auto* target = ::Rendering::Backend::GetHandleAllocator().HandleCast<::Rendering::HAL::Texture>(handle);
-		if (target == nullptr || target->GetID() == 0 || p_byteCount == 0)
-		{
-			std::fprintf(stderr, "[texbytes] %s missing\n", p_label != nullptr ? p_label : "?");
-			std::fflush(stderr);
-			return;
-		}
-
-		std::vector<uint8_t> bytes(p_byteCount, 0);
-		glGetTextureImage(target->GetID(), 0, GL_RGBA, GL_FLOAT, static_cast<GLsizei>(bytes.size()), bytes.data());
-		std::fprintf(stderr, "[texbytes] %s id=%u bytes=", p_label != nullptr ? p_label : "?", target->GetID());
-		for (uint32_t i = 0; i < p_byteCount && i < 16; ++i) { std::fprintf(stderr, "%02x", bytes[i]); }
-		std::fprintf(stderr, "\n");
+		std::fprintf(stderr, "[texbytes] %s missing\n", p_label != nullptr ? p_label : "?");
 		std::fflush(stderr);
+		return;
 	}
 
-	void OpenGLDriver::SetTextureBorderColor(const ::Rendering::Backend::SetTextureBorderColorRequest& p_request)
+	std::vector<uint8_t> bytes(p_byteCount, 0);
+	glGetTextureImage(target->GetID(), 0, GL_RGBA, GL_FLOAT, static_cast<GLsizei>(bytes.size()), bytes.data());
+	std::fprintf(stderr, "[texbytes] %s id=%u bytes=", p_label != nullptr ? p_label : "?", target->GetID());
+	for (uint32_t i = 0; i < p_byteCount && i < 16; ++i) { std::fprintf(stderr, "%02x", bytes[i]); }
+	std::fprintf(stderr, "\n");
+	std::fflush(stderr);
+}
+
+void OpenGLDriver::GenerateTextureMipmapsObject(
+	::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwTexture> p_texture)
+{
+	::Rendering::HAL::Texture* const target = ResolveTexture(p_texture);
+	if (target != nullptr)
 	{
-		const auto handle = ::Rendering::Backend::ResourceHandle<Rendering::Backend::HwTexture>{ p_request.handleId };
-		auto* target = ::Rendering::Backend::GetHandleAllocator().HandleCast<Rendering::HAL::Texture>(handle);
-		if (target != nullptr)
-		{
-			target->SetBorderColor(p_request.color);
-		}
+		target->GenerateMipmaps();
 	}
+}
 
-	void OpenGLDriver::GenerateTextureMipmaps(const ::Rendering::Backend::GenerateTextureMipmapsRequest& p_request)
+void OpenGLDriver::SetTextureBorderColorObject(
+	::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwTexture> p_texture,
+	::Maths::FVector4 p_color)
+{
+	::Rendering::HAL::Texture* const target = ResolveTexture(p_texture);
+	if (target != nullptr)
 	{
-		const auto handle = ::Rendering::Backend::ResourceHandle<Rendering::Backend::HwTexture>{ p_request.handleId };
-		auto* target = ::Rendering::Backend::GetHandleAllocator().HandleCast<Rendering::HAL::Texture>(handle);
-		if (target != nullptr)
-		{
-			target->GenerateMipmaps();
-		}
+		target->SetBorderColor(p_color);
 	}
+}
 
-	void OpenGLDriver::DrawVertexArray(const ::Rendering::Backend::DrawVertexArrayRequest& p_request)
+void OpenGLDriver::DrawVertexArray(const ::Rendering::Backend::DrawVertexArrayRequest& p_request)
 	{
 		const uint32_t array = ::Rendering::Backend::Records::VertexArrayName(
 			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwVertexArray>{

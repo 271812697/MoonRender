@@ -10,19 +10,15 @@
 
 #include <Rendering/Backend/CircularBuffer.h>
 #include <Rendering/Backend/CommandBufferQueue.h>
-#include <Rendering/Backend/BindFramebufferRequest.h>
 #include <Rendering/Backend/BufferRequests.h>
+#include <Rendering/Backend/BufferDescriptor.h>
+#include <Rendering/Backend/PixelBufferDescriptor.h>
+#include <Rendering/Settings/EAccessSpecifier.h>
 #include <Rendering/Backend/DescriptorRequests.h>
 #include <Rendering/Backend/ProgramRequests.h>
-#include <Rendering/Backend/ReadPixelsRequest.h>
 #include <Rendering/Backend/VertexArrayRequests.h>
-#include <Rendering/Backend/FramebufferRequests.h>
-#include <Rendering/Backend/CreateTextureRequest.h>
 #include <Rendering/Backend/OverlayRequests.h>
-#include <Rendering/Backend/TextureRequests.h>
 #include <Rendering/Backend/DrawMeshRequest.h>
-#include <Rendering/Backend/TextureUploadRequest.h>
-#include <Rendering/Backend/UpdateTextureRequest.h>
 #include <Rendering/Data/PipelineState.h>
 #include <Rendering/Data/Framebuffer.h>
 #include <Rendering/Resources/IMesh.h>
@@ -229,10 +225,20 @@ namespace Rendering::Backend
 		 * No arguments, so it is written out rather than generated. */
 		void MakeCurrent();
 
-		/** The recording entry points: one per method of OpenGLDriver (see DriverAPI.inc). */
+		/** The recording entry points: one per method of OpenGLDriver (see DriverAPI.inc).
+		 *
+		 * DECL_DRIVER_COMMAND declares the historical <name> entry (Driver calls it Enqueue<name>);
+		 * DECL_DRIVER_API is Filament's driver API, same name end to end; and
+		 * DECL_DRIVER_API_RETURN is the same but for the calls that hand a value back - its command
+		 * carries the handle the driver reserved as its first argument, which is the object the
+		 * executor is to fill in. */
 #define DECL_DRIVER_COMMAND(name, paramsDecl, params) void name paramsDecl;
+#define DECL_DRIVER_API(name, paramsDecl, params) void name paramsDecl;
+#define DECL_DRIVER_API_RETURN(RetType, name, paramsDecl, params) void name(RetType p_handle, MOON_EXPAND_ARGS paramsDecl);
 #include <Rendering/Backend/DriverAPI.inc>
 #undef DECL_DRIVER_COMMAND
+#undef DECL_DRIVER_API
+#undef DECL_DRIVER_API_RETURN
 
 	private:
 

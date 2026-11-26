@@ -51,4 +51,22 @@ namespace Rendering::Backend
 		template <typename B, typename = std::enable_if_t<std::is_base_of_v<T, B>>>
 		ResourceHandle(ResourceHandle<B> const& p_base) noexcept : ResourceHandleBase(p_base.GetId()) {}
 	};
+
+	/** The record a handle names - Filament's `Handle<T>`'s T. What the driver API needs to reserve
+	 * a slot for a call that returns one (see DECL_DRIVER_API_RETURN in DriverAPI.inc): the caller
+	 * names the handle type, this recovers the record to construct in it. */
+	template <typename T>
+	struct HandleRecordOf
+	{
+		using Type = void;
+	};
+
+	template <typename T>
+	struct HandleRecordOf<ResourceHandle<T>>
+	{
+		using Type = T;
+	};
+
+	template <typename T>
+	using HandleRecord = typename HandleRecordOf<T>::Type;
 }

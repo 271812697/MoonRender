@@ -1,6 +1,8 @@
 
 #include <Rendering/Context/Driver.h>
 
+#include <atomic>
+#include <cassert>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -10,15 +12,29 @@
 #include <Rendering/Backend/DeferredDeleter.h>
 #include <Rendering/Backend/BackendResources.h>
 #include <Rendering/Backend/DrawMeshRequest.h>
-#include <Rendering/Backend/BindFramebufferRequest.h>
 #include <Rendering/Backend/OpenGLDriver.h>
 #include <Rendering/HAL/Backend.h>
+#include <Rendering/HAL/Buffer.h>
 #include <Rendering/Utils/Conversions.h>
 #include <tracy/Tracy.hpp>
 
 namespace
 {
 	std::unique_ptr<Rendering::HAL::Backend> m_gfxBackend;
+
+	/** The driver of the running module (see Driver::Get). Set by the constructor and cleared by
+	 * the destructor: there is one module, so there is one of these. Atomic because with a render
+	 * thread the driver is made on that thread and asked for from the recording one. */
+	std::atomic<Rendering::Context::Driver*> s_currentDriver{ nullptr };
+
+	using BufferHandle = Rendering::Backend::ResourceHandle<Rendering::Backend::HwBufferObject>;
+
+	/** The backend object a handle names, on the side that owns the context: null until the create
+	 * command has run, or after the object was released. */
+	Rendering::HAL::Buffer* ResolveBuffer(BufferHandle p_handle)
+	{
+		return Rendering::Backend::GetHandleAllocator().HandleCast<Rendering::HAL::Buffer>(p_handle);
+	}
 
 	/** The ring the frame is recorded into, and the space a publish is guaranteed after a flush.
 	 *
@@ -28,6 +44,13 @@ namespace
 	 * enough, and a full ring used to have to run what it had, mid-frame. */
 	constexpr size_t kRequiredCommandBytes = 1024 * 1024;
 	constexpr size_t kCommandRingBytes = 8 * 1024 * 1024;
+}
+
+Rendering::Context::Driver& Rendering::Context::Driver::Get()
+{
+	Rendering::Context::Driver* const driver = s_currentDriver.load(std::memory_order_acquire);
+	assert(driver != nullptr && "No render module is running: there is no driver to make or use a resource");
+	return *driver;
 }
 
 Rendering::Context::Driver::Driver(const Rendering::Settings::DriverSettings& p_driverSettings)
@@ -60,10 +83,19 @@ Rendering::Context::Driver::Driver(const Rendering::Settings::DriverSettings& p_
 	m_hardware = m_gfxBackend->GetHardware();
 	m_version = m_gfxBackend->GetVersion();
 	m_shadingLanguageVersion = m_gfxBackend->GetShadingLanguageVersion();
+
+	// From here on resources can be made: everything that creates or uses a handle asks for this
+	// driver (see Driver::Get). Set last, so a half-built driver is never handed out.
+	s_currentDriver.store(this, std::memory_order_release);
 }
 
 Rendering::Context::Driver::~Driver()
 {
+	if (s_currentDriver.load(std::memory_order_acquire) == this)
+	{
+		s_currentDriver.store(nullptr, std::memory_order_release);
+	}
+
 	// What was still queued for deletion is released now, while the context the driver belongs to
 	// is still current (the owner destroys the driver with it current). After this there is no
 	// context to defer to any more, so later releases destroy where they happen.
@@ -83,83 +115,95 @@ Rendering::Context::Driver::~Driver()
 		/* ExecuteAll). Nothing runs inline here any more (docs/RenderThreadPlan.md §8.72). */ \
 		m_commandStream->name(MOON_EXPAND_ARGS params); \
 	}
+
+/* The driver API (Filament's DECL_DRIVER_API): the method keeps its name and forwards to the
+ * command stream, which is where the command is actually recorded. Nothing else happens here -
+ * the GL is in OpenGLDriver, on the side that owns the context. */
+#define DECL_DRIVER_API(name, paramsDecl, params) \
+	void Rendering::Context::Driver::name paramsDecl \
+	{ \
+		m_commandStream->name(MOON_EXPAND_ARGS params); \
+	}
+
+/* The same for a call that hands back a value at once (Filament's DECL_DRIVER_API_RETURN, e.g.
+ * createBufferObject / createTexture): the handle is reserved here - the allocator is thread
+ * safe, so the recording side can do it without the object existing - and the command that
+ * constructs the object in that slot is recorded right behind it. Whatever the caller records
+ * next resolves the handle, because the ring runs in order. */
+#define DECL_DRIVER_API_RETURN(RetType, name, paramsDecl, params) \
+	RetType Rendering::Context::Driver::name paramsDecl \
+	{ \
+		const RetType handle = Rendering::Backend::GetHandleAllocator() \
+			.Allocate<Rendering::Backend::HandleRecord<RetType>>(); \
+		m_commandStream->name(handle, MOON_EXPAND_ARGS params); \
+		return handle; \
+	}
+
 #include <Rendering/Backend/DriverAPI.inc>
 #undef DECL_DRIVER_COMMAND
+#undef DECL_DRIVER_API
+#undef DECL_DRIVER_API_RETURN
 #undef MOON_EXPAND_ARGS
+
+// ---- The synchronous halves of the driver API ------------------------------------------------
+//
+// These return the GPU's answer, so they cannot be a command: the query is recorded (it has to run
+// where the context is) and waited for. Filament declares them DECL_DRIVER_API_RETURN too
+// (getFenceStatus / mapBuffer) and its command stream serves them through getResult(); ours has no
+// result channel, so the wait is FlushAndWait - which is why they are between-frame calls only.
+
+bool Rendering::Context::Driver::IsBufferFenceSignaled(BufferHandle p_buffer)
+{
+	if (!static_cast<bool>(p_buffer))
+	{
+		return false;
+	}
+
+	if (IsExecutorThread())
+	{
+		// Already where the context is: ask directly instead of recording and waiting.
+		const Rendering::HAL::Buffer* const buffer = ResolveBuffer(p_buffer);
+		return buffer != nullptr && buffer->IsFenceSignaled();
+	}
+
+	bool signaled = false;
+	Enqueue([&signaled, p_buffer]
+		{
+			const Rendering::HAL::Buffer* const buffer = ResolveBuffer(p_buffer);
+			signaled = buffer != nullptr && buffer->IsFenceSignaled();
+		});
+	FlushAndWait();
+	return signaled;
+}
+
+void* Rendering::Context::Driver::MapBufferRead(BufferHandle p_buffer, uint64_t p_offset, uint64_t p_size)
+{
+	if (!static_cast<bool>(p_buffer))
+	{
+		return nullptr;
+	}
+
+	if (IsExecutorThread())
+	{
+		Rendering::HAL::Buffer* const buffer = ResolveBuffer(p_buffer);
+		return buffer != nullptr ? buffer->MapRead(p_offset, p_size) : nullptr;
+	}
+
+	// Filament's mapBuffer: the map runs where the context is and the pointer comes back. It stays
+	// mapped until UnmapBufferObject runs, so the caller reads it while the range is mapped.
+	void* mapped = nullptr;
+	Enqueue([&mapped, p_buffer, p_offset, p_size]
+		{
+			Rendering::HAL::Buffer* const buffer = ResolveBuffer(p_buffer);
+			mapped = buffer != nullptr ? buffer->MapRead(p_offset, p_size) : nullptr;
+		});
+	FlushAndWait();
+	return mapped;
+}
 
 void Rendering::Context::Driver::Enqueue(std::function<void()> p_command)
 {
 	m_commandStream->Enqueue<::Rendering::Backend::CustomCommand>(std::move(p_command));
-}
-
-void Rendering::Context::Driver::ReadPixels(const ::Rendering::Backend::ReadPixelsRequest& p_request)
-{
-	m_commandStream->ReadPixels(p_request);
-}
-
-void Rendering::Context::Driver::ApplyVertexArrayLayout(const ::Rendering::Backend::SetVertexArrayLayoutRequest& p_request)
-{
-	m_commandStream->SetVertexArrayLayout(p_request);
-}
-
-void Rendering::Context::Driver::CreateProgram(::Rendering::Backend::CreateProgramRequest p_request)
-{
-	if (p_request.programHandleId == 0)
-	{
-		return;
-	}
-
-	m_commandStream->CreateProgram(std::move(p_request));
-}
-
-void Rendering::Context::Driver::BindProgram(uint32_t p_programId)
-{
-	m_commandStream->BindProgram(p_programId);
-}
-
-void Rendering::Context::Driver::BindProgramHandle(uint32_t p_programHandleId)
-{
-	m_commandStream->BindProgramHandle(p_programHandleId);
-}
-
-void Rendering::Context::Driver::DeclareProgramBindings(::Rendering::Backend::DeclareProgramBindingsRequest p_request)
-{
-	if (p_request.programHandleId == 0 || p_request.bindings == nullptr)
-	{
-		return;
-	}
-
-	m_commandStream->DeclareProgramBindings(std::move(p_request));
-}
-
-void Rendering::Context::Driver::UpdateBufferRange(
-	uint32_t p_bufferHandleId, uint32_t p_offset, const void* p_data, uint32_t p_size)
-{
-	if (p_bufferHandleId == 0 || p_data == nullptr || p_size == 0)
-	{
-		return;
-	}
-
-	if (std::getenv("MOON_FRAME_TRACE") != nullptr)
-	{
-		static int calls = 0;
-		if (++calls < 40 || (calls % 500) == 0)
-		{
-			std::fprintf(stderr, "[buf] #%d handle=%u off=%u size=%u\n", calls, p_bufferHandleId, p_offset, p_size);
-			std::fflush(stderr);
-		}
-	}
-	// The bytes are owned by the command (Filament's BufferDescriptor), not by the ring: an upload
-	// can be megabytes, and the ring is sized for a batch of commands.
-	auto owned = std::make_shared<std::vector<uint8_t>>(p_size);
-	std::memcpy(owned->data(), p_data, p_size);
-
-	::Rendering::Backend::UpdateBufferRequest request;
-	request.handleId = p_bufferHandleId;
-	request.offset = p_offset;
-	request.size = p_size;
-	request.data = std::move(owned);
-	m_commandStream->UpdateBuffer(request);
 }
 
 void Rendering::Context::Driver::BindDescriptor(const ::Rendering::Backend::BindDescriptorRequest& p_request)
@@ -167,47 +211,12 @@ void Rendering::Context::Driver::BindDescriptor(const ::Rendering::Backend::Bind
 	m_commandStream->BindDescriptor(p_request);
 }
 
-void Rendering::Context::Driver::SetupFramebuffer(Data::Framebuffer& p_target, uint32_t p_width, uint32_t p_height,
-	bool p_useDepth, bool p_useStencil, bool p_useMipMaps, bool p_useMultiSample)
+void Rendering::Context::Driver::ResizeFramebuffer(Data::Framebuffer& p_target, uint16_t p_width,
+	uint16_t p_height)
 {
-	if (std::getenv("MOON_FRAME_TRACE") != nullptr)
-	{
-		std::fprintf(stderr, "[setup] record target=%p name=%s %ux%u\n",
-			static_cast<void*>(&p_target), p_target.GetDebugName().c_str(), p_width, p_height);
-		std::fflush(stderr);
-	}	::Rendering::Backend::SetupFramebufferRequest request;
-	request.target = &p_target;
-	request.width = p_width;
-	request.height = p_height;
-	request.useDepth = p_useDepth;
-	request.useStencil = p_useStencil;
-	request.useMipMaps = p_useMipMaps;
-	request.useMultiSample = p_useMultiSample;
-	m_commandStream->SetupFramebuffer(request);
-}
-
-void Rendering::Context::Driver::SetupFramebuffer(Data::Framebuffer& p_target, const ::Rendering::Settings::TextureDesc& p_desc,
-	bool p_useDepth, bool p_useStencil, bool p_useMultiSample)
-{
-	::Rendering::Backend::SetupFramebufferRequest request;
-	request.target = &p_target;
-	request.width = p_desc.width;
-	request.height = p_desc.height;
-	request.useDepth = p_useDepth;
-	request.useStencil = p_useStencil;
-	request.useMultiSample = p_useMultiSample;
-	request.useDesc = true;
-	request.desc = p_desc;
-	m_commandStream->SetupFramebuffer(request);
-}
-
-void Rendering::Context::Driver::ResizeFramebuffer(Data::Framebuffer& p_target, uint16_t p_width, uint16_t p_height)
-{
-	// The size is front-end state: it is the attachment descriptors, and GetSize() answers from
-	// them. Resizing here records the GL storage re-specs for the attachments (their own Resize
-	// does that), so this side knows the new size immediately - deferring it to the executor left
-	// GetSize() reporting the old size for the rest of the frame, and a blit then sized its
-	// destination from a 1x1 target (the bloom pass then clamped 0..0).
+	// Front-end bookkeeping: a resize is each attachment re-specifying its storage, and those are
+	// recorded commands of their own (Data::Texture::Resize / Data::Renderbuffer::Resize). Running it
+	// here, on the recording side, is what keeps the attachment list the passes read back current.
 	p_target.Resize(p_width, p_height);
 }
 
@@ -215,60 +224,31 @@ void Rendering::Context::Driver::CopyFramebufferColor(
 	Data::Framebuffer& p_source, uint32_t p_sourceIndex,
 	Data::Framebuffer& p_target, uint32_t p_targetIndex)
 {
-	::Rendering::Backend::CopyFramebufferColorRequest request;
-	request.source = &p_source;
-	request.sourceIndex = p_sourceIndex;
-	request.target = &p_target;
-	request.targetIndex = p_targetIndex;
-	m_commandStream->CopyFramebufferColor(request);
+	// Filament's blit: the two targets travel as handles, and so do their sizes - the attachment list
+	// that says how big they are is the front end's (a resize updates it, and this may run before the
+	// executor has seen that command).
+	const auto [sourceWidth, sourceHeight] = p_source.GetSize();
+	const auto [targetWidth, targetHeight] = p_target.GetSize();
+	CopyFramebufferColorObject(p_source.GetHandle(), p_sourceIndex, sourceWidth, sourceHeight,
+		p_target.GetHandle(), p_targetIndex, targetWidth, targetHeight);
 }
 
 void Rendering::Context::Driver::CopyFramebufferDepth(
 	Data::Framebuffer& p_source, Data::Framebuffer& p_target)
 {
-	::Rendering::Backend::CopyFramebufferDepthRequest request;
-	request.source = &p_source;
-	request.target = &p_target;
-	m_commandStream->CopyFramebufferDepth(request);
+	const auto [sourceWidth, sourceHeight] = p_source.GetSize();
+	const auto [targetWidth, targetHeight] = p_target.GetSize();
+	CopyFramebufferDepthObject(p_source.GetHandle(), sourceWidth, sourceHeight,
+		p_target.GetHandle(), targetWidth, targetHeight);
 }
 
 void Rendering::Context::Driver::BindFramebuffer(const Data::Framebuffer* p_target)
 {
-	::Rendering::Backend::BindFramebufferRequest request;
-	request.target = p_target;
-	EnqueueBindFramebuffer(request);
-}
-
-void Rendering::Context::Driver::CreateTexture(Rendering::Backend::CreateTextureRequest p_request)
-{
-	if (p_request.handleId == 0)
-	{
-		return;
-	}
-
-	EnqueueCreateTexture(std::move(p_request));
-}
-
-void Rendering::Context::Driver::UpdateTexture(Rendering::Backend::UpdateTextureRequest p_request)
-{
-	if (p_request.handleId == 0 || p_request.pixels.empty())
-	{
-		return;
-	}
-
-	EnqueueUpdateTexture(std::move(p_request));
-}
-
-void Rendering::Context::Driver::UploadTexture(Rendering::Backend::TextureUploadRequest p_request)
-{
-	if (p_request.handleId == 0 || p_request.pixels.empty())
-	{
-		return;
-	}
-
-	// The command carries the descriptor and the bytes; the executor runs it where the context
-	// lives. Nothing is left here but the recording.
-	EnqueueUploadTexture(std::move(p_request));
+	// Filament's bindFramebuffer: the target is named by its handle, and a null one is the default
+	// framebuffer (the front end's own pointer never crosses to the other side).
+	BindFramebufferObject(p_target != nullptr
+		? p_target->GetHandle()
+		: ::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwFramebuffer>{});
 }
 
 void Rendering::Context::Driver::Flush()
@@ -304,7 +284,7 @@ void Rendering::Context::Driver::FlushAndWait()
 	if (IsExecutorThread())
 	{
 		// Already where the commands run: recording from here would land after the batch being
-		// executed, so the caller has to do its work inline (see the callers in ResourceOps).
+		// executed, so the caller has to do its work inline.
 		return;
 	}
 

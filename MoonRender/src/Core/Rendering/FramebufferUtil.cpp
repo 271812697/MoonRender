@@ -12,21 +12,6 @@
 
 namespace Core::Rendering::FramebufferUtil
 {
-	void CopyFramebufferColor(::Rendering::Data::Framebuffer& src_framebuffer,int src, ::Rendering::Data::Framebuffer& dst_framebuffer,int dst) {
-		auto[sw,sh]=src_framebuffer.GetSize();
-		auto [dw, dh] = dst_framebuffer.GetSize();
-		glNamedFramebufferReadBuffer(src_framebuffer.GetID(), GL_COLOR_ATTACHMENT0 + src);
-		glNamedFramebufferDrawBuffer(dst_framebuffer.GetID(), GL_COLOR_ATTACHMENT0 + dst);
-		glBlitNamedFramebuffer(src_framebuffer.GetID(), dst_framebuffer.GetID(), 0, 0, sw, sh, 0, 0, dw, dh, GL_COLOR_BUFFER_BIT, GL_NEAREST);
-	}
-	void CopyFramebufferDepth(
-		::Rendering::Data::Framebuffer& src_framebuffer,
-		::Rendering::Data::Framebuffer& dst_framebuffer
-	) {
-		auto [sw, sh] = src_framebuffer.GetSize();
-		auto [dw, dh] = dst_framebuffer.GetSize();
-		glBlitNamedFramebuffer(src_framebuffer.GetID(), dst_framebuffer.GetID(), 0, 0, sw, sh, 0, 0, dw, dh, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
-	}
 	void SetupFramebuffer(
 		::Rendering::Data::Framebuffer& p_framebuffer,
 		const ::Rendering::Settings::TextureDesc& p_textureDesc,

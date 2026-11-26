@@ -17,26 +17,30 @@ namespace Rendering::Data
 	/** The front end of a buffer: what the recording side owns (a Mesh's vertex and index buffers,
 	 * the engine's uniform blocks, the overlay's geometry).
 	 *
-	 * It holds the handle that names the backend object - HAL::Buffer, which lives in the handle's
-	 * slot on the side that owns the context and is the only thing that has a GL name - plus what
-	 * the recording side needs to size its commands (the kind of buffer and the size it allocated).
-	 * Every method here records a command, or, with no driver at all, does the work inline; none of
-	 * them touches GL on the recording side. This is Filament's BufferObject, and the naming follows
-	 * the engine's HAL/Texture + Resources::Texture split rather than Filament's F-prefix.
+	 * It holds the handle the driver gave it - the backend object, HAL::Buffer, lives in the handle's
+	 * slot on the side that owns the context and is the only thing that has a GL name - plus what the
+	 * recording side needs to size its operations (the kind of buffer and the size it allocated).
+	 *
+	 * Creation and every operation go through the driver (Rendering::Context::Driver::CreateBufferObject
+	 * and friends), which is Filament's BufferObject calling Engine::getDriverApi(): the driver
+	 * reserves the handle, records the create, and records each operation with the handle as its
+	 * argument. Nothing here knows how a handle reaches the side that owns the context, and there is
+	 * no "is there a driver" branch - that is the driver's contract, not the resource's.
 	 *
 	 * The object owns its handle: copying is disabled, moving transfers it.
 	 */
 	class BufferObject
 	{
 	public:
-		/** An empty object: no handle, no type. IsValid() is false; every operation is a no-op. */
+		/** An empty object: no handle, no type. Every operation is a no-op. */
 		BufferObject() = default;
 
-		/** Reserves the handle and records the creation of its backend object. */
+		/** Asks the driver for a handle and records the creation of its backend object. */
 		explicit BufferObject(Settings::EBufferType p_type);
 
 		/** Frees the record now and queues the GL deletion to the side that owns the context, so
-		 * this is safe from any thread. */
+		 * this is safe from any thread - including after the module (and its driver) is gone,
+		 * which is where the long lived singletons release their buffers. */
 		~BufferObject();
 
 		BufferObject(const BufferObject&) = delete;
@@ -65,8 +69,9 @@ namespace Rendering::Data
 		/** Binds nothing to the buffer's target. */
 		void Unbind() const;
 
-		/** Maps a range for reading on the CPU. Synchronous: it needs the context, so it may only
-		 * be called from the thread that owns it (see ResourceOps::MapRead, and its TODO). */
+		/** Maps a range for reading on the CPU. Synchronous (Filament's mapBuffer is a
+		 * DECL_DRIVER_API_RETURN): the map happens where the context is and the pointer comes
+		 * back, so it may only be used between frames. */
 		void* MapRead(uint64_t p_offset, uint64_t p_size);
 
 		/** Unmaps what MapRead mapped (a command: the unmap needs the context). */

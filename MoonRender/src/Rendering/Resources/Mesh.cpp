@@ -4,7 +4,6 @@
 #include <glad/glad.h>
 #include <Rendering/Backend/BackendResources.h>
 #include <Rendering/Backend/HandleAllocator.h>
-#include <Rendering/HAL/Common/ResourceOps.h>
 #include <Rendering/Resources/Mesh.h>
 #include "Rendering/Geometry/split_bvh.h"
 
@@ -370,7 +369,7 @@ void Rendering::Resources::Mesh::Upload(const std::vector<Geometry::Vertex>& p_v
 	m_vertexStride = sizeof(Geometry::Vertex);
 
 	// Every call below is recorded as the command that does it when the context lives on another
-	// thread, and done here otherwise (see HAL::ResourceOps). The work names handles, so it stays
+	// thread, and recorded as commands otherwise. The work names handles, so it stays
 	// valid even if the front-end object that recorded it is gone before it runs.
 	m_vertexBuffer.Allocate(vertexBytes);
 	m_vertexBuffer.Upload(p_vertices.data());

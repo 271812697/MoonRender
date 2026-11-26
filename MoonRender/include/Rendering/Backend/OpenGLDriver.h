@@ -1,22 +1,21 @@
 ﻿#pragma once
 #include <cstdint>
+#include <functional>
+#include <optional>
 #include <unordered_map>
 
 #include <Rendering/HAL/Backend.h>
-#include <Rendering/Backend/CreateTextureRequest.h>
-#include <Rendering/Backend/UpdateTextureRequest.h>
-#include <Rendering/Backend/TextureRequests.h>
 #include <Rendering/Backend/OverlayRequests.h>
-#include <Rendering/Backend/TextureUploadRequest.h>
+#include <Rendering/Backend/BufferDescriptor.h>
+#include <Rendering/Backend/PixelBufferDescriptor.h>
+#include <Rendering/Settings/EFramebufferAttachment.h>
 #include <Rendering/Backend/BufferRequests.h>
+#include <Rendering/Settings/EAccessSpecifier.h>
 #include <Rendering/Backend/DescriptorRequests.h>
 #include <Rendering/Backend/ProgramRequests.h>
-#include <Rendering/Backend/ReadPixelsRequest.h>
 #include <Rendering/Backend/VertexArrayRequests.h>
-#include <Rendering/Backend/FramebufferRequests.h>
 #include <Rendering/Context/IGLContextHost.h>
 #include <Rendering/Backend/DrawMeshRequest.h>
-#include <Rendering/Backend/BindFramebufferRequest.h>
 #include <Rendering/Data/PipelineState.h>
 #include <Rendering/Settings/ERenderingCapability.h>
 #include <Rendering/Settings/EBlendingFactor.h>
@@ -70,56 +69,166 @@ namespace Rendering::Backend
 		void BlendingFunction(::Rendering::Settings::EBlendingFactor p_source, ::Rendering::Settings::EBlendingFactor p_destination);
 		void PipelineState(::Rendering::Data::PipelineState p_state);
 		void DrawMesh(const ::Rendering::Backend::DrawMeshRequest& p_request);
-		void BindFramebuffer(const ::Rendering::Backend::BindFramebufferRequest& p_request);
 		void SetClearColor(float p_red, float p_green, float p_blue, float p_alpha);
 		void Clear(bool p_colorBuffer, bool p_depthBuffer, bool p_stencilBuffer);
-		void CreateTexture(::Rendering::Backend::CreateTextureRequest p_request);
-		void UpdateTexture(::Rendering::Backend::UpdateTextureRequest p_request);
-		void UploadTexture(::Rendering::Backend::TextureUploadRequest p_request);
 		/** glTextureParameterfv(GL_TEXTURE_BORDER_COLOR): a sampler parameter on a texture the
 		 * caller only holds a handle for. */
-		void SetTextureBorderColor(const ::Rendering::Backend::SetTextureBorderColorRequest& p_request);
-		void GenerateTextureMipmaps(const ::Rendering::Backend::GenerateTextureMipmapsRequest& p_request);
-		/** glNamedFramebufferTexture{,Layer}: attaches a texture the target's owner already has. */
-		void AttachTexture(const ::Rendering::Backend::AttachTextureRequest& p_request);
-		/** glNamedFramebufferDrawBuffers: which colour attachments the target writes. */
-		void SetFramebufferDrawBuffers(const ::Rendering::Backend::SetFramebufferDrawBuffersRequest& p_request);
-		/** glNamedFramebufferRenderbuffer: attaches a renderbuffer the target's owner already has. */
-		void AttachRenderbuffer(const ::Rendering::Backend::AttachRenderbufferRequest& p_request);
-		/** glNamedRenderbufferStorage{,Multisample}. */
-		void AllocateRenderbuffer(const ::Rendering::Backend::AllocateRenderbufferRequest& p_request);
-		/** Depth blit between two targets. */
-		void CopyFramebufferDepth(const ::Rendering::Backend::CopyFramebufferDepthRequest& p_request);
-		void AllocateBuffer(::Rendering::Backend::AllocateBufferRequest p_request);
-		/** Binds a buffer to a target or an indexed binding point, on the side that owns the
-		 * context: the light SSBO binding used to be issued from the recording side, which left it
-		 * unbound on the executor (docs §8.67). */
-		void BindBuffer(const ::Rendering::Backend::BindBufferRequest& p_request);
+		void CopyFramebufferColorObject(
+			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwFramebuffer> p_source,
+			uint32_t p_sourceIndex,
+			uint16_t p_sourceWidth, uint16_t p_sourceHeight,
+			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwFramebuffer> p_target,
+			uint32_t p_targetIndex,
+			uint16_t p_targetWidth, uint16_t p_targetHeight);
+		void CopyFramebufferDepthObject(
+			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwFramebuffer> p_source,
+			uint16_t p_sourceWidth, uint16_t p_sourceHeight,
+			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwFramebuffer> p_target,
+			uint16_t p_targetWidth, uint16_t p_targetHeight);
+		void BlitFramebufferObject(
+			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwFramebuffer> p_source,
+			uint16_t p_sourceWidth, uint16_t p_sourceHeight,
+			uint16_t p_targetWidth, uint16_t p_targetHeight);
+		void ClearFramebufferAttachmentObject(
+			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwFramebuffer> p_framebuffer,
+			::Rendering::Settings::EFramebufferAttachment p_attachment, int32_t p_index);
+		void ReadPixelsObject(
+			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwFramebuffer> p_framebuffer,
+			std::shared_ptr<std::vector<uint8_t>> p_data,
+			uint32_t p_x, uint32_t p_y, uint32_t p_width, uint32_t p_height,
+			::Rendering::Settings::EPixelDataFormat p_format,
+			::Rendering::Settings::EPixelDataType p_type,
+			std::function<void()> p_onDone);
+		void ReadPixelsToBufferObject(
+			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwFramebuffer> p_framebuffer,
+			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwBufferObject> p_buffer,
+			uint64_t p_offset,
+			uint32_t p_x, uint32_t p_y, uint32_t p_width, uint32_t p_height,
+			::Rendering::Settings::EPixelDataFormat p_format,
+			::Rendering::Settings::EPixelDataType p_type);
+
+		// Render targets (Filament's createRenderTarget / bindFramebuffer / setAttachments): the
+		// recording side names the target and its attachments as handles, this side does the GL.
+		void CreateFramebufferObject(
+			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwFramebuffer> p_framebuffer,
+			std::string p_debugName);
+		void BindFramebufferObject(
+			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwFramebuffer> p_framebuffer);
+		void AttachTextureObject(
+			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwFramebuffer> p_framebuffer,
+			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwTexture> p_texture,
+			::Rendering::Settings::EFramebufferAttachment p_attachment,
+			uint32_t p_index, uint32_t p_level, bool p_hasLayer, uint32_t p_layer);
+		void AttachRenderbufferObject(
+			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwFramebuffer> p_framebuffer,
+			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwRenderbuffer> p_renderbuffer,
+			::Rendering::Settings::EFramebufferAttachment p_attachment, uint32_t p_index);
+		void SetFramebufferDrawBuffersObject(
+			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwFramebuffer> p_framebuffer,
+			std::vector<uint32_t> p_indices);
+		void SetFramebufferReadBufferObject(
+			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwFramebuffer> p_framebuffer,
+			bool p_hasIndex, uint32_t p_index);
+
+		// Vertex arrays, renderbuffers and programs: the create hands back the handle, the rest is
+		// one command per operation, resolved on this side.
+		void CreateVertexArrayObject(
+			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwVertexArray> p_array,
+			std::string p_debugName);
+		void SetVertexArrayObjectLayout(
+			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwVertexArray> p_array,
+			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwBufferObject> p_vertexBuffer,
+			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwBufferObject> p_indexBuffer,
+			std::shared_ptr<const std::vector<::Rendering::Backend::VertexLayoutAttribute>> p_attributes);
+		void CreateRenderbufferObject(
+			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwRenderbuffer> p_renderbuffer,
+			std::string p_debugName);
+		void AllocateRenderbufferObject(
+			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwRenderbuffer> p_renderbuffer,
+			uint16_t p_width, uint16_t p_height,
+			::Rendering::Settings::EInternalFormat p_format,
+			bool p_multiSample);
+		void CreateProgramObject(
+			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwProgram> p_program,
+			std::shared_ptr<const std::vector<::Rendering::Backend::ShaderSourceSpec>> p_stages,
+			std::shared_ptr<const ::Rendering::Data::DescriptorSetInfo> p_bindings);
+		void BindProgramObject(
+			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwProgram> p_program);
+		void DeclareProgramBindingsObject(
+			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwProgram> p_program,
+			std::shared_ptr<const ::Rendering::Data::DescriptorSetInfo> p_bindings);
+
+		// The texture half of the driver API: the create makes the object in the slot the recording
+		// side reserved, and each later call resolves the handle and does the GL.
+		void CreateTextureObject(
+			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwTexture> p_texture,
+			::Rendering::Settings::ETextureType p_type,
+			std::string p_debugName);
+		void AllocateTextureObject(
+			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwTexture> p_texture,
+			::Rendering::Settings::TextureDesc p_desc,
+			::Rendering::Backend::PixelBufferDescriptor p_pixels);
+		void UpdateTextureObject(
+			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwTexture> p_texture,
+			uint32_t p_x, uint32_t p_y, uint32_t p_width, uint32_t p_height,
+			::Rendering::Backend::PixelBufferDescriptor p_pixels);
+		void UploadTextureObject(
+			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwTexture> p_texture,
+			::Rendering::Settings::TextureDesc p_desc,
+			::Rendering::Backend::PixelBufferDescriptor p_pixels,
+			bool p_generateMipmaps);
+		void GenerateTextureMipmapsObject(
+			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwTexture> p_texture);
+		void SetTextureBorderColorObject(
+			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwTexture> p_texture,
+			::Maths::FVector4 p_color);
+
+		// The buffer half of the driver API (see DriverAPI.inc): each one is the command the
+		// recording side queued, and each one resolves the handle to the backend object that lives
+		// in its slot. Filament's createBufferObjectR / allocateBufferObject / updateBufferObject /
+		// bindBuffer / unmapBuffer / insertFence.
+		void CreateBufferObject(
+			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwBufferObject> p_buffer,
+			::Rendering::Settings::EBufferType p_type);
+		void AllocateBufferObject(
+			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwBufferObject> p_buffer,
+			uint64_t p_size,
+			::Rendering::Settings::EAccessSpecifier p_usage);
+		void UpdateBufferObject(
+			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwBufferObject> p_buffer,
+			::Rendering::Backend::BufferDescriptor p_data,
+			uint64_t p_offset);
+		/** glBindBuffer / glBindBufferBase: the target, or one of the indexed binding points (the
+		 * light SSBO used to be bound from the recording side, which left it unbound on the
+		 * executor - docs §8.67). */
+		void BindBufferObject(
+			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwBufferObject> p_buffer,
+			::Rendering::Settings::EBufferType p_type,
+			std::optional<uint32_t> p_index);
+		/** Binds nothing to p_type's target: the inverse of a plain BindBufferObject. */
+		void UnbindBufferObject(::Rendering::Settings::EBufferType p_type);
 		/** glBindBufferRange: a byte range at an indexed binding point (a block of the pool). */
-		void BindBufferRange(const ::Rendering::Backend::BindBufferRangeRequest& p_request);
+		void BindBufferObjectRange(
+			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwBufferObject> p_buffer,
+			uint32_t p_index,
+			uint64_t p_offset,
+			uint64_t p_size);
 		/** glUnmapNamedBuffer on the buffer's backend object. */
-		void UnmapBuffer(uint32_t p_handleId);
+		void UnmapBufferObject(
+			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwBufferObject> p_buffer);
 		/** glFenceSync on the buffer's backend object (the GPU progress signal a readback waits
 		 * for). */
-		void InsertFence(uint32_t p_handleId);
+		void InsertBufferFence(
+			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwBufferObject> p_buffer);
 		/** glDeleteSync on the buffer's backend object. */
-		void ClearFence(uint32_t p_handleId);
-		void CreateBuffer(::Rendering::Backend::CreateBufferRequest p_request);
-		void CreateVertexArray(uint32_t p_handleId);
-		void CreateFramebuffer(uint32_t p_handleId);
+		void ClearBufferFence(
+			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwBufferObject> p_buffer);
 		/** Makes the module's context current on the executor's thread and re-applies the global GL
 		 * state. Filament's OpenGLDriver::makeCurrent (called by FRenderer::beginFrame through the
 		 * swap chain): the context is made current for the frame that is about to be drawn. */
 		void MakeCurrent();
 		void SetContextHost(::Rendering::Context::IGLContextHost* p_contextHost) { m_contextHost = p_contextHost; }
 
-		void CreateProgram(::Rendering::Backend::CreateProgramRequest p_request);
-		/** glUseProgram on the side that owns the context; 0 unbinds (Filament's bindProgram). */
-		void BindProgram(uint32_t p_programId);
-		/** The same bind, named by the program handle: resolves the GL name on this side, after the
-		 * create command has run. */
-		void BindProgramHandle(uint32_t p_programHandleId);
-		void DeclareProgramBindings(::Rendering::Backend::DeclareProgramBindingsRequest p_request);
 		/** Uploads the overlay's per-frame vertex stream into its buffer and describes the vertex
 		 * format on its array (attribute pointers too: the stride varies per draw). */
 		void UploadOverlayVertices(::Rendering::Backend::UploadOverlayVerticesRequest p_request);
@@ -131,17 +240,8 @@ namespace Rendering::Backend
 		void DrawIndexedVertexArray(const ::Rendering::Backend::DrawIndexedVertexArrayRequest& p_request);
 		/** A loose mat4 uniform on a program the overlay owns (its projection). */
 		void SetProgramMatrix4(const ::Rendering::Backend::ProgramMatrix4Request& p_request);
-		void ReadPixels(const ::Rendering::Backend::ReadPixelsRequest& p_request);
-		void SetFramebufferReadBuffer(const ::Rendering::Backend::SetFramebufferReadBufferRequest& p_request);
-		void ReadPixelsToBuffer(::Rendering::Backend::ReadPixelsToBufferRequest p_request);
 		void DownloadBuffer(::Rendering::Backend::DownloadBufferRequest p_request);
-		void SetVertexArrayLayout(const ::Rendering::Backend::SetVertexArrayLayoutRequest& p_request);
-		void UpdateBuffer(const ::Rendering::Backend::UpdateBufferRequest& p_request);
 		void BindDescriptor(const ::Rendering::Backend::BindDescriptorRequest& p_request);
-		void SetupFramebuffer(const ::Rendering::Backend::SetupFramebufferRequest& p_request);
-		void ResizeFramebuffer(const ::Rendering::Backend::ResizeFramebufferRequest& p_request);
-		void CopyFramebufferColor(const ::Rendering::Backend::CopyFramebufferColorRequest& p_request);
-		void CreateRenderbuffer(uint32_t p_handleId);
 		void CommitAView();
 
 	private:

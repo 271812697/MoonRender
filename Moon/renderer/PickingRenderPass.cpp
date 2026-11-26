@@ -243,29 +243,29 @@ void Editor::Rendering::PickingRenderPass::IssuePickReadback()
 	// thread, or this thread in the single-threaded configuration), and each one bumps the slot's
 	// counter when its bytes are on the CPU. Nothing here touches GL, so the frame never waits for
 	// the readback: TryConsumePick picks it up on a later frame.
-	::Rendering::Backend::ReadPixelsRequest idRequest;
-	idRequest.framebufferId = m_actorPickingFramebuffer.GetID();
-	idRequest.readBufferIndex = 0;
-	idRequest.x = m_pickRequestX;
-	idRequest.y = m_pickRequestY;
-	idRequest.width = 1;
-	idRequest.height = 1;
-	idRequest.format = ::Rendering::Settings::EPixelDataFormat::RGBA;
-	idRequest.type = ::Rendering::Settings::EPixelDataType::UNSIGNED_BYTE;
-	idRequest.data = freeSlot->readback->idBytes;
-	idRequest.onDone = [readback = freeSlot->readback] {
-		readback->arrived->fetch_add(1, std::memory_order_release);
-	};
-	m_renderer.GetDriver().ReadPixels(idRequest);
+	// Filament's readPixels, once per attachment: select the colour attachment, then read the pixel
+	// into the slot's bytes. Both run where the context is, and each bumps the slot's counter when
+	// its bytes are on the CPU.
+	::Rendering::Context::Driver& driver = m_renderer.GetDriver();
+	const auto framebuffer = m_actorPickingFramebuffer.GetHandle();
 
-	::Rendering::Backend::ReadPixelsRequest positionRequest = idRequest;
-	positionRequest.readBufferIndex = 1;
-	positionRequest.type = ::Rendering::Settings::EPixelDataType::FLOAT;
-	positionRequest.data = freeSlot->readback->positionBytes;
-	positionRequest.onDone = [readback = freeSlot->readback] {
-		readback->arrived->fetch_add(1, std::memory_order_release);
-	};
-	m_renderer.GetDriver().ReadPixels(positionRequest);
+	driver.SetFramebufferReadBufferObject(framebuffer, true, 0);
+	driver.ReadPixelsObject(framebuffer, freeSlot->readback->idBytes,
+		m_pickRequestX, m_pickRequestY, 1, 1,
+		::Rendering::Settings::EPixelDataFormat::RGBA,
+		::Rendering::Settings::EPixelDataType::UNSIGNED_BYTE,
+		[readback = freeSlot->readback] {
+			readback->arrived->fetch_add(1, std::memory_order_release);
+		});
+
+	driver.SetFramebufferReadBufferObject(framebuffer, true, 1);
+	driver.ReadPixelsObject(framebuffer, freeSlot->readback->positionBytes,
+		m_pickRequestX, m_pickRequestY, 1, 1,
+		::Rendering::Settings::EPixelDataFormat::RGBA,
+		::Rendering::Settings::EPixelDataType::FLOAT,
+		[readback = freeSlot->readback] {
+			readback->arrived->fetch_add(1, std::memory_order_release);
+		});
 
 	freeSlot->x = m_pickRequestX;
 	freeSlot->y = m_pickRequestY;

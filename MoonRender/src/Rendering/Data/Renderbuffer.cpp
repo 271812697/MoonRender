@@ -1,7 +1,6 @@
 #include <Rendering/Data/Renderbuffer.h>
 
 #include <Rendering/Backend/BackendResources.h>
-#include <Rendering/Backend/FramebufferRequests.h>
 #include <Rendering/Backend/HandleAllocator.h>
 #include <Rendering/Context/Driver.h>
 #include <Rendering/HAL/Common/HALDriverAccess.h>
@@ -21,19 +20,9 @@ namespace Rendering::Data
 
 	Renderbuffer::Renderbuffer(bool p_multiSample) : m_multiSample(p_multiSample)
 	{
-		// createRenderbufferS/createRenderbufferR: the handle here, the object (and its GL name)
-		// where the context is.
-		m_handle = Rendering::Backend::GetHandleAllocator()
-			.Allocate<Rendering::Backend::HwRenderbuffer>();
-
-		if (::Rendering::HAL::CurrentDriver() != nullptr)
-		{
-			::Rendering::HAL::CurrentDriver()->EnqueueCreateRenderbuffer(m_handle.GetId());
-		}
-		else
-		{
-			Rendering::Backend::Records::CreateRenderbuffer(m_handle);
-		}
+		// Filament's createRenderbuffer: the driver reserves the handle and records the create that
+		// gives it its backend object where the context is.
+		m_handle = Rendering::Context::Driver::Get().CreateRenderbufferObject("");
 	}
 
 	Renderbuffer::~Renderbuffer()
@@ -76,25 +65,10 @@ namespace Rendering::Data
 		m_height = p_height;
 		m_format = p_format;
 
-		if (::Rendering::Context::Driver* const driver = ::Rendering::HAL::CurrentDriver())
-		{
-			// The storage is GL, so it is recorded (Filament's allocateRenderbufferStorage); the
-			// size stays here, because the framebuffer's own size report reads it.
-			Rendering::Backend::AllocateRenderbufferRequest request;
-			request.handleId = m_handle.GetId();
-			request.width = p_width;
-			request.height = p_height;
-			request.format = p_format;
-			request.multiSample = m_multiSample;
-			driver->EnqueueAllocateRenderbuffer(request);
-			m_allocated = true;
-			return;
-		}
-
-		if (Rendering::HAL::Renderbuffer* const renderbuffer = Resolve(m_handle))
-		{
-			renderbuffer->Allocate(p_width, p_height, p_format, m_multiSample);
-		}
+		// The storage is GL, so it is recorded (Filament's allocateRenderbufferStorage); the size
+		// stays here, because the framebuffer's own size report reads it.
+		Rendering::Context::Driver::Get().AllocateRenderbufferObject(
+			m_handle, p_width, p_height, p_format, m_multiSample);
 		m_allocated = true;
 	}
 

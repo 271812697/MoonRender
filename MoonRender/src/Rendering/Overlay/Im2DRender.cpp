@@ -3,8 +3,7 @@
 // The header only forward declares them; the implementation builds the list and the font.
 #include <Rendering/Overlay/Im2D.h>
 #include <Rendering/Backend/BackendResources.h>
-#include <Rendering/HAL/Common/ResourceOps.h>
-#include <Rendering/Backend/TextureUploadRequest.h>
+#include <Rendering/Backend/VertexArrayRequests.h>
 #include <Rendering/Resources/Texture.h>
 #include <Rendering/Overlay/Im2DFont.h>
 
@@ -109,16 +108,16 @@ public:
 		// belong to their front-end objects, so dropping them does the same.
 		m_fontAtlases.clear();
 		m_whiteTexture.reset();
-		::Rendering::HAL::ResourceOps::DestroyBuffer(m_vertexBuffer);
-		::Rendering::HAL::ResourceOps::DestroyBuffer(m_indexBuffer);
-		::Rendering::HAL::ResourceOps::DestroyVertexArray(m_vertexArray);
+		::Rendering::Backend::Records::DestroyBuffer(m_vertexBuffer);
+		::Rendering::Backend::Records::DestroyBuffer(m_indexBuffer);
+		::Rendering::Backend::Records::DestroyVertexArray(m_vertexArray);
 		::Rendering::Backend::Records::DestroyProgram(m_programHandle);
 	}
 
 	/** Creates the overlay's objects (by command) and loads the font.
 	 *
 	 * Nothing here touches GL: the program, the array and its two buffers are created where the
-	 * context is, through ResourceOps and the create-program command, and each of them is drained
+	 * context is, through the driver API (see DriverAPI.inc), and each of them is drained
 	 * before the first frame that names it. */
 	void Init(::Rendering::Context::Driver& p_driver)
 	{
@@ -140,11 +139,9 @@ public:
 			::Rendering::Settings::EShaderType::FRAGMENT,
 			std::make_shared<const std::string>(kFragmentShader) });
 
-		m_programHandle = GetHandleAllocator().Allocate<HwProgram>();
-		CreateProgramRequest programRequest;
-		programRequest.programHandleId = m_programHandle.GetId();
-		programRequest.stages = std::move(stages);
-		p_driver.EnqueueCreateProgram(std::move(programRequest));
+		// Filament's createProgram: the sources travel with the command and the driver hands back
+		// the handle; the link itself runs where the context is.
+		m_programHandle = p_driver.CreateProgramObject(std::move(stages), nullptr);
 		m_programName = Records::ProgramName(m_programHandle);
 
 		// The sampler samples unit 0, which is what a sampler uniform is initialised to: the list's
@@ -153,18 +150,17 @@ public:
 
 		// The array and its buffers: containers, so they are born where the context is and the
 		// front end only holds the handles.
-		m_vertexArray = GetHandleAllocator().Allocate<HwVertexArray>();
-		m_vertexBuffer = GetHandleAllocator().Allocate<HwBufferObject>();
-		m_indexBuffer = GetHandleAllocator().Allocate<HwBufferObject>();
+		m_vertexArray = p_driver.CreateVertexArrayObject("im2d");
 
-		ResourceOps::EnsureBuffer(m_vertexBuffer, ::Rendering::Settings::EBufferType::VERTEX);
-		ResourceOps::EnsureBuffer(m_indexBuffer, ::Rendering::Settings::EBufferType::INDEX);
-		ResourceOps::EnsureVertexArray(m_vertexArray);
+		// The two buffers are the driver's: it reserves each handle and records the create.
+		::Rendering::Context::Driver& driver = ::Rendering::Context::Driver::Get();
+		m_vertexBuffer = driver.CreateBufferObject(::Rendering::Settings::EBufferType::VERTEX);
+		m_indexBuffer = driver.CreateBufferObject(::Rendering::Settings::EBufferType::INDEX);
 
 		// Storage is allocated large enough for the first frames and grown when a list outgrows it
 		// (see UploadGeometry): the per-frame path is a sub-data upload, not a reallocation.
-		ResourceOps::AllocateBuffer(m_vertexBuffer, kInitialVertexCapacity, ::Rendering::Settings::EAccessSpecifier::STREAM_DRAW);
-		ResourceOps::AllocateBuffer(m_indexBuffer, kInitialIndexCapacity, ::Rendering::Settings::EAccessSpecifier::STREAM_DRAW);
+		driver.AllocateBufferObject(m_vertexBuffer, kInitialVertexCapacity, ::Rendering::Settings::EAccessSpecifier::STREAM_DRAW);
+		driver.AllocateBufferObject(m_indexBuffer, kInitialIndexCapacity, ::Rendering::Settings::EAccessSpecifier::STREAM_DRAW);
 
 
 		// pos (2 floats), uv (2 floats), colour (4 normalised bytes) - the layout of Im2D::DrawVert,
@@ -174,15 +170,14 @@ public:
 			{ ::Rendering::Settings::EDataType::FLOAT, 2, false },
 			{ ::Rendering::Settings::EDataType::UNSIGNED_BYTE, 4, true },
 		};
-		ResourceOps::SetVertexArrayLayout(m_vertexArray, m_vertexBuffer, m_indexBuffer, attributes);
+		p_driver.SetVertexArrayObjectLayout(m_vertexArray, m_vertexBuffer, m_indexBuffer,
+			Im2DVertexLayout(attributes));
 
-		// 1x1 white: what untextured geometry samples.
+		// 1x1 white: what untextured geometry samples. The front end records the create, the
+		// allocation and the upload; all the executor does is make the object and fill it.
 		const uint8_t white[4] = { 255, 255, 255, 255 };
-		m_whiteTexture = std::make_unique<::Rendering::Resources::Texture>();
-		CreateTextureObject(p_driver, *m_whiteTexture, "im2d white");
-		TextureUploadRequest whiteRequest;
-		whiteRequest.handleId = m_whiteTexture->GetHandle().GetId();
-		whiteRequest.descriptor = ::Rendering::Settings::TextureDesc{
+		m_whiteTexture = std::make_unique<::Rendering::Resources::Texture>("", "im2d white");
+		m_whiteTexture->GetTexture().Allocate(::Rendering::Settings::TextureDesc{
 			.width = 1, .height = 1,
 			.minFilter = ::Rendering::Settings::ETextureFilteringMode::NEAREST,
 			.magFilter = ::Rendering::Settings::ETextureFilteringMode::NEAREST,
@@ -190,10 +185,9 @@ public:
 			.verticalWrap = ::Rendering::Settings::ETextureWrapMode::CLAMP_TO_EDGE,
 			.internalFormat = ::Rendering::Settings::EInternalFormat::RGBA8,
 			.useMipMaps = false
-		};
-		whiteRequest.format = ::Rendering::Settings::EFormat::RGBA;
-		whiteRequest.type = ::Rendering::Settings::EPixelDataType::UNSIGNED_BYTE;
-		whiteRequest.pixels.assign(white, white + 4);
+		});
+		m_whiteTexture->GetTexture().Upload(white,
+			::Rendering::Settings::EFormat::RGBA, ::Rendering::Settings::EPixelDataType::UNSIGNED_BYTE);
 
 		m_font.Load(FontPaths(), kFontPixelSize);
 		if (!m_font.IsLoaded())
@@ -204,6 +198,35 @@ public:
 		// whenever a text size appears for the first time.
 	}
 
+	/** The 2D vertex layout in the shape the driver API takes it: one entry per attribute, with the
+	 * stride and the offset already resolved (the executor only feeds them to GL). */
+	std::shared_ptr<const std::vector<::Rendering::Backend::VertexLayoutAttribute>> Im2DVertexLayout(
+		::Rendering::Settings::VertexAttributeLayout p_attributes)
+	{
+		auto attributes = std::make_shared<std::vector<::Rendering::Backend::VertexLayoutAttribute>>();
+		attributes->reserve(p_attributes.size());
+
+		uint32_t stride = 0;
+		for (const ::Rendering::Settings::VertexAttribute& attribute : p_attributes)
+		{
+			stride += 4u * attribute.count;
+		}
+
+		uint64_t offset = 0;
+		for (const ::Rendering::Settings::VertexAttribute& attribute : p_attributes)
+		{
+			::Rendering::Backend::VertexLayoutAttribute entry;
+			entry.type = attribute.type;
+			entry.count = attribute.count;
+			entry.normalized = attribute.normalized;
+			entry.stride = stride;
+			entry.offset = offset;
+			attributes->push_back(entry);
+			offset += 4u * attribute.count;
+		}
+		return attributes;
+	}
+
 	/** Grows a buffer when a frame's list needs more room than the last allocation. */
 	void ReserveVertexCapacity(uint64_t p_bytes)
 	{
@@ -212,7 +235,7 @@ public:
 			return;
 		}
 		m_vertexCapacity = std::max<uint64_t>(p_bytes, m_vertexCapacity * 2);
-		::Rendering::HAL::ResourceOps::AllocateBuffer(m_vertexBuffer, m_vertexCapacity,
+		::Rendering::Context::Driver::Get().AllocateBufferObject(m_vertexBuffer, m_vertexCapacity,
 			::Rendering::Settings::EAccessSpecifier::STREAM_DRAW);
 	}
 
@@ -223,26 +246,10 @@ public:
 			return;
 		}
 		m_indexCapacity = std::max<uint64_t>(p_bytes, m_indexCapacity * 2);
-		::Rendering::HAL::ResourceOps::AllocateBuffer(m_indexBuffer, m_indexCapacity,
+		::Rendering::Context::Driver::Get().AllocateBufferObject(m_indexBuffer, m_indexCapacity,
 			::Rendering::Settings::EAccessSpecifier::STREAM_DRAW);
 	}
 
-	/** Records the creation of a resource texture's object (Filament's createTexture) and waits for
-	 * it: the upload that follows names the handle, so the object has to exist on the other side. */
-	void CreateTextureObject(::Rendering::Context::Driver& p_driver, ::Rendering::Resources::Texture& p_texture,
-		const char* p_debugName)
-	{
-		if (!p_texture.GetHandle())
-		{
-			return;
-		}
-
-		::Rendering::Backend::CreateTextureRequest request;
-		request.handleId = p_texture.GetHandle().GetId();
-		request.type = ::Rendering::Settings::ETextureType::TEXTURE_2D;
-		request.debugName = p_debugName;
-		p_driver.EnqueueCreateTexture(std::move(request));
-	}
 	/** Makes sure every size atlas the font has so far has a texture, and re-uploads the ones that
 	 * gained glyphs. One 1 MB upload per touched size is cheap next to the per-glyph sub-uploads a
 	 * dirty-rect scheme would need to track.
@@ -275,9 +282,8 @@ public:
 		while (static_cast<int>(m_fontAtlases.size()) < atlasCount)
 		{
 			const int index = static_cast<int>(m_fontAtlases.size());
-			auto atlas = std::make_unique<Rendering::Resources::Texture>();
-			CreateTextureObject(p_driver, *atlas, "im2d font atlas");
-			m_fontAtlases.push_back(std::move(atlas));
+			m_fontAtlases.push_back(
+				std::make_unique<Rendering::Resources::Texture>("", "im2d font atlas"));
 			m_font.SetTextureId(index,
 				Im2D::TextureIdFromHandle(m_fontAtlases.back()->GetHandle().GetId()));
 
@@ -299,13 +305,15 @@ public:
 				continue;
 			}
 
-			::Rendering::Backend::TextureUploadRequest request;
-			request.handleId = m_fontAtlases[static_cast<size_t>(i)]->GetHandle().GetId();
-			request.descriptor = descriptorOf(i);
-			request.format = Rendering::Settings::EFormat::RGBA;
-			request.type = Rendering::Settings::EPixelDataType::UNSIGNED_BYTE;
-			request.pixels = pixels;
-			p_driver.UploadTexture(std::move(request));
+			// The atlas is mutable: the first upload stores the storage, later ones only replace the
+			// pixels (Data::Texture::Upload records the descriptor that says which).
+			Rendering::Data::Texture& atlas = m_fontAtlases[static_cast<size_t>(i)]->GetTexture();
+			if (!atlas.IsValid())
+			{
+				atlas.Allocate(descriptorOf(i));
+			}
+			atlas.Upload(pixels.data(),
+				Rendering::Settings::EFormat::RGBA, Rendering::Settings::EPixelDataType::UNSIGNED_BYTE);
 		}
 
 	}
@@ -320,13 +328,15 @@ public:
 		{
 			const uint64_t bytes = vertices.size() * sizeof(Im2D::DrawVert);
 			ReserveVertexCapacity(bytes);
-			::Rendering::HAL::ResourceOps::UploadBuffer(m_vertexBuffer, vertices.data(), 0, bytes);
+			::Rendering::Context::Driver::Get().UpdateBufferObject(m_vertexBuffer,
+				::Rendering::Backend::BufferDescriptor::Own(vertices.data(), bytes), 0);
 		}
 		if (!indices.empty())
 		{
 			const uint64_t bytes = indices.size() * sizeof(uint32_t);
 			ReserveIndexCapacity(bytes);
-			::Rendering::HAL::ResourceOps::UploadBuffer(m_indexBuffer, indices.data(), 0, bytes);
+			::Rendering::Context::Driver::Get().UpdateBufferObject(m_indexBuffer,
+				::Rendering::Backend::BufferDescriptor::Own(indices.data(), bytes), 0);
 		}
 	}
 
@@ -456,7 +466,7 @@ void Rendering::Overlay::Im2DRender::EndFrame(
 
 	mInternal->UploadGeometry(mInternal->m_drawList);
 
-	p_driver.EnqueueBindProgram(mInternal->m_programName);
+	p_driver.BindProgramObject(mInternal->m_programHandle);
 	::Rendering::Backend::ProgramMatrix4Request projectionRequest;
 	projectionRequest.programName = mInternal->m_programName;
 	projectionRequest.name = "ProjMtx";

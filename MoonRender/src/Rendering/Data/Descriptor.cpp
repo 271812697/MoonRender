@@ -3,6 +3,7 @@
 #include <glad/glad.h>
 
 #include <Rendering/Backend/BackendResources.h>
+#include <Rendering/Backend/BufferDescriptor.h>
 #include <Rendering/Data/Descriptor.h>
 
 #include <Rendering/Context/Driver.h>
@@ -160,7 +161,8 @@ namespace Rendering::Data
 		::Rendering::Context::Driver* const driver = ::Rendering::HAL::CurrentDriver();
 		if (driver != nullptr)
 		{
-			driver->UpdateBufferRange(buffer->handle.GetId(), buffer->offset, p_data, size);
+			driver->UpdateBufferObject(buffer->handle,
+				::Rendering::Backend::BufferDescriptor::Own(p_data, size), buffer->offset);
 			return;
 		}
 

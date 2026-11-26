@@ -13,7 +13,6 @@
 #include <Rendering/Context/Driver.h>
 #include <Rendering/Data/Material.h>
 #include <Rendering/HAL/Common/HALDriverAccess.h>
-#include <Rendering/HAL/Common/ResourceOps.h>
 #include <Rendering/Settings/EBlendingEquation.h>
 #include <Rendering/Settings/EBlendingFactor.h>
 #include <Rendering/Settings/EComparaisonAlgorithm.h>
@@ -34,13 +33,13 @@ Rendering::Overlay::Im3DGLRenderer::~Im3DGLRenderer()
 	// The names live on the executor: freeing the slot queues the GL deletion there.
 	if (m_vertexArrayHandle != 0)
 	{
-		::Rendering::HAL::ResourceOps::DestroyVertexArray(
+		::Rendering::Backend::Records::DestroyVertexArray(
 			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwVertexArray>{ m_vertexArrayHandle });
 		m_vertexArrayHandle = 0;
 	}
 	if (m_vertexBufferHandle != 0)
 	{
-		::Rendering::HAL::ResourceOps::DestroyBuffer(
+		::Rendering::Backend::Records::DestroyBuffer(
 			::Rendering::Backend::ResourceHandle<::Rendering::Backend::HwBufferObject>{ m_vertexBufferHandle });
 		m_vertexBufferHandle = 0;
 	}
@@ -57,12 +56,13 @@ void Rendering::Overlay::Im3DGLRenderer::Initialize()
 	// the side that owns the context. The attribute pointers are set per upload (the stride
 	// changes between draws), so nothing else has to happen at creation.
 	using namespace ::Rendering::Backend;
-	m_vertexArrayHandle = GetHandleAllocator().Allocate<HwVertexArray>().GetId();
-	::Rendering::HAL::ResourceOps::EnsureVertexArray(ResourceHandle<HwVertexArray>{ m_vertexArrayHandle });
+	// Filament's createVertexArray: the driver reserves the handle and records the create.
+	m_vertexArrayHandle = ::Rendering::Context::Driver::Get()
+		.CreateVertexArrayObject("im3d").GetId();
 
-	m_vertexBufferHandle = GetHandleAllocator().Allocate<HwBufferObject>().GetId();
-	::Rendering::HAL::ResourceOps::EnsureBuffer(ResourceHandle<HwBufferObject>{ m_vertexBufferHandle },
-		::Rendering::Settings::EBufferType::VERTEX);
+	// The vertex buffer is the driver's: it reserves the handle and records the create.
+	m_vertexBufferHandle = ::Rendering::Context::Driver::Get()
+		.CreateBufferObject(::Rendering::Settings::EBufferType::VERTEX).GetId();
 
 	if (std::getenv("MOON_FRAME_TRACE") != nullptr)
 	{

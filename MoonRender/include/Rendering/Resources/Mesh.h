@@ -58,7 +58,7 @@ namespace Rendering::Resources
 
 		/** The resources this mesh owns, as handles (Filament's VertexBuffer/IndexBuffer/
 		 * VertexArray handles): the GL objects behind them belong to the side that owns the
-		 * context and are reached with Backend::Records or HAL::ResourceOps. */
+		 * context and are reached through the driver API (see DriverAPI.inc). */
 		const Rendering::Backend::ResourceHandle<Rendering::Backend::HwVertexArray>& GetVertexArrayHandle(int p_index = 0) const;
 		const Rendering::Backend::ResourceHandle<Rendering::Backend::HwBufferObject>& GetVertexBufferHandle() const { return m_vertexBuffer.GetHandle(); }
 		const Rendering::Backend::ResourceHandle<Rendering::Backend::HwBufferObject>& GetIndexBufferHandle(int p_index = 0) const;
@@ -85,12 +85,12 @@ namespace Rendering::Resources
 		void ComputeBoundingSphereAndBox();
 	private:
 		/** Allocates the handles of the mesh's GPU resources and has their objects made (recorded
-		 * when the context lives on another thread - see HAL::ResourceOps). */
+		 * when the context lives on another thread - see DriverAPI.inc). */
 		void CreateResources();
 
 		/** The GPU half of the mesh: fills the vertex buffer, uploads the indices and applies the
 		 * layout. Everything it does is a command where the context lives on the other side (see
-		 * HAL::ResourceOps), so it is safe to call from the loader thread. */
+		 * the driver API), so it is safe to call from the loader thread. */
 		void Upload(const std::vector<Geometry::Vertex>& p_vertices, const std::vector<uint32_t>& p_indices);
 		void Upload(const std::vector<Geometry::VertexPositionNormal>&p_vertices, const std::vector<uint32_t>& p_indices);
 		void Upload(const std::vector<Geometry::VertexBVH>& p_vertices, const std::vector<uint32_t>& p_indices);

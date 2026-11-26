@@ -7,7 +7,6 @@
 #include <vector>
 #include <tracy/Tracy.hpp>
 #include <Core/Rendering/SkyBoxRenderPass .h>
-#include <Rendering/Backend/ReadPixelsRequest.h>
 #include <Rendering/Core/CompositeRenderer.h>
 #include <Rendering/HAL/Profiling.h>
 #include <Rendering/Utils/FrameTrace.h>
@@ -169,24 +168,21 @@ void Rendering::Core::CompositeRenderer::DrawFrame()
 
 			if (withRead)
 			{
+				// One pixel from the middle of the pass's output, printed where it is read: the
+				// attachment is selected first, then the readback names the target by its handle.
 				auto pixels = std::make_shared<std::vector<uint8_t>>(4);
-				::Rendering::Backend::ReadPixelsRequest request;
-				request.framebufferId = scratch.GetID();
-				request.readBufferIndex = 0;
-				request.x = static_cast<uint32_t>(m_frameDescriptor.renderWidth) / 2;
-				request.y = static_cast<uint32_t>(m_frameDescriptor.renderHeight) / 2;
-				request.width = 1;
-				request.height = 1;
-				request.format = ::Rendering::Settings::EPixelDataFormat::RGBA;
-				request.type = ::Rendering::Settings::EPixelDataType::UNSIGNED_BYTE;
-				request.data = pixels;
+				m_driver.SetFramebufferReadBufferObject(scratch.GetHandle(), true, 0);
 				const std::string label(pass.first);
-				request.onDone = [pixels, label] {
-					std::fprintf(stderr, "[passprobe] %s centre = %u %u %u %u\n", label.c_str(),
-						(*pixels)[0], (*pixels)[1], (*pixels)[2], (*pixels)[3]);
-					std::fflush(stderr);
-				};
-				m_driver.ReadPixels(request);
+				m_driver.ReadPixelsObject(scratch.GetHandle(), pixels,
+					static_cast<uint32_t>(m_frameDescriptor.renderWidth) / 2,
+					static_cast<uint32_t>(m_frameDescriptor.renderHeight) / 2, 1, 1,
+					::Rendering::Settings::EPixelDataFormat::RGBA,
+					::Rendering::Settings::EPixelDataType::UNSIGNED_BYTE,
+					[pixels, label] {
+						std::fprintf(stderr, "[passprobe] %s centre = %u %u %u %u\n", label.c_str(),
+							(*pixels)[0], (*pixels)[1], (*pixels)[2], (*pixels)[3]);
+						std::fflush(stderr);
+					});
 			}
 
 		}
@@ -203,27 +199,21 @@ void Rendering::Core::CompositeRenderer::DrawFrame()
 				m_frameDescriptor.presentBuffer.value(), 0);
 			auto pixels = std::make_shared<std::vector<uint8_t>>(
 				static_cast<size_t>(width) * height * 4, 0);
-			::Rendering::Backend::ReadPixelsRequest request;
-			request.framebufferId = m_frameDescriptor.presentBuffer.value().GetID();
-			request.readBufferIndex = 0;
-			request.x = 0;
-			request.y = 0;
-			request.width = width;
-			request.height = height;
-			request.format = ::Rendering::Settings::EPixelDataFormat::RGBA;
-			request.type = ::Rendering::Settings::EPixelDataType::UNSIGNED_BYTE;
-			request.data = pixels;
+			Rendering::Data::Framebuffer& present = m_frameDescriptor.presentBuffer.value();
+			m_driver.SetFramebufferReadBufferObject(present.GetHandle(), true, 0);
 			const std::string label(pass.first);
 			const std::string directory(dumpDir);
-			request.onDone = [pixels, label, directory] {
-				const std::string path = directory + "\\" + label + ".raw";
-				if (FILE* file = std::fopen(path.c_str(), "wb"))
-				{
-					std::fwrite(pixels->data(), 1, pixels->size(), file);
-					std::fclose(file);
-				}
-			};
-			m_driver.ReadPixels(request);
+			m_driver.ReadPixelsObject(present.GetHandle(), pixels, 0, 0, width, height,
+				::Rendering::Settings::EPixelDataFormat::RGBA,
+				::Rendering::Settings::EPixelDataType::UNSIGNED_BYTE,
+				[pixels, label, directory] {
+					const std::string path = directory + "\\" + label + ".raw";
+					if (FILE* file = std::fopen(path.c_str(), "wb"))
+					{
+						std::fwrite(pixels->data(), 1, pixels->size(), file);
+						std::fclose(file);
+					}
+				});
 		}
 
 		m_currentPass.reset();

@@ -4,50 +4,15 @@
 #include <cstring>
 
 #include <Rendering/Backend/BackendResources.h>
-#include <Rendering/Backend/CreateTextureRequest.h>
-#include <Rendering/Backend/HandleAllocator.h>
-#include <Rendering/Backend/TextureRequests.h>
-#include <Rendering/Backend/TextureUploadRequest.h>
-#include <Rendering/Backend/UpdateTextureRequest.h>
+#include <Rendering/Backend/PixelBufferDescriptor.h>
 #include <Rendering/Context/Driver.h>
-#include <Rendering/HAL/Common/HALDriverAccess.h>
-#include <Rendering/HAL/Texture.h>
 
 namespace Rendering::Data
 {
 	namespace
 	{
-		/** The backend object this handle names, on the side that owns the context; null until its
-		 * create command has run (or after it was destroyed). */
-		Rendering::HAL::Texture* Resolve(
-			Rendering::Backend::ResourceHandle<Rendering::Backend::HwTexture> p_handle)
-		{
-			return Rendering::Backend::GetHandleAllocator()
-				.HandleCast<Rendering::HAL::Texture>(p_handle);
-		}
-
-		/** Records the creation as a command, or - with no driver to record into - creates the
-		 * object here, which is what the code did before the commands existed. */
-		void EnsureBackend(
-			Rendering::Backend::ResourceHandle<Rendering::Backend::HwTexture> p_handle,
-			Rendering::Settings::ETextureType p_type,
-			const std::string& p_debugName)
-		{
-			Rendering::Context::Driver* const driver = ::Rendering::HAL::CurrentDriver();
-			if (driver != nullptr)
-			{
-				Rendering::Backend::CreateTextureRequest request;
-				request.handleId = p_handle.GetId();
-				request.type = p_type;
-				request.debugName = p_debugName;
-				driver->CreateTexture(std::move(request));
-				return;
-			}
-
-			Rendering::Backend::Records::CreateTexture(p_handle, p_type, p_debugName);
-		}
-
-		/** The number of bytes one pixel of p_format/p_type takes: the CPU mirror's size. */
+		/** The number of bytes one pixel of p_format/p_type takes: the CPU mirror's size, and the
+		 * size of a sub-image upload. */
 		size_t PixelBytes(
 			Rendering::Settings::EFormat p_format,
 			Rendering::Settings::EPixelDataType p_type)
@@ -61,19 +26,19 @@ namespace Rendering::Data
 		: m_type(p_type)
 		, m_debugName(p_debugName)
 	{
-		// The handle exists before the GPU object does (Filament's Texture allocates its HwTexture
-		// handle before the driver creates the object), and it is what every recorded command
-		// names.
-		m_handle = Rendering::Backend::GetHandleAllocator()
-			.Allocate<Rendering::Backend::HwTexture>();
-		EnsureBackend(m_handle, m_type, m_debugName);
+		// Filament's createTexture: the driver reserves the handle - it is what every later command
+		// names, and it exists before the object does - and records the create that gives it its
+		// backend object on the side that owns the context.
+		m_handle = Rendering::Context::Driver::Get().CreateTextureObject(p_type, m_debugName);
 	}
 
 	Texture::~Texture()
 	{
 		if (static_cast<bool>(m_handle))
 		{
-			// The allocator owns the object and queues its destruction to the context side.
+			// Teardown goes through the records, not the driver: the slot is freed here and the GL
+			// name is queued to the side that owns the context, so this is safe from any thread and
+			// after the module is gone (see Data::BufferObject).
 			Rendering::Backend::Records::DestroyTexture(m_handle);
 			m_handle.clear();
 		}
@@ -124,50 +89,20 @@ namespace Rendering::Data
 		m_desc.width = std::max(1u, m_desc.width);
 		m_desc.height = std::max(1u, m_desc.height);
 
-		Rendering::Context::Driver* const driver = ::Rendering::HAL::CurrentDriver();
-		if (driver != nullptr)
+		// A mutable texture's contents travel with the allocation: the descriptor's own data pointer
+		// names the caller's memory (a local vector of domain colours, the sketch's edge values),
+		// which is gone or rewritten by the time the executor runs.
+		Rendering::Backend::PixelBufferDescriptor pixels;
+		if (m_desc.mutableDesc.has_value() && m_desc.mutableDesc->data != nullptr
+			&& m_desc.buffetLen > 0)
 		{
-			// Recorded: the executor allocates the storage. This side only remembers the
-			// description, which is what GetDesc() and the material descriptors read.
-			Rendering::Backend::CreateTextureRequest request;
-			request.handleId = m_handle.GetId();
-			request.type = m_type;
-			request.debugName = m_debugName;
-			request.allocate = true;
-			request.descriptor = m_desc;
-
-			// The descriptor's data pointer names the caller's memory - a local vector of domain
-			// colours (CTopoShape's faces), the sketch's edge values, a temporary image. By the time
-			// the command runs that memory is gone, and a texture buffer allocated from it holds
-			// whatever was written there next, which is how a face ends up with another face's
-			// colour. Carry the bytes with the command (Filament's BufferDescriptor owns its copy
-			// for the same reason) and the executor points the descriptor at them.
-			if (m_desc.mutableDesc.has_value() && m_desc.mutableDesc->data != nullptr
-				&& m_desc.buffetLen > 0)
-			{
-				const auto* const begin = static_cast<const uint8_t*>(m_desc.mutableDesc->data);
-				request.pixels.assign(begin, begin + m_desc.buffetLen);
-			}
-
-			driver->CreateTexture(std::move(request));
-			m_allocated = true;
-			return;
+			pixels = Rendering::Backend::PixelBufferDescriptor::Own(
+				m_desc.mutableDesc->data, m_desc.buffetLen,
+				m_desc.mutableDesc->format, m_desc.mutableDesc->type);
 		}
 
-		if (Rendering::HAL::Texture* const target = Resolve(m_handle))
-		{
-			target->Allocate(m_desc);
-			m_allocated = target->IsValid();
-			return;
-		}
-
-		// No driver and no object yet: make it here, then allocate.
-		EnsureBackend(m_handle, m_type, m_debugName);
-		if (Rendering::HAL::Texture* const created = Resolve(m_handle))
-		{
-			created->Allocate(m_desc);
-			m_allocated = created->IsValid();
-		}
+		Rendering::Context::Driver::Get().AllocateTextureObject(m_handle, m_desc, std::move(pixels));
+		m_allocated = true;
 	}
 
 	void Texture::Upload(const void* p_data, Settings::EFormat p_format, Settings::EPixelDataType p_type)
@@ -187,34 +122,18 @@ namespace Rendering::Data
 			std::memcpy(texData.data(), p_data, size);
 		}
 
-		Rendering::Context::Driver* const driver = ::Rendering::HAL::CurrentDriver();
-		if (driver != nullptr)
-		{
-			// Recorded: the bytes travel with the command (Filament's PixelBufferDescriptor), so the
-			// caller's buffer is free the moment this returns. The executor allocates and uploads.
-			const size_t faces = m_type == Settings::ETextureType::TEXTURE_CUBE ? 6u : 1u;
-			const size_t size = static_cast<size_t>(m_desc.width) * m_desc.height * faces
-				* PixelBytes(p_format, p_type);
+		const size_t faces = m_type == Settings::ETextureType::TEXTURE_CUBE ? 6u : 1u;
+		const size_t size = static_cast<size_t>(m_desc.width) * m_desc.height * faces
+			* PixelBytes(p_format, p_type);
 
-			Rendering::Backend::TextureUploadRequest request;
-			request.handleId = m_handle.GetId();
-			request.descriptor = m_desc;
-			request.format = p_format;
-			request.type = p_type;
-			request.pixels.assign(static_cast<const uint8_t*>(p_data),
-				static_cast<const uint8_t*>(p_data) + size);
-			driver->UploadTexture(std::move(request));
-			return;
-		}
+		// One command carries the bytes (Filament's PixelBufferDescriptor): the caller's buffer is
+		// free the moment this returns, and the executor allocates the storage when it has none.
+		Rendering::Context::Driver::Get().UploadTextureObject(
+			m_handle, m_desc,
+			Rendering::Backend::PixelBufferDescriptor::Own(p_data, size, p_format, p_type),
+			false);
 
-		if (Rendering::HAL::Texture* const target = Resolve(m_handle))
-		{
-			if (!target->IsValid() && m_allocated)
-			{
-				target->Allocate(m_desc);
-			}
-			target->Upload(p_data, p_format, p_type);
-		}
+		m_allocated = true;
 	}
 
 	void Texture::UploadSubImage(
@@ -231,29 +150,10 @@ namespace Rendering::Data
 			return;
 		}
 
-		Rendering::Context::Driver* const driver = ::Rendering::HAL::CurrentDriver();
-		if (driver != nullptr)
-		{
-			const size_t size = static_cast<size_t>(p_width) * p_height * PixelBytes(p_format, p_type);
-
-			Rendering::Backend::UpdateTextureRequest request;
-			request.handleId = m_handle.GetId();
-			request.x = p_x;
-			request.y = p_y;
-			request.width = p_width;
-			request.height = p_height;
-			request.format = p_format;
-			request.type = p_type;
-			request.pixels.assign(static_cast<const uint8_t*>(p_data),
-				static_cast<const uint8_t*>(p_data) + size);
-			driver->UpdateTexture(std::move(request));
-			return;
-		}
-
-		if (Rendering::HAL::Texture* const target = Resolve(m_handle))
-		{
-			target->UploadSubImage(p_data, p_format, p_type, p_x, p_y, p_width, p_height);
-		}
+		const size_t size = static_cast<size_t>(p_width) * p_height * PixelBytes(p_format, p_type);
+		Rendering::Context::Driver::Get().UpdateTextureObject(
+			m_handle, p_x, p_y, p_width, p_height,
+			Rendering::Backend::PixelBufferDescriptor::Own(p_data, size, p_format, p_type));
 	}
 
 	void Texture::Resize(uint32_t p_width, uint32_t p_height)
@@ -286,19 +186,8 @@ namespace Rendering::Data
 			return;
 		}
 
-		if (Rendering::Context::Driver* const driver = ::Rendering::HAL::CurrentDriver())
-		{
-			// Recorded: glGenerateTextureMipmap needs the name, i.e. the executor.
-			Rendering::Backend::GenerateTextureMipmapsRequest request;
-			request.handleId = m_handle.GetId();
-			driver->EnqueueGenerateTextureMipmaps(request);
-			return;
-		}
-
-		if (const Rendering::HAL::Texture* const target = Resolve(m_handle))
-		{
-			target->GenerateMipmaps();
-		}
+		// glGenerateTextureMipmap needs the name, i.e. the executor (Filament's generateMipmaps).
+		Rendering::Context::Driver::Get().GenerateTextureMipmapsObject(m_handle);
 	}
 
 	void Texture::SetBorderColor(const Maths::FVector4& p_color)
@@ -308,19 +197,7 @@ namespace Rendering::Data
 			return;
 		}
 
-		if (Rendering::Context::Driver* const driver = ::Rendering::HAL::CurrentDriver())
-		{
-			Rendering::Backend::SetTextureBorderColorRequest request;
-			request.handleId = m_handle.GetId();
-			request.color = p_color;
-			driver->EnqueueSetTextureBorderColor(request);
-			return;
-		}
-
-		if (Rendering::HAL::Texture* const target = Resolve(m_handle))
-		{
-			target->SetBorderColor(p_color);
-		}
+		Rendering::Context::Driver::Get().SetTextureBorderColorObject(m_handle, p_color);
 	}
 
 	const Settings::TextureDesc& Texture::GetDesc() const

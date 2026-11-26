@@ -111,51 +111,23 @@ namespace Rendering::Data
 			stages->push_back(std::move(spec));
 		}
 
-		CreateProgramRequest request;
-		request.programHandleId = m_handle.GetId();
-		request.stages = std::move(stages);
-
-		::Rendering::Context::Driver* const driver = ::Rendering::HAL::CurrentDriver();
+		// Filament's createProgram: the sources travel with the command, the handle comes back. The
+		// build - compile, link, reflect, declare the slots - runs where the context is, so the
+		// front end treats a recorded link as successful (the executor complains if it is not).
+		std::shared_ptr<const Rendering::Data::DescriptorSetInfo> bindings;
 		if (m_descriptorBindingsConfigured)
 		{
-			request.bindings = std::make_shared<const Rendering::Data::DescriptorSetInfo>(
-				m_descriptorBindings);
+			bindings = std::make_shared<const Rendering::Data::DescriptorSetInfo>(m_descriptorBindings);
 		}
 
-		// A new link means a new program: the binding map is rebuilt on first bind.
-		const auto resetSlots = [this](bool p_declared)
-		{
-			m_descriptorSlots.clear();
-			m_descriptorSlotsInitialized = false;
-			m_descriptorBindingsDeclared = p_declared;
-		};
+		// A new link means a new program: the binding map is rebuilt on first bind, and the create
+		// command declares the slots right after the link.
+		m_handle = Rendering::Context::Driver::Get().CreateProgramObject(std::move(stages), std::move(bindings));
+		m_descriptorSlots.clear();
+		m_descriptorSlotsInitialized = false;
+		m_descriptorBindingsDeclared = true;
+		return { .success = true };
 
-		if (driver != nullptr)
-		{
-			driver->CreateProgram(std::move(request));
-			// The create command declares the slots right after the link, so this side does not.
-			resetSlots(true);
-			return { .success = true };
-		}
-
-		// No other side to run the build on: create the object here and build it in place.
-		Records::CreateProgram(m_handle);
-
-		Rendering::HAL::ShaderProgram* const program = Resolve(m_handle);
-		if (program == nullptr)
-		{
-			resetSlots(false);
-			return { .success = false, .message = "the program object could not be created" };
-		}
-
-		Settings::ShaderLinkingResult result = program->Build(*request.stages);
-		if (m_descriptorBindingsConfigured)
-		{
-			program->DeclareBindings(m_descriptorBindings);
-		}
-		resetSlots(m_descriptorBindingsConfigured);
-
-		return result;
 	}
 
 	void Program::Bind()
@@ -167,54 +139,25 @@ namespace Rendering::Data
 			ComputeDescriptorSlots(m_descriptorBindings);
 		}
 
-		::Rendering::Context::Driver* const driver = ::Rendering::HAL::CurrentDriver();
-		if (driver != nullptr)
-		{
-			// glUseProgram and the slot declaration belong to the executor. The declaration is lazy,
-			// like the immediate path's: a material's layout can be configured after the link.
-			if (!m_descriptorBindingsDeclared && m_descriptorBindingsConfigured)
-			{
-				Rendering::Backend::DeclareProgramBindingsRequest request;
-				request.programHandleId = m_handle.GetId();
-				request.bindings = std::make_shared<const Rendering::Data::DescriptorSetInfo>(
-					m_descriptorBindings);
-				driver->DeclareProgramBindings(std::move(request));
-				m_descriptorBindingsDeclared = true;
-			}
-
-			// By handle, not by name: the GL name is only known after the create command has run,
-			// so asking for it here gave 0 and recorded "bind nothing" (docs/RenderThreadPlan.md
-			// §8.64).
-			driver->BindProgramHandle(m_handle.GetId());
-			return;
-		}
-
-		Rendering::HAL::ShaderProgram* const program = Resolve(m_handle);
-		if (program == nullptr)
-		{
-			return;
-		}
-
+		// glUseProgram and the slot declaration belong to the executor. The declaration is lazy,
+		// like the immediate path's: a material's layout can be configured after the link.
 		if (!m_descriptorBindingsDeclared && m_descriptorBindingsConfigured)
 		{
-			program->DeclareBindings(m_descriptorBindings);
+			Rendering::Context::Driver::Get().DeclareProgramBindingsObject(
+				m_handle,
+				std::make_shared<const Rendering::Data::DescriptorSetInfo>(m_descriptorBindings));
 			m_descriptorBindingsDeclared = true;
 		}
-		program->Bind();
+
+		// By handle, not by name: the GL name is only known after the create command has run, so
+		// asking for it here gave 0 and recorded "bind nothing" (docs/RenderThreadPlan.md §8.64).
+		Rendering::Context::Driver::Get().BindProgramObject(m_handle);
 	}
 
 	void Program::Unbind() const
 	{
-		if (::Rendering::Context::Driver* const driver = ::Rendering::HAL::CurrentDriver())
-		{
-			driver->BindProgram(0);
-			return;
-		}
-
-		if (Rendering::HAL::ShaderProgram* const program = Resolve(m_handle))
-		{
-			program->Unbind();
-		}
+		// A null handle is glUseProgram(0): nothing bound.
+		Rendering::Context::Driver::Get().BindProgramObject({});
 	}
 
 	uint32_t Program::GetID() const

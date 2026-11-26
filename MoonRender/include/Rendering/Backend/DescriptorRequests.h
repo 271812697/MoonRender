@@ -5,22 +5,6 @@
 
 namespace Rendering::Backend
 {
-	/** Writes bytes into a buffer on the side that owns the context (Filament's updateBufferObject).
-	 *
-	 * The bytes are owned by the request, on the heap - Filament's BufferDescriptor does the same -
-	 * and not by the command ring: an upload is often far larger than a batch's worth of commands,
-	 * and a ring that small must not be used to carry mesh data.
-	 *
-	 * The buffer travels as the front end's *handle*: its GL name is made by the create command and
-	 * is resolved here, when this runs (Filament's BufferDescriptor names the handle too). A name
-	 * would be 0 at record time, because creation is asynchronous. */
-	struct UpdateBufferRequest
-	{
-		uint32_t handleId = 0;
-		uint32_t offset = 0;
-		uint32_t size = 0;
-		std::shared_ptr<const std::vector<uint8_t>> data;
-	};
 
 	/** Binds one descriptor of a set: a buffer range to an indexed slot, or a texture to a unit.
 	 *

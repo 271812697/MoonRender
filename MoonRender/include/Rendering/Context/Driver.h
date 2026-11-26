@@ -4,20 +4,20 @@
 #include <condition_variable>
 #include <array>
 #include <functional>
+#include <optional>
 #include <thread>
 #include <memory>
-#include "Rendering/Backend/CreateTextureRequest.h"
-#include "Rendering/Backend/UpdateTextureRequest.h"
-#include <Rendering/Backend/TextureRequests.h>
 #include <Rendering/Backend/OverlayRequests.h>
-#include "Rendering/Backend/TextureUploadRequest.h"
 #include "Rendering/Backend/BufferRequests.h"
+#include <Rendering/Backend/BufferDescriptor.h>
+#include <Rendering/Backend/PixelBufferDescriptor.h>
+#include "Rendering/Backend/BackendResources.h"
 #include "Rendering/Backend/DescriptorRequests.h"
 #include "Rendering/Backend/VertexArrayRequests.h"
 #include "Rendering/Backend/ProgramRequests.h"
-#include "Rendering/Backend/ReadPixelsRequest.h"
-#include "Rendering/Backend/FramebufferRequests.h"
 #include "Rendering/Settings/DriverSettings.h"
+#include "Rendering/Settings/EAccessSpecifier.h"
+#include "Rendering/Settings/EBufferType.h"
 #include "Rendering/Settings/ERenderingCapability.h"
 #include "Rendering/Settings/EPrimitiveMode.h"
 #include "Rendering/Settings/ERasterizationMode.h"
@@ -109,10 +109,51 @@ namespace Rendering::Context
 		void SetPipelineState(Data::PipelineState p_state);
 		void ResetPipelineState();
 		/** The recording side of the command API (see DriverAPI.inc): each one writes a command
-		 * into the stream and returns; nothing reaches GL until the batch is executed. */
+		 * into the stream and returns; nothing reaches GL until the batch is executed.
+		 *
+		 * DriverAPI.inc declares three flavours and every consumer of it (this header, Driver.cpp,
+		 * CommandStream, OpenGLDriver) expands all three:
+		 *  - DECL_DRIVER_COMMAND: the recording method is Enqueue<name>, the historical entry point
+		 *    of the commands that were here first;
+		 *  - DECL_DRIVER_API / DECL_DRIVER_API_RETURN: Filament's driver API proper. The method
+		 *    keeps its name on every side - this class forwards it to the command stream, the
+		 *    stream puts the command in the ring, OpenGLDriver::<name> does the work where the
+		 *    context is. The _RETURN form hands a value back to the caller (a fresh handle), so it
+		 *    reserves the handle here and records the command that gives it its backend object
+		 *    (Filament's createBufferObjectS / createBufferObjectR). */
 #define DECL_DRIVER_COMMAND(name, paramsDecl, params) void Enqueue##name paramsDecl;
+#define DECL_DRIVER_API(name, paramsDecl, params) void name paramsDecl;
+#define DECL_DRIVER_API_RETURN(RetType, name, paramsDecl, params) RetType name paramsDecl;
 #include <Rendering/Backend/DriverAPI.inc>
 #undef DECL_DRIVER_COMMAND
+#undef DECL_DRIVER_API
+#undef DECL_DRIVER_API_RETURN
+
+		/** The driver of the running module: Filament's `Engine::getEngine()->getDriver()`.
+		 *
+		 * Resource creation and every operation on the handles it returns go through it (see
+		 * DriverAPI.inc). Only valid once the module owns a driver - Filament has the same
+		 * requirement: there is no resource before there is an engine. */
+		static Driver& Get();
+
+		// ---- The synchronous halves of the buffer API --------------------------------------
+		//
+		// These two return the GPU's answer, so they are not commands: the query is recorded (it
+		// has to run where the context is) and then waited for. Filament declares them
+		// DECL_DRIVER_API_RETURN too (getFenceStatus / mapBuffer) and its command stream serves
+		// them through getResult(); ours has no result channel, so the wait is FlushAndWait and they
+		// are between-frame calls only (the HZB readback uses DownloadBuffer instead, so no frame
+		// ever waits).
+
+		bool IsBufferFenceSignaled(Rendering::Backend::ResourceHandle<Rendering::Backend::HwBufferObject> p_buffer);
+
+		/** Filament's mapBuffer: the range is mapped where the context is and the pointer comes
+		 * back. It stays mapped until UnmapBufferObject runs, so the caller reads it while the
+		 * range is still mapped. Synchronous, like the fence query. */
+		void* MapBufferRead(
+			Rendering::Backend::ResourceHandle<Rendering::Backend::HwBufferObject> p_buffer,
+			uint64_t p_offset,
+			uint64_t p_size);
 		/** Records p_command to be run when the batch is executed, on the render side.
 		 *
 		 * The escape hatch for GL that is not described by a command yet - an overlay renderer, a
@@ -122,50 +163,19 @@ namespace Rendering::Context
 		 * it is hot. Everything the lambda touches must live until the batch runs, which is the
 		 * same frame it was recorded in. */
 		void Enqueue(std::function<void()> p_command);
-		/** Uploads p_request.pixels into the texture p_request.handle names.
-		 *
-		 * A named driver method that records the matching command (EnqueueUploadTexture, see
-		 * DriverAPI.inc): the descriptor and a copy of the bytes travel with the command, and the
-		 * executor on the context side allocates and uploads them. Filament's
-		 * createTexture/update2DImage pair has the same shape.
-		 */
-		void UploadTexture(Rendering::Backend::TextureUploadRequest p_request);
 		/** Creates a texture on the side that owns the context (Filament's createTexture): the
 		 * request names it by handle and describes it; the object exists once the command runs,
 		 * which is before anything recorded after it. */
-		void CreateTexture(Rendering::Backend::CreateTextureRequest p_request);
 		/** Updates a sub-image of a texture that already has storage. */
-		void UpdateTexture(Rendering::Backend::UpdateTextureRequest p_request);
 		/** Binds p_target as the render target (null: the default framebuffer).
 		 *
 		 * Recorded like every other command: the bind lands in the batch's order, before the draws
 		 * that follow it (docs/RenderThreadPlan.md §8.72). */
 		void BindFramebuffer(const Data::Framebuffer* p_target);
 
-		/** Reads pixels on the side that owns the context (Filament's readPixels). */
-		void ReadPixels(const ::Rendering::Backend::ReadPixelsRequest& p_request);
 
-		/** Applies a vertex layout on the side that owns the context (glVertexAttribPointer needs it). */
-		void ApplyVertexArrayLayout(const ::Rendering::Backend::SetVertexArrayLayoutRequest& p_request);
 
-		/** Builds a program on the side that owns the context (Filament's createProgram): the
-		 * stages' sources and the binding layout travel with the command, and the executor
-		 * compiles, links and declares the descriptor slots there. */
-		void CreateProgram(::Rendering::Backend::CreateProgramRequest p_request);
 
-		/** Binds a program on the side that owns the context (Filament's bindProgram): 0 unbinds. */
-		void BindProgram(uint32_t p_programId);
-		/** Binds by handle: what a material uses, because the GL name of a program it only has a
-		 * front-end handle for is not known on this side (docs/RenderThreadPlan.md §8.64). */
-		void BindProgramHandle(uint32_t p_programHandleId);
-
-		/** Declares a program's descriptor slots to GL, on the side that owns the context. */
-		void DeclareProgramBindings(::Rendering::Backend::DeclareProgramBindingsRequest p_request);
-
-		/** Writes bytes into a buffer on the side that owns the context. The buffer is named by its
-		 * handle, because its GL name does not exist yet on this side; the data is copied into the
-		 * command, so it does not have to outlive this call (Filament's updateBufferObject). */
-		void UpdateBufferRange(uint32_t p_bufferHandleId, uint32_t p_offset, const void* p_data, uint32_t p_size);
 
 		/** Binds one descriptor - a buffer range or a texture - as a command (see
 		 * Backend::BindDescriptorRequest). */

@@ -1,9 +1,7 @@
 ﻿#include <Rendering/Overlay/Im3DType.h>
 #include <Rendering/Backend/BackendResources.h>
-#include <Rendering/Backend/CreateTextureRequest.h>
 #include <Rendering/Context/Driver.h>
 #include <Rendering/HAL/Common/HALDriverAccess.h>
-#include <Rendering/HAL/Common/ResourceOps.h>
 #include <Rendering/Overlay/ViewCubeLabels.h>
 #include <Rendering/Resources/Loaders/TextureLoader.h>
 
@@ -239,12 +237,14 @@ namespace MOON {
 		using namespace ::Rendering::Backend;
 		if (vaoHandle != 0)
 		{
-			::Rendering::HAL::ResourceOps::DestroyVertexArray(ResourceHandle<HwVertexArray>{ vaoHandle });
+			::Rendering::Backend::Records::DestroyVertexArray(ResourceHandle<HwVertexArray>{ vaoHandle });
 			vaoHandle = 0;
 		}
 		if (vboHandle != 0)
 		{
-			::Rendering::HAL::ResourceOps::DestroyBuffer(ResourceHandle<HwBufferObject>{ vboHandle });
+			// Teardown goes through the records, not the driver: these meshes are long lived
+			// singletons that outlive the module (see Data::BufferObject).
+			::Rendering::Backend::Records::DestroyBuffer(ResourceHandle<HwBufferObject>{ vboHandle });
 			vboHandle = 0;
 		}
 	}
@@ -274,11 +274,13 @@ namespace MOON {
 		// Filament's createVertexArray/createBuffer: the slot is taken here, the GL name is made on
 		// the side that owns the context. submit() describes the layout and uploads the stream.
 		using namespace ::Rendering::Backend;
-		vaoHandle = GetHandleAllocator().Allocate<HwVertexArray>().GetId();
-		::Rendering::HAL::ResourceOps::EnsureVertexArray(ResourceHandle<HwVertexArray>{ vaoHandle });
-		vboHandle = GetHandleAllocator().Allocate<HwBufferObject>().GetId();
-		::Rendering::HAL::ResourceOps::EnsureBuffer(ResourceHandle<HwBufferObject>{ vboHandle },
-			::Rendering::Settings::EBufferType::VERTEX);
+		// Filament's createVertexArray: the driver reserves the handle and records the create.
+		vaoHandle = ::Rendering::Context::Driver::Get()
+			.CreateVertexArrayObject("im3d mesh").GetId();
+
+		// The vertex buffer is the driver's: it reserves the handle and records the create.
+		vboHandle = ::Rendering::Context::Driver::Get()
+			.CreateBufferObject(::Rendering::Settings::EBufferType::VERTEX).GetId();
 		submit();
 	}
 	int PolygonMesh::hit(const Eigen::Matrix4f& viewProj, float u, float v)

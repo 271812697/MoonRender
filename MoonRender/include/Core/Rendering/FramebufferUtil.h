@@ -4,16 +4,6 @@
 
 namespace Core::Rendering::FramebufferUtil
 {
-	void CopyFramebufferColor(
-		::Rendering::Data::Framebuffer& src_framebuffer,
-		int src, 
-		::Rendering::Data::Framebuffer& dst_framebuffer, 
-		int dst
-	);
-	void CopyFramebufferDepth(
-		::Rendering::Data::Framebuffer& src_framebuffer,
-		::Rendering::Data::Framebuffer& dst_framebuffer
-	);
 	void SetupFramebuffer(
 		::Rendering::Data::Framebuffer& p_framebuffer,
 		const ::Rendering::Settings::TextureDesc& p_textureDesc,
